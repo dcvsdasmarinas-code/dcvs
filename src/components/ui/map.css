@@ -1,0 +1,32 @@
+.mapcn-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.mapcn-container .maplibregl-map {
+  width: 100%;
+  height: 100%;
+}
+
+.mapcn-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.85);
+  z-index: 10;
+  font-size: 0.85rem;
+  color: #64748b;
+  gap: 10px;
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+
+.mapcn-loading i {
+  animation: mapcn-spin 1s linear infinite;
+}
+
+@keyframes mapcn-spin {
+  to { transform: rotate(360deg); }
+}

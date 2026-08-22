@@ -1,0 +1,438 @@
+<?php
+require_once 'db.php';
+
+// Fetch published advisories (legacy support)
+$advisories = [];
+$aq = $conn->query("SELECT * FROM announcements WHERE category = 'advisory' AND status = 'published' AND is_active = 1 ORDER BY created_at DESC");
+if ($aq) {
+    while ($row = $aq->fetch_assoc()) $advisories[] = $row;
+}
+
+// Fetch published announcements (legacy support)
+$announcementItems = [];
+$anq = $conn->query("SELECT * FROM announcements WHERE category = 'announcement' AND status = 'published' AND is_active = 1 ORDER BY created_at DESC");
+if ($anq) {
+    while ($row = $anq->fetch_assoc()) $announcementItems[] = $row;
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dasmariñas City Veterinary Services</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="assets/css/monolog.css" />
+
+    <style>
+:root {
+  --bg-ice: #e9f3ff;
+  --bg-cloud: #f3f8ff;
+  --primary: #045E1FD9;
+  --primary-dark: #045E1FD9;
+  --ink: #080807;
+  --muted: #4a5672;
+  --white: #ffffff;
+  --accent-sand: #e8a80a;
+  --transition: cubic-bezier(0.25, 0.65, 0.35, 1);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  background: var(--swatch--black-400);
+  color: var(--swatch--brand-text);
+}
+
+img, svg, video { max-width: 100%; display: block; }
+a { text-decoration: none; color: inherit; }
+main { padding-top: 0; }
+
+/* ───────────────────────── navbar (unchanged) ───────────────────────── */
+.site-header { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 0.8rem 0; }
+.navbar { display: flex; align-items: center; gap: 2rem; width: min(1200px, 92vw); margin: 0 auto; padding: 0.85rem 1.5rem; border-radius: 999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 24px 48px rgba(0,0,0,0.06); position: relative; transition: background 0.3s var(--transition), box-shadow 0.3s var(--transition), border 0.3s var(--transition), transform 0.3s var(--transition); }
+.navbar::before, .navbar::after { display: none; }
+.brand-logo { display: block; object-fit: contain; height: 50px; width: auto; }
+.navbar.nav-scrolled { background: #ffffff; border-color: rgba(0,0,0,0.12); box-shadow: 0 26px 52px rgba(0,0,0,0.1); }
+.nav-links { display: flex; align-items: center; justify-content: center; gap: 1.5rem; list-style: none; margin: 0; padding: 0; flex: 1; }
+.nav-links a { font-weight: 500; padding: 6px 16px; border-radius: 8px; color: #1a2a3a; transition: color 0.25s var(--transition), background 0.25s var(--transition); }
+.nav-links a::after { display: none; }
+.nav-links a:hover, .nav-links a:focus-visible { background: rgba(4,94,31,0.06); color: #045e1f; }
+.nav-links a.active { background: rgba(4,94,31,0.1); color: #045e1f; }
+.nav-item { position: relative; }
+.dropdown-toggle { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 6px 16px; border-radius: 8px; color: #1a2a3a; transition: background 0.2s, color 0.2s; }
+.dropdown-toggle:hover { background: rgba(4,94,31,0.06); color: #045e1f; }
+.dropdown-toggle .arrow { font-size: 10px; transition: transform 0.3s var(--transition); }
+.nav-item.open .dropdown-toggle .arrow { transform: rotate(180deg); }
+.dropdown-menu { position: absolute; top: calc(100% + 8px); left: 0; background: #ffffff; border-radius: 12px; padding: 6px 0; min-width: 190px; box-shadow: 0 20px 48px rgba(0,0,0,0.12); opacity: 0; visibility: hidden; transform: translateY(8px); transition: all 0.25s ease; z-index: 9999; border: 1px solid rgba(0,0,0,0.06); }
+.nav-item:hover .dropdown-menu, .nav-item.open .dropdown-menu { opacity: 1; visibility: visible; transform: translateY(0); }
+.dropdown-menu a { display: block; padding: 10px 20px; font-size: 14px; font-weight: 500; color: #1a2a3a; white-space: nowrap; }
+.dropdown-menu a::after { display: none; }
+.dropdown-menu a:hover { background: rgba(4,94,31,0.06); color: #045e1f; }
+.nav-toggle { display: none; flex-direction: column; gap: 5px; background: transparent; border: none; cursor: pointer; padding: 0; }
+.nav-toggle span { width: 22px; height: 2px; background: #1a2a3a; border-radius: 999px; transition: transform 0.3s var(--transition), opacity 0.3s var(--transition); }
+.nav-login-btn { font-weight: 600; font-size: 0.88rem; padding: 8px 22px; border-radius: 8px; background: #045e1f; color: #fff !important; white-space: nowrap; transition: background 0.2s; flex-shrink: 0; }
+
+/* ── override monolog global heading/img margins for navbar only ── */
+.navbar h1, .navbar h2, .navbar h3 { margin: 0; font-size: inherit; }
+
+/* ── monolog local fixes / page-level overrides ── */
+html, body { overflow-x: clip; }
+.gap_home_cover { width: 21rem !important; max-width: 21rem !important; }
+
+/* KPI statistics (restyled into dark template design) */
+.dcvs-kpis { background: var(--swatch--black-400); color: var(--swatch--beige-100); padding: var(--_spacing---section-space--main) var(--site--margin); display: flex; flex-direction: column; gap: var(--_spacing---space--7); }
+.dcvs-stats-head { display: flex; flex-direction: column; gap: var(--_spacing---space--2); }
+.dcvs-stats-kicker { font-family: SuisseIntlMono, monospace; text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.85rem; color: var(--swatch--beige-200); }
+.dcvs-stats-title { font-family: var(--_typography---font--secondary-family); font-size: clamp(2rem, 1.2rem + 4vw, 5rem); line-height: 0.9; letter-spacing: -0.03em; text-transform: uppercase; margin: 0; }
+.dcvs-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(232,232,227,0.12); }
+.dcvs-stat { background: var(--swatch--black-400); padding: var(--_spacing---space--8) var(--_spacing---space--5); display: flex; flex-direction: column; gap: var(--_spacing---space--3); }
+.dcvs-stat-num { font-family: var(--_typography---font--primary-family); font-size: clamp(2.4rem, 2rem + 2.5vw, 5rem); line-height: 0.9; font-weight: 500; letter-spacing: -0.02em; color: var(--swatch--beige-100); }
+.dcvs-stat-label { font-weight: 500; max-width: 24ch; color: var(--swatch--beige-200); }
+@media (max-width: 820px) { .dcvs-stats-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .dcvs-stats-grid { grid-template-columns: 1fr; } }
+
+/* ── footer (unchanged) ── */
+.site-footer { background: linear-gradient(180deg, #0b1a0f 30%, #045e1fd9 80%); color: #e8f1eb; padding: 4rem 3rem 2.5rem; border-top: 1px solid #0a3c14; }
+.footer-container { display: flex; gap: 4rem; max-width: 1400px; margin: 0 auto 3rem; }
+.footer-brand-column { flex: 0 0 280px; display: flex; flex-direction: column; gap: 1.5rem; }
+.footer-brand { font-size: 1.4rem; font-weight: 700; color: #ffffff; margin: 0; display: flex; gap: 0.6rem; align-items: baseline; }
+.footer-brand-tag { font-size: 0.75rem; font-weight: 500; color: #b8d9bf; letter-spacing: 0.05em; }
+.footer-description { font-size: 0.9rem; color: #c5d9cc; line-height: 1.6; margin: 0; }
+.footer-socials { display: flex; gap: 0.7rem; margin-top: 0.5rem; }
+.social-link { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.1); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; text-decoration: none; transition: all 0.3s ease; font-size: 0.8rem; }
+.social-link:hover { background: #4ade80; color: #000; transform: translateY(-2px); }
+.footer-link-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3rem; flex: 1; }
+.footer-column { display: flex; flex-direction: column; gap: 1rem; }
+.footer-section-title { font-size: 0.95rem; font-weight: 700; color: #ffffff; margin: 0; line-height: 1.4; }
+.footer-links { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+.footer-links a { color: #c5d9cc; text-decoration: none; font-size: 0.9rem; transition: color 0.3s ease; line-height: 1.5; }
+.footer-links a:hover { color: #4ade80; }
+.footer-bottom { border-top: 1px solid #0a3c14; padding-top: 2rem; }
+.footer-bottom-content { display: flex; justify-content: space-between; align-items: center; max-width: 1400px; margin: 0 auto; }
+.footer-bottom-socials { display: flex; gap: 0.6rem; }
+.social-link-small { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; text-decoration: none; transition: all 0.3s ease; font-size: 0.75rem; }
+.social-link-small:hover { background: #4ade80; color: #000; transform: translateY(-2px); }
+.footer-bottom p { color: #9db4a0; font-size: 0.85rem; margin: 0; }
+
+@media (max-width: 1024px) { .footer-link-group { grid-template-columns: repeat(2, 1fr); gap: 2rem; } .footer-container { gap: 2.5rem; } }
+@media (max-width: 768px) {
+  .footer-container { flex-direction: column; gap: 2.5rem; }
+  .footer-link-group { grid-template-columns: 1fr; gap: 1.5rem; }
+  .footer-bottom-content { flex-direction: column; gap: 1rem; }
+  .footer-brand-column { flex: 1; }
+}
+@media (max-width: 1100px) {
+  .navbar { border-radius: 24px; }
+  .nav-links { position: fixed; inset: 90px 1.5rem auto 1.5rem; background: #ffffff; border-radius: 24px; padding: 1.8rem; flex-direction: column; align-items: flex-start; gap: 1rem; box-shadow: 0 24px 60px rgba(18,39,84,0.25); transform: translateY(-20px); opacity: 0; pointer-events: none; transition: opacity 0.3s var(--transition), transform 0.3s var(--transition); max-height: calc(100vh - 110px); overflow-y: auto; }
+  .nav-links.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
+  .nav-toggle { display: flex; }
+}
+@media (max-width: 800px) {
+  .nav-item .dropdown-menu { position: static; box-shadow: none; border: none; padding-left: 1rem; opacity: 1; visibility: visible; transform: none; width: 100%; display: none; }
+  .nav-item.open .dropdown-menu { display: block; }
+  .site-header { padding: 0.4rem 0; }
+  .navbar { padding: 0.4rem 0.85rem; }
+  .brand-logo { height: 36px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+  [data-reveal] { opacity: 1 !important; transform: none !important; }
+}
+[data-reveal] { opacity: 0; transform: translateY(30px); transition: opacity 0.9s var(--transition), transform 0.9s var(--transition); }
+[data-reveal].is-in { opacity: 1; transform: none; }
+    </style>
+    <link rel="stylesheet" href="assets/css/responsive.css" />
+  </head>
+  <body>
+    <?php $currentPage = 'home'; $homePage = '#'; include 'includes/landing-navbar.php'; ?>
+
+    <main class="page_main">
+
+      <!-- Hero: We connect / Communities -->
+      <section data-theme-section="dark" data-stacking-cards-item="" class="gap_home_wrap">
+        <div class="gap_home_contain">
+          <div class="g_bg_overlay">
+            <div class="gap_home_line_horizontal"><div class="gap_home_line_square is-1"></div><div class="gap_home_line_square is-2"></div><div class="gap_home_line_square is-3"></div></div>
+            <div class="gap_home_overlay u-grid-custom">
+              <div class="gap_home_line"></div>
+              <div class="gap_home_line"></div>
+              <div class="gap_home_line"></div>
+              <div class="gap_home_line"></div>
+              <div class="gap_home_line"></div>
+            </div>
+            <div class="gap_home_line_horizontal"><div class="gap_home_line_square is-1"></div><div class="gap_home_line_square is-2"></div><div class="gap_home_line_square is-3"></div></div>
+          </div>
+          <div class="gap_home_inner" data-reveal>
+            <div class="gap_home_eyebrow u-text-mono"><br/><br/><br/><br/></div>
+            <div class="gap_home_inner_content">
+              <div class="gap_home_inner_heading-contain is-left"><h2 class="gap_home_inner_heading u-text-style-display is-left">We connect</h2></div>
+              <div class="gap_home_inner_heading-contain is-right"><h2 class="gap_home_inner_heading u-text-style-display is-right">Communities</h2></div>
+            </div>
+            <div class="gap_home_bottom">
+              <p class="gap_home_p u-text-style-h5">Access to animal welfare services should be simple, transparent, and available to everyone. Dasmariñas City Veterinary Services brings residents, barangays, and City Veterinary Services together through one connected platform that makes reporting, appointments, and case management faster and more accessible.</p>
+            </div>
+          </div>
+          <div class="gap_home_cover">
+            <div class="gap_home_gradient"></div>
+            <img src="WE BRIDGE (1).jpg" loading="lazy" alt="" class="gap_home_image"/>
+            <img src="WE BRIDGE   (2).jpg" loading="lazy" alt="" class="gap_home_image"/>
+            <img src="WE BRIDGE  (3).jpg" loading="lazy" alt="" class="gap_home_image"/>
+            <img src="WE BRIDGE (4).jpg" loading="lazy" alt="" class="gap_home_image"/>
+            <img src="WE BRIDGE (5).jpg" loading="lazy" alt="" class="gap_home_image"/>
+          </div>
+        </div>
+      </section>
+
+      <!-- Partners -->
+      <section data-theme-section="dark" class="problems_home_wrap">
+        <div class="problems_home_bottom">
+          <div class="problems_home_left">
+            <div data-wf--global-eyebrow--variant="base" class="g_eyebrow" data-reveal>
+              <div class="g_eyebrow_circle"></div>
+              <div class="g_eyebrow_text u-text-style-large">Dasmariñas City Veterinary Services partnered with</div>
+            </div>
+          </div>
+          <div class="problems_home_collection w-dyn-list">
+            <div role="list" class="problems_home_list u-grid-custom w-dyn-items">
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="AKF.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Animal Kingdom Foundation (AKF)</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="ANIMAL INDUSTRY.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Bureau of Animal Industry (Department of Agriculture)</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="CARA.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Compassion and Responsibility for Animals (CARA) Welfare Philippines</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="PARTNER.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Pet Lovers Philippines, Inc.</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="PAWS.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Philippine Animal Welfare Society (PAWS)</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="PAWSTURE.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">Pawsture</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="SPCA.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">SPCA International</div></div>
+              <div role="listitem" class="problems_home_item w-dyn-item"><img src="WORLD ANIMAL PROTECTION.png" loading="lazy" width="351" height="351" alt="" class="problems_home_image"/><div class="problems_home_label u-text-mono">World Animal Protection</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- KPIs (restyled) -->
+      <section class="dcvs-kpis">
+        <div class="dcvs-stats-head" data-reveal>
+          <span class="dcvs-stats-kicker">Field Impact</span>
+          <h2 class="dcvs-stats-title">Measured across Dasmarinas</h2>
+        </div>
+        <div class="dcvs-stats-grid">
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="10000" data-suffix="+">0+</span><span class="dcvs-stat-label">Registered Pets Monitored</span></div>
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="100" data-suffix="%">0%</span><span class="dcvs-stat-label">Vaccination Records Digitally Tracked</span></div>
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="26">0</span><span class="dcvs-stat-label">Rescue Reports Logged</span></div>
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="75">0</span><span class="dcvs-stat-label">Barangays Covered</span></div>
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="1">0</span><span class="dcvs-stat-label">Citizen Access to Services</span></div>
+          <div class="dcvs-stat" data-reveal><span class="dcvs-stat-num" data-count="600" data-suffix="+">0+</span><span class="dcvs-stat-label">Citywide Veterinary Information System</span></div>
+        </div>
+      </section>
+
+      <!-- How DCVS Works -->
+      <section id="process" class="process_home_wrap">
+        <h2 class="process_home_heading u-text-style-display">How DCVS Works</h2>
+        <div class="process_home_content w-dyn-list">
+          <div role="list" class="process_home_content-list w-dyn-items">
+            <div role="listitem" class="process_home_content-item w-dyn-item" data-reveal>
+              <div class="process_home_content-left">
+                <div class="process_home_content_index u-text-mono">
+                  <div class="process_home_micrographic">
+                    <div class="works_home_content_ss u-text-style-micro">Step</div>
+                    <div class="process_micrographic_inner"><div class="process_micrographic_circle"></div></div>
+                    <div class="process_home_content_span u-text-style-micro">1</div>
+                  </div>
+                </div>
+                <div class="process_home_content_inner">
+                  <h3 class="process_home_content_heading u-text-style-h6">Every Service.</h3>
+                  <p class="process_home_content-p u-text-style-small">From pet registration and appointment booking to animal welfare reporting, DCVS brings every essential veterinary service into one digital platform. Built to simplify requests, improve accessibility, and strengthen collaboration between residents, barangays, and the City Veterinary Office.</p>
+                </div>
+              </div>
+              <a data-video="playpause" data-cursor-text="Watch Feature Overview" aria-label="Watch Feature Overview" class="process_home_video w-inline-block">
+                <img src="service image.jpg" loading="lazy" alt="" class="overview_home_video u-ratio-16-9 u-background-skeleton"/>
+                <div class="process_home_cta u-text-mono">Watch Feature Overview</div>
+              </a>
+            </div>
+            <div role="listitem" class="process_home_content-item w-dyn-item" data-reveal>
+              <div class="process_home_content-left">
+                <div class="process_home_content_index u-text-mono">
+                  <div class="process_home_micrographic">
+                    <div class="works_home_content_ss u-text-style-micro">Step</div>
+                    <div class="process_micrographic_inner"><div class="process_micrographic_circle"></div></div>
+                    <div class="process_home_content_span u-text-style-micro">2</div>
+                  </div>
+                </div>
+                <div class="process_home_content_inner">
+                  <h3 class="process_home_content_heading u-text-style-h6">One Dashboard.</h3>
+                  <p class="process_home_content-p u-text-style-small">Sign in to a personalized dashboard where pets, reports, appointments, notifications, announcements, and account information are organized into one secure workspace. Everything you need stays connected and easy to manage.</p>
+                </div>
+              </div>
+              <a data-video="playpause" data-cursor-text="Watch Dashboard Tour" aria-label="Watch Dashboard Tour" class="process_home_video w-inline-block">
+                <video src="dashboard video.mp4" loop="" muted="" playsinline="true" preload="none" class="overview_home_video u-ratio-16-9 u-background-skeleton"></video>
+                <div class="process_home_cta u-text-mono">Watch Dashboard Tour</div>
+              </a>
+            </div>
+            <div role="listitem" class="process_home_content-item w-dyn-item" data-reveal>
+              <div class="process_home_content-left">
+                <div class="process_home_content_index u-text-mono">
+                  <div class="process_home_micrographic">
+                    <div class="works_home_content_ss u-text-style-micro">Step</div>
+                    <div class="process_micrographic_inner"><div class="process_micrographic_circle"></div></div>
+                    <div class="process_home_content_span u-text-style-micro">3</div>
+                  </div>
+                </div>
+                <div class="process_home_content_inner">
+                  <h3 class="process_home_content_heading u-text-style-h6">Every Case.</h3>
+                  <p class="process_home_content-p u-text-style-small">View verified reports through an interactive geo-mapping system designed for real-time monitoring across Dasmariñas. Help identify affected areas, monitor ongoing cases, and support faster, data-driven response by DCVS and barangays.</p>
+                </div>
+              </div>
+              <a data-video="playpause" data-cursor-text="Watch Map Demo" aria-label="Watch Map Demo" class="process_home_video w-inline-block">
+                <video src="geo map video.mp4" loop="" muted="" playsinline="true" preload="metadata" class="overview_home_video u-ratio-16-9 u-background-skeleton"></video>
+                <div class="process_home_cta u-text-mono">Watch Map Demo</div>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section data-theme-section="dark" class="cta_home_wrap">
+        <div class="cta_home_contain">
+          <div class="cta_home_inner">
+            <div class="cta_home_header">
+              <h2 class="cta_home_heading u-text-style-display u-sr-only">Ready to build an experience that moves people?</h2>
+              <div class="cta_home_heading_contain">
+                <div class="cta_home_heading u-text-style-display">Let's build</div>
+                <div class="cta_home_heading u-text-style-display is-2">A safer</div>
+                <div class="cta_home_heading u-text-style-display is-3">Community</div>
+                <span class="cta_heading_inner">
+                  <div class="cta_home_heading u-text-style-display is-4 is-arrow"></div>
+                  <div class="cta_home_heading u-text-style-display is-4">Together</div>
+                </span>
+              </div>
+              <a href="register.php" class="g_btn_main w-inline-block">
+                <div class="g_btn_text"><div class="btn_label">Get Started</div></div>
+                <div class="g_btn_aside_wrap">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 12 12" fill="none" class="g_btn_svg"><path d="M8.90954 9.09046L9 3L2.90954 3.09046L2.90213 4.32367L6.86437 4.25391L2.55914 8.55914L3.44086 9.44086L7.74609 5.13563L7.68708 9.10862L8.90954 9.09046Z" fill="currentColor"></path></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 12 12" fill="none" class="g_btn_svg is-absolute"><path d="M8.90954 9.09046L9 3L2.90954 3.09046L2.90213 4.32367L6.86437 4.25391L2.55914 8.55914L3.44086 9.44086L7.74609 5.13563L7.68708 9.10862L8.90954 9.09046Z" fill="currentColor"></path></svg>
+                </div>
+              </a>
+            </div>
+          </div>
+          <div class="cta_home_bottom">
+            <div class="u-section-spacer"></div>
+            <div class="cta_home_proof">
+              <div class="cta_home_awards">
+                <img src="DCVS AWARDS.png" alt="DCVS AWARDS" loading="lazy" class="cta_home_svgs">
+                <img src="ANIMAL WELFARE AWARDS.png" alt="ANIMAL WELFARE AWARDS" loading="lazy" class="cta_home_svgs is-cssda">
+                <img src="PUBLIC SERVICE AWARDS.png" alt="PUBLIC SERVICE AWARDS" loading="lazy" class="cta_home_svgs">
+              </div>
+              <blockquote class="cta_home_testimonial_message u-text-style-h5">A modern platform that makes animal welfare services more accessible, transparent, and connected for every community.</blockquote>
+              <div class="cta_home_testimonee u-text-mono">&#8212; Dasmariñas City Veterinary Services</div>
+            </div>
+          </div>
+        </div>
+        <div class="cta_home_cover_wrap">
+          <div class="cta_home_overlay"></div>
+          <img loading="lazy" alt="Dasmariñas City Veterinary Services" src="footer image.jpg" class="cta_home_visual"/>
+        </div>
+      </section>
+
+      <a href="#" id="to-top" class="footer_bottom_span is-top" aria-label="Back to top">↑</a>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="footer-container">
+        <div class="footer-column footer-brand-column">
+          <h4 class="footer-brand">Dasmariñas City Veterinary Services<span class="footer-brand-tag">DCVS</span></h4>
+          <p class="footer-description">Contact for any help & support or business related query of vetdasma@yahoo.com</p>
+          <div class="footer-socials"><a href="#" class="social-link">f</a><a href="#" class="social-link">G</a><a href="#" class="social-link">y</a></div>
+        </div>
+        <div class="footer-link-group">
+          <div class="footer-column">
+            <h4 class="footer-section-title">Explore the System</h4>
+            <ul class="footer-links">
+              <li><a href="<?php echo $homePage; ?>">Explore the Platform</a></li>
+              <li><a href="announcements.php">Public Service Updates</a></li>
+              <li><a href="geo-map-landing.php">Geo-Mapping Dashboard</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4 class="footer-section-title">About the Veterinary Office</h4>
+            <ul class="footer-links">
+              <li><a href="about.php">About DCVS</a></li>
+              <li><a href="faq.php">Frequently Asked Questions</a></li>
+              <li><a href="contact.php">Contact Us</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4 class="footer-section-title">Services &amp; Insights</h4>
+            <ul class="footer-links">
+              <li><a href="adoption.php">Pet Adoption Services</a></li>
+              <li><a href="Knowledge-Hub.php">Knowledge Hub</a></li>
+              <li><a href="Philippine-Initiatives.php">Philippine Initiatives</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div class="footer-bottom-content">
+          <div class="footer-bottom-socials"><a href="#" class="social-link-small">f</a><a href="#" class="social-link-small">G</a><a href="#" class="social-link-small">y</a></div>
+          <p>&copy; <?php echo date('Y'); ?> Dasmariñas City Veterinary Services. All rights reserved. | Compliance matters here.</p>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+// navbar mobile toggle
+const navbar = document.querySelector(".navbar");
+const navLinks = document.querySelector(".nav-links");
+const navToggle = document.querySelector(".nav-toggle");
+navToggle?.addEventListener("click", () => { navLinks?.classList.toggle("open"); navToggle.setAttribute("aria-expanded", navLinks?.classList.contains("open") ? "true" : "false"); });
+navLinks?.addEventListener("click", (e) => { if (e.target instanceof HTMLAnchorElement && !e.target.classList.contains('dropdown-toggle') && navLinks.classList.contains("open")) { navLinks.classList.remove("open"); navToggle?.setAttribute("aria-expanded","false"); } });
+document.querySelectorAll('.dropdown-toggle').forEach(function(t){ t.addEventListener('click', function(e){ var li=this.closest('.nav-item'); if(li && window.innerWidth<1100){ e.preventDefault(); li.classList.toggle('open'); } }); });
+document.addEventListener('click', function(e){ if(!e.target.closest('.nav-item')){ document.querySelectorAll('.nav-item.open').forEach(function(i){ i.classList.remove('open'); }); } });
+const handleScrollState = () => { if(!navbar) return; navbar.classList.toggle("nav-scrolled", window.scrollY > 24); };
+window.addEventListener("scroll", handleScrollState, { passive: true });
+handleScrollState();
+
+// reveal on scroll
+document.addEventListener("DOMContentLoaded", () => {
+  if ("IntersectionObserver" in window) {
+    const obs = new IntersectionObserver((entries) => { entries.forEach(en => { if(en.isIntersecting){ en.target.classList.add("is-in"); obs.unobserve(en.target); } }); }, { threshold: 0.15 });
+    document.querySelectorAll("[data-reveal]").forEach(el => obs.observe(el));
+  } else {
+    document.querySelectorAll("[data-reveal]").forEach(el => el.classList.add("is-in"));
+  }
+
+  // KPI count-up
+  const nums = document.querySelectorAll(".dcvs-stat-num");
+  const animateNum = (el) => {
+    const target = Number(el.dataset.count || "0");
+    const suffix = el.dataset.suffix || "";
+    const dur = 1800; const start = performance.now();
+    const step = (now) => { const p = Math.min((now-start)/dur, 1); const eased = 1-Math.pow(1-p,4); el.textContent = Math.floor(eased*target).toLocaleString("en-US") + suffix; if(p<1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  };
+  if ("IntersectionObserver" in window && nums.length) {
+    const nobs = new IntersectionObserver((entries) => { entries.forEach(e => { if(e.isIntersecting){ animateNum(e.target); nobs.unobserve(e.target); } }); }, { threshold: 0.6 });
+    nums.forEach(el => nobs.observe(el));
+  }
+});
+
+// video interactions (no Barba): play/pause the demo media on demand
+document.querySelectorAll("[data-video]").forEach(function(el){
+  const vid = el.querySelector("video");
+  el.addEventListener("mouseenter", function(){ if(vid){ vid.muted=true; vid.loop=true; vid.play().catch(function(){}); } });
+  el.addEventListener("mouseleave", function(){ if(vid){ vid.pause(); } });
+  el.addEventListener("click", function(e){ if(vid){ e.preventDefault(); vid.muted=false; if(vid.paused){ vid.play().catch(function(){}); } else { vid.pause(); } } });
+});
+    </script>
+  </body>
+</html>

@@ -1,0 +1,265 @@
+<?php
+require_once 'db.php';
+
+$announcements = [];
+$aq = $conn->query("SELECT * FROM announcements WHERE status = 'published' AND is_active = 1 ORDER BY created_at DESC");
+if ($aq) {
+    while ($row = $aq->fetch_assoc()) $announcements[] = $row;
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Announcements and Advisories | Dasmariñas City Veterinary Services</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="assets/css/monolog.css" />
+
+    <style>
+:root {
+  --bg-ice: #e9f3ff;
+  --bg-cloud: #f3f8ff;
+  --primary: #045E1FD9;
+  --primary-dark: #045E1FD9;
+  --ink: #080807;
+  --muted: #4a5672;
+  --white: #ffffff;
+  --accent-sand: #e8a80a;
+  --transition: cubic-bezier(0.25, 0.65, 0.35, 1);
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif; background: var(--swatch--beige-100); color: var(--swatch--black-400); }
+img, svg, video { max-width: 100%; display: block; }
+a { text-decoration: none; color: inherit; }
+main { padding-top: 0; }
+
+/* ── navbar (shared) ── */
+.site-header { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; padding: 0.8rem 0; }
+.navbar { display: flex; align-items: center; gap: 2rem; width: min(1200px, 92vw); margin: 0 auto; padding: 0.85rem 1.5rem; border-radius: 999px; background: #ffffff; border: 1px solid rgba(0,0,0,0.08); box-shadow: 0 24px 48px rgba(0,0,0,0.06); position: relative; transition: background 0.3s var(--transition), box-shadow 0.3s var(--transition), border 0.3s var(--transition), transform 0.3s var(--transition); }
+.navbar::before, .navbar::after { display: none; }
+.brand-logo { display: block; object-fit: contain; height: 50px; width: auto; }
+.navbar.nav-scrolled { background: #ffffff; border-color: rgba(0,0,0,0.12); box-shadow: 0 26px 52px rgba(0,0,0,0.1); }
+.nav-links { display: flex; align-items: center; justify-content: center; gap: 1.5rem; list-style: none; margin: 0; padding: 0; flex: 1; }
+.nav-links a { font-weight: 500; padding: 6px 16px; border-radius: 8px; color: #1a2a3a; transition: color 0.25s var(--transition), background 0.25s var(--transition); }
+.nav-links a::after { display: none; }
+.nav-links a:hover, .nav-links a:focus-visible { background: rgba(4,94,31,0.06); color: #045e1f; }
+.nav-links a.active { background: rgba(4,94,31,0.1); color: #045e1f; }
+.nav-item { position: relative; }
+.dropdown-toggle { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 6px 16px; border-radius: 8px; color: #1a2a3a; transition: background 0.2s, color 0.2s; }
+.dropdown-toggle:hover { background: rgba(4,94,31,0.06); color: #045e1f; }
+.dropdown-toggle .arrow { font-size: 10px; transition: transform 0.3s var(--transition); }
+.nav-item.open .dropdown-toggle .arrow { transform: rotate(180deg); }
+.dropdown-menu { position: absolute; top: calc(100% + 8px); left: 0; background: #ffffff; border-radius: 12px; padding: 6px 0; min-width: 190px; box-shadow: 0 20px 48px rgba(0,0,0,0.12); opacity: 0; visibility: hidden; transform: translateY(8px); transition: all 0.25s ease; z-index: 9999; border: 1px solid rgba(0,0,0,0.06); }
+.nav-item:hover .dropdown-menu, .nav-item.open .dropdown-menu { opacity: 1; visibility: visible; transform: translateY(0); }
+.dropdown-menu a { display: block; padding: 10px 20px; font-size: 14px; font-weight: 500; color: #1a2a3a; white-space: nowrap; }
+.dropdown-menu a::after { display: none; }
+.dropdown-menu a:hover { background: rgba(4,94,31,0.06); color: #045e1f; }
+.nav-toggle { display: none; flex-direction: column; gap: 5px; background: transparent; border: none; cursor: pointer; padding: 0; }
+.nav-toggle span { width: 22px; height: 2px; background: #1a2a3a; border-radius: 999px; transition: transform 0.3s var(--transition), opacity 0.3s var(--transition); }
+.nav-login-btn { font-weight: 600; font-size: 0.88rem; padding: 8px 22px; border-radius: 8px; background: #045e1f; color: #fff !important; white-space: nowrap; transition: background 0.2s; flex-shrink: 0; }
+
+/* filter widget */
+.filter-buttons { display: flex; flex-wrap: wrap; gap: var(--_spacing---space--1); list-style: none; padding: 0; margin: var(--_spacing---space--7) 0 0; }
+.filter_button_list { width: fit-content; }
+.filter-btn { border: none; cursor: pointer; color: var(--swatch--black-400); background-color: #dcd7cc; padding: 0.4em 0.9em; border-radius: 0.15rem; font-family: inherit; }
+.filter-btn[data-filter-status="active"] { background-color: #131313; color: #efeeec; }
+
+/* ann cards */
+#announcement-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--_spacing---space--6); }
+.hero_work_item { transition: opacity 0.3s ease; }
+.hero_work_item.is-hidden { display: none; }
+.e-ann-card { display: block; border: 1px solid var(--swatch--beige-200); border-radius: 0.3rem; overflow: hidden; background: var(--swatch--beige-100); }
+.e-ann-card .thumb { aspect-ratio: 16/10; overflow: hidden; background: var(--swatch--beige-200); }
+.e-ann-card .thumb img { width: 100%; height: 100%; object-fit: cover; }
+.e-ann-card .body { padding: var(--_spacing---space--4); display: flex; flex-direction: column; gap: var(--_spacing---space--2); }
+.e-ann-meta { display: flex; align-items: center; gap: 0.6rem; font-family: SuisseIntlMono, monospace; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.7rem; color: var(--swatch--black-400); }
+.e-ann-tag { background: #131313; color: #efeeec; padding: 0.15em 0.5em; border-radius: 0.15rem; }
+.e-ann-title { font-family: var(--_typography---font--primary-family); font-size: 1.4rem; line-height: 1.05; letter-spacing: -0.01em; margin: 0; }
+.e-ann-content { color: var(--swatch--black-50); font-size: 0.95rem; line-height: 1.5; margin: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.e-ann-link { font-weight: 600; color: #045e1f; }
+@media (max-width: 800px) { #announcement-list { grid-template-columns: 1fr; } }
+
+/* ── CTA reuse (dark) ── */
+.cta_home_wrap { background: var(--swatch--black-400); }
+/* monolog local fixes */
+html, body { overflow-x: clip; }
+
+/* ── footer (shared) ── */
+.site-footer { background: linear-gradient(180deg, #0b1a0f 30%, #045e1fd9 80%); color: #e8f1eb; padding: 4rem 3rem 2.5rem; border-top: 1px solid #0a3c14; }
+.footer-container { display: flex; gap: 4rem; max-width: 1400px; margin: 0 auto 3rem; }
+.footer-brand-column { flex: 0 0 280px; display: flex; flex-direction: column; gap: 1.5rem; }
+.footer-brand { font-size: 1.4rem; font-weight: 700; color: #ffffff; margin: 0; display: flex; gap: 0.6rem; align-items: baseline; }
+.footer-brand-tag { font-size: 0.75rem; font-weight: 500; color: #b8d9bf; letter-spacing: 0.05em; }
+.footer-description { font-size: 0.9rem; color: #c5d9cc; line-height: 1.6; margin: 0; }
+.footer-socials { display: flex; gap: 0.7rem; margin-top: 0.5rem; }
+.social-link { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,0.1); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; text-decoration: none; transition: all 0.3s ease; font-size: 0.8rem; }
+.social-link:hover { background: #4ade80; color: #000; }
+.footer-link-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3rem; flex: 1; }
+.footer-column { display: flex; flex-direction: column; gap: 1rem; }
+.footer-section-title { font-size: 0.95rem; font-weight: 700; color: #ffffff; margin: 0; line-height: 1.4; }
+.footer-links { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.8rem; }
+.footer-links a { color: #c5d9cc; text-decoration: none; font-size: 0.9rem; transition: color 0.3s ease; line-height: 1.5; }
+.footer-links a:hover { color: #4ade80; }
+.footer-bottom { border-top: 1px solid #0a3c14; padding-top: 2rem; }
+.footer-bottom-content { display: flex; justify-content: space-between; align-items: center; max-width: 1400px; margin: 0 auto; }
+.footer-bottom-socials { display: flex; gap: 0.6rem; }
+.social-link-small { width: 28px; height: 28px; border-radius: 50%; background: rgba(255,255,255,0.1); color: #ffffff; display: flex; align-items: center; justify-content: center; font-weight: 600; text-decoration: none; transition: all 0.3s ease; font-size: 0.75rem; }
+.social-link-small:hover { background: #4ade80; color: #000; }
+.footer-bottom p { color: #9db4a0; font-size: 0.85rem; margin: 0; }
+@media (max-width: 1024px) {.footer-link-group { grid-template-columns: repeat(2, 1fr); gap: 2rem;} .footer-container { gap: 2.5rem; }}
+@media (max-width: 768px) { .footer-container { flex-direction: column; gap: 2.5rem; } .footer-link-group { grid-template-columns: 1fr; gap: 1.5rem; } .footer-bottom-content { flex-direction: column; gap: 1rem; } }
+@media (max-width: 1100px) { .navbar { border-radius: 24px; } .nav-links { position: fixed; inset: 90px 1.5rem auto 1.5rem; background: #fff; border-radius: 24px; padding: 1.8rem; flex-direction: column; align-items: flex-start; gap: 1rem; box-shadow: 0 24px 60px rgba(18,39,84,0.25); transform: translateY(-20px); opacity: 0; pointer-events: none; transition: all .3s var(--transition); max-height: calc(100vh - 110px); overflow-y: auto; } .nav-links.open { transform: translateY(0); opacity: 1; pointer-events: auto; } .nav-toggle { display: flex; } }
+@media (max-width: 800px) { .nav-item .dropdown-menu { position: static; box-shadow: none; border: none; padding-left: 1rem; opacity: 1; visibility: visible; transform: none; width: 100%; display: none; } .nav-item.open .dropdown-menu { display: block; } .site-header { padding: 0.4rem 0; } .navbar { padding: 0.4rem 0.85rem; } .brand-logo { height: 36px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; } }
+    </style>
+    <link rel="stylesheet" href="assets/css/responsive.css" />
+  </head>
+  <body class="page_main is-light">
+    <?php $currentPage = 'updates'; $homePage = 'landing-page.php'; include 'includes/landing-navbar.php'; ?>
+
+    <main class="page_main is-light">
+
+      <section data-theme-section="light" class="hero_work_wrap">
+        <div class="hero_work_header">
+          <h1 class="hero_work_heading u-text-style-h1">Announcements and Advisories</h1>
+        </div>
+        <div data-filter-group="" role="group" class="hero_work_content">
+          <div class="hero_work_left">
+            <div class="hero_work_filters">
+              <ul class="filter-buttons">
+                <li class="filter_button_list"><button data-filter-target="all" data-filter-status="active" aria-pressed="true" class="filter-btn u-text-style-main">All</button></li>
+                <li class="filter_button_list"><button data-filter-target="announcement" data-filter-status="not-active" aria-pressed="false" class="filter-btn u-text-style-main">Announcements</button></li>
+                <li class="filter_button_list"><button data-filter-target="advisory" data-filter-status="not-active" aria-pressed="false" class="filter-btn u-text-style-main">Advisories</button></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="hero_work_projects">
+            <div id="announcement-list" class="hero_work_list">
+              <?php if (count($announcements) === 0): ?>
+                <p class="u-text-style-h5" style="max-width:40ch">No public service updates yet. Check back soon for kapon caravans, anti-rabies boosters, and welfare actions across Dasmariñas.</p>
+              <?php else: foreach ($announcements as $ann):
+                $cat = ($ann['category'] === 'advisory') ? 'Advisory' : 'Announcement';
+                $ph = !empty($ann['photo_url']) ? htmlspecialchars($ann['photo_url']) : '';
+                $d = date('M d, Y', strtotime($ann['created_at']));
+                $link = ($ann['link_url'] !== '' && $ann['link_url'] !== null) ? $ann['link_url'] : '#';
+                $hrefTop = ($link === '#' && $ph === '') ? '#' : ($ph !== '' ? '#' : $link);
+              ?>
+              <article class="hero_work_item" data-filter-name="<?php echo $ann['category']; ?>">
+                <a class="e-ann-card" href="<?php echo htmlspecialchars($link); ?>" target="<?php echo ($link === '#' ? '_self' : '_blank'); ?>" rel="noopener">
+                  <?php if ($ph !== ''): ?>
+                  <div class="thumb"><img src="<?php echo $ph; ?>" alt="<?php echo htmlspecialchars($ann['title']); ?>" loading="lazy"></div>
+                  <?php endif; ?>
+                  <div class="body">
+                    <div class="e-ann-meta"><span class="e-ann-tag"><?php echo $cat; ?></span><span><?php echo $d; ?></span></div>
+                    <h2 class="e-ann-title"><?php echo htmlspecialchars($ann['title']); ?></h2>
+                    <p class="e-ann-content"><?php echo htmlspecialchars($ann['content']); ?></p>
+                    <?php if ($link !== '#'): ?><span class="e-ann-link">Learn more &rarr;</span><?php endif; ?>
+                  </div>
+                </a>
+              </article>
+              <?php endforeach; endif; ?>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section data-theme-section="dark" class="cta_home_wrap" style="padding: var(--_spacing---section-space--main) var(--site--margin); color: var(--swatch--beige-100);">
+        <div class="cta_home_heading_contain" style="display:flex;flex-direction:column;gap:var(--_spacing---space--2)">
+          <div class="cta_home_heading u-text-style-display">Let's build</div>
+          <div class="cta_home_heading u-text-style-display is-2">A safer</div>
+          <div class="cta_home_heading u-text-style-display is-3">Community</div>
+          <span class="cta_heading_inner">
+            <div class="cta_home_heading u-text-style-display is-4">Together</div>
+          </span>
+        </div>
+        <a href="register.php" class="g_btn_main w-inline-block" style="margin-top:var(--_spacing---space-7)">
+          <div class="btn_label">Get Started</div>
+        </a>
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="site-footer">
+      <div class="footer-container">
+        <div class="footer-column footer-brand-column">
+          <h4 class="footer-brand">Dasmariñas City Veterinary Services<span class="footer-brand-tag">DCVS</span></h4>
+          <p class="footer-description">Contact for any help & support or business related query of vetdasma@yahoo.com</p>
+          <div class="footer-socials"><a href="#" class="social-link">f</a><a href="#" class="social-link">G</a><a href="#" class="social-link">y</a></div>
+        </div>
+        <div class="footer-link-group">
+          <div class="footer-column">
+            <h4 class="footer-section-title">Explore the System</h4>
+            <ul class="footer-links">
+              <li><a href="<?php echo $homePage; ?>">Explore the Platform</a></li>
+              <li><a href="announcements.php" class="active">Public Service Updates</a></li>
+              <li><a href="geo-map-landing.php">Geo-Mapping Dashboard</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4 class="footer-section-title">About the Veterinary Office</h4>
+            <ul class="footer-links">
+              <li><a href="about.php">About DCVS</a></li>
+              <li><a href="faq.php">Frequently Asked Questions</a></li>
+              <li><a href="contact.php">Contact Us</a></li>
+            </ul>
+          </div>
+          <div class="footer-column">
+            <h4 class="footer-section-title">Services &amp; Insights</h4>
+            <ul class="footer-links">
+              <li><a href="adoption.php">Pet Adoption Services</a></li>
+              <li><a href="Knowledge-Hub.php">Knowledge Hub</a></li>
+              <li><a href="Philippine-Initiatives.php">Philippine Initiatives</a></li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <div class="footer-bottom-content">
+          <div class="footer-bottom-socials"><a href="#" class="social-link-small">f</a><a href="#" class="social-link-small">G</a><a href="#" class="social-link-small">y</a></div>
+          <p>&copy; <?php echo date('Y'); ?> Dasmariñas City Veterinary Services. All rights reserved. | Compliance matters here.</p>
+        </div>
+      </div>
+    </footer>
+
+    <script>
+      const navbar = document.querySelector(".navbar");
+      const navLinks = document.querySelector(".nav-links");
+      const navToggle = document.querySelector(".nav-toggle");
+      navToggle?.addEventListener("click", () => { navLinks?.classList.toggle("open"); });
+      navLinks?.addEventListener("click", (e) => { if (e.target instanceof HTMLAnchorElement && !e.target.classList.contains('dropdown-toggle') && navLinks.classList.contains("open")) { navLinks.classList.remove("open"); } });
+      document.querySelectorAll('.dropdown-toggle').forEach(function(t){ t.addEventListener('click', function(e){ var li=this.closest('.nav-item'); if(li && window.innerWidth<1100){ e.preventDefault(); li.classList.toggle('open'); } }); });
+      document.addEventListener('click', function(e){ if(!e.target.closest('.nav-item')){ document.querySelectorAll('.nav-item.open').forEach(i=>i.classList.remove('open')); } });
+      const scrolled = () => navbar?.classList.toggle("nav-scrolled", window.scrollY > 24);
+      window.addEventListener("scroll", scrolled, { passive: true }); scrolled();
+
+      // Filter buttons
+      const buttons = document.querySelectorAll(".filter-btn");
+      const items = document.querySelectorAll(".hero_work_item");
+      buttons.forEach(btn => btn.addEventListener("click", () => {
+        buttons.forEach(b => { b.dataset.filterStatus = "not-active"; b.setAttribute("aria-pressed","false"); });
+        btn.dataset.filterStatus = "active"; btn.setAttribute("aria-pressed","true");
+        const target = btn.dataset.filterTarget;
+        items.forEach(it => { it.style.display = (target === "all" || it.dataset.filterName === target) ? "" : "none"; });
+        document.querySelectorAll('.nav-item.open').forEach(i=>i.classList.remove('open'));
+      }));
+
+      // reveal
+      document.addEventListener("DOMContentLoaded", () => {
+        if ("IntersectionObserver" in window) {
+          const io = new IntersectionObserver((es) => es.forEach(en => { if(en.isIntersecting){ en.target.classList.add("is-in"); io.unobserve(en.target);} }), { threshold: 0.15 });
+          document.querySelectorAll("[data-reveal]").forEach(el => io.observe(el));
+        }
+      });
+    </script>
+  </body>
+</html>
