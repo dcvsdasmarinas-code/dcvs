@@ -1,6 +1,6 @@
 ﻿/* ── Root Variables ── */
 :root {
-  --sidebar-w: 80px;
+  --sidebar-w: 270px;
   --topbar-h: 64px;
   --radius: 14px;
   --radius-sm: 8px;
@@ -37,25 +37,22 @@ h1,h2,h3,h4 { font-family: 'Montserrat', sans-serif; }
 a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; }
 
-/* ── Sidebar (hover-expand, liquid cutout) ── */
+/* ── Sidebar (always expanded) ── */
 .sidebar {
   position: fixed; top: 0; left: 0;
-  width: 80px;
+  width: 270px;
   height: 100vh;
   background: linear-gradient(180deg, #0b1a0f, #0a3015, #065019);
   display: flex; flex-direction: column; z-index: 200;
-  overflow-x: hidden; overflow-y: visible;
+  overflow-x: hidden; overflow-y: auto;
   scrollbar-width: none;
-  transition: width 0.4s cubic-bezier(0.25, 0.1, 0.25, 1);
   white-space: nowrap;
 }
 .sidebar::-webkit-scrollbar { display: none; }
-.sidebar:hover { width: 270px; overflow-y: auto; }
-.sidebar.expanded { width: 270px; overflow-y: auto; }
-.sidebar.expanded .sidebar-brand-text,
-.sidebar.expanded .sidebar-profile-info,
-.sidebar.expanded .nav-section-label,
-.sidebar.expanded .nav-link-text { opacity: 1; transform: translateX(0); }
+.sidebar .sidebar-brand-text,
+.sidebar .sidebar-profile-info,
+.sidebar .nav-section-label,
+.sidebar .nav-link-text { opacity: 1; transform: translateX(0); }
 
 /* ── Sidebar Top ── */
 .sidebar-top {
@@ -72,10 +69,8 @@ button { font-family: inherit; cursor: pointer; }
 .sidebar-logo { width: 36px; height: 36px; object-fit: contain; border-radius: 6px; flex-shrink: 0; }
 .sidebar-brand-text {
   overflow: hidden;
-  opacity: 0; transform: translateX(-12px);
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s;
+  opacity: 1; transform: translateX(0);
 }
-.sidebar:hover .sidebar-brand-text { opacity: 1; transform: translateX(0); }
 .sidebar-brand-name { font-weight: 800; font-size: 1rem; color: #fff; display: block; }
 .sidebar-brand-sub { font-size: 0.65rem; color: rgba(255,255,255,0.6); letter-spacing: 0.08em; text-transform: uppercase; display: block; }
 
@@ -96,10 +91,8 @@ button { font-family: inherit; cursor: pointer; }
 
 .sidebar-profile-info {
   overflow: hidden;
-  opacity: 0; transform: translateX(-12px);
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s;
+  opacity: 1; transform: translateX(0);
 }
-.sidebar:hover .sidebar-profile-info { opacity: 1; transform: translateX(0); }
 .sidebar-profile-name { font-size: 0.85rem; font-weight: 700; color: #fff; margin: 0; }
 .sidebar-profile-barangay { font-size: 0.72rem; color: rgba(255,255,255,0.6); margin: 2px 0 0; }
 .sidebar-profile-barangay i { font-size: 0.65rem; }
@@ -113,10 +106,8 @@ button { font-family: inherit; cursor: pointer; }
   text-transform: uppercase; color: rgba(255,255,255,0.35);
   padding: 0 0.9rem; margin-bottom: 0.6rem; margin-top: 1.5rem;
   overflow: hidden;
-  opacity: 0; transform: translateX(-12px);
-  transition: opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s, transform 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.12s;
+  opacity: 1; transform: translateX(0);
 }
-.sidebar:hover .nav-section-label { opacity: 1; transform: translateX(0); }
 .nav-section-label:first-child { margin-top: 0; }
 .sidebar-links { list-style: none; padding: 0; margin: 0; }
 .sidebar-links li { margin: 8px 0; padding: 0; }
@@ -147,17 +138,15 @@ button { font-family: inherit; cursor: pointer; }
 }
 .nav-link-icon i { transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 
-/* Text: hidden when narrow, slides in on hover */
+/* Text: always visible */
 .nav-link-text {
-  opacity: 0; transform: translateX(-14px);
-  transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.08s, transform 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.08s;
+  opacity: 1; transform: translateX(0);
   white-space: nowrap;
   overflow: hidden;
   padding-right: 1rem;
   position: relative;
   z-index: 2;
 }
-.sidebar:hover .nav-link-text { opacity: 1; transform: translateX(0); }
 
 /* ── Sidebar dropdown group (Reports submenu) ── */
 .nav-group { position: relative; }
@@ -185,7 +174,6 @@ button { font-family: inherit; cursor: pointer; }
   color: #fff; font-weight: 600;
 }
 .nav-submenu .nav-link.active .nav-link-icon i { color: #4ade80; }
-.sidebar:not(:hover):not(.expanded) .nav-submenu { max-height: 0 !important; }
 
 /* Highlight the Reports group toggle when one of its sub-items is active */
 .nav-group.active > .nav-group-toggle {

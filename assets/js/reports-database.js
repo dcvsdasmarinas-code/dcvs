@@ -273,14 +273,6 @@
     var resolvedDate = r.status === 'resolved' ? (r.resolved || r.date) : '-';
 
     box.innerHTML =
-      '<div class="rpt-detail-header">' +
-      '<div style="min-width:0;">' +
-      '<div class="rpt-detail-ref">' + esc(r.ref) + '</div>' +
-      '<div class="rpt-detail-type">' + typeBadge(r.type, r.typeLabel) + '</div>' +
-      '</div>' +
-      statusPill(r.status) +
-      '</div>' +
-
       '<div class="rpt-tabs">' +
       '<button class="rpt-tab" data-tab="details" onclick="rptDetailGo(\'details\')">Details</button>' +
       '<button class="rpt-tab" data-tab="attachments" onclick="rptDetailGo(\'attachments\')">Attachments</button>' +
@@ -288,6 +280,8 @@
       '</div>' +
 
       '<div class="rpt-detail-body" data-tab="details">' +
+
+      '<div class="rpt-detail-ref" style="margin-bottom:14px;">' + esc(r.ref) + '</div>' +
 
       '<div class="rpt-detail-grid">' +
 
@@ -350,7 +344,15 @@
       '</div>';
 
     rptDetailRefreshTabs();
+    openModal('rptDetailsModal');
   };
+
+  window.closeReportDrawer = function () {
+    closeModal('rptDetailsModal');
+  };
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeReportDrawer();
+  });
 
   window.rptDetailGo = function (t) {
     rptDetailTab = t;

@@ -384,6 +384,7 @@ function loadClient(userId, tab){
   document.querySelectorAll('#dataRows tr').forEach(function(r){ r.classList.toggle('selected', r.getAttribute('data-id')==String(userId)); });
   var box = document.getElementById('profileContent');
   box.innerHTML = '<div class="profile-loading"><i class="fas fa-spinner fa-spin"></i> Loading profile...</div>';
+  openModal('clientProfileModal');
   fetch('client-database-handler.php?action=get_client&user_id=' + encodeURIComponent(userId))
     .then(function(r){ return r.json(); })
     .then(function(data){
@@ -464,6 +465,7 @@ function closeProfile(){
   currentProfile = null;
   document.getElementById('profileContent').innerHTML =
     '<div class="profile-empty"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><p>Select a client to view their profile</p></div>';
+  closeModal('clientProfileModal');
 }
 
 // ── Add / Edit / Archive ──
@@ -606,7 +608,12 @@ function exportCSV(){
   }
   if (VIEW_OWNER){
     loadClient(VIEW_OWNER, 'profile');
-  } else if (CLIENTS.length){
-    loadClient(CLIENTS[0].id, 'profile');
+  } else {
+    document.addEventListener('DOMContentLoaded', function() {
+      var section = document.getElementById('client-pets');
+      if (section && getComputedStyle(section).display !== 'none' && CLIENTS.length) {
+        loadClient(CLIENTS[0].id, 'profile');
+      }
+    });
   }
 })();

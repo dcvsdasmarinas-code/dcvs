@@ -253,8 +253,24 @@
       var box = el(p + 'DetailContent');
       if (box) {
         detailTab = 'details';
-        box.innerHTML = cfg.drawerHtml(r);
+        try {
+          box.innerHTML = cfg.drawerHtml(r);
+        } catch (e) {
+          box.innerHTML = '<p style="padding:1rem;color:#71717a;">Unable to load case details.</p>';
+        }
         refreshDetailTabs();
+      }
+      var footer = el(p + 'DrawerFooter');
+      if (footer) {
+        footer.innerHTML = (typeof cfg.drawerFooter === 'function') ? cfg.drawerFooter(r) : '';
+      }
+      if (cfg.modalId) {
+        var m = document.getElementById(cfg.modalId);
+        if (m) {
+          m.classList.add('active');
+          m.style.display = 'flex';
+          document.body.style.overflow = 'hidden';
+        }
       }
     };
     window[p + 'DetailGo'] = function (t) {

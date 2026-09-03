@@ -70,21 +70,23 @@ $activePage = 'geo';
       --shadow: 0 4px 24px rgba(0,0,0,0.06);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', sans-serif; background: var(--bg-body); color: var(--text); min-height: 100vh; display: flex; }
+    body { font-family: 'Inter', 'Segoe UI', sans-serif; background: var(--bg-body); color: var(--text); min-height: 100vh; display: flex; }
     .staff-layout { display: flex; width: 100%; min-height: 100vh; }
-    .staff-main { flex: 1; margin-left: 80px; margin-top: var(--topbar-h, 64px); padding: 1.75rem 2rem; min-height: 100vh; }
+    .staff-main { flex: 1; margin-left: 80px; margin-top: var(--topbar-h, 64px); padding: 1.75rem 2rem; min-height: calc(100vh - var(--topbar-h, 64px)); }
 
     .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
     .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Montserrat',sans-serif; display:flex; align-items:center; gap:10px; }
     .page-title i { color:#0E8131; }
     .page-subtitle { font-size:0.88rem; color:#64748b; margin:4px 0 0; }
 
-    .geo-full-page .geo-map-card { border-radius: 14px; }
-    .geo-full-page #geoMap { height: 600px; }
+    .geo-full-page { margin: -1.75rem -2rem; }
+    .geo-full-page .geo-map-section { height: calc(100vh - var(--topbar-h, 64px)); margin-bottom: 0; }
+    .geo-full-page .geo-map-card { border-radius: 0; height: 100%; display: flex; flex-direction: column; }
+    .geo-full-page #geoMap { height: auto !important; flex: 1; min-height: 0; }
 
     @media (max-width: 768px) {
       .staff-main { margin-left: 0; padding: 1rem; }
-      .geo-full-page #geoMap { height: 420px; }
+      .geo-full-page { margin: -1rem; }
     }
   </style>
 </head>
@@ -93,13 +95,6 @@ $activePage = 'geo';
 <?php include 'includes/staff-sidebar.php'; ?>
 
 <div class="staff-main">
-  <div class="page-header">
-    <div>
-      <h1 class="page-title">Geo Mapping</h1>
-      <p class="page-subtitle">Real-time choropleth map of confirmed animal welfare cases across Dasmariñas 75 barangays</p>
-    </div>
-  </div>
-
   <div class="geo-full-page">
     <!-- ===== Geo-Mapping Module ===== -->
     <div class="geo-map-section">
@@ -116,7 +111,7 @@ $activePage = 'geo';
           </span>
         </div>
         <!-- Map container -->
-        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}' style="width:100%;height:520px;position:relative;">
+        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}' style="width:100%;position:relative;">
           <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
         </div>
         <!-- Slide-in Info Panel -->
@@ -149,7 +144,7 @@ $activePage = 'geo';
         </div>
         <!-- Legend -->
         <div class="geo-legend">
-          <span style="font-weight:600;color:#0f172a;font-size:0.8rem;">Risk Level:</span>
+          <span style="font-weight:600;color:#18181b;font-size:12px;">Risk Level:</span>
           <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#22c55e;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">0 cases</span></div>
           <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#eab308;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">1–5 cases</span></div>
           <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#f97316;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">6–15 cases</span></div>

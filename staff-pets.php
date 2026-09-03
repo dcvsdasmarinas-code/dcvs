@@ -28,7 +28,7 @@ if ($lq) {
 }
 
 $petLookup = [];
-$pq = $conn->query("SELECT pet_name, vaccination_status, owner_id FROM pets");
+$pq = $conn->query("SELECT pet_name, vaccination_status, owner_id, reference_id FROM pets");
 if ($pq) {
     while ($r = $pq->fetch_assoc()) {
         $k = strtolower(trim($r['pet_name']));
@@ -45,8 +45,10 @@ if ($uq) {
 $payload = [];
 foreach ($listings as $row) {
     $id = (int)$row['listing_id'];
-    $ref = '#PET-' . strtoupper(substr(md5('lst' . $id), 0, 6));
     $match = $petLookup[strtolower(trim($row['name']))] ?? null;
+    $ref = ($match && !empty($match['reference_id']))
+        ? $match['reference_id']
+        : '#PET-' . strtoupper(substr(md5('lst' . $id), 0, 6));
     $vaccination = ($match && !empty($match['vaccination_status'])) ? $match['vaccination_status'] : 'Not specified';
     $owner = null;
     if ($match && isset($match['owner_id']) && isset($userLookup[$match['owner_id']])) {
@@ -307,6 +309,12 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .cpd .pet-img{ position:relative; width:100%; height:250px; background:var(--ink-100); }
     .cpd .pet-img img{ width:100%; height:100%; object-fit:cover; display:block; }
     .cpd .pet-img-placeholder{ width:100%; height:100%; display:flex;align-items:center;justify-content:center; color:var(--ink-300); font-size:42px; }
+    .cpd .pet-card-wrap{ display:flex; flex-direction:column; gap:8px; cursor:pointer; width:250px; margin:0 auto; }
+    .cpd .pet-card-wrap .rpt-card{ border-radius:0; border:1px solid var(--border); cursor:pointer; width:100%; }
+    .cpd .pet-card-wrap .pet-img{ height:250px; }
+    .cpd .pet-card-caption{ display:flex; flex-direction:row; align-items:baseline; justify-content:space-between; gap:10px; padding:0 2px; width:100%; }
+    .cpd .pet-card-caption .pet-card-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .cpd .pet-card-caption .rpt-card-ref{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; text-align:right; flex-shrink:0; }
     .cpd .pet-status-badge{ position:absolute; top:8px; right:8px; display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:0; font-size:11.5px; font-weight:700; box-shadow:0 1px 4px rgba(15,23,32,.12); }
     .cpd .pet-card-body{ display:flex; flex-direction:column; gap:6px; flex:1; padding:14px 16px 12px; }
     .cpd .pet-card-name{ font-size:20px; font-weight:800; color:var(--ink-900); line-height:1.25; }
@@ -468,6 +476,50 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .pets-cms .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
     .pets-cms .sd-row-actions{ width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:transparent; border:none; color:#71717a; cursor:pointer; }
     .pets-cms .sd-row-actions:hover{ background:#f4f4f5; color:#18181b; }
+    /* ── shadcn data-table (exact client-table look) ── */
+    .pets-cms .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    .pets-cms table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
+    .pets-cms thead tr{ border-bottom:1px solid #e4e4e7; }
+    .pets-cms thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:transparent; border-bottom:none; }
+    .pets-cms thead th.sd-th-action{ text-align:right; }
+    .pets-cms tbody tr{ border-bottom:1px solid #e4e4e7; transition:background .15s; cursor:pointer; }
+    .pets-cms tbody tr:last-child{ border-bottom:none; }
+    .pets-cms tbody tr:hover{ background:#fafafa; }
+    .pets-cms tbody tr.selected, .pets-cms tbody tr.selected:hover{ background:#f4f4f5; }
+    .pets-cms tbody td{ padding:8px; vertical-align:middle; font-size:14px; color:#18181b; }
+    .pets-cms tbody td.sd-td-action{ text-align:right; }
+    .pets-cms .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
+    .pets-cms .th-sort:hover{ background:#f4f4f5; color:#18181b; }
+    .pets-cms .th-sort.th-sorted{ color:#18181b; }
+    .pets-cms .th-sort-icon{ width:16px; height:16px; color:#71717a; flex-shrink:0; }
+    .pets-cms .th-sorted .th-sort-icon{ color:#18181b; }
+    .pets-cms .client-cell{ display:flex; align-items:center; gap:10px; }
+    .pets-cms .avatar{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:var(--green-700); background:var(--green-100); flex-shrink:0; overflow:hidden; }
+    .pets-cms .avatar img{ width:100%; height:100%; object-fit:cover; }
+    .pets-cms .client-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; }
+    .pets-cms .client-id{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
+    .pets-cms .contact-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    .pets-cms .contact-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
+    .pets-cms .vax-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
+    .pets-cms .vacc-ok{ background:var(--green-100); color:var(--green-700); }
+    .pets-cms .vacc-no{ background:#fef2f2; color:#b91c1c; }
+    .pets-cms .vacc-unknown{ background:var(--ink-100); color:var(--ink-500); }
+    .pets-cms .status-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
+    /* Pet listings: full-width table + right drawer detail panel */
+    .pets-reports .layout{ grid-template-columns:minmax(0,1fr); min-height:calc(100vh - var(--topbar-h)); }
+    .pets-reports .db-panel{ border-right:none; }
+    #petProfileModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
+    #petProfileModal.modal.active{ opacity:1; visibility:visible; }
+    #petProfileModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
+    #petProfileModal .sd-dialog-content{ position:relative; width:100%; max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; overflow-y:auto; background:#ffffff; border:none; border-radius:0; padding:24px; display:flex; flex-direction:column; gap:18px; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); }
+    #petProfileModal.active .sd-dialog-content{ transform:translateX(0); }
+    #petProfileModal .sd-dialog-close{ position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all .15s ease; z-index:2; }
+    #petProfileModal .sd-dialog-close:hover{ background:#f4f4f5; color:#18181b; }
+    #petProfileModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
+    #petProfileModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    #petProfileModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+    #petProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+    #petProfileModal .sd-dialog-footer{ flex-shrink:0; display:flex; flex-direction:row; justify-content:center; gap:8px; }
   </style>
 </head>
 <body class="staff-theme" data-portal="staff">
@@ -543,7 +595,14 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
                 <button type="button" class="sd-btn sd-btn-default" onclick="openCreate()"><i class="fas fa-plus"></i> Add New Pet</button>
               </div>
             </div>
-            <div id="cardsWrap" class="cards-grid"></div>
+            <div id="tableWrap" class="dt-container">
+              <div style="overflow-x:auto;">
+                <table>
+                  <thead id="tableHead"></thead>
+                  <tbody id="dataRows"></tbody>
+                </table>
+              </div>
+            </div>
           </div>
 
           <div class="dt-pagination">
@@ -551,11 +610,11 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
               <div class="dt-rows">
                 <span>Rows per page</span>
                 <select onchange="setPerPage(this.value)">
-                  <option value="9">9</option>
-                  <option value="12">12</option>
-                  <option value="18">18</option>
-                  <option value="24">24</option>
+                  <option value="10">10</option>
+                  <option value="20">20</option>
                   <option value="30">30</option>
+                  <option value="40">40</option>
+                  <option value="50">50</option>
                 </select>
               </div>
               <div class="dt-page-label" id="pageLabel">Page 1 of 1</div>
@@ -577,18 +636,27 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
           </div>
         </div>
 
-        <!-- Right: Pet Details -->
-        <div class="panel profile-panel" id="profilePanel">
-          <div id="profileContent">
-            <div class="profile-empty pet-empty">
-              <h3>Pet Details</h3>
-              <p>Select a pet from the list to view its photo, profile, listing, and adoption history.</p>
+        </div>
+      </div>
+
+      <!-- Pet Details Drawer (right drawer) -->
+      <div id="petProfileModal" class="modal cpd">
+        <div class="sd-dialog">
+          <div class="sd-dialog-content" role="dialog" aria-modal="true">
+            <button type="button" class="sd-dialog-close" onclick="closeModal('petProfileModal')" aria-label="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+            <div class="sd-dialog-header">
+              <h2 class="sd-dialog-title">Pet Details</h2>
+              <p class="sd-dialog-description">Review pet profile, listing, and adoption history.</p>
             </div>
+            <div class="sd-field-group">
+              <div id="profileContent"></div>
+            </div>
+            <div class="sd-dialog-footer" id="petProfileFooter"></div>
           </div>
         </div>
-
       </div>
-    </div>
 
     <!-- Row menu popup -->
     <div class="cpd row-menu-pop" id="rowMenuPop"></div>
@@ -646,6 +714,12 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
       #petModal .sd-photo-upload .upload-placeholder i{ font-size:1.7rem; color:#a1a1aa; display:block; margin-bottom:0.35rem; }
       #petModal .sd-photo-upload .upload-placeholder span{ font-size:0.8rem; color:#a1a1aa; }
       #petModal .sd-photo-upload input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
+      #petModal .sd-photo-avatar{ position:relative; width:140px; height:140px; border-radius:20px; overflow:hidden; background:#f1f5f9; border:2px dashed #e4e4e7; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#94a3b8; }
+      #petModal .sd-photo-avatar.has-image{ border:none; }
+      #petModal .sd-photo-avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+      #petModal .sd-photo-avatar .upload-placeholder{ display:flex; flex-direction:column; align-items:center; gap:4px; font-size:12px; color:#94a3b8; text-align:center; }
+      #petModal .sd-photo-avatar .upload-placeholder i{ font-size:2rem; }
+      #petModal .sd-photo-avatar input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
       #petModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
       @media (min-width:640px){ #petModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
       #petModal .sd-btn{
@@ -677,6 +751,17 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
             <p class="sd-dialog-description" id="modalDescription">Fill in the pet's details. Click save when you're done.</p>
           </div>
           <div class="sd-field-group">
+            <div class="sd-field sd-field-full">
+              <label class="sd-label">Photo</label>
+              <div class="sd-photo-avatar" id="photoArea">
+                <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
+                <div class="upload-placeholder" id="photoPlaceholder">
+                  <i class="fas fa-paw"></i>
+                  <span>Upload<br>photo</span>
+                </div>
+                <img id="photoPreview" style="display:none;" />
+              </div>
+            </div>
             <div class="sd-form-grid">
               <div class="sd-field sd-field-full">
                 <label class="sd-label" for="formName">Pet Name <span class="req">*</span></label>
@@ -723,17 +808,6 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
               <div class="sd-field">
                 <label class="sd-label" for="formRescued">Rescued Date <span class="req">*</span></label>
                 <input type="text" name="rescued_date" id="formRescued" class="sd-input" required placeholder="e.g. March 10, 2025">
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="photoInput">Photo</label>
-                <div class="sd-photo-upload" id="photoArea">
-                  <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
-                  <div class="upload-placeholder" id="photoPlaceholder">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                    <span>Click to upload photo</span>
-                  </div>
-                  <img id="photoPreview" style="display:none;" />
-                </div>
               </div>
               <div class="sd-field sd-field-full">
                 <label class="sd-label" for="formDesc">Description <span class="req">*</span></label>
@@ -813,6 +887,8 @@ let state = {
   vacc: [],
   q: '',
   sort: 'newest',
+  sortCol: '',
+  sortDir: 'asc',
   page: 1,
   per: 9,
   selected: 0,
@@ -914,14 +990,27 @@ function applyFilters(){
     const q = state.q.toLowerCase();
     items = items.filter(p => (p.name + ' ' + p.ref + ' ' + p.species + ' ' + p.breed + ' ' + (p.owner ? p.owner.name : '')).toLowerCase().includes(q));
   }
-  const s = state.sort;
-  items.sort(function(a,b){
-    if(s === 'newest') return new Date(b.created_at) - new Date(a.created_at);
-    if(s === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
-    if(s === 'recent') return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
-    if(s === 'alpha') return a.name.localeCompare(b.name);
-    return 0;
-  });
+  if(state.sortCol){
+    const dir = state.sortDir === 'desc' ? -1 : 1;
+    const col = state.sortCol;
+    items.sort(function(a,b){
+      let va = a[col], vb = b[col];
+      if(col === 'name' || col === 'species' || col === 'gender' || col === 'status' || col === 'owner'){ va = String(va||'').toLowerCase(); vb = String(vb||'').toLowerCase(); }
+      if(typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      if(va < vb) return -1 * dir;
+      if(va > vb) return 1 * dir;
+      return 0;
+    });
+  } else {
+    const s = state.sort;
+    items.sort(function(a,b){
+      if(s === 'newest') return new Date(b.created_at) - new Date(a.created_at);
+      if(s === 'oldest') return new Date(a.created_at) - new Date(b.created_at);
+      if(s === 'recent') return new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
+      if(s === 'alpha') return a.name.localeCompare(b.name);
+      return 0;
+    });
+  }
   return items;
 }
 
@@ -946,37 +1035,70 @@ function render(){
   const start = (state.page - 1) * state.per;
   const slice = items.slice(start, start + state.per);
 
-  const cards = document.getElementById('cardsWrap');
-
+  renderTableHead();
+  const tbody = document.getElementById('dataRows');
   if(total === 0){
-    cards.innerHTML = '<div class="no-results" style="grid-column:1/-1;"><i class="fas fa-paw"></i><p>No pets found.</p></div>';
+    tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="9" style="text-align:center; padding:48px 12px; color:#71717a;"><i class="fas fa-paw" style="font-size:34px; display:block; margin-bottom:10px; color:#d4d4d8;"></i><p style="margin:0; font-size:13px;">No pets found.</p></td></tr>';
   } else {
-    cards.innerHTML = slice.map(cardHtml).join('');
+    tbody.innerHTML = slice.map(rowHtml).join('');
   }
-  cards.style.display = '';
 
   renderPagination(pages);
 }
 
-function cardHtml(p){
-  const img = p.photo_url
-    ? '<img src="' + esc(p.photo_url) + '" alt="">'
-    : '<div class="pet-img-placeholder"><i class="fas fa-paw"></i></div>';
-  const unpublishBtn = p.status === 'withdrawn'
-    ? '<button class="pet-card-relist" onclick="event.stopPropagation();relistPet(' + p.id + ')"><i class="fas fa-undo"></i> Re-list</button>'
-    : '<button class="pet-card-unpublish" onclick="event.stopPropagation();unpublishPet(' + p.id + ')"><i class="fas fa-eye-slash"></i> Unpublish</button>';
-  return '<div class="rpt-card pet-card" data-id="' + p.id + '">' +
-    '<div class="pet-img">' + img + '</div>' +
-    '<div class="pet-card-body">' +
-      '<div class="pet-card-name">' + esc(p.name) + '</div>' +
-      '<div class="rpt-card-ref">' + p.ref + '</div>' +
-      '<div class="pet-card-foot">' +
-        '<button class="pet-card-view" onclick="event.stopPropagation();selectPet(' + p.id + ')"><i class="fas fa-eye"></i> View Pet</button>' +
-        unpublishBtn +
-        '<button class="sd-row-actions" title="More options" onclick="event.stopPropagation();openRowMenu(event,' + p.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>' +
-      '</div>' +
-    '</div>' +
-  '</div>';
+const COLS = [
+  { id: 'name', label: 'Pet' },
+  { id: 'ref', label: 'Pet ID' },
+  { id: 'species', label: 'Species' },
+  { id: 'gender', label: 'Sex' },
+  { id: 'age', label: 'Age' },
+  { id: 'vaccination', label: 'Vaccination' },
+  { id: 'owner', label: 'Owner' },
+  { id: 'status', label: 'Status' }
+];
+
+function sortHeaderHtml(col){
+  const active = state.sortCol === col.id;
+  let icon;
+  if(active && state.sortDir === 'asc') icon = '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>';
+  else if(active && state.sortDir === 'desc') icon = '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>';
+  else icon = '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>';
+  return '<button class="th-sort'+(active?' th-sorted':'')+'" onclick="toggleSort(\''+col.id+'\')">'+col.label+'<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icon+'</svg></button>';
+}
+function renderTableHead(){
+  const head = document.getElementById('tableHead');
+  let html = '<tr class="sd-tr">';
+  for(let i=0;i<COLS.length;i++) html += '<th class="sd-th">'+sortHeaderHtml(COLS[i])+'</th>';
+  html += '<th class="sd-th sd-th-action"></th>';
+  head.innerHTML = html;
+}
+function toggleSort(col){
+  if(state.sortCol === col){ state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'; }
+  else { state.sortCol = col; state.sortDir = 'asc'; }
+  state.page = 1;
+  render();
+}
+
+function petAvatarHtml(p){
+  if(p.photo_url) return '<img src="' + esc(p.photo_url) + '" alt="">';
+  return '<i class="fas fa-paw" style="font-size:18px;"></i>';
+}
+function rowHtml(p){
+  const selCls = state.selected === p.id ? 'selected' : '';
+  const vm = vaccMeta(p.vaccination);
+  const lm = listingMeta(p.status);
+  const ownerName = (p.owner && p.owner.name) ? esc(p.owner.name) : '—';
+  return '<tr class="sd-tr ' + selCls + '" data-id="' + p.id + '" onclick="selectPet(' + p.id + ')">' +
+    '<td class="sd-td"><div class="client-cell"><div class="avatar">' + petAvatarHtml(p) + '</div><div class="client-name">' + esc(p.name) + '</div></div></td>' +
+    '<td class="sd-td"><span class="client-id">' + esc(p.ref) + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + esc(p.species || '—') + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + esc(p.gender || '—') + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + ageLabel(p.age) + '</span></td>' +
+    '<td class="sd-td"><span class="vax-pill ' + vm.cls + '">' + esc(vm.label) + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + ownerName + '</span></td>' +
+    '<td class="sd-td"><span class="status-pill ' + lm.cls + '">' + esc(lm.label) + '</span></td>' +
+    '<td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();openRowMenu(event,' + p.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
+    '</tr>';
 }
 
 function goPage(p){
@@ -1071,13 +1193,13 @@ function closeRowMenuOnce(e){
 function selectPet(id){
   state.selected = id;
   state.tab = 'profile';
-  document.querySelectorAll('#cardsWrap .rpt-card').forEach(r => r.classList.toggle('selected', r.dataset.id == id));
-  document.getElementById('profilePanel').classList.add('open');
+  document.querySelectorAll('#dataRows tr').forEach(r => r.classList.toggle('selected', r.dataset.id == id));
+  openModal('petProfileModal');
   renderDetail();
 }
 function closeProfile(){
   state.selected = 0;
-  document.getElementById('profilePanel').classList.remove('open');
+  closeModal('petProfileModal');
   document.getElementById('profileContent').innerHTML =
     '<div class="profile-empty pet-empty"><h3>Pet Details</h3><p>Select a pet from the list to view its photo, profile, listing, and adoption history.</p></div>';
 }
@@ -1105,6 +1227,15 @@ function renderDetail(){
       '<button class="tab" data-tab="history" onclick="setTab(\'history\')">History</button>' +
     '</div>' +
     '<div id="tabBody"></div>';
+  var footer = document.getElementById('petProfileFooter');
+  if (footer) {
+    var unpublishBtn = p.status === 'withdrawn'
+      ? '<button class="sd-btn sd-btn-outline" style="color:#15803d;border-color:#bbf7d0;" onclick="relistPet(' + p.id + ')">Re-list</button>'
+      : '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="unpublishPet(' + p.id + ')">Unpublish</button>';
+    footer.innerHTML =
+      '<button class="sd-btn sd-btn-default" onclick="openEdit(' + p.id + ')">Edit</button>' +
+      unpublishBtn;
+  }
   renderTab();
 }
 function setTab(t){
@@ -1129,7 +1260,7 @@ function profileTabHtml(p){
   const cust = p.owner
     ? '<div class="custodian-card"><div class="custodian-avatar">' + (p.owner.avatar ? '<img src="' + esc(p.owner.avatar) + '" alt="">' : initials(p.owner.name)) + '</div><div style="min-width:0;flex:1;"><div class="custodian-name">' + esc(p.owner.name) + '</div><div class="custodian-sub">' + esc(p.owner.ref) + ' • ' + esc(p.owner.address) + '</div></div><a class="btn btn-sm" href="dashboard-staff.php#client-pets">View Client</a></div>'
     : '<div class="rpt-desc-box">No custodian on file for this listing yet.</div>';
-  return '<div class="info-card-head"><h3>Pet Information</h3><button class="sd-btn sd-btn-outline" onclick="openEdit(' + p.id + ')"><i class="fas fa-pen"></i> Edit</button></div>' +
+  return '<div class="info-card-head"><h3>Pet Information</h3></div>' +
     '<div class="info-grid">' +
       infoCell('Species', p.species || '—') +
       infoCell('Sex', p.gender || '—') +

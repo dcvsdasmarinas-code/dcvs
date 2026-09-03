@@ -3,6 +3,25 @@
 if (!isset($fullName)) {
     $fullName = $_SESSION['full_name'] ?? 'Resident';
 }
+if (!isset($residentAvatar)) {
+    $residentAvatar = $_SESSION['avatar_url'] ?? '';
+    // If still empty, fetch from DB
+    if (empty($residentAvatar) && isset($_SESSION['user_id'])) {
+        $aq = $conn->prepare("SELECT full_name, avatar_url FROM users WHERE user_id = ?");
+        if ($aq) {
+            $aq->bind_param("i", $_SESSION['user_id']);
+            $aq->execute();
+            $ar = $aq->get_result();
+            if ($row = $ar->fetch_assoc()) {
+                $fullName = $row['full_name'] ?? $fullName;
+                $residentAvatar = $row['avatar_url'] ?? '';
+                $_SESSION['full_name'] = $fullName;
+                $_SESSION['avatar_url'] = $residentAvatar;
+            }
+            $aq->close();
+        }
+    }
+}
 if (!isset($barangayName)) {
     $barangayName = $_SESSION['barangay'] ?? '';
 }
@@ -58,48 +77,181 @@ if (isset($_SESSION['user_id'])) {
         $ucStmt->close();
     }
 }
+
+// ── Map the current page to the matching sidebar module ──
+$sbActiveModule = ($activePage === 'account-settings') ? 'system' : 'main';
+
+// Item helper: label, icon, optional href / dashboard-section / page-filter fn
+function sbItem($label, $icon, $opts = []) {
+    return ['label' => $label, 'icon' => $icon] + $opts;
+}
+function sbAttrs($item) {
+    $a = '';
+    if (!empty($item['section'])) $a .= ' data-section="' . htmlspecialchars($item['section']) . '"';
+    if (!empty($item['href']))      $a .= ' data-href="' . htmlspecialchars($item['href']) . '"';
+    if (!empty($item['fn']))        $a .= ' data-fn="' . htmlspecialchars($item['fn']) . '"';
+    if (!empty($item['arg']))       $a .= ' data-arg="' . htmlspecialchars($item['arg']) . '"';
+    if (!empty($item['logout']))    $a .= ' data-logout="1"';
+    return $a;
+}
+
+// ── Sidebar content model (all modules are rendered; JS shows the active one) ──
+// Each module is a group dropdown; each section renders as a nested dropdown
+// whose toggle label is the section title, with the section's items as options.
+// Single-item sections render as a plain menu item instead of a dropdown.
+$sbModules = [
+    'main' => [
+        'title' => 'Main',
+        'sections' => [
+            [
+                'title' => 'Dashboard', 'icon' => 'fa-th-large',
+                'items' => [
+                    sbItem('Dashboard', 'fa-th-large', ['section' => 'overview', 'href' => 'dashboard-resident.php#overview', 'initialActive' => $activePage === 'overview']),
+                ],
+            ],
+            [
+                'title' => 'Pets', 'icon' => 'fa-paw',
+                'items' => [
+                    sbItem('Pet List', 'fa-list', ['section' => 'my-pets', 'href' => 'dashboard-resident.php#my-pets', 'initialActive' => $activePage === 'my-pets']),
+                    sbItem('Reports', 'fa-file-medical-alt', ['section' => 'my-reports', 'href' => 'dashboard-resident.php#my-reports', 'initialActive' => $activePage === 'my-reports']),
+                    sbItem('Appointments', 'fa-calendar-alt', ['section' => 'appointments', 'href' => 'dashboard-resident.php#appointments', 'initialActive' => $activePage === 'appointments']),
+                ],
+            ],
+            [
+                'title' => 'Adoption Listings', 'icon' => 'fa-paw',
+                'items' => [
+                    sbItem('Adoption Listings', 'fa-paw', ['section' => 'adoption', 'href' => 'dashboard-resident.php#adoption', 'initialActive' => $activePage === 'adoption']),
+                ],
+            ],
+            [
+                'title' => 'Archive', 'icon' => 'fa-archive',
+                'items' => [
+                    sbItem('Archive', 'fa-archive', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'initialActive' => $activePage === 'archive']),
+                ],
+            ],
+        ],
+    ],
+    'system' => [
+        'title' => 'System',
+        'sections' => [
+            [
+                'title' => 'Settings', 'icon' => 'fa-cog',
+                'items' => [
+                    sbItem('Account Settings', 'fa-user-cog', ['section' => 'account-settings', 'href' => 'dashboard-resident.php#account-settings', 'initialActive' => $activePage === 'account-settings']),
+                ],
+            ],
+            [
+                'title' => 'Logout', 'icon' => 'fa-sign-out-alt',
+                'items' => [
+                    sbItem('Logout', 'fa-sign-out-alt', ['href' => 'logout.php', 'logout' => true]),
+                ],
+            ],
+        ],
+    ],
+];
 ?>
-<aside class="sidebar" id="sidebar">
-  <div class="sidebar-top">
-    <div class="sidebar-brand">
-      <img src="uploads/site/logo.png" alt="DCVS" class="sidebar-logo" />
-      <div class="sidebar-brand-text">
-        <span class="sidebar-brand-name">DCVS</span>
-        <span class="sidebar-brand-sub">Resident Portal</span>
+<link rel="stylesheet" href="assets/css/sb2.css" />
+<script>
+window.SB2_CONFIG = {
+  activeModule: <?php echo json_encode($sbActiveModule); ?>,
+  activePage: <?php echo json_encode($activePage); ?>
+};
+</script>
+
+<aside class="sb2" id="sidebar" data-state="expanded" data-collapsible="icon">
+  <div class="sb2-inner">
+
+    <!-- SidebarHeader: brand -->
+    <div class="sb2-header">
+      <div class="sb2-brand">
+        <div class="sb2-brand-logo">
+          <img src="uploads/site/logo.png" alt="DCVS" />
+        </div>
+        <div class="sb2-brand-text">
+          <span class="sb2-brand-name">DCVS</span>
+          <span class="sb2-brand-sub">Resident Portal</span>
+        </div>
       </div>
     </div>
-    <div class="sidebar-profile">
-      <div class="sidebar-avatar">
-        <?php if (!empty($_SESSION['avatar_url'])): ?>
-          <img src="<?php echo htmlspecialchars($_SESSION['avatar_url']); ?>" alt="Profile Avatar">
-        <?php else: ?>
-          <i class="fas fa-user"></i>
-        <?php endif; ?>
-      </div>
-      <div class="sidebar-profile-info">
-        <p class="sidebar-profile-name"><?php echo htmlspecialchars($fullName); ?></p>
-        <p class="sidebar-profile-barangay"><i class="fas fa-map-pin"></i> Brgy. <?php echo htmlspecialchars($barangayName); ?></p>
-        <p class="sidebar-profile-contact"><i class="fas fa-phone"></i> <?php echo htmlspecialchars($_SESSION['phone'] ?? ''); ?></p>
+
+    <!-- SidebarContent: one group per module -->
+    <div class="sb2-content" id="sb2Menu">
+      <?php foreach ($sbModules as $modId => $mod): ?>
+        <div class="sb2-group <?php echo $sbActiveModule === $modId ? 'module-active' : ''; ?>" data-module="<?php echo $modId; ?>">
+          <div class="sb2-group-label"><?php echo htmlspecialchars($mod['title']); ?></div>
+          <ul class="sb2-menu">
+            <?php foreach ($mod['sections'] as $sec):
+              $secHasActive = false;
+              foreach ($sec['items'] as $item) {
+                if (!empty($item['initialActive'])) $secHasActive = true;
+              }
+              $single = count($sec['items']) === 1;
+            ?>
+              <?php if ($single):
+                $item = $sec['items'][0]; ?>
+                <li class="sb2-menu-item">
+                  <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
+                     class="sb2-menu-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
+                     title="<?php echo htmlspecialchars($item['label']); ?>"
+                     <?php echo sbAttrs($item); ?>>
+                    <i class="fas <?php echo htmlspecialchars($item['icon']); ?>"></i>
+                    <span><?php echo htmlspecialchars($item['label']); ?></span>
+                  </a>
+                </li>
+              <?php else: ?>
+                <li class="sb2-menu-item">
+                  <button type="button"
+                    class="sb2-menu-button sb2-collapsible <?php echo $secHasActive ? 'open' : ''; ?>"
+                    aria-expanded="<?php echo $secHasActive ? 'true' : 'false'; ?>"
+                    title="<?php echo htmlspecialchars($sec['title']); ?>">
+                    <i class="fas <?php echo htmlspecialchars($sec['icon'] ?? 'fa-circle'); ?>"></i>
+                    <span><?php echo htmlspecialchars($sec['title']); ?></span>
+                    <svg class="sb2-caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                  </button>
+                  <ul class="sb2-menu-sub">
+                    <?php foreach ($sec['items'] as $item): ?>
+                      <li class="sb2-menu-item">
+                        <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
+                           class="sb2-menu-sub-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
+                           title="<?php echo htmlspecialchars($item['label']); ?>"
+                           <?php echo sbAttrs($item); ?>>
+                          <i class="fas <?php echo htmlspecialchars($item['icon']); ?>"></i>
+                          <span><?php echo htmlspecialchars($item['label']); ?></span>
+                        </a>
+                      </li>
+                    <?php endforeach; ?>
+                  </ul>
+                </li>
+              <?php endif; ?>
+            <?php endforeach; ?>
+          </ul>
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <!-- SidebarFooter: user row -->
+    <div class="sb2-footer">
+      <div class="sb2-user">
+        <div class="sb2-user-avatar" title="<?php echo htmlspecialchars($fullName); ?>">
+          <?php if (!empty($residentAvatar)): ?>
+            <img src="<?php echo htmlspecialchars($residentAvatar); ?>" alt="Avatar">
+          <?php else: ?>
+            <?php echo strtoupper(substr($fullName, 0, 1)); ?>
+          <?php endif; ?>
+        </div>
+        <div class="sb2-user-info">
+          <span class="sb2-user-name"><?php echo htmlspecialchars($fullName); ?></span>
+          <span class="sb2-user-role">Resident</span>
+        </div>
+        <button type="button" class="sb2-user-more" id="sb2Logout" aria-label="Logout" title="Logout">
+          <i class="fas fa-sign-out-alt"></i>
+        </button>
       </div>
     </div>
   </div>
-  <nav class="sidebar-nav">
-    <p class="nav-section-label">Main Menu</p>
-    <ul class="sidebar-links">
-      <li><a href="#" class="nav-link <?php echo $activePage === 'overview' ? 'active' : ''; ?>" data-section="overview" id="navOverview"><span class="nav-link-icon"><i class="fas fa-th-large"></i></span><span class="nav-link-text">Dashboard</span></a></li>
-      <li><a href="#" class="nav-link <?php echo $activePage === 'my-pets' ? 'active' : ''; ?>" data-section="my-pets" id="navPets"><span class="nav-link-icon"><i class="fas fa-paw"></i></span><span class="nav-link-text">My Pets</span></a></li>
-      <li><a href="#" class="nav-link <?php echo $activePage === 'my-reports' ? 'active' : ''; ?>" data-section="my-reports" id="navReports"><span class="nav-link-icon"><i class="fas fa-file-medical-alt"></i></span><span class="nav-link-text">My Reports</span></a></li>
-      <li><a href="#" class="nav-link <?php echo $activePage === 'appointments' ? 'active' : ''; ?>" data-section="appointments" id="navAppointments"><span class="nav-link-icon"><i class="fas fa-calendar-alt"></i></span><span class="nav-link-text">Appointments</span></a></li>
-      <li><a href="#" class="nav-link <?php echo $activePage === 'archive' ? 'active' : ''; ?>" data-section="archive" id="navArchive"><span class="nav-link-icon"><i class="fas fa-archive"></i></span><span class="nav-link-text">Archive</span></a></li>
-      <li><a href="#" class="nav-link <?php echo $activePage === 'adoption' ? 'active' : ''; ?>" data-section="adoption" id="navAdoption"><span class="nav-link-icon"><i class="fas fa-paw"></i></span><span class="nav-link-text">Adoption Listings</span></a></li>
 
-    </ul>
-    <p class="nav-section-label" style="margin-top:1.5rem;">Account</p>
-    <ul class="sidebar-links">
-      <li><a href="#" class="nav-link <?php echo $activePage === 'account-settings' ? 'active' : ''; ?>" data-section="account-settings" id="navSettings"><span class="nav-link-icon"><i class="fas fa-cog"></i></span><span class="nav-link-text">Account Settings</span></a></li>
-      <li><a href="#" class="nav-link nav-link-logout" id="logoutBtn"><span class="nav-link-icon"><i class="fas fa-sign-out-alt"></i></span><span class="nav-link-text">Logout</span></a></li>
-    </ul>
-  </nav>
+  <!-- SidebarRail: desktop collapse handle -->
+  <button type="button" class="sb2-rail" id="sb2Rail" aria-label="Toggle Sidebar" title="Toggle Sidebar"></button>
 </aside>
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
@@ -108,7 +260,7 @@ if (isset($_SESSION['user_id'])) {
     <i class="fas fa-bars"></i>
   </button>
   <div class="topbar-right">
-    <div class="notif-dropdown" id="msgDropdown">
+    <div class="notif-dropdown" id="msgDropdown" style="margin-left:auto;">
       <button class="notif-bell" id="msgBell" onclick="toggleMsg()">
         <i class="fas fa-envelope"></i>
         <?php if ($unreadMsgCount > 0): ?>
@@ -143,8 +295,8 @@ if (isset($_SESSION['user_id'])) {
     <span class="topbar-time" id="clockDisplay"></span>
     <div class="topbar-user">
       <div class="topbar-avatar">
-        <?php if (!empty($_SESSION['avatar_url'])): ?>
-          <img src="<?php echo htmlspecialchars($_SESSION['avatar_url']); ?>" alt="Avatar" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+        <?php if (!empty($residentAvatar)): ?>
+          <img src="<?php echo htmlspecialchars($residentAvatar); ?>" alt="Avatar" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
         <?php else: ?>
           <?php echo strtoupper(substr($fullName, 0, 1)); ?>
         <?php endif; ?>
@@ -155,21 +307,6 @@ if (isset($_SESSION['user_id'])) {
 </header>
 
 <style>
-  .topbar-time { font-size:0.8rem; color:#94a3b8; font-weight:500; }
-  .topbar-user {
-    display:flex; align-items:center; gap:8px;
-    background:#f8fafc; border:1px solid #eef2f6;
-    border-radius:999px; padding:4px 12px 4px 6px;
-  }
-  .topbar-avatar {
-    width:30px; height:30px; border-radius:50%;
-    background:linear-gradient(135deg,#045e1f,#043012);
-    color:#fff; display:flex; align-items:center; justify-content:center;
-    font-weight:800; font-size:0.75rem;
-  }
-  .topbar-avatar img { width:30px; height:30px; border-radius:50%; object-fit:cover; }
-  .topbar-user-name { font-size:0.82rem; font-weight:600; color:#0f172a; }
-
   .notif-dropdown { position: relative; }
   .notif-bell { background: none; border: none; font-size: 1.2rem; color: #475569; cursor: pointer; padding: 6px; position: relative; border-radius: 8px; transition: background 0.15s; }
   .notif-bell:hover { background: #f1f5f9; }
@@ -192,9 +329,20 @@ if (isset($_SESSION['user_id'])) {
   .notif-msg { font-size: 0.74rem; color: #64748b; line-height: 1.3; margin-top: 1px; }
   .notif-time { font-size: 0.65rem; color: #94a3b8; margin-top: 3px; }
   .notif-empty { text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.82rem; }
-
-  .nav-badge { display: inline-flex; align-items:center; justify-content:center; background:#dc2626; color:#fff; font-size:0.6rem; font-weight:700; min-width:18px; height:18px; border-radius:9px; padding:0 4px; margin-left:auto; line-height:1; }
-  .sidebar-links li a .nav-badge { margin-left:auto; }
+  .topbar-time { font-size:0.8rem; color:#94a3b8; font-weight:500; }
+  .topbar-user {
+    display:flex; align-items:center; gap:8px;
+    background:#f8fafc; border:1px solid #eef2f6;
+    border-radius:999px; padding:4px 12px 4px 6px;
+  }
+  .topbar-avatar {
+    width:30px; height:30px; border-radius:50%;
+    background:linear-gradient(135deg,#045e1f,#043012);
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:800; font-size:0.75rem;
+  }
+  .topbar-avatar img { width:30px; height:30px; border-radius:50%; object-fit:cover; }
+  .topbar-user-name { font-size:0.82rem; font-weight:600; color:#0f172a; }
 </style>
 
 <div class="modal" id="logoutModal">
@@ -205,10 +353,10 @@ if (isset($_SESSION['user_id'])) {
     </div>
     <div class="modal-body" style="text-align:center;padding:2rem;">
       <i class="fas fa-question-circle" style="font-size:3rem;color:#94a3b8;margin-bottom:1rem;"></i>
-      <p style="font-size:1.05rem;color:#475569;">Are you sure you want to logout?</p>
+      <p style="font-size:1.05rem;color:#475569;">Are you sure you want to logout of the Resident Portal?</p>
     </div>
     <div class="modal-actions" style="justify-content:center;">
-      <a href="logout.php" class="btn-primary" style="padding:10px 28px;"><i class="fas fa-check"></i> Yes</a>
+      <a href="logout.php" class="btn-primary" style="padding:10px 28px;" onclick="localStorage.removeItem('activeSection');localStorage.removeItem('sb2State')"><i class="fas fa-check"></i> Yes, Logout</a>
       <button type="button" class="btn-secondary" onclick="closeModal('logoutModal')">Cancel</button>
     </div>
   </div>
@@ -219,10 +367,28 @@ if (isset($_SESSION['user_id'])) {
   var sidebar = document.getElementById('sidebar');
   var overlay = document.getElementById('sidebarOverlay');
   var toggle = document.getElementById('sidebarToggle');
+  var rail = document.getElementById('sb2Rail');
+
+  // Flag the layout so the topbar / main-content offsets use the sidebar width
+  document.body.classList.add('sb2-active');
+
+  // ── Desktop icon-collapse (shadcn SidebarRail / ctrl+b) ──
+  function setDesktopState(collapsed) {
+    sidebar.setAttribute('data-state', collapsed ? 'collapsed' : 'expanded');
+    document.body.classList.toggle('sb2-collapsed', collapsed);
+    try { localStorage.setItem('sb2Collapsed', collapsed ? '1' : '0'); } catch (e) {}
+  }
+  try {
+    if (window.innerWidth > 768 && localStorage.getItem('sb2Collapsed') === '1') setDesktopState(true);
+  } catch (e) {}
+
+  // ── Mobile drawer toggle ──
   function handleResize() {
     if (window.innerWidth > 768) {
       sidebar.classList.remove('collapsed');
       if (overlay) overlay.classList.remove('active');
+    } else {
+      sidebar.setAttribute('data-state', 'expanded');
     }
   }
   window.addEventListener('resize', handleResize);
@@ -232,24 +398,198 @@ if (isset($_SESSION['user_id'])) {
       if (overlay) overlay.classList.toggle('active');
     });
   }
+  if (rail) {
+    rail.addEventListener('click', function() {
+      setDesktopState(sidebar.getAttribute('data-state') !== 'collapsed');
+    });
+  }
   if (overlay) {
     overlay.addEventListener('click', function() {
       sidebar.classList.remove('collapsed');
       overlay.classList.remove('active');
     });
   }
-})();
 
-document.addEventListener('DOMContentLoaded', function() {
-  var logoutBtn = document.getElementById('logoutBtn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', function(e) {
+  // Keyboard shortcut (ctrl/cmd + b) to toggle the sidebar
+  document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'b') {
       e.preventDefault();
-      openModal('logoutModal');
+      if (window.innerWidth <= 768) {
+        sidebar.classList.toggle('collapsed');
+        if (overlay) overlay.classList.toggle('active');
+      } else {
+        setDesktopState(sidebar.getAttribute('data-state') !== 'collapsed');
+      }
+    }
+  });
+
+  // ── Module activation ──
+  // Maps dashboard-resident.php hash sections to sidebar modules
+  var sectionToModule = {
+    'overview': 'main', 'my-pets': 'main', 'my-reports': 'main', 'appointments': 'main',
+    'adoption': 'main', 'archive': 'main', 'account-settings': 'system'
+  };
+
+  // ── Sidebar state persistence (keeps open collapsibles / active item across pages) ──
+  function getItemKey(item) {
+    return (item.getAttribute('data-section') || '') + '|' +
+           (item.getAttribute('data-href') || '') + '|' +
+           (item.getAttribute('data-fn') || '') + '|' +
+           (item.getAttribute('data-arg') || '');
+  }
+  function saveSidebarState() {
+    try {
+      var open = [];
+      document.querySelectorAll('.sb2-collapsible.open').forEach(function(b) {
+        var t = b.querySelector(':scope > span');
+        if (t && t.textContent) open.push(t.textContent.trim());
+      });
+      var activeItem = document.querySelector('.sb2-menu-button.active:not(.sb2-collapsible), .sb2-menu-sub-button.active');
+      var state = { open: open, module: null };
+      if (activeItem) state.activeKey = getItemKey(activeItem);
+      localStorage.setItem('sb2State', JSON.stringify(state));
+    } catch (e) {}
+  }
+
+  function activateModule(moduleId) {
+    if (!moduleId) return;
+    document.querySelectorAll('.sb2-group').forEach(function(g) {
+      g.classList.toggle('module-active', g.getAttribute('data-module') === moduleId);
     });
   }
-});
 
+  // Open the collapsible group that contains a sub-item
+  function openAncestor(item) {
+    var inner = item.closest('.sb2-menu-item');
+    var outer = inner && inner.parentElement ? inner.parentElement.closest('.sb2-menu-item') : null;
+    var coll = outer ? outer.querySelector(':scope > .sb2-collapsible') : null;
+    if (coll) {
+      coll.classList.add('open');
+      coll.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function activateSection(sectionId) {
+    var moduleId = sectionToModule[sectionId];
+    if (moduleId) activateModule(moduleId);
+    var match = document.querySelector('.sb2-menu-sub-button.active[data-section="' + sectionId + '"]') ||
+                document.querySelector('.sb2-menu-button.active[data-section="' + sectionId + '"]') ||
+                document.querySelector('.sb2-menu-sub-button[data-section="' + sectionId + '"]') ||
+                document.querySelector('.sb2-menu-button[data-section="' + sectionId + '"]');
+    document.querySelectorAll('.sb2-menu-button, .sb2-menu-sub-button').forEach(function(item) {
+      if (match && item === match) return;
+      item.classList.remove('active');
+    });
+    if (match) {
+      match.classList.add('active');
+      openAncestor(match);
+    }
+    saveSidebarState();
+  }
+
+  // Highlight a specific sidebar item (and open its ancestor collapsible)
+  function activateItem(item) {
+    document.querySelectorAll('.sb2-menu-button, .sb2-menu-sub-button').forEach(function(el) {
+      el.classList.remove('active');
+    });
+    item.classList.add('active');
+    openAncestor(item);
+    saveSidebarState();
+  }
+
+  // Initial activation: prefer URL hash, else server page
+  var initHash = window.location.hash.replace('#', '');
+  if (initHash && sectionToModule[initHash]) {
+    activateSection(initHash);
+  } else {
+    var cfg = window.SB2_CONFIG || {};
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem('sb2State') || 'null'); } catch (e) {}
+    activateModule(cfg.activeModule || 'main');
+    // Dashboard is the default landing page
+    var def = document.querySelector('.sb2-menu-button[data-section="overview"]');
+    if (def) def.classList.add('active');
+    // Restore previously open collapsibles + active item after a cross-page navigation
+    if (saved && saved.open && saved.open.length) {
+      document.querySelectorAll('.sb2-collapsible').forEach(function(b) {
+        var t = b.querySelector(':scope > span');
+        if (t && t.textContent && saved.open.indexOf(t.textContent.trim()) !== -1) {
+          b.classList.add('open');
+          b.setAttribute('aria-expanded', 'true');
+        }
+      });
+    }
+    if (saved && saved.activeKey) {
+      document.querySelectorAll('.sb2-menu-button:not(.sb2-collapsible), .sb2-menu-sub-button').forEach(function(item) {
+        if (getItemKey(item) === saved.activeKey) activateItem(item);
+      });
+    }
+  }
+
+  // React to dashboard hash navigation
+  window.addEventListener('hashchange', function() {
+    var hash = window.location.hash.replace('#', '');
+    if (hash && sectionToModule[hash]) activateSection(hash);
+  });
+
+  // Expose for dashboard.js switchSection()
+  window.SB2 = {
+    activateModule: activateModule,
+    activateSection: activateSection
+  };
+
+  // ── Section collapsibles (expand/collapse only; submenu items navigate) ──
+  document.querySelectorAll('.sb2-collapsible').forEach(function(toggle) {
+    toggle.addEventListener('click', function(e) {
+      e.preventDefault();
+      var open = toggle.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      saveSidebarState();
+    });
+  });
+
+  // ── Menu item click (skip section collapsibles) ──
+  document.querySelectorAll('.sb2-menu-button, .sb2-menu-sub-button').forEach(function(item) {
+    if (item.classList.contains('sb2-collapsible')) return;
+    item.addEventListener('click', function(e) {
+      if (item.getAttribute('data-logout') === '1') {
+        e.preventDefault();
+        openModal('logoutModal');
+        return;
+      }
+      var section = item.getAttribute('data-section');
+      var fn = item.getAttribute('data-fn');
+      var arg = item.getAttribute('data-arg');
+      var href = item.getAttribute('data-href');
+
+      if (section && typeof switchSection === 'function') {
+        e.preventDefault();
+        switchSection(section);
+        if (fn && typeof window[fn] === 'function') window[fn](arg);
+        activateItem(item);
+        return;
+      }
+      if (fn && typeof window[fn] === 'function') {
+        e.preventDefault();
+        window[fn](arg);
+        activateItem(item);
+        return;
+      }
+      // Default: plain navigation (href is already set on the anchor)
+      activateItem(item);
+      saveSidebarState();
+    });
+  });
+
+  // Footer logout button
+  var footLogout = document.getElementById('sb2Logout');
+  if (footLogout) {
+    footLogout.addEventListener('click', function() { openModal('logoutModal'); });
+  }
+})();
+</script>
+
+<script>
 function openModal(id) {
   var el = document.getElementById(id);
   if (el) { el.classList.add('active'); el.style.display = 'flex'; document.body.style.overflow = 'hidden'; }

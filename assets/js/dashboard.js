@@ -5,15 +5,15 @@ function switchSection(sectionId) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   var target = document.getElementById(sectionId);
   if (target) target.style.display = 'block';
-  document.body.classList.toggle('white-page', sectionId === 'appointments');
+  document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments');
   document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
   var nav = document.querySelector('.nav-link[data-section="' + sectionId + '"]');
   if (nav) nav.classList.add('active');
   var labels = {
-    'overview':'Analytics','account-settings':'Account Settings','my-pets':'My Pets','my-reports':'My Reports',
-    'appointments':'Appointments','archive':'Archive','adoption':'Adoption Listings',
-    'account-settings':'Account Settings','users':'Users','activity':'Activity Logs',
-    'analytics':'Analytics','settings':'Settings','client-pets':'Client & Pet DB',
+    'analytics':'Citywide Analytics','overview':'Analytics','account-settings':'Account Settings','my-pets':'My Pets','my-reports':'My Reports',
+    'appointments':'Appointments','calendar-schedule':'Calendar Schedule','archive':'Archive','adoption':'Adoption Listings',
+    'users':'Users','activity':'Activity Logs',
+    'settings':'Settings','client-pets':'Client & Pet DB',
     'barangay':'Barangay Validation','geomapping':'Geo-Mapping','pet-listings':'Pet Listings',
     'reports-all':'All Reports','reports-pending':'Pending Validation','reports-active':'Active Cases','reports-resolved':'Resolved Cases'
   };

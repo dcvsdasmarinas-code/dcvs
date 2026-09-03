@@ -169,6 +169,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     .cpd .row-menu-item.danger{ color:#dc2626; }
     .cpd .row-menu-item.danger:hover{ background:#fef2f2; }
     .cpd .row-menu-item i{ width:15px; text-align:center; }
+    .announcements-cms .row-menu-pop{ position:fixed; z-index:999; }
 
     .cpd .cards-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
 
@@ -302,6 +303,8 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     .acms .type-announcement, .acms .type-advisory{ background:none; color:var(--ink-700); }
 
     .acms .subj-chip{ display:inline-flex; align-items:center; gap:5px; padding:0; border-radius:20px; font-size:14px; font-weight:600; white-space:nowrap; background:transparent; color:var(--ink-700); }
+    .acms .rpt-card-cat{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    .acms .rpt-card-type{ font-size:12px; font-weight:600; color:var(--green-700); white-space:nowrap; }
     .acms .subj-animal_health{ background:transparent; color:var(--ink-700); padding:0; }
     .acms .subj-services_programs{ background:#eff6ff; color:#1d4ed8; }
     .acms .subj-events{ background:#fffbeb; color:#b45309; }
@@ -416,6 +419,34 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     .announcements-cms .dt-page-btn{ height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
     .announcements-cms .dt-page-btn:hover:not(:disabled){ background:#f4f4f5; }
     .announcements-cms .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
+    /* Announcements: full-width table + right drawer detail panel */
+    .acms .layout{ grid-template-columns:minmax(0,1fr); }
+    .acms .db-panel{ border-right:none; }
+    #annProfileModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
+    #annProfileModal.modal.active{ opacity:1; visibility:visible; }
+    #annProfileModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
+    #annProfileModal .sd-dialog-content{ position:relative; width:100%; max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; overflow-y:auto; background:#ffffff; border:none; border-radius:0; padding:24px; display:flex; flex-direction:column; gap:18px; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); }
+    #annProfileModal.active .sd-dialog-content{ transform:translateX(0); }
+    #annProfileModal .sd-dialog-close{ position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all .15s ease; z-index:2; }
+    #annProfileModal .sd-dialog-close:hover{ background:#f4f4f5; color:#18181b; }
+    #annProfileModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
+    #annProfileModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    #annProfileModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+    #annProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
+    #annProfileModal .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:12px; overflow:hidden; background:var(--ink-100); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; margin-bottom:4px; }
+    #annProfileModal .acms-preview-stage img{ width:100%; height:100%; object-fit:cover; display:block; }
+    #annProfileModal .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--ink-300); font-size:46px; }
+    #annProfileModal .status-pill, #annProfileModal .type-badge, #annProfileModal .ann-profile-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    #annProfileModal .profile-header{ flex-shrink:0; }
+    #annProfileModal .sd-dialog-footer{ flex-shrink:0; display:flex; flex-direction:row; justify-content:flex-end; gap:8px; }
+    #draftModal .sd-dialog{ width:100%; display:flex; justify-content:center; }
+    #draftModal .sd-dialog-content{ position:relative; width:100%; max-width:420px; background:#fff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; }
+    #draftModal .sd-dialog-close{ position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all .15s ease; }
+    #draftModal .sd-dialog-close:hover{ background:#f4f4f5; color:#18181b; }
+    #draftModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
+    #draftModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    #draftModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+    #draftModal .sd-dialog-footer{ display:flex; flex-direction:row; justify-content:flex-end; gap:8px; margin-top:4px; }
   </style>
 </head>
 <body class="staff-theme" data-portal="staff">
@@ -531,14 +562,6 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
           </div>
         </div>
 
-        <!-- Right: Announcement Details -->
-        <div class="panel profile-panel" id="profilePanel">
-          <div id="profileContent">
-            <div class="profile-empty">
-              <i class="fas fa-bullhorn"></i>
-              <p>Select a post to view its details</p>
-            </div>
-          </div>
         </div>
 
       </div>
@@ -546,6 +569,25 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
 
     <!-- Row menu popup -->
     <div class="cpd row-menu-pop" id="rowMenuPop"></div>
+
+    <!-- Announcement Details Drawer (right drawer) -->
+    <div id="annProfileModal" class="modal cpd">
+      <div class="sd-dialog">
+        <div class="sd-dialog-content" role="dialog" aria-modal="true">
+          <button type="button" class="sd-dialog-close" onclick="closeModal('annProfileModal')" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+          <div class="sd-dialog-header">
+            <h2 class="sd-dialog-title">Announcement Details</h2>
+            <p class="sd-dialog-description">Review announcement content and publishing details.</p>
+          </div>
+          <div class="sd-field-group">
+            <div id="profileContent"></div>
+          </div>
+          <div class="sd-dialog-footer" id="annProfileFooter"></div>
+        </div>
+      </div>
+    </div>
 
     <!-- Create/Edit Modal -->
     <style>
@@ -652,6 +694,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
                 <select name="subject" id="formSubject" class="sd-input">
                   <option value="general_notices">General Notices</option>
                   <option value="animal_health">Animal Health</option>
+                  <option value="free_rabies">Free Rabies</option>
                   <option value="services_programs">Services &amp; Programs</option>
                   <option value="events">Events</option>
                 </select>
@@ -737,6 +780,25 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       </div>
     </div>
 
+    <!-- Move to Draft Modal -->
+    <div id="draftModal" class="modal">
+      <div class="sd-dialog">
+        <div class="sd-dialog-content" role="dialog" aria-modal="true" style="max-width:420px;">
+          <button type="button" class="sd-dialog-close" onclick="closeModal('draftModal')" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          </button>
+          <div class="sd-dialog-header">
+            <h2 class="sd-dialog-title">Move to Draft</h2>
+            <p class="sd-dialog-description">Set this post to draft? It will be hidden from the public page until published again.</p>
+          </div>
+          <div class="sd-dialog-footer">
+            <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('draftModal')">Cancel</button>
+            <button type="button" class="sd-btn sd-btn-default" id="confirmDraftBtn" onclick="executeDraft()"><i class="fas fa-file"></i> Move to Draft</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="cpd-toast success" id="cpdToast"></div>
   </div>
 </main>
@@ -747,10 +809,11 @@ const AMS_DATA = <?php echo json_encode($announcements); ?>;
 const BARANGAYS = <?php echo json_encode($barangays); ?>;
 
 const SUBJECTS = {
-  animal_health: { label: 'Advisory - Animal Health', icon: '' },
+  animal_health: { label: 'Animal Health', icon: 'fa-heart-pulse' },
   services_programs: { label: 'Services & Programs', icon: 'fa-handshake' },
   events: { label: 'Events', icon: 'fa-calendar-day' },
-  general_notices: { label: 'Announcement - General Notices', icon: '' }
+  general_notices: { label: 'General Notices', icon: 'fa-bullhorn' },
+  free_rabies: { label: 'Free Rabies', icon: 'fa-syringe' }
 };
 const STATUS_META = {
   published: { label: 'Published', cls: 'st-pub' },
@@ -914,6 +977,7 @@ function setCount(id, n){ const el = document.getElementById(id); if(el) el.text
 function annColVal(a, col){
   if(col === 'created') return new Date(a.created_at).getTime() || 0;
   if(col === 'title') return String(a.title||'').toLowerCase();
+  if(col === 'type') return String(typeMeta(a.category).label||'').toLowerCase();
   if(col === 'category') return String(subjectLabel(a.subject) || a.category || '').toLowerCase();
   if(col === 'status') return String(a.status||'').toLowerCase();
   return String(a[col] != null ? a[col] : '').toLowerCase();
@@ -927,7 +991,7 @@ function annSortHead(col, label){
   return '<button type="button" class="th-sort' + (active?' th-sorted':'') + '" onclick="annSortBy(\'' + col + '\')">' + label + '<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg></button>';
 }
 function renderTableHead(){
-  document.getElementById('tableHead').innerHTML = '<tr class="sd-tr"><th class="sd-th">Photo</th><th class="sd-th">' + annSortHead('title','Post') + '</th><th class="sd-th">' + annSortHead('category','Category') + '</th><th class="sd-th">' + annSortHead('status','Status') + '</th><th class="sd-th">' + annSortHead('created','Created') + '</th><th class="sd-th sd-th-action"></th></tr>';
+  document.getElementById('tableHead').innerHTML = '<tr class="sd-tr"><th class="sd-th">Photo</th><th class="sd-th">' + annSortHead('title','Title') + '</th><th class="sd-th">Content</th><th class="sd-th">' + annSortHead('type','Type') + '</th><th class="sd-th">' + annSortHead('category','Category') + '</th><th class="sd-th">' + annSortHead('status','Status') + '</th><th class="sd-th">' + annSortHead('created','Created') + '</th><th class="sd-th sd-th-action"></th></tr>';
 }
 function annSortBy(col){
   if(state.sortCol === col){ state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'; }
@@ -965,6 +1029,7 @@ function render(){
 
 function rowHtml(a){
   const sm = statusMeta(a.status);
+  const tm = typeMeta(a.category);
   const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
   const thumb = a.photo_url
     ? '<img src="' + esc(a.photo_url) + '" alt="">'
@@ -973,8 +1038,10 @@ function rowHtml(a){
   const dateText = a.status === 'scheduled' ? (a.publish_at ? fmtDateTime(a.publish_at) : 'Scheduled') : fmtDate(a.created_at);
   return '<tr class="sd-tr" data-id="' + a.id + '" onclick="selectPost(' + a.id + ')" style="cursor:pointer;">' +
     '<td class="sd-td"><div class="post-thumb-sm">' + thumb + '</div></td>' +
-    '<td class="sd-td"><div style="min-width:0;"><div class="client-name">' + esc(a.title) + featured + '</div><div class="contact-sub">' + esc(a.content) + '</div></div></td>' +
-    '<td class="sd-td"><div style="display:flex;flex-wrap:wrap;gap:4px;"><span class="subj-chip subj-' + a.subject + '">' + (subj.icon ? '<i class="fas ' + subj.icon + '"></i>' : '') + subjectLabel(a.subject) + '</span></div></td>' +
+    '<td class="sd-td"><div class="client-name">' + esc(a.title) + featured + '</div></td>' +
+    '<td class="sd-td"><div class="contact-sub">' + esc(a.content) + '</div></td>' +
+    '<td class="sd-td"><span class="subj-chip">' + tm.label + '</span></td>' +
+    '<td class="sd-td"><span class="subj-chip subj-' + a.subject + '">' + subjectLabel(a.subject) + '</span></td>' +
     '<td class="sd-td"><span class="status-pill ' + sm.cls + '"><span class="st-dot"></span>' + sm.label + '</span></td>' +
     '<td class="sd-td"><div class="contact-main">' + dateText + '</div></td>' +
     '<td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();openRowMenu(event,' + a.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
@@ -984,6 +1051,7 @@ function rowHtml(a){
 function cardHtml(a){
   const sm = statusMeta(a.status);
   const tm = typeMeta(a.category);
+  const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
   const featured = a.is_featured ? '<span class="status-pill" style="background:var(--amber-100);color:var(--amber-700);"><i class="fas fa-star"></i> Featured</span>' : '';
   const img = a.photo_url
     ? '<img class="card-img" src="' + esc(a.photo_url) + '" alt="">'
@@ -993,8 +1061,9 @@ function cardHtml(a){
     img +
     '<div class="rpt-card-head"><span class="rpt-card-ref">#' + a.id + '</span>' + featured + '</div>' +
     '<div class="rpt-card-name">' + esc(a.title) + '</div>' +
+    '<div class="rpt-card-cat"><span class="subj-chip subj-' + a.subject + '">' + (subj.icon ? '<i class="fas ' + subj.icon + '"></i>' : '') + subjectLabel(a.subject) + '</span><span class="rpt-card-type">' + tm.label + '</span></div>' +
     '<div class="rpt-card-brgy">' + esc(a.content) + '</div>' +
-    '<div class="rpt-card-foot"><span class="rpt-card-date">' + dateText + '</span><span class="rpt-card-link">' + tm.label + ' <i class="fas fa-chevron-right" style="font-size:10px;"></i></span></div>' +
+    '<div class="rpt-card-foot"><span class="rpt-card-date">' + dateText + '</span></div>' +
   '</div>';
 }
 
@@ -1029,15 +1098,17 @@ function goPage(p){
 
 /* ───────────────────────── State setters ───────────────────────── */
 function setPost(v){
-  state.post = v; state.page = 1;
+  state.post = v; state.status = 'all'; state.page = 1;
   document.querySelectorAll('[data-rail="post"]').forEach(el => el.classList.toggle('active', el.dataset.val === v));
   const rt = document.getElementById('annType');
   if(rt && rt.value !== v) rt.value = v;
   render();
 }
 function setStatus(v){
-  state.status = v; state.page = 1;
+  state.status = v; state.post = 'all'; state.page = 1;
   document.querySelectorAll('[data-rail="status"],[data-rail="trash"]').forEach(el => el.classList.toggle('active', el.dataset.val === v));
+  const rt = document.getElementById('annType');
+  if(rt && rt.value !== 'all') rt.value = 'all';
   render();
 }
 function setCat(v){
@@ -1099,12 +1170,12 @@ function selectPost(id){
   state.selected = id;
   document.querySelectorAll('#dataRows tr').forEach(r => r.classList.toggle('selected', r.dataset.id == id));
   document.querySelectorAll('#cardsWrap .rpt-card').forEach(r => r.classList.toggle('selected', r.dataset.id == id));
-  document.getElementById('profilePanel').classList.add('open');
+  openModal('annProfileModal');
   renderDetail();
 }
 function closeProfile(){
   state.selected = 0;
-  document.getElementById('profilePanel').classList.remove('open');
+  closeModal('annProfileModal');
   document.getElementById('profileContent').innerHTML =
     '<div class="profile-empty"><i class="fas fa-bullhorn"></i><p>Select a post to view its details</p></div>';
 }
@@ -1124,7 +1195,7 @@ function renderDetail(){
           '<span class="type-badge ' + tm.cls + '">' + tm.label + '</span>' +
           '<span class="status-pill ' + sm.cls + '"><span class="st-dot"></span>' + sm.label + '</span>' +
           (a.is_featured ? '<span class="status-pill" style="background:var(--amber-100);color:var(--amber-700);"><i class="fas fa-star"></i> Featured</span>' : '') +
-          '<span style="font-size:12.5px;color:var(--ink-500);">' + pubDate + '</span>' +
+          '<span class="ann-profile-date">' + pubDate + '</span>' +
         '</div>' +
       '</div>' +
       '<button class="close-x" onclick="closeProfile()"><i class="fas fa-times"></i></button>' +
@@ -1135,14 +1206,20 @@ function renderDetail(){
     '<div style="white-space:pre-line;font-size:13px;color:var(--ink-700);line-height:1.55;">' + esc(a.content) + '</div>' +
     '<div class="rpt-section-title">Details</div>' +
     '<div class="info-rows">' +
-      infoRow('tag', 'Category', subjectLabel(a.subject)) +
+      infoRow('tag', 'Type', tm.label) +
+      infoRow('tag2', 'Category', subjectLabel(a.subject)) +
       infoRow('users', 'Visible to', audienceLabel(a)) +
       infoRow('pen', 'Last Updated', a.updated_at ? fmtDate(a.updated_at) : '—') +
-    '</div>' +
-    '<div class="profile-footer">' +
-      '<button type="button" class="sd-btn sd-btn-default" onclick="openEdit(' + a.id + ')">Edit ' + (a.category === 'advisory' ? 'Advisory' : 'Announcement') + '</button>' +
-      '<button type="button" class="sd-btn sd-btn-outline" onclick="window.open(\'announcements.php\',\'_blank\')"><i class="fas fa-external-link-alt"></i> View on Public Page</button>' +
     '</div>';
+  var footer = document.getElementById('annProfileFooter');
+  if (footer) {
+    footer.innerHTML =
+      '<button type="button" class="sd-btn sd-btn-default" onclick="openEdit(' + a.id + ')">Edit ' + (a.category === 'advisory' ? 'Advisory' : 'Announcement') + '</button>' +
+      (a.status !== 'draft'
+      ? '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmDraft(' + a.id + ')"><i class="fas fa-file"></i> Draft</button>'
+      : '<button type="button" class="sd-btn sd-btn-outline" onclick="setPostStatus(' + a.id + ',\'published\',\'Publish Now\')"><i class="fas fa-check-circle"></i> Publish</button>') +
+      '<button type="button" class="sd-btn sd-btn-outline" onclick="window.open(\'announcements.php\',\'_blank\')"><i class="fas fa-external-link-alt"></i> View on Public Page</button>';
+  }
 }
 
 /* ───────────────────────── Create / edit modal ───────────────────────── */
@@ -1293,6 +1370,28 @@ function setPostStatus(id, status, label){
     .then(res => res.json())
     .then(data => { if(data.success) location.reload(); else alert('Error: ' + data.message); })
     .catch(() => alert('Network error'));
+}
+let draftId = 0;
+function confirmDraft(id){
+  draftId = id;
+  openModal('draftModal');
+}
+function executeDraft(){
+  if(!draftId) return;
+  const btn = document.getElementById('confirmDraftBtn');
+  if(btn) btn.disabled = true;
+  const fd = new FormData();
+  fd.append('action', 'status');
+  fd.append('id', draftId);
+  fd.append('status', 'draft');
+  fetch('staff-announcements-handler.php', { method: 'POST', body: fd })
+    .then(res => res.json())
+    .then(data => {
+      if(btn) btn.disabled = false;
+      if(data.success){ closeModal('draftModal'); location.reload(); }
+      else alert('Error: ' + data.message);
+    })
+    .catch(() => { if(btn) btn.disabled = false; alert('Network error'); });
 }
 function duplicatePost(id){
   const fd = new FormData();

@@ -43,223 +43,23 @@ if ($roleRow = $roleResult->fetch_assoc()) {
 }
 $roleCheck->close();
 
-// Fetch basic stats for the dashboard
-$totalResidents = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident'")->fetch_row()[0] ?? 0;
-$totalPets = $conn->query("SELECT COUNT(*) FROM pets WHERE archived_at IS NULL")->fetch_row()[0] ?? 0;
-$totalReports = $conn->query("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL")->fetch_row()[0] ?? 0;
-$activeRabiesCases = $conn->query("SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL")->fetch_row()[0] ?? 0;
-
-// â�?��,�â�?��,� KPI Comparison (default: last 30 days vs previous 30 days) â�?��,�â�?��,�
-$kpiPeriod = 30;
-$kpiCur = $kpiPrev = $kpiPct = $kpiDir = [];
-
-function kpiCmp(&$conn, &$kpiCur, &$kpiPrev, &$kpiPct, &$kpiDir, $key, $sql, $days) {
-    $cur = $conn->query("$sql AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL $days DAY)")->fetch_row()[0] ?? 0;
-    $prev = $conn->query("$sql AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL " . ($days*2) . " DAY) AND DATE(created_at) < DATE_SUB(CURDATE(), INTERVAL $days DAY)")->fetch_row()[0] ?? 0;
-    $pct = $prev > 0 ? round(($cur - $prev) / $prev * 100, 1) : ($cur > 0 ? 100 : 0);
-    $kpiCur[$key]  = (int)$cur;
-    $kpiPrev[$key] = (int)$prev;
-    $kpiPct[$key]  = $pct;
-    $kpiDir[$key]  = $cur >= $prev ? 'up' : 'down';
-}
-kpiCmp($conn, $kpiCur, $kpiPrev, $kpiPct, $kpiDir, 'residents', "SELECT COUNT(*) FROM users WHERE role = 'resident'", $kpiPeriod);
-kpiCmp($conn, $kpiCur, $kpiPrev, $kpiPct, $kpiDir, 'pets', "SELECT COUNT(*) FROM pets WHERE archived_at IS NULL", $kpiPeriod);
-kpiCmp($conn, $kpiCur, $kpiPrev, $kpiPct, $kpiDir, 'reports', "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL", $kpiPeriod);
-kpiCmp($conn, $kpiCur, $kpiPrev, $kpiPct, $kpiDir, 'rabies', "SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL", $kpiPeriod);
-
-// â�?��,�â�?��,� Fetch staff's own data from DB (single source of truth) â�?��,�â�?��,�
-$staffData = [];
-$stmt = $conn->prepare("SELECT user_id, reference_id, username, email, full_name, role, phone, address, avatar_url, status, created_at FROM users WHERE user_id = ?");
-$stmt->bind_param("i", $_SESSION['user_id']);
-$stmt->execute();
-$staffData = $stmt->get_result()->fetch_assoc();
-$stmt->close();
-
-$fullName = $staffData['full_name'] ?? $_SESSION['full_name'] ?? 'Staff Member';
-$staffRefId = $staffData['reference_id'] ?? 'â�,��?�';
-$staffUsername = $staffData['username'] ?? '';
-$staffPhone = $staffData['phone'] ?? '';
-$staffAddress = $staffData['address'] ?? '';
-$staffAvatar = $staffData['avatar_url'] ?? '';
-$staffEmail = $staffData['email'] ?? $_SESSION['email'] ?? '';
-
-// --- CHART DATA AGGREGATION ---
-$currentMonth = (int)date('n'); // 1-12
-$currentYear = (int)date('Y');
-
-// 1. Line Chart: Reports & Rabies (Grouped by Month for Current Year)
-$realMonthlyReports = array_fill(1, 12, 0);
-$realMonthlyRabies = array_fill(1, 12, 0);
-
-$reportsTrendQuery = $conn->query("SELECT MONTH(created_at) as m, COUNT(*) as c FROM reports WHERE YEAR(created_at) = $currentYear AND archived_at IS NULL GROUP BY MONTH(created_at)");
-if ($reportsTrendQuery) {
-    while($r = $reportsTrendQuery->fetch_assoc()) {
-        $realMonthlyReports[$r['m']] = (int)$r['c'];
+// Fetch current staff profile for Account Settings
+$staffEmail = '';
+$staffPhone = '';
+$staffAddress = '';
+$staffQuery = $conn->prepare("SELECT email, phone, address FROM users WHERE user_id = ?");
+if ($staffQuery) {
+    $staffQuery->bind_param("i", $_SESSION['user_id']);
+    $staffQuery->execute();
+    $staffResult = $staffQuery->get_result();
+    if ($staffRow = $staffResult->fetch_assoc()) {
+        $staffEmail = $staffRow['email'] ?? '';
+        $staffPhone = $staffRow['phone'] ?? '';
+        $staffAddress = $staffRow['address'] ?? '';
     }
-}
-$rabiesTrendQuery = $conn->query("SELECT MONTH(created_at) as m, COUNT(*) as c FROM reports WHERE report_type = 'rabies' AND YEAR(created_at) = $currentYear AND archived_at IS NULL GROUP BY MONTH(created_at)");
-if ($rabiesTrendQuery) {
-    while($r = $rabiesTrendQuery->fetch_assoc()) {
-        $realMonthlyRabies[$r['m']] = (int)$r['c'];
-    }
+    $staffQuery->close();
 }
 
-// Placeholder historical data for year selector (2023â�,��?o2025)
-$yearlyDatasets = [];
-$historicalPatterns = [
-    2023 => ['reports' => [5,4,7,9,12,14,16,18,13,10,7,6], 'rabies' => [2,1,2,3,4,5,5,5,4,3,2,1]],
-    2024 => ['reports' => [8,6,10,12,16,18,20,22,17,13,9,7], 'rabies' => [2,2,3,4,5,6,7,6,5,4,3,2]],
-    2025 => ['reports' => [6,5,9,11,14,17,19,18,14,11,8,5], 'rabies' => [1,2,3,4,5,6,6,5,4,3,2,1]],
-];
-foreach ([2023, 2024, 2025] as $y) {
-    $yearlyDatasets[$y] = $historicalPatterns[$y];
-}
-$yearlyDatasets[$currentYear] = [
-    'reports' => array_values($realMonthlyReports),
-    'rabies' => array_values($realMonthlyRabies),
-];
-
-// 2. Pie Chart: Report Types
-$realReportTypes = ['stray' => 0, 'rabies' => 0, 'injured' => 0, 'dead' => 0];
-$pieQuery = $conn->query("SELECT report_type, COUNT(*) as c FROM reports WHERE archived_at IS NULL GROUP BY report_type");
-if ($pieQuery) {
-    while($r = $pieQuery->fetch_assoc()) {
-        $type = strtolower($r['report_type']);
-        if(isset($realReportTypes[$type])) {
-            $realReportTypes[$type] += (int)$r['c'];
-        }
-    }
-}
-
-// 3. Bar Chart: Appointments per Service
-$realAppointments = ['kapon' => 0, 'vaccination' => 0, 'adoption' => 0, 'checkup' => 0];
-$barQuery = $conn->query("SELECT appointment_type, COUNT(*) as c FROM appointments WHERE archived_at IS NULL GROUP BY appointment_type");
-if ($barQuery) {
-    while($r = $barQuery->fetch_assoc()) {
-        $type = strtolower($r['appointment_type']);
-        if(isset($realAppointments[$type])) {
-            $realAppointments[$type] += (int)$r['c'];
-        }
-    }
-}
-
-// â�?��,�â�?��,� Reports by Barangay (Top 5, last 30 days) â�?��,�â�?��,�
-$brgyPeriod = 30;
-$brgyReportQuery = $conn->query("
-  SELECT b.barangay_id, b.barangay_name,
-    COUNT(*) as total,
-    SUM(CASE WHEN r.report_type = 'stray' THEN 1 ELSE 0 END) as stray,
-    SUM(CASE WHEN r.report_type = 'rabies' THEN 1 ELSE 0 END) as rabies,
-    SUM(CASE WHEN r.report_type = 'injured' THEN 1 ELSE 0 END) as injured,
-    SUM(CASE WHEN r.report_type = 'dead' THEN 1 ELSE 0 END) as dead,
-    SUM(CASE WHEN r.status = 'pending' THEN 1 ELSE 0 END) as pending,
-    SUM(CASE WHEN r.status = 'validated' THEN 1 ELSE 0 END) as validated,
-    SUM(CASE WHEN r.status = 'confirmed' THEN 1 ELSE 0 END) as confirmed,
-    SUM(CASE WHEN r.status = 'resolved' THEN 1 ELSE 0 END) as resolved,
-    SUM(CASE WHEN r.status = 'rejected' THEN 1 ELSE 0 END) as rejected
-  FROM reports r
-  JOIN barangays b ON r.barangay_id = b.barangay_id
-  WHERE r.archived_at IS NULL
-  GROUP BY b.barangay_id, b.barangay_name
-  ORDER BY total DESC
-  LIMIT 5
-");
-$brgyReportData = [];
-$brgyMaxTotal = 0;
-if ($brgyReportQuery) {
-    while ($row = $brgyReportQuery->fetch_assoc()) {
-        $brgyReportData[] = $row;
-        if ($row['total'] > $brgyMaxTotal) $brgyMaxTotal = $row['total'];
-    }
-}
-
-// â�?��,�â�?��,� Report Trend Insights (all reports) â�?��,�â�?��,�
-$allReports = [];
-$arq = $conn->query("SELECT report_id, report_type, status, created_at FROM reports WHERE archived_at IS NULL ORDER BY report_id ASC");
-if ($arq) {
-    while ($row = $arq->fetch_assoc()) $allReports[] = $row;
-}
-$avgResolutionAll = null;
-$arRes = $conn->query("SELECT AVG(DATEDIFF(cc.resolved_at, r.created_at)) AS avg_days FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id WHERE cc.status = 'resolved' AND cc.resolved_at IS NOT NULL");
-if ($arRes && $row = $arRes->fetch_assoc()) {
-    $avgResolutionAll = $row['avg_days'];
-}
-
-// Period filter for insights
-$insightPeriodAll = isset($_GET['period']) ? intval($_GET['period']) : 0;
-$insightReportsAll = $allReports;
-if ($insightPeriodAll > 0) {
-    $cutoff = strtotime("-{$insightPeriodAll} days");
-    $insightReportsAll = array_values(array_filter($allReports, fn($r) => strtotime($r['created_at']) >= $cutoff));
-} elseif ($insightPeriodAll !== 0) {
-    $insightPeriodAll = 30;
-}
-
-$reportTypesAll = array_count_values(array_map(fn($r) => $r['report_type'], $insightReportsAll));
-arsort($reportTypesAll);
-$mostSubmittedAll = $reportTypesAll ? ucfirst(array_key_first($reportTypesAll)) : 'N/A';
-$firstReportAll = $insightReportsAll ? date('M d, Y', strtotime($insightReportsAll[0]['created_at'])) : 'N/A';
-$lastReportAll = $insightReportsAll ? date('M d, Y', strtotime($insightReportsAll[count($insightReportsAll)-1]['created_at'])) : 'N/A';
-$totalReportsAll = count($insightReportsAll);
-$activeCasesAll = count(array_filter($insightReportsAll, fn($r) => $r['status'] === 'pending' || $r['status'] === 'validated'));
-
-// Weekly report counts for sparkline (last 5 weeks)
-$weeklyBucketsAll = [];
-$now = new DateTime();
-for ($i = 4; $i >= 0; $i--) {
-    $ws = (clone $now)->modify('monday this week -' . $i . ' weeks');
-    $we = (clone $ws)->modify('+6 days');
-    $weeklyBucketsAll[] = [
-        'label' => date('M d', $ws->getTimestamp()) . ' - ' . date('M d', $we->getTimestamp()),
-        'start' => $ws->format('Y-m-d'),
-        'end'   => $we->format('Y-m-d'),
-        'count' => 0,
-    ];
-}
-foreach ($insightReportsAll as $r) {
-    $created = date('Y-m-d', strtotime($r['created_at']));
-    foreach ($weeklyBucketsAll as &$b) {
-        if ($created >= $b['start'] && $created <= $b['end']) { $b['count']++; break; }
-    }
-}
-unset($b);
-$maxCountAll = max(array_column($weeklyBucketsAll, 'count'));
-$maxCountAll = $maxCountAll > 0 ? $maxCountAll : 1;
-$ptsAll = [];
-$xs = [0, 25, 50, 75, 100];
-foreach ($weeklyBucketsAll as $j => $b) {
-    $y = 25 - ($b['count'] / $maxCountAll) * 20;
-    $ptsAll[] = ['x' => $xs[$j], 'y' => round($y, 2), 'count' => $b['count'], 'label' => $b['label']];
-}
-// Smooth cubic bezier through points
-$nAll = count($ptsAll);
-$linePathAll = 'M' . $ptsAll[0]['x'] . ',' . $ptsAll[0]['y'];
-if ($nAll > 1) {
-    for ($i = 1; $i < $nAll; $i++) {
-        $p0 = $ptsAll[$i-1];
-        $p1 = $ptsAll[$i];
-        $pPrev = $ptsAll[max(0, $i-2)];
-        $pNext = $ptsAll[min($nAll-1, $i+1)];
-        $cp1x = $p0['x'] + ($p1['x'] - $pPrev['x']) * 0.25;
-        $cp1y = $p0['y'] + ($p1['y'] - $pPrev['y']) * 0.25;
-        $cp2x = $p1['x'] - ($pNext['x'] - $p0['x']) * 0.25;
-        $cp2y = $p1['y'] - ($pNext['y'] - $p0['y']) * 0.25;
-        $linePathAll .= 'C' . $cp1x . ',' . $cp1y . ' ' . $cp2x . ',' . $cp2y . ' ' . $p1['x'] . ',' . $p1['y'];
-    }
-}
-$fillPathAll = $linePathAll . ' L100,30 L0,30 Z';
-
-// â�?��,�â�?��,� Recent Reports (for sidebar) â�?��,�â�?��,�
-$recentReportsList = [];
-$rrq = $conn->query("SELECT r.report_id, r.report_type, r.status, r.created_at, u.full_name, b.barangay_name
-  FROM reports r
-  JOIN users u ON r.reporter_id = u.user_id
-  LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
-  WHERE r.archived_at IS NULL
-  ORDER BY r.created_at DESC LIMIT 10");
-if ($rrq) {
-    while ($row = $rrq->fetch_assoc()) $recentReportsList[] = $row;
-}
 
 // Pagination settings
 $perPage = 10;
@@ -816,126 +616,8 @@ $activePage = 'overview';
     .dashboard-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .card-header { padding:1rem 1.5rem; border-bottom:1px solid #f1f5f9; }
     .card-header h3 { font-size:1rem; font-weight:700; color:#0f172a; margin:0; }
-    .charts-grid { display: grid; grid-template-columns: 1fr 0.7fr 1fr; gap: 1.25rem; margin-bottom: 1.75rem; align-items: stretch; }
-    .chart-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
-    .chart-card h3 { font-size: 0.92rem; font-weight: 700; color: #0f172a; margin: 0 0 1rem; display: flex; align-items: center; gap: 8px; }
-    .chart-card h3 i { color: #0E8131; }
-    .chart-card .chart-wrap { position: relative; height: 380px; }
-    .chart-card .chart-wrap.donut-wrap { height: auto; }
-    .chart-empty { text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.85rem; }
-    .brgy-chart-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.04); display:flex; flex-direction:column; padding:1.25rem; }
-    .brgy-title { margin:0 0 2px 0; font-size:0.85rem; font-weight:700; color:#0f172a; }
-    .brgy-desc { margin:0 0 12px 0; font-size:0.72rem; color:#64748b; }
-    .brgy-period-label { color:#64748b; }
-    .brgy-content { flex:1; display:flex; flex-direction:column; gap:14px; }
-    .brgy-empty { text-align:center; padding:1.5rem; color:#94a3b8; font-size:0.82rem; }
-    .brgy-bar-item { cursor:pointer; border-radius:8px; padding:8px 10px; transition:background 0.15s; }
-    .brgy-bar-item:hover { background:#f8fafc; }
-    .brgy-bar-item.selected { background:#ecfdf5; }
-    .brgy-bar-item .brgy-bar-name { font-size:0.82rem; font-weight:700; color:#0f172a; margin-bottom:5px; }
-    .brgy-bar-item .brgy-bar-row { display:flex; align-items:center; gap:8px; }
-    .brgy-bar-item .brgy-bar-track { flex:1; height:10px; background:#f1f5f9; border-radius:5px; overflow:hidden; }
-    .brgy-bar-item .brgy-bar-fill { height:100%; border-radius:5px; background:#0E8131; transition:width 0.4s cubic-bezier(0.4,0,0.2,1); min-width:4px; }
-    .brgy-bar-item .brgy-bar-pct { width:36px; text-align:right; font-size:0.72rem; font-weight:700; color:#0f172a; flex-shrink:0; }
-    .brgy-bar-item .brgy-bar-stats { display:flex; justify-content:space-between; margin-top:4px; font-size:0.72rem; color:#64748b; }
-    .brgy-bar-item .brgy-bar-stats span { font-weight:600; color:#0f172a; }
 
-    /* Donut chart styles */
-    .segment { cursor: pointer; transition: transform 0.25s ease; }
-    .segment path { transition: filter 0.25s ease; }
-    .segment:hover path { filter: brightness(1.08); }
-    .segment:hover { transform: translate(var(--dx, 0px), var(--dy, 0px)); }
-    .legend-item { display:flex; align-items:center; gap:6px; font-size:13px; color:#4a5060; }
-    .legend-dot { width:12px; height:12px; border-radius:50%; display:inline-block; }
-    /* â�?��,�â�?��,� Analytics Grid Layout â�?��,�â�?��,� */
-    .analytics-grid { display:flex; gap:1.25rem; margin-bottom:1.75rem; align-items:stretch; }
-    .analytics-left { flex:3; display:flex; flex-direction:column; min-width:0; }
-    .analytics-right { flex:1; display:flex; flex-direction:column; min-width:0; }
-    .analytics-left .chart-card { flex:1; display:flex; flex-direction:column; }
-    .analytics-left .chart-card .chart-wrap { flex:1; min-height:380px; height:auto; }
-    .analytics-right .chart-card { flex:1; display:flex; flex-direction:column; }
-    .analytics-inner-row { display:flex; gap:1.25rem; }
-    .analytics-inner-left { flex:1; min-width:0; }
-    .analytics-inner-left .chart-card { height:100%; }
-    .analytics-inner-right { flex:2; min-width:0; }
-
-    /* â�?��,�â�?��,� City Overview Card (Report Trend Insights) â�?��,�â�?��,� */
-    .city-overview-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.04); overflow:hidden; display:flex; flex-direction:column; }
-    .city-overview-header { padding:1.25rem 1.25rem 0.75rem 1.25rem; font-size:0.85rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px; border-bottom:1px solid #f1f5f9; }
-    .city-overview-body { padding:1.25rem; display:flex; flex-direction:column; gap:1rem; flex:1; }
-    .city-overview-body .insights-kpi-row{display:flex;align-items:baseline;gap:0.75rem;}
-    .city-overview-body .insights-kpi{font-size:1.75rem;font-weight:800;color:#0f172a;line-height:1;}
-    .city-overview-body .insights-trend{font-size:0.85rem;font-weight:600;color:#045e1f;background:#e8f5ec;padding:0.25rem 0.5rem;border-radius:6px;}
-    .city-overview-body .sparkline-container{position:relative;width:100%;height:30px;margin-top:0.25rem;}
-    .city-overview-body .insights-sparkline{width:100%;height:100%;display:block;}
-    .city-overview-body .sparkline-overlay{position:absolute;top:0;left:0;width:100%;height:100%;display:flex;}
-    .city-overview-body .hit-target{position:absolute;top:0;width:20%;height:100%;transform:translateX(-50%);cursor:crosshair;z-index:10;}
-    .city-overview-body .hit-target:nth-child(1){left:0%;width:10%;transform:translateX(0);}
-    .city-overview-body .hit-target:nth-child(2){left:25%;}
-    .city-overview-body .hit-target:nth-child(3){left:50%;}
-    .city-overview-body .hit-target:nth-child(4){left:75%;}
-    .city-overview-body .hit-target:nth-child(5){left:100%;width:10%;transform:translateX(-100%);}
-    .city-overview-body .guide-line{position:absolute;top:0;left:50%;width:1px;height:100%;border-left:1px solid #e2e8f0;opacity:0;transition:opacity 0.2s;pointer-events:none;}
-    .city-overview-body .hit-target:nth-child(1) .guide-line{left:0%}
-    .city-overview-body .hit-target:nth-child(5) .guide-line{left:100%;transform:translateX(-1px)}
-    .city-overview-body .hover-content{position:absolute;left:50%;width:0;height:0;pointer-events:none;}
-    .city-overview-body .hit-target:nth-child(1) .hover-content{left:0%}
-    .city-overview-body .hit-target:nth-child(5) .hover-content{left:100%}
-    .city-overview-body .highlight-dot{position:absolute;left:0;top:0;width:10px;height:10px;background:#fff;border-radius:50%;transform:translate(-50%,-50%) scale(0);transition:transform 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2),0 0 0 1px rgba(0,0,0,0.05);}
-    .city-overview-body .hit-tooltip{position:absolute;top:0;left:15px;background:#fff;border:1px solid #f1f5f9;box-shadow:0 4px 12px rgba(0,0,0,0.08);border-radius:8px;padding:0.5rem 0.75rem;white-space:nowrap;opacity:0;visibility:hidden;transition:opacity 0.2s,transform 0.2s;transform:translateY(-20px);}
-    .city-overview-body .tooltip-label{font-size:0.75rem;color:#64748b;margin-bottom:0.25rem;}
-    .city-overview-body .tooltip-value{font-size:0.85rem;font-weight:600;color:#045e1f;}
-    .city-overview-body .hit-target:nth-child(4) .hit-tooltip,.city-overview-body .hit-target:nth-child(5) .hit-tooltip{left:auto;right:15px}
-    .city-overview-body .hit-target:hover .guide-line{opacity:1}
-    .city-overview-body .hit-target:hover .highlight-dot{transform:translate(-50%,-50%) scale(1)}
-    .city-overview-body .hit-target:hover .hit-tooltip{opacity:1;visibility:visible;transform:translateY(-10px)}
-    .city-overview-body .insights-metrics-grid{display:grid;grid-template-columns:1fr 1fr;gap:1rem;}
-    .city-overview-body .metric-item{display:flex;flex-direction:column;gap:0.25rem;}
-    .city-overview-body .metric-label{font-size:0.75rem;font-weight:500;color:#64748b;text-transform:uppercase;letter-spacing:0.05em;}
-    .city-overview-body .metric-value{font-size:0.88rem;font-weight:600;color:#0f172a;}
-    .city-overview-body .insights-status-bar{width:100%;height:8px;border-radius:4px;display:flex;overflow:hidden;background:#f3f4f6;margin-top:0.5rem;}
-    .city-overview-body .status-legend{display:flex;justify-content:space-between;margin-top:0.5rem;font-size:0.75rem;color:#64748b;}
-    .city-overview-body .legend-item{display:flex;align-items:center;gap:0.35rem;}
-    .city-overview-body .legend-dot{width:6px;height:6px;border-radius:50%;}
-    .city-overview-body .insights-ai{background:linear-gradient(145deg,#f8fafc,#f1f5f9);border:1px solid #e2e8f0;border-radius:12px;padding:0.75rem;display:flex;gap:0.75rem;align-items:flex-start;}
-    .city-overview-body .ai-icon{color:#6366f1;flex-shrink:0;margin-top:0.1rem;}
-    .city-overview-body .ai-text{font-size:0.82rem;color:#475569;line-height:1.5;}
-    .city-overview-body .ai-text strong{color:#0f172a;}
-    .city-overview-body .insights-summary{border-top:1px solid #e2e8f0;padding-top:1rem;display:flex;flex-direction:column;gap:0.5rem;}
-    .city-overview-body .summary-row{display:flex;justify-content:space-between;align-items:center;font-size:0.8rem;}
-    .city-overview-body .summary-label{color:#64748b;}
-    .city-overview-body .summary-value{font-size:0.78rem;font-weight:600;color:#0f172a;}
-    .highrisk-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.04); overflow:hidden; display:flex; flex-direction:column; }
-    .highrisk-header { padding:1.25rem 1.25rem 0.75rem 1.25rem; font-size:0.85rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px; border-bottom:1px solid #f1f5f9; }
-    .highrisk-body { padding:0.75rem 1.25rem 1.25rem 1.25rem; display:flex; flex-direction:column; gap:8px; flex:1; }
-    .highrisk-item { display:flex; align-items:center; gap:10px; padding:8px 10px; background:#fef2f2; border:1px solid #fecaca; border-radius:8px; font-size:0.82rem; }
-    .highrisk-item .hr-name { font-weight:600; color:#991b1b; flex:1; }
-    .highrisk-item .hr-badge { background:#dc2626; color:#fff; font-size:0.7rem; font-weight:700; padding:2px 8px; border-radius:10px; white-space:nowrap; }
-
-
-    /* â�?��,�â�?��,� Recent Reports Card â�?��,�â�?��,� */
-    .recent-reports-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.04); overflow:hidden; display:flex; flex-direction:column; }
-    .recent-reports-header { padding:1rem 1.1rem 0.75rem 1.1rem; font-size:0.85rem; font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px; border-bottom:1px solid #f1f5f9; }
-    .recent-reports-body { padding:0.5rem 1.1rem 0.75rem 1.1rem; display:flex; flex-direction:column; gap:6px; }
-    .recent-report-item { display:flex; gap:10px; align-items:flex-start; padding:7px 0; border-bottom:1px solid #f8fafc; }
-    .recent-report-item:last-child { border-bottom:none; }
-    .recent-report-item .rr-icon { width:32px; height:32px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:0.75rem; flex-shrink:0; }
-    .recent-report-item .rr-content { flex:1; min-width:0; }
-    .recent-report-item .rr-title { font-size:0.78rem; font-weight:600; color:#0f172a; }
-    .recent-report-item .rr-meta { font-size:0.68rem; color:#94a3b8; margin-top:1px; }
-    .recent-reports-empty { text-align:center; padding:1rem; color:#94a3b8; font-size:0.78rem; }
-
-    /* â�?��,�â�?��,� KPI Period Bar â�?��,�â�?��,� */
-    .kpi-arrow.up { color:#059669; }
-    .kpi-arrow.down { color:#dc2626; }
-    .kpi-pct { font-weight:700; color:#0f172a; }
     .kpi-sub { color:#94a3b8; font-weight:400; margin-left:2px; }
-    .kpi-period-bar { display:flex; align-items:center; gap:10px; margin-bottom:1rem; }
-    .kpi-period-label { font-size:0.72rem; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.03em; }
-    .kpi-period-btns { display:flex; gap:4px; }
-    .kpi-period-btn { padding:4px 14px; font-size:0.72rem; font-weight:600; border:1px solid #e2e8f0; border-radius:6px; background:#fff; color:#64748b; cursor:pointer; transition:all 0.15s; }
-    .kpi-period-btn:hover { border-color:#cbd5e1; background:#f8fafc; }
-    .kpi-period-btn.active { border-color:#0E8131; background:#ecfdf5; color:#0E8131; }
     .table-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem 1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .reports-fullpage .table-card { display:flex; flex-direction:column; flex:1; min-height:0; margin:0; padding:0; overflow:hidden; }
     .reports-fullpage .table-card .db-toolbar { margin:0; padding:1.25rem 1.5rem; border-bottom:1px solid #f1f5f9; }
@@ -978,7 +660,6 @@ $activePage = 'overview';
     .form-control:focus { border-color:#045e1f; box-shadow:0 0 0 3px rgba(4,94,31,0.1); }
     textarea.form-control { font-family:inherit; font-size:0.82rem; line-height:1.4; }
     .account-meta-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.65rem; margin-top:0.75rem; }
-    .staff-analytics { }
     .staff-theme { }
     .status-pill.status-pending { background:#fef3c7; color:#92400e; }
     .status-pill.status-validated { background:#dbeafe; color:#1e40af; }
@@ -992,25 +673,15 @@ $activePage = 'overview';
     .status-pill.status-no_show { background:#fef3c7; color:#92400e; }
     @media (max-width: 768px) {
       .settings-grid { grid-template-columns:1fr; }
-      .kpi-period-btns { flex-wrap:wrap; }
       .geo-map-card { overflow:hidden; }
     }
     @media (max-width: 600px) {
-      .kpi-grid { grid-template-columns:1fr !important; }
-      .kpi-period-bar { flex-wrap:wrap; gap:6px; }
-      .analytics-left .chart-card .chart-wrap { min-height:220px; }
-      .donut-wrap svg { max-width:100% !important; height:auto !important; }
       .table-card { padding:0.75rem; }
       .topbar { padding:0 0.35rem; }
-      .recent-report-item { flex-wrap:wrap; gap:6px; }
-      .recent-report-item .rr-content { min-width:0; flex:1 1 100%; }
-      .recent-report-item .rr-meta { flex:1 1 100%; padding-left:0; }
       .geo-map-card { overflow:hidden; }
       .maps-container { height:180px !important; }
     }
     @media (max-width: 900px) {
-      .analytics-grid { flex-direction:column; }
-      .charts-grid { grid-template-columns:1fr; }
       /* Prevent horizontal overflow */
       .dashboard-content, .content-area { max-width:100vw; overflow-x:hidden; }
       .table-card { padding:1rem; overflow-x:auto; }
@@ -1020,8 +691,6 @@ $activePage = 'overview';
       .table-card .table-header-actions > * { flex:1 1 auto; min-width:120px; }
       .data-table { display:block; overflow-x:auto; white-space:nowrap; }
       .notif-panel { width:calc(100vw - 2rem) !important; right:0.5rem !important; }
-      .brgy-bar-item { flex-wrap:wrap; }
-      .brgy-bar-item .brgy-bar-track { min-width:60px; }
     }
 
     /* Notification Dropdown */
@@ -1145,6 +814,28 @@ $activePage = 'overview';
     .reports-fullpage .filters{ border-right:1px solid var(--border); }
     .reports-fullpage .db-panel{ border-left:none; border-right:1px solid var(--border); }
     .reports-fullpage .profile-panel{ border-left:none; }
+
+    /* Reports pages: full-width table + right drawer detail panel (appointments style) */
+    #reports-all .layout, #reports-pending .layout, #reports-active .layout, #reports-resolved .layout, #client-pets .layout{ grid-template-columns:minmax(0,1fr); }
+    #reports-all .db-panel, #reports-pending .db-panel, #reports-active .db-panel, #reports-resolved .db-panel, #client-pets .db-panel{ border-right:none; }
+    .cd-drawer.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
+    .cd-drawer.modal.active{ opacity:1; visibility:visible; }
+    .cd-drawer .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
+    .cd-drawer .sd-dialog-content{ max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; }
+    .cd-drawer.active .sd-dialog-content{ transform:translateX(0); }
+    .cd-drawer .sd-field-group{ flex:1; min-height:0; overflow-y:auto; }
+
+    /* Pending/Active/Resolved: KPI cards on top, toolbar styled like All Reports */
+    #reports-pending .db-toolbar, #reports-active .db-toolbar, #reports-resolved .db-toolbar{ justify-content:flex-start; }
+    #reports-pending .search-grow-wrap input, #reports-active .search-grow-wrap input, #reports-resolved .search-grow-wrap input{ height:36px; width:100%; padding:0 12px 0 36px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; font-size:14px; color:#18181b; outline:none; font-family:inherit; }
+    #reports-pending .search-grow-wrap input:focus, #reports-active .search-grow-wrap input:focus, #reports-resolved .search-grow-wrap input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #reports-pending .search-grow-wrap input::placeholder, #reports-active .search-grow-wrap input::placeholder, #reports-resolved .search-grow-wrap input::placeholder{ color:#a1a1aa; }
+    #reports-pending .search-grow-wrap svg, #reports-active .search-grow-wrap svg, #reports-resolved .search-grow-wrap svg{ color:#71717a; }
+    #reports-pending .tf-select, #reports-active .tf-select, #reports-resolved .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background-color:#fff; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
+    #reports-pending .tf-select:focus, #reports-active .tf-select:focus, #reports-resolved .tf-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #reports-pending .kpi-label, #reports-active .kpi-label, #reports-resolved .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; }
+    #reports-pending .kpi-value, #reports-active .kpi-value, #reports-resolved .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
+    #reports-pending .kpi-sub, #reports-active .kpi-sub, #reports-resolved .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
 
     /* Left filters sidebar rail */
     .cpd .filters{ padding:20px 16px; display:flex; flex-direction:column; border-right:1px solid var(--border); position:sticky; top:0; overflow-y:auto; }
@@ -1505,33 +1196,6 @@ $activePage = 'overview';
   </style>
 
   <script>
-  function togglePeriodMenu(e) {
-    e.stopPropagation();
-    var menu = document.getElementById('periodMenu');
-    if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
-  }
-  document.addEventListener('click', function() {
-    var menu = document.getElementById('periodMenu');
-    if (menu) menu.style.display = 'none';
-  });
-  function switchPeriod(e, period) {
-    e.preventDefault();
-    var url = new URL(window.location.href);
-    url.searchParams.set('period', period);
-    fetch(url.toString())
-      .then(function(r) { return r.text(); })
-      .then(function(html) {
-        var parser = new DOMParser();
-        var doc = parser.parseFromString(html, 'text/html');
-        var newC = doc.getElementById('insightsContainer');
-        var oldC = document.getElementById('insightsContainer');
-        if (newC && oldC) {
-          oldC.outerHTML = newC.outerHTML;
-          history.pushState({period: period}, '', url.toString());
-        }
-      });
-    return false;
-  }
   document.addEventListener('DOMContentLoaded', function() {
   document.addEventListener('DOMContentLoaded', function() {
     // �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ 2. REGISTERED USERS: multi-field search + pagination �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬
@@ -1632,370 +1296,9 @@ $activePage = 'overview';
   <?php endif; ?>
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ OVERVIEW / ANALYTICS DASHBOARD �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
-  <section id="overview" class="content-section active staff-analytics">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Citywide Analytics</h1>
-        <p class="page-subtitle">Dasmari&ntilde;as City Veterinary Services Overview</p>
-      </div>
-      <div class="header-actions" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-         <button class="btn-primary" id="exportReportBtn" onclick="exportDashboardPDF()"><i class="fas fa-download"></i> Export Report</button>
-      </div>
-    </div>
-
-    <!-- Period Toggle -->
-    <div class="kpi-period-bar">
-      <span class="kpi-period-label">vs previous month</span>
-      <div class="kpi-period-btns">
-        <button class="kpi-period-btn" data-period="1">Day</button>
-        <button class="kpi-period-btn" data-period="7">Week</button>
-        <button class="kpi-period-btn active" data-period="30">Month</button>
-      </div>
-    </div>
-
-    <!-- KPI Stats Grid -->
-    <div class="row row-deck row-cards mb-3">
-      <div class="col-sm-6 col-lg-3">
-        <div class="card">
-          <div class="card-body">
-            <div class="subheader">Total Residents</div>
-            <div class="d-flex align-items-baseline">
-              <div class="h1 mb-0 me-2" id="kpi-residents"><?php echo number_format($kpiCur['residents']); ?></div>
-              <div class="me-auto">
-                <span class="text-<?php echo $kpiDir['residents'] === 'up' ? 'green' : 'red'; ?> d-inline-flex align-items-center lh-1">
-                  <?php echo abs($kpiPct['residents']); ?>%
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon ms-1 icon-2">
-                    <?php if ($kpiDir['residents'] === 'up'): ?>
-                      <path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>
-                    <?php else: ?>
-                      <path d="M3 7l6 6l4 -4l8 8"/><path d="M21 10l0 7l-7 0"/>
-                    <?php endif; ?>
-                  </svg>
-                </span>
-              </div>
-            </div>
-            <div id="kpi-residents-change" class="text-secondary mt-1">vs prev 30 days</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-sm-6 col-lg-3">
-        <div class="card">
-          <div class="card-body">
-            <div class="subheader">Registered Pets</div>
-            <div class="d-flex align-items-baseline">
-              <div class="h1 mb-0 me-2" id="kpi-pets"><?php echo number_format($totalPets); ?></div>
-              <div class="me-auto">
-                <span class="text-<?php echo $kpiDir['pets'] === 'up' ? 'green' : 'red'; ?> d-inline-flex align-items-center lh-1">
-                  <?php echo abs($kpiPct['pets']); ?>%
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon ms-1 icon-2">
-                    <?php if ($kpiDir['pets'] === 'up'): ?>
-                      <path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>
-                    <?php else: ?>
-                      <path d="M3 7l6 6l4 -4l8 8"/><path d="M21 10l0 7l-7 0"/>
-                    <?php endif; ?>
-                  </svg>
-                </span>
-              </div>
-            </div>
-            <div id="kpi-pets-change" class="text-secondary mt-1">vs prev 30 days</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-sm-6 col-lg-3">
-        <div class="card">
-          <div class="card-body">
-            <div class="subheader">Total Reports</div>
-            <div class="d-flex align-items-baseline">
-              <div class="h1 mb-0 me-2" id="kpi-reports"><?php echo number_format($totalReports); ?></div>
-              <div class="me-auto">
-                <span class="text-<?php echo $kpiDir['reports'] === 'up' ? 'green' : 'red'; ?> d-inline-flex align-items-center lh-1">
-                  <?php echo abs($kpiPct['reports']); ?>%
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon ms-1 icon-2">
-                    <?php if ($kpiDir['reports'] === 'up'): ?>
-                      <path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>
-                    <?php else: ?>
-                      <path d="M3 7l6 6l4 -4l8 8"/><path d="M21 10l0 7l-7 0"/>
-                    <?php endif; ?>
-                  </svg>
-                </span>
-              </div>
-            </div>
-            <div id="kpi-reports-change" class="text-secondary mt-1">vs prev 30 days</div>
-          </div>
-        </div>
-      </div>
-      <div class="col-sm-6 col-lg-3">
-        <div class="card">
-          <div class="card-body">
-            <div class="subheader">Active Rabies Cases</div>
-            <div class="d-flex align-items-baseline">
-              <div class="h1 mb-0 me-2" id="kpi-rabies"><?php echo number_format($activeRabiesCases); ?></div>
-              <div class="me-auto">
-                <span class="text-<?php echo $kpiDir['rabies'] === 'up' ? 'red' : 'green'; ?> d-inline-flex align-items-center lh-1">
-                  <?php echo abs($kpiPct['rabies']); ?>%
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon ms-1 icon-2">
-                    <?php if ($kpiDir['rabies'] === 'up'): ?>
-                      <path d="M3 17l6 -6l4 4l8 -8"/><path d="M14 7l7 0l0 7"/>
-                    <?php else: ?>
-                      <path d="M3 7l6 6l4 -4l8 8"/><path d="M21 10l0 7l-7 0"/>
-                    <?php endif; ?>
-                  </svg>
-                </span>
-              </div>
-            </div>
-            <div id="kpi-rabies-change" class="text-secondary mt-1">vs prev 30 days</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Split Row: Report Activity (left) + Reports by Category (right) -->
-    <div class="analytics-grid">
-      <div class="analytics-left">
-        <div class="chart-card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-            <h3 style="margin:0;font-size:0.92rem;font-weight:700;color:#0f172a;">Report Activity</h3>
-            <select id="yearSelect" style="padding:4px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:0.8rem;font-weight:600;color:#334155;background:#fff;outline:none;cursor:pointer;">
-              <option value="2023">2023</option>
-              <option value="2024">2024</option>
-              <option value="2025" selected>2025</option>
-              <option value="<?php echo $currentYear; ?>"><?php echo $currentYear; ?></option>
-            </select>
-          </div>
-          <div class="chart-wrap"><canvas id="monthlyChart"></canvas></div>
-        </div>
-      </div>
-      <div class="analytics-right">
-        <?php
-        $catTotal = array_sum($realReportTypes);
-        $catColors = ['stray' => '#6266ea', 'rabies' => '#ee4b4b', 'injured' => '#f2a613', 'dead' => '#9aa4ae'];
-        $cx = 280; $cy = 200; $R = 155; $r = 90;
-        $gap = 3;
-        $segments = [];
-        $liveKeys = [];
-        foreach (['stray', 'rabies', 'injured', 'dead'] as $k) {
-            if (($realReportTypes[$k] ?? 0) > 0) $liveKeys[] = $k;
-        }
-        $numLive = count($liveKeys);
-        $adjustedTotal = $numLive > 0 ? 360 - ($numLive * $gap) : 360;
-        $startAngle = $numLive > 0 ? -90 + ($gap / 2) : -90;
-        foreach (['stray', 'rabies', 'injured', 'dead'] as $key) {
-            $val = $realReportTypes[$key] ?? 0;
-            if ($val <= 0 || $catTotal <= 0) continue;
-            $sweep = ($val / $catTotal) * $adjustedTotal;
-            $endAngle = $startAngle + $sweep;
-            $sRad = deg2rad($startAngle); $eRad = deg2rad($endAngle);
-            $ox1 = $cx + $R * cos($sRad); $oy1 = $cy + $R * sin($sRad);
-            $ox2 = $cx + $R * cos($eRad); $oy2 = $cy + $R * sin($eRad);
-            $ix1 = $cx + $r * cos($sRad); $iy1 = $cy + $r * sin($sRad);
-            $ix2 = $cx + $r * cos($eRad); $iy2 = $cy + $r * sin($eRad);
-            $largeArc = $sweep > 180 ? 1 : 0;
-            $path = sprintf("M%.2f,%.2f A%d,%d 0 %d,1 %.2f,%.2f L%.2f,%.2f A%d,%d 0 %d,0 %.2f,%.2f Z",
-                $ox1, $oy1, $R, $R, $largeArc, $ox2, $oy2,
-                $ix2, $iy2, $r, $r, $largeArc, $ix1, $iy1);
-            $midAngle = $startAngle + $sweep / 2;
-            $midRad = deg2rad($midAngle);
-            $dx = 14 * cos($midRad);
-            $dy = 14 * sin($midRad);
-            $segments[] = ['key' => $key, 'path' => $path, 'color' => $catColors[$key], 'dx' => $dx, 'dy' => $dy];
-            $startAngle = $endAngle + $gap;
-        }
-        ?>
-        <div class="chart-card category-card" style="display:flex;flex-direction:column;">
-          <h3 class="brgy-title" style="margin-bottom:2px;">Reports by Category</h3>
-          <p class="brgy-desc" style="margin-bottom:12px;">&nbsp;</p>
-          <div style="display:flex;justify-content:center;align-items:center;flex:1;">
-            <svg viewBox="0 0 600 430" style="width:100%;max-width:340px;height:auto;" xmlns="http://www.w3.org/2000/svg">
-              <?php if ($catTotal > 0): ?>
-              <?php foreach ($segments as $seg): ?>
-              <g class="segment <?php echo $seg['key']; ?>" style="--dx:<?php echo round($seg['dx'],1); ?>px;--dy:<?php echo round($seg['dy'],1); ?>px">
-                <path d="<?php echo $seg['path']; ?>" fill="<?php echo $seg['color']; ?>"/>
-              </g>
-              <?php endforeach; ?>
-              <?php else: ?>
-              <circle cx="280" cy="200" r="155" fill="#f1f5f9"/>
-              <?php endif; ?>
-              <circle cx="280" cy="200" r="90" fill="#ffffff"/>
-              <text x="280" y="190" text-anchor="middle" style="font-size:30px;font-weight:800;fill:#0f172a;font-family:Montserrat,sans-serif;"><?php echo $catTotal; ?></text>
-              <text x="280" y="216" text-anchor="middle" style="font-size:13px;fill:#94a3b8;font-family:Inter,sans-serif;font-weight:500;">Total</text>
-            </svg>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:2px;margin-top:14px;padding:0 2px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;">
-              <span style="display:flex;align-items:center;gap:7px;font-size:13px;color:#334155;font-weight:500;">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#6266ea;"></span> Stray
-              </span>
-              <span style="font-weight:700;color:#0f172a;font-size:13px;"><?php echo $realReportTypes['stray'] ?? 0; ?></span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;">
-              <span style="display:flex;align-items:center;gap:7px;font-size:13px;color:#334155;font-weight:500;">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ee4b4b;"></span> Rabies
-              </span>
-              <span style="font-weight:700;color:#0f172a;font-size:13px;"><?php echo $realReportTypes['rabies'] ?? 0; ?></span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;">
-              <span style="display:flex;align-items:center;gap:7px;font-size:13px;color:#334155;font-weight:500;">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f2a613;"></span> Injured
-              </span>
-              <span style="font-weight:700;color:#0f172a;font-size:13px;"><?php echo $realReportTypes['injured'] ?? 0; ?></span>
-            </div>
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;">
-              <span style="display:flex;align-items:center;gap:7px;font-size:13px;color:#334155;font-weight:500;">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#9aa4ae;"></span> Dead
-              </span>
-              <span style="font-weight:700;color:#0f172a;font-size:13px;"><?php echo $realReportTypes['dead'] ?? 0; ?></span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-<style>
-  #geoMapCompact .maplibregl-ctrl-scale,
-  #geoMapCompact .maplibregl-ctrl-group { display: none !important; }
-  .geo-map-card { display: flex; flex-direction: column; }
-</style>
-    <!-- Bottom Grid: Locations + City Overview + Barangay Reporting Activity -->
-    <div class="charts-grid">
-      <div class="card" style="display:flex;flex-direction:column;">
-        <div class="card-header">
-          <h3 class="card-title"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-map-pin"><path d="M12 21a8 8 0 0 0 8-8c0-5.4-3.6-9.333-8-12c-4.4 2.667 -8 6.6 -8 12a8 8 0 0 0 8 8z"/><path d="M12 13m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/></svg> Locations</h3>
-        </div>
-        <div class="card-body" style="flex:1;overflow-y:auto;max-height:400px;">
-          <?php if (!empty($brgyReportData)): ?>
-            <div class="space-y-3">
-              <?php foreach ($brgyReportData as $br): ?>
-                <?php $pct = $brgyMaxTotal > 0 ? round($br['total'] / $brgyMaxTotal * 100) : 0; ?>
-                <div style="padding:0.5rem 0;border-bottom:1px solid #f1f5f9;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.25rem;">
-                    <span style="font-weight:600;color:#0f172a;font-size:0.85rem;"><?php echo htmlspecialchars($br['barangay_name']); ?></span>
-                    <span style="font-size:0.8rem;color:#64748b;font-weight:500;"><?php echo (int)$br['total']; ?> reports</span>
-                  </div>
-                  <div class="progress" style="height:5px;">
-                    <div class="progress-bar bg-green" style="width:<?php echo $pct; ?>%"></div>
-                  </div>
-                  <div style="display:flex;gap:0.75rem;margin-top:0.25rem;font-size:0.7rem;color:#94a3b8;">
-                    <span><span style="color:#059669;font-weight:600;"><?php echo (int)$br['pending']; ?></span> pending</span>
-                    <span><span style="color:#2563eb;font-weight:600;"><?php echo (int)$br['validated']; ?></span> validated</span>
-                    <span><span style="color:#7c3aed;font-weight:600;"><?php echo (int)$br['confirmed']; ?></span> confirmed</span>
-                    <span><span style="color:#059669;font-weight:600;"><?php echo (int)$br['resolved']; ?></span> resolved</span>
-                  </div>
-                </div>
-              <?php endforeach; ?>
-            </div>
-          <?php else: ?>
-            <div class="text-secondary text-center py-4">No barangay data available.</div>
-          <?php endif; ?>
-        </div>
-      </div>
-      <div id="insightsContainer">
-      <div class="city-overview-card">
-        <div class="city-overview-header">
-          Report Trend Insights
-          <div class="period-filter" onclick="togglePeriodMenu(event)" style="margin-left:auto;font-size:0.75rem;font-weight:500;color:#64748b;background:#f3f4f6;padding:0.25rem 0.75rem;border-radius:20px;display:flex;align-items:center;gap:0.25rem;cursor:pointer;position:relative;">
-            <span><?php echo $insightPeriodAll === 7 ? 'Last 7 Days' : ($insightPeriodAll === 90 ? 'Last 90 Days' : ($insightPeriodAll === 0 ? 'All Time' : 'Last 30 Days')); ?></span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-            <div id="periodMenu" class="period-menu" style="display:none;position:absolute;top:100%;right:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.08);z-index:20;min-width:140px;margin-top:4px;">
-              <a href="#" class="period-option" style="display:block;padding:0.5rem 1rem;font-size:0.78rem;color:#0f172a;text-decoration:none;border-bottom:1px solid #f1f5f9;<?php echo $insightPeriodAll === 7 ? 'font-weight:600;color:#045e1f;' : ''; ?>" data-period="7" onclick="return switchPeriod(event,7)">Last 7 Days</a>
-              <a href="#" class="period-option" style="display:block;padding:0.5rem 1rem;font-size:0.78rem;color:#0f172a;text-decoration:none;border-bottom:1px solid #f1f5f9;<?php echo $insightPeriodAll === 30 ? 'font-weight:600;color:#045e1f;' : ''; ?>" data-period="30" onclick="return switchPeriod(event,30)">Last 30 Days</a>
-              <a href="#" class="period-option" style="display:block;padding:0.5rem 1rem;font-size:0.78rem;color:#0f172a;text-decoration:none;border-bottom:1px solid #f1f5f9;<?php echo $insightPeriodAll === 90 ? 'font-weight:600;color:#045e1f;' : ''; ?>" data-period="90" onclick="return switchPeriod(event,90)">Last 90 Days</a>
-              <a href="#" class="period-option" style="display:block;padding:0.5rem 1rem;font-size:0.78rem;color:#0f172a;text-decoration:none;<?php echo $insightPeriodAll === 0 ? 'font-weight:600;color:#045e1f;' : ''; ?>" data-period="0" onclick="return switchPeriod(event,0)">All Time</a>
-            </div>
-          </div>
-        </div>
-        <div class="city-overview-body">
-          <div class="insights-kpi-row">
-            <span class="insights-kpi"><?php echo $totalReportsAll; ?></span>
-            <?php if ($totalReportsAll > 0): ?>
-              <span class="insights-trend"><?php echo $activeCasesAll; ?> active</span>
-            <?php endif; ?>
-          </div>
-
-          <div class="sparkline-container">
-            <svg class="insights-sparkline" viewBox="0 0 100 30" preserveAspectRatio="none">
-              <path d="<?php echo $linePathAll; ?>" fill="none" stroke="#045e1f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-              <path d="<?php echo $fillPathAll; ?>" fill="url(#sparkline-gradient-all)" opacity="0.2"/>
-              <defs>
-                <linearGradient id="sparkline-gradient-all" x1="0" x2="0" y1="0" y2="1">
-                  <stop offset="0%" stop-color="#045e1f" stop-opacity="1"/>
-                  <stop offset="100%" stop-color="#045e1f" stop-opacity="0"/>
-                </linearGradient>
-              </defs>
-            </svg>
-            <div class="sparkline-overlay">
-              <?php foreach ($ptsAll as $p): ?>
-              <div class="hit-target">
-                <div class="guide-line"></div>
-                <div class="hover-content" style="top: <?php echo 100 - ($p['count'] / $maxCountAll) * 100; ?>%;">
-                  <div class="highlight-dot"></div>
-                  <div class="hit-tooltip">
-                    <div class="tooltip-label"><?php echo $p['label']; ?></div>
-                    <div class="tooltip-value">Reports: <?php echo $p['count']; ?></div>
-                  </div>
-                </div>
-              </div>
-              <?php endforeach; ?>
-            </div>
-          </div>
-
-          <div class="insights-metrics-grid">
-            <div class="metric-item">
-              <span class="metric-label">Most Submitted</span>
-              <span class="metric-value"><?php echo $mostSubmittedAll; ?></span>
-            </div>
-            <div class="metric-item">
-              <span class="metric-label">Avg Resolution</span>
-              <span class="metric-value"><?php echo $avgResolutionAll !== null ? round($avgResolutionAll, 1) . ' Days' : 'N/A'; ?></span>
-            </div>
-          </div>
-
-          <div class="insights-ai">
-            <svg class="ai-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
-            <div class="ai-text">
-              <strong>Insight:</strong> <?php echo $totalReportsAll; ?> report<?php echo $totalReportsAll !== 1 ? 's' : ''; ?> citywide, <?php echo $activeCasesAll; ?> currently active. <?php
-              $lastWkAll = $weeklyBucketsAll[3]['count'] ?? 0;
-              $thisWkAll = $weeklyBucketsAll[4]['count'] ?? 0;
-              if ($lastWkAll > 0 || $thisWkAll > 0):
-                  $diff = $thisWkAll - $lastWkAll;
-                  if ($diff > 0): echo 'Up ' . $diff . ' report' . ($diff !== 1 ? 's' : '') . ' from last week.';
-                  elseif ($diff < 0): echo 'Down ' . abs($diff) . ' report' . (abs($diff) !== 1 ? 's' : '') . ' from last week.';
-                  else: echo 'Same as last week.';
-                  endif;
-              endif;
-              ?>
-            </div>
-          </div>
-
-          <div class="insights-summary">
-            <div class="summary-row">
-              <span class="summary-label">First report</span>
-              <span class="summary-value"><?php echo $firstReportAll; ?></span>
-            </div>
-            <div class="summary-row">
-              <span class="summary-label">Latest report</span>
-              <span class="summary-value"><?php echo $lastReportAll; ?></span>
-            </div>
-            <div class="summary-row">
-              <span class="summary-label">Active cases</span>
-              <span class="summary-value"><?php echo $activeCasesAll; ?></span>
-            </div>
-          </div>
-        </div>
-      </div>
-      </div>
-      <div class="chart-card brgy-chart-card" id="brgyChartSection">
-        <h3 class="brgy-title">Barangay Reporting Activity</h3>
-        <p class="brgy-desc"><span class="brgy-period-label">all reports</span></p>
-        <div class="brgy-content" id="brgyChartBody">
-          <!-- Rows built by JS -->
-        </div>
-        <div id="rabiesAdvisory" class="rabies-advisory" style="display:none;margin-top:10px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:0.75rem;color:#991b1b;line-height:1.5;align-items:flex-start;gap:8px;">
-          <div><strong>Inspection Advisory:</strong> When report activity reaches 90% or higher of the monitoring threshold, DCVS is advised to conduct a general rabies inspection, strengthen surveillance in affected barangays, and coordinate appropriate response measures to help prevent further spread.</div>
-        </div>
-      </div>
-    </div>
-
-  </section>
+<section id="analytics" class="content-section active aether-analytics">
+<?php include 'includes/aether-dashboard.php'; ?>
+</section>
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ USERS TAB �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
 <section id="users" class="content-section">
@@ -2168,19 +1471,19 @@ $activePage = 'overview';
                         </div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main"><?php echo $typeLabel; ?></div>
+                        <div class="contact-main contact-normal"><?php echo $typeLabel; ?></div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main"><?php echo $residentName; ?></div>
+                        <div class="contact-main contact-name"><?php echo $residentName; ?></div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main"><?php echo $petName; ?></div>
+                        <div class="contact-main contact-normal"><?php echo $petName; ?></div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main"><?php echo $dt; ?> &middot; <?php echo $tm; ?></div>
+                        <div class="contact-main contact-normal"><?php echo $dt; ?> &middot; <?php echo $tm; ?></div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main"><?php echo $sub; ?></div>
+                        <div class="contact-main contact-normal"><?php echo $sub; ?></div>
                       </td>
                       <td class="sd-td">
                         <span class="appt-status-pill" style="background:<?php echo $sc['bg']; ?>;color:<?php echo $sc['color']; ?>;"><?php echo $statusLabel; ?></span>
@@ -2226,6 +1529,11 @@ $activePage = 'overview';
             </div>
           </div>
 
+</section>
+
+  <!-- CALENDAR SCHEDULE -->
+  <section id="calendar-schedule" class="content-section">
+    <?php include __DIR__ . '/calendar/events-calendar.php'; ?>
   </section>
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ CLIENT & PET DATABASE TAB �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
@@ -2341,21 +1649,29 @@ $activePage = 'overview';
             </div>
           </div>
 
-          <!-- Right: Profile -->
-          <div class="panel profile-panel">
-            <div id="profileContent">
-              <div class="profile-empty">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <p>Select a client to view their profile</p>
-              </div>
-            </div>
           </div>
-
-        </div>
       </div>
 
       <!-- Row menu popup -->
       <div class="cpd row-menu-pop" id="rowMenuPop"></div>
+
+      <!-- Client Profile Drawer (right drawer, appointments style) -->
+      <div id="clientProfileModal" class="modal cpd cd-drawer">
+        <div class="sd-dialog">
+          <div class="sd-dialog-content" role="dialog" aria-modal="true">
+            <button type="button" class="sd-dialog-close" onclick="closeModal('clientProfileModal')" aria-label="Close">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+            <div class="sd-dialog-header">
+              <h2 class="sd-dialog-title">Client Profile</h2>
+              <p class="sd-dialog-description">Review client information and registered pets.</p>
+            </div>
+            <div class="sd-field-group">
+              <div id="profileContent"></div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- Add Client Modal (shadcn Dialog) -->
       <style>
@@ -2516,6 +1832,15 @@ $activePage = 'overview';
     /* Header alignment */
     .page-header { max-width:1550px; margin:0 auto; }
     .content-section { max-width:1550px; margin:0 auto; }
+
+    /* Aether analytics dashboard: full-page white, attached to the page (no gray gutter / no centering) */
+    #analytics.aether-analytics {
+      margin:-1.75rem -2rem;
+      width:calc(100% + 4rem);
+      max-width:none;
+      background:#ffffff;
+      min-height:calc(100vh - var(--topbar-h, 64px));
+    }
 
     /* Appointment Records Table - Enhanced UI */
     #appointments.content-section {
@@ -3146,6 +2471,8 @@ $activePage = 'overview';
     #appointments .appt-table .client-name { font-family:'Inter','Segoe UI',sans-serif; font-weight:600; color:#18181b; font-size:14px; }
     #appointments .appt-table .client-id { font-family:'Inter','Segoe UI',sans-serif; font-size:12px; color:#71717a; margin-top:2px; }
     #appointments .appt-table .contact-main { font-family:'Inter','Segoe UI',sans-serif; color:#18181b; font-weight:500; font-size:14px; }
+    #appointments .appt-table .contact-main.contact-normal { font-weight:400; }
+    #appointments .appt-table .contact-main.contact-name { font-weight:600; }
     #appointments .appt-table .contact-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:12px; color:#71717a; margin-top:2px; }
     #appointments .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
     #appointments .th-sort:hover{ background:#f4f4f5; color:#18181b; }
@@ -3446,20 +2773,30 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
           </div>
 
-          <!-- Right: Report Details drawer -->
-          <div class="panel profile-panel">
-            <div id="rptDetailContent">
-              <div class="profile-empty">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                <p>Select a report to view its details</p>
-              </div>
-            </div>
           </div>
 
         </div>
       </div>
     </div>
   </section>
+
+  <!-- Report Details Drawer (right drawer, appointments style) -->
+  <div id="rptDetailsModal" class="modal cpd cd-drawer">
+    <div class="sd-dialog">
+      <div class="sd-dialog-content" role="dialog" aria-modal="true">
+        <button type="button" class="sd-dialog-close" onclick="closeModal('rptDetailsModal')" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title">Report Details</h2>
+          <p class="sd-dialog-description">Review report information and case details.</p>
+        </div>
+        <div class="sd-field-group">
+          <div id="rptDetailContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
   var RPT_ITEMS = <?php echo json_encode($reportItems, $jsonFlags); ?>;
@@ -3482,6 +2819,30 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
           <!-- Center: Database -->
           <div class="panel db-panel">
+            <!-- Overview KPIs -->
+            <div class="kpis">
+              <div class="kpi-card">
+                <p class="kpi-label">Total Pending</p>
+                <div class="kpi-value"><?php echo $pendingCounts['all']; ?></div>
+                <p class="kpi-sub">Awaiting DCVS action</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">High Priority</p>
+                <div class="kpi-value"><?php echo $pendingCounts['high']; ?></div>
+                <p class="kpi-sub">Needs urgent review</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">New This Week</p>
+                <div class="kpi-value"><?php echo $pendingCounts['week']; ?></div>
+                <p class="kpi-sub">Validated in 7 days</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Awaiting Confirmation</p>
+                <div class="kpi-value"><?php echo $pendingCounts['all']; ?></div>
+                <p class="kpi-sub">Barangay-verified</p>
+              </div>
+            </div>
+
             <!-- Toolbar -->
             <div class="db-toolbar">
                 <div class="search-grow-wrap">
@@ -3507,30 +2868,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                   </div>
                 </div>
               </div>
-
-            <!-- Overview KPIs -->
-            <div class="kpis">
-              <div class="kpi-card">
-                <p class="kpi-label">Total Pending</p>
-                <div class="kpi-value"><?php echo $pendingCounts['all']; ?></div>
-                <p class="kpi-sub">Awaiting DCVS action</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">High Priority</p>
-                <div class="kpi-value"><?php echo $pendingCounts['high']; ?></div>
-                <p class="kpi-sub">Needs urgent review</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">New This Week</p>
-                <div class="kpi-value"><?php echo $pendingCounts['week']; ?></div>
-                <p class="kpi-sub">Validated in 7 days</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">Awaiting Confirmation</p>
-                <div class="kpi-value"><?php echo $pendingCounts['all']; ?></div>
-                <p class="kpi-sub">Barangay-verified</p>
-              </div>
-            </div>
               <div class="db-table-area">
                 <div id="penTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
@@ -3563,20 +2900,28 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
           </div>
 
-          <!-- Right: Case Details drawer -->
-          <div class="panel profile-panel">
-            <div id="penDetailContent">
-              <div class="profile-empty">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                <p>Select a pending report to review it</p>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
   </section>
+
+  <!-- Pending Case Details Drawer -->
+  <div id="penDetailsModal" class="modal cpd cd-drawer">
+    <div class="sd-dialog">
+      <div class="sd-dialog-content" role="dialog" aria-modal="true">
+        <button type="button" class="sd-dialog-close" onclick="closeModal('penDetailsModal')" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title">Pending Case Details</h2>
+          <p class="sd-dialog-description">Review the pending report details.</p>
+        </div>
+        <div class="sd-field-group">
+          <div id="penDetailContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
   var PENDING_ITEMS = <?php echo json_encode($pendingItems, $jsonFlags); ?>;
@@ -3592,6 +2937,30 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
           <!-- Center: Database -->
           <div class="panel db-panel">
+            <!-- Overview KPIs -->
+            <div class="kpis">
+              <div class="kpi-card">
+                <p class="kpi-label">Total Active</p>
+                <div class="kpi-value"><?php echo $activeCounts['all']; ?></div>
+                <p class="kpi-sub">Currently being handled</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">High Priority</p>
+                <div class="kpi-value"><?php echo $activeCounts['high']; ?></div>
+                <p class="kpi-sub">Needs urgent action</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Scheduled</p>
+                <div class="kpi-value"><?php echo $activeCounts['sched']; ?></div>
+                <p class="kpi-sub">Have a set schedule</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Overdue</p>
+                <div class="kpi-value"><?php echo $activeCounts['overdue']; ?></div>
+                <p class="kpi-sub">Past scheduled date</p>
+              </div>
+            </div>
+
             <!-- Toolbar -->
             <div class="db-toolbar">
                 <div class="search-grow-wrap">
@@ -3617,30 +2986,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                   </div>
                 </div>
               </div>
-
-            <!-- Overview KPIs -->
-            <div class="kpis">
-              <div class="kpi-card">
-                <p class="kpi-label">Total Active</p>
-                <div class="kpi-value"><?php echo $activeCounts['all']; ?></div>
-                <p class="kpi-sub">Currently being handled</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">High Priority</p>
-                <div class="kpi-value"><?php echo $activeCounts['high']; ?></div>
-                <p class="kpi-sub">Needs urgent action</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">Scheduled</p>
-                <div class="kpi-value"><?php echo $activeCounts['sched']; ?></div>
-                <p class="kpi-sub">Have a set schedule</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">Overdue</p>
-                <div class="kpi-value"><?php echo $activeCounts['overdue']; ?></div>
-                <p class="kpi-sub">Past scheduled date</p>
-              </div>
-            </div>
               <div class="db-table-area">
                 <div id="actTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
@@ -3668,20 +3013,29 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
           </div>
 
-          <!-- Right: Case Details drawer -->
-          <div class="panel profile-panel">
-            <div id="actDetailContent">
-              <div class="profile-empty">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                <p>Select an active case to view its details</p>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
   </section>
+
+  <!-- Active Case Details Drawer -->
+  <div id="actDetailsModal" class="modal cpd cd-drawer">
+    <div class="sd-dialog">
+      <div class="sd-dialog-content" role="dialog" aria-modal="true">
+        <button type="button" class="sd-dialog-close" onclick="closeModal('actDetailsModal')" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title">Active Case Details</h2>
+          <p class="sd-dialog-description">Review the active case details.</p>
+        </div>
+        <div class="sd-field-group">
+          <div id="actDetailContent"></div>
+        </div>
+        <div class="sd-dialog-footer" id="actDrawerFooter"></div>
+      </div>
+    </div>
+  </div>
 
   <script>
   var ACTIVE_ITEMS = <?php echo json_encode($activeItems, $jsonFlags); ?>;
@@ -3697,6 +3051,30 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
           <!-- Center: Database -->
           <div class="panel db-panel">
+            <!-- Overview KPIs -->
+            <div class="kpis">
+              <div class="kpi-card">
+                <p class="kpi-label">Resolved Cases</p>
+                <div class="kpi-value"><?php echo $resolvedCounts['all']; ?></div>
+                <p class="kpi-sub">Completed cases</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Resolved This Month</p>
+                <div class="kpi-value"><?php echo $resolvedCounts['month']; ?></div>
+                <p class="kpi-sub">Current month</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Resolved This Year</p>
+                <div class="kpi-value"><?php echo $resolvedCounts['year']; ?></div>
+                <p class="kpi-sub">Since Jan 1</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">High Priority</p>
+                <div class="kpi-value"><?php echo $resolvedCounts['high']; ?></div>
+                <p class="kpi-sub">Urgent, now closed</p>
+              </div>
+            </div>
+
             <!-- Toolbar -->
             <div class="db-toolbar">
                 <div class="search-grow-wrap">
@@ -3722,30 +3100,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                   </div>
                 </div>
               </div>
-
-            <!-- Overview KPIs -->
-            <div class="kpis">
-              <div class="kpi-card">
-                <p class="kpi-label">Resolved Cases</p>
-                <div class="kpi-value"><?php echo $resolvedCounts['all']; ?></div>
-                <p class="kpi-sub">Completed cases</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">Resolved This Month</p>
-                <div class="kpi-value"><?php echo $resolvedCounts['month']; ?></div>
-                <p class="kpi-sub">Current month</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">Resolved This Year</p>
-                <div class="kpi-value"><?php echo $resolvedCounts['year']; ?></div>
-                <p class="kpi-sub">Since Jan 1</p>
-              </div>
-              <div class="kpi-card">
-                <p class="kpi-label">High Priority</p>
-                <div class="kpi-value"><?php echo $resolvedCounts['high']; ?></div>
-                <p class="kpi-sub">Urgent, now closed</p>
-              </div>
-            </div>
               <div class="db-table-area">
                 <div id="resTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
@@ -3778,20 +3132,28 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
           </div>
 
-          <!-- Right: Case Details drawer -->
-          <div class="panel profile-panel">
-            <div id="resDetailContent">
-              <div class="profile-empty">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                <p>Select a resolved case to view its history</p>
-              </div>
-            </div>
-          </div>
-
         </div>
       </div>
     </div>
   </section>
+
+  <!-- Resolved Case Details Drawer -->
+  <div id="resDetailsModal" class="modal cpd cd-drawer">
+    <div class="sd-dialog">
+      <div class="sd-dialog-content" role="dialog" aria-modal="true">
+        <button type="button" class="sd-dialog-close" onclick="closeModal('resDetailsModal')" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title">Resolved Case Details</h2>
+          <p class="sd-dialog-description">Review the resolved case history.</p>
+        </div>
+        <div class="sd-field-group">
+          <div id="resDetailContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script>
   var RESOLVED_ITEMS = <?php echo json_encode($resolvedItems, $jsonFlags); ?>;
@@ -3801,6 +3163,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   initCaseDB({
     p: 'pen',
     section: 'reports-pending',
+    modalId: 'penDetailsModal',
     data: PENDING_ITEMS,
     pageLabel: 'pending',
     emptyText: 'No pending cases match your filters.',
@@ -3844,17 +3207,15 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       var photoHtml = r.photo
         ? '<div class="rpt-photo-box"><div class="rpt-photo-thumb" onclick="penViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div></div>'
         : '<p class="rpt-photo-none">No attachments.</p>';
-      return '<div class="rpt-detail-header">' +
-        '<div style="min-width:0;"><div class="rpt-detail-ref">' + casEsc(r.ref) + '</div>' +
-        '<div class="rpt-detail-type">' + casTypeBadge(r.type, r.typeLabel) + '</div></div>' +
-        casStatusPill('pending') + '</div>' +
-        '<div class="rpt-tabs">' +
+      return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="penDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="attachments" onclick="penDetailGo(\'attachments\')">Attachments</button>' +
         '<button class="rpt-tab" data-tab="history" onclick="penDetailGo(\'history\')">History</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
+
+        '<div class="rpt-detail-ref" style="margin-bottom:14px;">' + casEsc(r.ref) + '</div>' +
 
         '<div class="rpt-detail-grid">' +
 
@@ -3926,6 +3287,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   initCaseDB({
     p: 'act',
     section: 'reports-active',
+    modalId: 'actDetailsModal',
     data: ACTIVE_ITEMS,
     pageLabel: 'cases',
     emptyText: 'No active cases match your filters.',
@@ -3973,17 +3335,15 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       var photoHtml = r.photo
         ? '<div class="rpt-photo-box"><div class="rpt-photo-thumb" onclick="actViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div></div>'
         : '<p class="rpt-photo-none">No attachments.</p>';
-      return '<div class="rpt-detail-header">' +
-        '<div style="min-width:0;"><div class="rpt-detail-ref">' + casCaseId(r) + ' &middot; ' + casEsc(r.ref) + '</div>' +
-        '<div class="rpt-detail-type">' + casTypeBadge(r.type, r.typeLabel) + '</div></div>' +
-        casStatusPill('active') + '</div>' +
-        '<div class="rpt-tabs">' +
+      return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="actDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="attachments" onclick="actDetailGo(\'attachments\')">Attachments</button>' +
         '<button class="rpt-tab" data-tab="history" onclick="actDetailGo(\'history\')">History</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
+
+        '<div class="rpt-detail-ref" style="margin-bottom:14px;">' + casEsc(r.ref) + '</div>' +
 
         '<div class="rpt-detail-grid">' +
 
@@ -4025,12 +3385,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
         '</div>' +
 
-        '<div class="profile-footer">' +
-        '<button class="btn" onclick="actViewGeo(\'' + casEsc(r.brgy) + '\')">View Location</button>' +
-        '<button class="btn btn-primary" onclick="openResolveModal(' + r.caseId + ', \'' + casEsc(r.typeLabel).replace(/'/g, '\\\'') + '\', \'' + casEsc(r.reporter).replace(/'/g, '\\\'') + '\')">Mark Resolved</button>' +
-        '</div>' +
-        '</div>' +
-
         '<div class="rpt-detail-body" data-tab="attachments" style="display:none;">' +
         '<div class="rpt-section-title">Attachments</div>' + photoHtml +
         '</div>' +
@@ -4041,6 +3395,10 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
           return '<li>' + casEsc(h.t) + '<span class="h-date">' + casEsc(h.d) + '</span></li>';
         }).join('') + '</ul>' +
         '</div>';
+    },
+    drawerFooter: function (r) {
+      return '<button class="sd-btn sd-btn-outline" onclick="actViewGeo(\'' + casEsc(r.brgy) + '\')">View Location</button>' +
+        '<button class="sd-btn sd-btn-default" onclick="openResolveModal(' + r.caseId + ', \'' + casEsc(r.typeLabel).replace(/'/g, '\\\'') + '\', \'' + casEsc(r.reporter).replace(/'/g, '\\\'') + '\')">Mark Resolved</button>';
     },
     menuHtml: function (r) {
       return '<button class="row-menu-item" onclick="actSelect(' + r.id + ');caseCloseActions()">View Report</button>' +
@@ -4053,6 +3411,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   initCaseDB({
     p: 'res',
     section: 'reports-resolved',
+    modalId: 'resDetailsModal',
     data: RESOLVED_ITEMS,
     pageLabel: 'cases',
     emptyText: 'No resolved cases match your filters.',
@@ -4100,17 +3459,15 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       var photoHtml = r.photo
         ? '<div class="rpt-photo-box"><div class="rpt-photo-thumb" onclick="resViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div></div>'
         : '<p class="rpt-photo-none">No attachments.</p>';
-      return '<div class="rpt-detail-header">' +
-        '<div style="min-width:0;"><div class="rpt-detail-ref">' + casCaseId(r) + ' &middot; ' + casEsc(r.ref) + '</div>' +
-        '<div class="rpt-detail-type">' + casTypeBadge(r.type, r.typeLabel) + '</div></div>' +
-        casStatusPill('resolved') + '</div>' +
-        '<div class="rpt-tabs">' +
+      return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="resDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="attachments" onclick="resDetailGo(\'attachments\')">Attachments</button>' +
         '<button class="rpt-tab" data-tab="history" onclick="resDetailGo(\'history\')">History</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
+
+        '<div class="rpt-detail-ref" style="margin-bottom:14px;">' + casEsc(r.ref) + '</div>' +
 
         '<div class="rpt-detail-grid">' +
 
@@ -4395,14 +3752,21 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 <!-- Schedule Appointment Modal -->
 <!-- Review Appointment Request Modal (shadcn Dialog) -->
 <style>
-  #addAppointmentModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
-  #addAppointmentModal.modal.active{ opacity:1; visibility:visible; }
-  #appointmentDetailsModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
-  #addAppointmentModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
-  #addAppointmentModal .sd-dialog-content{ max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; }
-  #addAppointmentModal.active .sd-dialog-content{ transform:translateX(0); }
-  #appointmentDetailsModal .sd-dialog-content{ max-width:470px; gap:20px; }
+  /* Appointment Details = right drawer */
+  #appointmentDetailsModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
+  #appointmentDetailsModal.modal.active{ opacity:1; visibility:visible; }
+  #appointmentDetailsModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
+  #appointmentDetailsModal .sd-dialog-content{ max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; }
+  #appointmentDetailsModal.active .sd-dialog-content{ transform:translateX(0); }
+  /* Review Requests = centered dialog */
+  #addAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
+  #addAppointmentModal .sd-dialog-content{ max-width:470px; gap:20px; }
+  /* Details content layout (kept on the drawer) */
   #appointmentDetailsModal .sd-field-group{ gap:22px; }
+  #appointmentDetailsModal .ec-detail-rows{ display:flex; flex-direction:column; gap:16px; }
+  #appointmentDetailsModal .ec-detail-row{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  #appointmentDetailsModal .ec-detail-row .sd-label{ margin:0; }
+  #appointmentDetailsModal .ec-detail-row .sd-value{ text-align:right; }
 .sd-field-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px 20px; }
 .sd-detail-cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px 36px; }
 .sd-detail-cols > div{ display:flex; flex-direction:column; gap:16px; }
@@ -4574,40 +3938,15 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </button>
           </div>
         </div>
-        <div class="sd-detail-cols">
-          <div>
-            <div class="sd-field">
-              <span class="sd-label">Email</span>
-              <span id="detailEmail" class="sd-value">-</span>
-            </div>
-            <div class="sd-field">
-              <span class="sd-label">Barangay</span>
-              <span id="detailBrgy" class="sd-value">-</span>
-            </div>
-            <div class="sd-field">
-              <span class="sd-label">Time</span>
-              <span id="detailTime" class="sd-value">-</span>
-            </div>
-          </div>
-          <div>
-            <div class="sd-field">
-              <span class="sd-label">Phone</span>
-              <span id="detailPhone" class="sd-value">-</span>
-            </div>
-            <div class="sd-field">
-              <span class="sd-label">Date</span>
-              <span id="detailDate" class="sd-value">-</span>
-            </div>
-            <div class="sd-field">
-              <span class="sd-label">Status</span>
-              <span id="detailStatus" class="sd-value">-</span>
-            </div>
-          </div>
+        <div class="ec-detail-rows">
+          <div class="ec-detail-row"><span class="sd-label">Email</span><span id="detailEmail" class="sd-value">-</span></div>
+          <div class="ec-detail-row"><span class="sd-label">Barangay</span><span id="detailBrgy" class="sd-value">-</span></div>
+          <div class="ec-detail-row"><span class="sd-label">Time</span><span id="detailTime" class="sd-value">-</span></div>
+          <div class="ec-detail-row"><span class="sd-label">Phone</span><span id="detailPhone" class="sd-value">-</span></div>
+          <div class="ec-detail-row"><span class="sd-label">Date</span><span id="detailDate" class="sd-value">-</span></div>
+          <div class="ec-detail-row"><span class="sd-label">Status</span><span id="detailStatus" class="sd-value">-</span></div>
         </div>
-        <div class="sd-field">
-          <span class="sd-label">Address</span>
-          <div id="detailAddress" class="sd-value" style="background:#f8fafc; border:1px solid #e4e4e7; border-radius:6px; padding:10px 12px;">-</div>
-        </div>
+        <div class="ec-detail-row"><span class="sd-label">Address</span><span id="detailAddress" class="sd-value">-</span></div>
         <div class="sd-field">
           <span class="sd-label">Pet</span>
           <div id="detailPet" class="sd-value">-</div>
@@ -4631,33 +3970,40 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </div>
 </div>
 
-<!-- Resolve Case Modal -->
+<!-- Resolve Case Modal (shadcn dialog) -->
 <div class="modal" id="resolveModal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h2>Mark Case as Resolved</h2>
-      <button class="modal-close" onclick="closeModal('resolveModal')"><i class="fas fa-times"></i></button>
+  <div class="sd-dialog">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" style="max-width:470px;">
+      <button type="button" class="sd-dialog-close" onclick="closeModal('resolveModal')" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+      <div class="sd-dialog-header">
+        <h2 class="sd-dialog-title">Mark Case as Resolved</h2>
+        <p class="sd-dialog-description">Mark the case as resolved to close it and notify the resident and barangay.</p>
+      </div>
+      <form id="resolveForm" action="resolve-report.php" method="POST" style="display:contents;">
+        <div class="sd-field-group">
+          <input type="hidden" name="case_id" id="resolveCaseId" value="">
+          <div class="sd-field">
+            <div style="background:#eef6f0;border:1px solid #b8d1c0;border-radius:8px;padding:12px 16px;">
+              <p style="margin:0;font-size:14px;color:#065f46;line-height:1.5;">
+                <i class="fas fa-info-circle"></i>
+                You are about to mark the <strong id="resolveCaseRef">case</strong> as resolved.
+                This will close the case and notify the resident and barangay.
+              </p>
+            </div>
+          </div>
+          <div class="sd-field">
+            <span class="sd-label">Resolution Notes</span>
+            <textarea name="notes" rows="4" class="sd-input" placeholder="Describe how the case was resolved (e.g., animal rescued, owner found, treatment completed)..."></textarea>
+          </div>
+        </div>
+        <div class="sd-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('resolveModal')">Cancel</button>
+          <button type="submit" class="sd-btn sd-btn-default"><i class="fas fa-check"></i> Mark as Resolved</button>
+        </div>
+      </form>
     </div>
-    <form class="modal-form" id="resolveForm" action="resolve-report.php" method="POST">
-      <div class="modal-body">
-        <input type="hidden" name="case_id" id="resolveCaseId" value="">
-        <div style="background:#eef6f0; border:1px solid #b8d1c0; border-radius:8px; padding:12px 16px; margin-bottom:1rem;">
-          <p style="margin:0; font-size:0.88rem; color:#065f46;">
-            <i class="fas fa-info-circle"></i>
-            You are about to mark the <strong id="resolveCaseRef">case</strong> as resolved.
-            This will close the case and notify the resident and barangay.
-          </p>
-        </div>
-        <div class="form-group">
-          <label>Resolution Notes</label>
-          <textarea name="notes" rows="4" class="form-control" placeholder="Describe how the case was resolved (e.g., animal rescued, owner found, treatment completed)..." style="width:100%;"></textarea>
-        </div>
-      </div>
-      <div class="modal-actions">
-        <button type="submit" class="btn-primary"><i class="fas fa-check"></i> Mark as Resolved</button>
-        <button type="button" class="btn-secondary" onclick="closeModal('resolveModal')">Cancel</button>
-      </div>
-    </form>
   </div>
 </div>
 
@@ -5108,171 +4454,6 @@ document.addEventListener('DOMContentLoaded', function() {
 function initCharts() {
     Chart.defaults.font.family = "'Inter', sans-serif";
     Chart.defaults.color = '#64748b';
-
-    // Crosshair plugin (vertical guideline on hover)
-    const crosshairPlugin = {
-      id: 'crosshair',
-      afterDraw: function(chart) {
-        const tooltip = chart.tooltip;
-        if (!tooltip || !tooltip._active || !tooltip._active.length) return;
-        const ctx = chart.ctx;
-        const activePoint = tooltip._active[0];
-        const x = activePoint.element.x;
-        const yScale = chart.scales.y;
-        ctx.save();
-        ctx.setLineDash([5, 4]);
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.45)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, yScale.top);
-        ctx.lineTo(x, yScale.bottom);
-        ctx.stroke();
-        ctx.restore();
-      }
-    };
-
-
-
-    // Monthly Activity (Jan-Dec) â�,��?� dynamic year selector
-    (function() {
-      var allData = <?php echo json_encode($yearlyDatasets); ?>;
-      var labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      var chartInstance = null;
-      var select = document.getElementById('yearSelect');
-
-      function buildChart(year) {
-        var rawData = allData[year] ? allData[year].reports : [];
-        var maxVal = Math.max.apply(null, rawData.concat([1]));
-        var chartMax = maxVal <= 20 ? 50 : maxVal <= 50 ? 75 : maxVal <= 100 ? 100 : Math.ceil(maxVal / 50) * 50;
-        var shadowData = rawData.map(function(v) { return +(v * 0.6).toFixed(2); });
-
-        var ctx = document.getElementById('monthlyChart');
-        if (!ctx) return;
-
-        if (chartInstance) chartInstance.destroy();
-
-        chartInstance = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels: labels,
-            datasets: [
-              {
-                label: '',
-                data: shadowData,
-                borderColor: 'transparent',
-                backgroundColor: function(ctx) {
-                  var chart = ctx.chart;
-                  var ca = chart.chartArea;
-                  if (!ca) return 'rgba(30,41,59,0.06)';
-                  var g = chart.ctx.createLinearGradient(0, ca.top, 0, ca.bottom);
-                  g.addColorStop(0, 'rgba(30,41,59,0.13)');
-                  g.addColorStop(1, 'rgba(30,41,59,0.00)');
-                  return g;
-                },
-                borderWidth: 0,
-                pointRadius: 0,
-                tension: 0.3,
-                fill: true
-              },
-              {
-                label: 'Reports',
-                data: rawData,
-                borderColor: '#334155',
-                backgroundColor: function(ctx) {
-                  var chart = ctx.chart;
-                  var ca = chart.chartArea;
-                  if (!ca) return 'rgba(30,41,59,0.18)';
-                  var g = chart.ctx.createLinearGradient(0, ca.top, 0, ca.bottom);
-                  g.addColorStop(0, 'rgba(30,41,59,0.28)');
-                  g.addColorStop(1, 'rgba(30,41,59,0.01)');
-                  return g;
-                },
-                borderWidth: 1.5,
-                pointRadius: 0,
-                pointHoverRadius: 4,
-                pointHoverBackgroundColor: '#334155',
-                pointHoverBorderColor: '#fff',
-                pointHoverBorderWidth: 2,
-                tension: 0.3,
-                fill: true
-              }
-            ]
-          },
-          plugins: [crosshairPlugin],
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                backgroundColor: '#1e293b',
-                titleColor: '#94a3b8',
-                bodyColor: '#f8fafc',
-                titleFont: { size: 11, weight: '500' },
-                bodyFont: { size: 12, weight: '700' },
-                padding: 10,
-                cornerRadius: 8,
-                displayColors: false,
-                callbacks: {
-                  title: function(items) { return items[0].label; },
-                  label: function(item) {
-                    if (item.datasetIndex === 1)
-                      return item.raw + ' report' + (item.raw !== 1 ? 's' : '');
-                    return null;
-                  }
-                },
-                filter: function(item) { return item.datasetIndex === 1; }
-              }
-            },
-            scales: {
-              y: {
-                display: true,
-                beginAtZero: true,
-                max: chartMax,
-                grid: { color: '#f1f5f9', drawBorder: false },
-                ticks: {
-                  font: { size: 10 },
-                  color: '#94a3b8',
-                  precision: 0,
-                  stepSize: Math.max(5, Math.ceil(chartMax / 6 / 5) * 5)
-                }
-              },
-              x: {
-                grid: { display: false },
-                border: { display: false },
-                ticks: {
-                  color: '#94a3b8',
-                  font: { size: 10 },
-                  maxRotation: 0,
-                  autoSkip: true,
-                  maxTicksLimit: 12
-                }
-              }
-            }
-          }
-        });
-
-        // Show/hide rabies advisory
-        var advisory = document.getElementById('rabiesAdvisory');
-        if (advisory) {
-          var threshold = Math.round(chartMax * 0.9);
-          var triggered = rawData.some(function(v) { return v >= threshold; });
-          advisory.style.display = triggered ? 'flex' : 'none';
-        }
-      }
-
-      // Initial build with 2025 (previous year as showcase)
-      buildChart('2025');
-
-      // Rebuild on year change
-      if (select) {
-        select.addEventListener('change', function() {
-          buildChart(this.value);
-        });
-      }
-    })();
-
 }
 
 // Modal Functions
@@ -5498,49 +4679,6 @@ function confirmRemoveAvatar() {
     }
 }
 
-// â�?��,�â�?��,� Barangay Reporting Activity â�?��,�â�?��,�
-var periodLabels = {1:'last 1 day',7:'last 7 days',30:'last 30 days'};
-var vsLabels = {1:'yesterday',7:'previous week',30:'previous month'};
-var selectedBrgyName = null;
-
-function renderBrgyBars(data) {
-  var body = document.getElementById('brgyChartBody');
-  if (!body) return;
-  if (!data || !data.length) {
-    body.innerHTML = '<div class="brgy-empty">No reports in this period.</div>';
-    return;
-  }
-  var rawMax = Math.max.apply(null, data.map(function(d) { return d.total; })) || 1;
-  var ceiling = rawMax <= 20 ? 50 : rawMax <= 50 ? 100 : rawMax <= 100 ? 200 : rawMax <= 200 ? 500 : Math.ceil(rawMax / 1000) * 1000;
-  var html = '';
-  var maxRabies = 0;
-  data.forEach(function(br) {
-    var pct = Math.min(Math.round(br.total / ceiling * 100), 100);
-    var sel = selectedBrgyName === br.name ? ' selected' : '';
-    html += '<div class="brgy-bar-item' + sel + '" data-name="' + br.name + '" data-total="' + br.total + '"';
-    html += ' data-stray="' + br.stray + '" data-rabies="' + br.rabies + '" data-injured="' + br.injured + '" data-dead="' + br.dead + '"';
-    html += ' data-pending="' + br.pending + '" data-validated="' + br.validated + '" data-confirmed="' + br.confirmed + '"';
-    html += ' data-resolved="' + br.resolved + '" data-rejected="' + br.rejected + '">';
-    html += '<div class="brgy-bar-name">' + br.name + '</div>';
-    html += '<div class="brgy-bar-row"><div class="brgy-bar-track"><div class="brgy-bar-fill" style="width:' + pct + '%;"></div></div><span class="brgy-bar-pct">' + pct + '%</span></div>';
-    html += '<div class="brgy-bar-stats"><span>' + br.total + ' Reports</span><span>' + (br.resolved || 0) + ' Resolved</span></div>';
-    html += '</div>';
-    if (br.rabies > maxRabies) maxRabies = br.rabies;
-  });
-  body.innerHTML = html;
-  var advisory = document.getElementById('rabiesAdvisory');
-  if (advisory) {
-    var advThreshold = Math.round(ceiling * 0.9);
-    advisory.style.display = maxRabies >= advThreshold ? 'flex' : 'none';
-  }
-}
-
-// â�?��,�â�?��,� Update Barangay Chart from AJAX â�?��,�â�?��,�
-function updateBrgyChart(data, period) {
-  var periodSpan = document.querySelector('#brgyChartSection .brgy-period-label');
-  if (periodSpan) periodSpan.textContent = 'all reports';
-  renderBrgyBars(data);
-}
 
 // â�?��,�â�?��,� Compact map: dim inactive, highlight active-case barangays â�?��,�â�?��,�
 (function() {
@@ -5728,37 +4866,6 @@ function updateBrgyChart(data, period) {
   }
 })();
 
-// â�?��,�â�?��,� KPI change builder (reusable) â�?��,�â�?��,�
-function buildKpiChangeHtml(cur, prev, pct, vsText) {
-  var dir = cur >= prev ? 'up' : 'down';
-  var arrow = dir === 'up' ? '&#9650;' : '&#9660;';
-  var pctDisplay;
-  if (prev === 0) {
-    pctDisplay = cur === 0 ? '0% change' : 'No previous data';
-  } else {
-    pctDisplay = Math.abs(pct) + '%';
-  }
-  return '<span class="kpi-arrow ' + dir + '">' + arrow + '</span><span class="kpi-pct">' + pctDisplay + '</span><span class="kpi-sub">vs ' + vsText + '</span>';
-}
-
-// Initial render
-var brgyInitialData = <?php echo json_encode(array_map(function($br) {
-    return [
-        'id' => (int)$br['barangay_id'],
-        'name' => $br['barangay_name'],
-        'total' => (int)$br['total'],
-        'stray' => (int)$br['stray'],
-        'rabies' => (int)$br['rabies'],
-        'injured' => (int)$br['injured'],
-        'dead' => (int)$br['dead'],
-        'pending' => (int)$br['pending'],
-        'validated' => (int)$br['validated'],
-        'confirmed' => (int)$br['confirmed'],
-        'resolved' => (int)$br['resolved'],
-        'rejected' => (int)$br['rejected'],
-    ];
-}, $brgyReportData)); ?>;
-renderBrgyBars(brgyInitialData);
 
 // â�?��,�â�?��,� Slot Availability Check â�?��,�â�?��,�
 function checkStaffSlot() {
@@ -5800,45 +4907,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (ft) ft.addEventListener('change', checkStaffSlot);
 });
 
-// â�?��,�â�?��,� Period Toggle (updates KPI cards + barangay chart) â�?��,�â�?��,�
-(function() {
-  var btns = document.querySelectorAll('.kpi-period-btn');
-  if (!btns.length) return;
-  btns.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      btns.forEach(function(b) { b.classList.remove('active'); });
-      this.classList.add('active');
-      var period = this.getAttribute('data-period');
-      var vsText = vsLabels[period] || 'prev 30 days';
-
-      document.querySelector('.kpi-period-label').textContent = 'vs ' + vsText;
-      var subs = document.querySelectorAll('.kpi-sub');
-      for (var i = 0; i < subs.length; i++) subs[i].textContent = 'vs ' + vsText;
-
-      fetch('staff-filter-kpi.php?period=' + period)
-        .then(function(r) { return r.json(); })
-        .then(function(d) {
-          if (d.error) return;
-          // Update KPI cards
-          if (typeof d.curResidents !== 'undefined') {
-            document.getElementById('kpi-residents-change').innerHTML = buildKpiChangeHtml(d.curResidents, d.prevResidents, d.pctResidents, vsText);
-          }
-          if (typeof d.curPets !== 'undefined') {
-            document.getElementById('kpi-pets-change').innerHTML = buildKpiChangeHtml(d.curPets, d.prevPets, d.pctPets, vsText);
-          }
-          if (typeof d.curReports !== 'undefined') {
-            document.getElementById('kpi-reports-change').innerHTML = buildKpiChangeHtml(d.curReports, d.prevReports, d.pctReports, vsText);
-          }
-          if (typeof d.curRabies !== 'undefined') {
-            document.getElementById('kpi-rabies-change').innerHTML = buildKpiChangeHtml(d.curRabies, d.prevRabies, d.pctRabies, vsText);
-          }
-          // Update barangay chart
-          if (typeof updateBrgyChart === 'function' && d.brgyData) updateBrgyChart(d.brgyData, period);
-        })
-        .catch(function() {});
-    });
-  });
-})();
 
 
 // �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�

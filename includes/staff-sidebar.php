@@ -94,6 +94,15 @@ $sbModules = [
         'title' => 'Operations',
         'sections' => [
             [
+                'title' => 'Analytics', 'icon' => 'fa-chart-line',
+                'items' => [
+                    sbItem('Cases Analytics', 'fa-chart-pie', ['section' => 'analytics', 'href' => 'dashboard-staff.php#analytics', 'fn' => 'aethGo', 'arg' => 'engine']),
+                    sbItem('Appointment Overview', 'fa-calendar-check', ['section' => 'analytics', 'href' => 'dashboard-staff.php#analytics', 'fn' => 'aethGo', 'arg' => 'intel']),
+                    sbItem('Adoption Insights', 'fa-paw', ['section' => 'analytics', 'href' => 'dashboard-staff.php#analytics', 'fn' => 'aethGo', 'arg' => 'budget']),
+                    sbItem('Programs & Services', 'fa-layer-group', ['section' => 'analytics', 'href' => 'dashboard-staff.php#analytics', 'fn' => 'aethGo', 'arg' => 'architect']),
+                ],
+            ],
+            [
                 'title' => 'Reports', 'icon' => 'fa-file-medical-alt',
                 'items' => [
                     sbItem('All Reports', 'fa-list', ['section' => 'reports-all', 'href' => 'dashboard-staff.php#reports-all']),
@@ -106,6 +115,7 @@ $sbModules = [
                 'title' => 'Appointments', 'icon' => 'fa-calendar-alt',
                 'items' => [
                     sbItem('Appointment Requests', 'fa-calendar-check', ['section' => 'appointments', 'href' => 'dashboard-staff.php#appointments']),
+                    sbItem('Calendar Schedule', 'fa-calendar-day', ['section' => 'calendar-schedule', 'href' => 'dashboard-staff.php#calendar-schedule']),
                 ],
             ],
             [
@@ -491,8 +501,8 @@ window.SB2_CONFIG = {
   // ── Module activation ──
   // Maps dashboard-staff.php hash sections to sidebar modules
   var sectionToModule = {
-    'overview': 'operations', 'users': 'operations',
-    'appointments': 'operations',
+    'analytics': 'operations', 'overview': 'operations', 'users': 'operations',
+    'appointments': 'operations', 'calendar-schedule': 'operations',
     'client-pets': 'operations',
     'reports-all': 'operations', 'reports-pending': 'operations',
     'reports-active': 'operations', 'reports-resolved': 'operations',

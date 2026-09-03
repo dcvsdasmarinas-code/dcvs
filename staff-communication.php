@@ -200,9 +200,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resend_log_id'])) {
 if (isset($_GET['ajax_logs'])) {
     header('Content-Type: application/json');
     $page   = max(1, intval($_GET['page'] ?? 1));
-    $perPage = max(1, intval($_GET['per_page'] ?? 8));
+    $perPage = max(1, intval($_GET['per_page'] ?? 20));
     $search = trim($_GET['search'] ?? '');
     $type   = trim($_GET['type'] ?? '');
+    $sortCol = $_GET['sort'] ?? 'date';
+    $sortDir = strtolower($_GET['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
+    $sortMap = [
+        'date' => 'el.created_at', 'time' => 'el.created_at',
+        'recipient' => 'el.recipient_name', 'email' => 'el.recipient_email',
+        'subject' => 'el.subject', 'type' => 'el.message_type',
+        'delivery' => 'el.status'
+    ];
+    $orderBy = ($sortMap[$sortCol] ?? 'el.created_at') . ' ' . $sortDir;
 
     $where = "el.sent_by = ?";
     $params = [$staffId];
@@ -231,7 +240,7 @@ if (isset($_GET['ajax_logs'])) {
 
     $offset = ($page - 1) * $perPage;
     $logs = [];
-    $logStmt = $conn->prepare("SELECT el.* FROM email_logs el WHERE $where ORDER BY el.created_at DESC LIMIT ? OFFSET ?");
+    $logStmt = $conn->prepare("SELECT el.* FROM email_logs el WHERE $where ORDER BY $orderBy, el.log_id DESC LIMIT ? OFFSET ?");
     if ($logStmt) {
         $logStmt->bind_param($types . 'ii', ...[...$params, $perPage, $offset]);
         $logStmt->execute();
@@ -299,7 +308,7 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
       --comm-type-other: #94a3b8;
     }
 
-    body.staff-theme { background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%); }
+    body.staff-theme { background: #ffffff; }
 
     .comm-page { padding-bottom: 3rem; }
 
@@ -318,7 +327,8 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-alert i { margin-top: 2px; }
 
     /* ── Search & Filter toolbar ── */
-    .comm-toolbar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; background: var(--comm-card); border: 1px solid var(--comm-border); border-radius: 12px; padding: 0.85rem 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.04); margin-bottom: 1.1rem; }
+    .comm-toolbar { display: flex; align-items: center; justify-content: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .comm-toolbar .comm-toolbar-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
     .comm-search { position: relative; flex: 0 1 320px; min-width: 200px; max-width: 320px; }
     .comm-search .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--comm-text-3); font-size: 0.85rem; pointer-events: none; }
     .comm-search input { width: 100%; box-sizing: border-box; padding: 0.6rem 0.85rem 0.6rem 2.3rem; border: 1.5px solid var(--comm-border); border-radius: 9px; font-family: inherit; font-size: 0.86rem; color: var(--comm-text); background: #fff; transition: border-color 0.2s, box-shadow 0.2s; }
@@ -326,21 +336,24 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-filter select { max-width: 180px; padding: 0.6rem 2rem 0.6rem 0.85rem; border: 1.5px solid var(--comm-border); border-radius: 9px; font-family: inherit; font-size: 0.86rem; color: var(--comm-text-2); background: #fff; cursor: pointer; transition: border-color 0.2s; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 0.7rem center; }
     .comm-filter select:focus { outline: none; border-color: var(--comm-primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
     .comm-count { margin-left: auto; font-size: 0.8rem; color: var(--comm-text-3); font-weight: 500; white-space: nowrap; }
-    .comm-card .sd-data-table-wrap > .comm-toolbar { margin-bottom: 0; border: none; border-bottom: 1px solid var(--comm-border); border-radius: 0; box-shadow: none; padding: 12px 16px; background: #fff; }
-    .comm-card .sd-data-table-wrap > .comm-toolbar .btn-compose { margin-left: auto; }
 
     /* ── History card ── */
-    .comm-card { background: var(--comm-card); border: 1px solid var(--comm-border); border-radius: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); overflow: hidden; display: flex; flex-direction: column; }
+    .comm-card { background: #fff; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; }
 
     /* ── History table (shadcn) ── */
     .comm-card .sd-data-table-wrap { overflow-x: auto; min-height: 31.5rem; flex: 1; }
-    .comm-card .sd-data-table { width: 100%; border-collapse: collapse; }
+    .comm-card .sd-data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .comm-card .sd-data-table .sd-tr { border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
     .comm-card .sd-data-table .sd-tr:last-child { border-bottom: none; }
     .comm-card .sd-data-table tbody .sd-tr:hover { background: #f8fafc; }
-    .comm-card .sd-th { height: 40px; padding: 0 12px; text-align: left; vertical-align: middle; font-family: inherit; font-size: 14px; font-weight: 700; color: #000; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
-    .comm-card .sd-th:nth-child(1) { width: 128px; }
-    .comm-card .sd-th:nth-child(3) { width: 150px; }
+    .comm-card .sd-th { height: 40px; padding: 0 8px; text-align: left; vertical-align: middle; font-family: inherit; font-size: 14px; font-weight: 700; color: #000; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
+    .comm-card .sd-th:nth-child(1) { width: 110px; }
+    .comm-card .sd-th:nth-child(2) { width: 85px; }
+    .comm-card .sd-th:nth-child(3) { width: 16%; }
+    .comm-card .sd-th:nth-child(4) { width: 20%; }
+    .comm-card .sd-th:nth-child(5) { width: auto; }
+    .comm-card .sd-th:nth-child(6) { width: 90px; }
+    .comm-card .sd-th:nth-child(7) { width: 140px; }
     .comm-card .sd-th-action { width: 48px; }
     .comm-card .sd-td { padding: 12px; vertical-align: middle; font-size: 13px; color: #3f3f46; line-height: 1.4; }
     .comm-card .sd-td-action { text-align: right; }
@@ -447,23 +460,28 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-page .page-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; }
     .comm-page .page-subtitle{ font-size:14px; color:#71717a; }
     /* toolbar */
-    .comm-toolbar{ border:1px solid #e4e4e7; }
-    .comm-search input{ height:36px; padding:0 12px 0 2.3rem; border:1px solid #e4e4e7; border-radius:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; }
+    .comm-toolbar{ border: none; background: #fff; box-shadow: none; padding: 0; border-radius: 0; }
+    .comm-search input{ height:36px; padding:0 12px 0 36px; border:1px solid #e4e4e7; border-radius:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; }
     .comm-search input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .comm-search input::placeholder{ color:#a1a1aa; }
-    .comm-search .search-icon{ color:#71717a; }
-    .comm-filter select{ height:36px; padding:0 2rem 0 0.85rem; border:1px solid #e4e4e7; border-radius:6px; background-color:#fff; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
+    .comm-search .search-icon{ color:#71717a; font-size:14px; left:13px; }
+    .comm-filter select{ height:36px; padding:0 26px 0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
     .comm-filter select:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .comm-count{ font-size:14px; color:#71717a; }
-    /* table data */
-    .comm-card .sd-th{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:500; color:#71717a; }
-    .comm-card .sd-td{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; }
-    .comm-card .sd-data-table tbody .sd-tr:hover{ background:#f4f4f5; }
-    .log-recipient .name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; }
-    .log-recipient .email{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; }
-    .log-subject .subj{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
-    .log-col-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:400; color:#71717a; }
-    .type-badge, .delivery-badge{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:500; color:#18181b; }
+    /* table data (All Clients table style) */
+    .comm-card .sd-th{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; height:40px; padding:0 8px; border-bottom:none; }
+    .comm-card .sd-td{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; padding:8px; overflow:hidden; }
+    .comm-card .sd-data-table tbody .sd-tr:hover{ background:#fafafa; }
+    .comm-card .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
+    .comm-card .th-sort:hover{ background:#f4f4f5; color:#18181b; }
+    .comm-card .th-sort.th-sorted{ color:#18181b; }
+    .comm-card .th-sort-icon{ width:14px; height:14px; color:#71717a; flex-shrink:0; }
+    .comm-card .th-sorted .th-sort-icon{ color:#18181b; }
+    .log-recipient .name{ font-family:'Inter','Segoe UI',sans-serif; font-size:13.5px; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .log-recipient .email{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .log-subject .subj{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .log-col-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
+    .type-badge, .delivery-badge{ font-family:'Inter','Segoe UI',sans-serif; font-size:12.5px; font-weight:700; color:#18181b; }
     .log-empty{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
     /* drawer + modal fonts/buttons */
     .drawer-header h2, .resend-modal-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; }
@@ -498,38 +516,44 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
       <div class="comm-alert error"><i class="fas fa-exclamation-circle"></i> <span><?php echo $sendError; ?></span></div>
     <?php endif; ?>
 
+    <!-- History toolbar (outside the table container) -->
+    <div class="comm-toolbar comm-toolbar-inner">
+      <div class="comm-search">
+        <i class="fas fa-search search-icon"></i>
+        <input type="text" id="logSearch" placeholder="Search by recipient or subject..." oninput="logDebouncedSearch()" />
+      </div>
+      <div class="comm-filter">
+        <select id="logTypeFilter" onchange="renderLogPage(1)">
+          <option value="">All Types</option>
+          <option value="report">Report</option>
+          <option value="adoption">Adoption</option>
+          <option value="appointment">Appointment</option>
+          <option value="followup">Follow-up</option>
+          <option value="general">General</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="comm-toolbar-actions">
+        <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDrawer()">Compose Message</button>
+      </div>
+    </div>
+
     <!-- History table -->
     <div class="comm-card">
       <?php if ($logsTotal === 0): ?>
         <div class="log-empty">No messages sent yet.</div>
       <?php else: ?>
         <div class="sd-data-table-wrap">
-          <div class="comm-toolbar comm-toolbar-inner">
-            <div class="comm-search">
-              <i class="fas fa-search search-icon"></i>
-              <input type="text" id="logSearch" placeholder="Search by recipient or subject..." oninput="logDebouncedSearch()" />
-            </div>
-            <div class="comm-filter">
-              <select id="logTypeFilter" onchange="renderLogPage(1)">
-                <option value="">All Types</option>
-                <option value="report">Report</option>
-                <option value="adoption">Adoption</option>
-                <option value="appointment">Appointment</option>
-                <option value="followup">Follow-up</option>
-                <option value="general">General</option>
-                <option value="other">Other</option>
-              </select>
-            </div>
-            <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDrawer()">Compose Message</button>
-          </div>
           <table class="sd-data-table">
             <thead>
               <tr class="sd-tr">
-                <th class="sd-th">Date &amp; Time</th>
-                <th class="sd-th">Recipient</th>
-                <th class="sd-th">Subject</th>
-                <th class="sd-th">Type</th>
-                <th class="sd-th">Delivery</th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="commSort('date')">Date<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="commSort('time')">Time<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="recipient" onclick="commSort('recipient')">Recipient Name<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="email" onclick="commSort('email')">Email<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="subject" onclick="commSort('subject')">Subject<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="type" onclick="commSort('type')">Type<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="delivery" onclick="commSort('delivery')">Delivery<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th sd-th-action"></th>
               </tr>
             </thead>
@@ -541,10 +565,10 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
               <div class="dt-rows">
                 <span>Rows per page</span>
                 <select onchange="setLogPerPage(this.value)">
+                  <option value="20" selected>20</option>
                   <option value="8">8</option>
                   <option value="10">10</option>
                   <option value="15">15</option>
-                  <option value="20">20</option>
                   <option value="30">30</option>
                 </select>
               </div>
@@ -721,9 +745,11 @@ document.getElementById('composeForm')?.addEventListener('submit', function(e) {
 });
 
 /* ── Sent Message History: server-side search + filter + pagination (8/page) ── */
-var logPerPage = 8;
+var logPerPage = 20;
 var logPage = 1;
 var searchTimer = null;
+var commSortCol = 'date';
+var commSortDir = 'desc';
 
 var typeLabels = <?php echo json_encode($typeShortLabels); ?>;
 
@@ -740,9 +766,13 @@ function fmtLogDate(s) {
     if (!s) return '';
     var d = new Date(String(s).replace(' ', 'T'));
     if (isNaN(d)) return escapeHtml(s);
-    var date = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    var time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    return '<div>' + date + '</div><div style="font-size:0.72rem;">' + time + '</div>';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+function fmtLogTime(s) {
+    if (!s) return '';
+    var d = new Date(String(s).replace(' ', 'T'));
+    if (isNaN(d)) return '';
+    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
 function logRowHtml(log) {
@@ -762,8 +792,9 @@ function logRowHtml(log) {
 
     return '<tr class="sd-tr">' +
         '<td class="sd-td log-col-date">' + fmtLogDate(log.created_at) + '</td>' +
-        '<td class="sd-td"><div class="log-recipient"><div class="name">' + escapeHtml(recipientName) + '</div>' +
-        '<div class="email">' + escapeHtml(recipientEmail) + '</div></div></td>' +
+        '<td class="sd-td log-col-date">' + fmtLogTime(log.created_at) + '</td>' +
+        '<td class="sd-td"><div class="log-recipient"><div class="name">' + escapeHtml(recipientName) + '</div></div></td>' +
+        '<td class="sd-td"><div class="log-recipient"><div class="email">' + escapeHtml(recipientEmail) + '</div></div></td>' +
         '<td class="sd-td"><div class="log-subject"><div class="subj">' + escapeHtml(log.subject || '') + '</div></div></td>' +
         '<td class="sd-td"><span class="type-badge">' + tm.label + '</span></td>' +
         '<td class="sd-td"><div class="delivery-badges">' + badges + '</div></td>' +
@@ -783,7 +814,7 @@ function renderLogPage(page) {
     var q = (document.getElementById('logSearch')?.value || '').trim();
     var f = (document.getElementById('logTypeFilter')?.value || '');
 
-    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f);
+    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f) + "&sort=" + commSortCol + "&dir=" + commSortDir;
     fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -791,7 +822,7 @@ function renderLogPage(page) {
             var rowLogs = data.logs || [];
 
             if (total === 0) {
-                tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="6" style="text-align:center;padding:2.5rem;color:#94a3b8;">No messages match your search.</td></tr>';
+                tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="8" style="text-align:center;padding:2.5rem;color:#94a3b8;">No messages match your search.</td></tr>';
                 if (pag) pag.style.display = 'none';
                 return;
             }
@@ -800,6 +831,21 @@ function renderLogPage(page) {
             var start = (page - 1) * logPerPage;
 
             tbody.innerHTML = rowLogs.map(logRowHtml).join('');
+
+            document.querySelectorAll('.comm-card .th-sort').forEach(function(btn){
+                var c = btn.getAttribute('data-col');
+                btn.classList.toggle('th-sorted', c === commSortCol);
+                var icon = btn.querySelector('.th-sort-icon');
+                if (icon) {
+                    if (c === commSortCol) {
+                        icon.innerHTML = commSortDir === 'asc'
+                            ? '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>'
+                            : '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>';
+                    } else {
+                        icon.innerHTML = '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>';
+                    }
+                }
+            });
 
             logPage = page;
             if (pag) {
@@ -824,6 +870,12 @@ function renderLogPage(page) {
 
 window.logPageGo = function(page) {
     renderLogPage(page);
+};
+
+window.commSort = function(col) {
+    if (commSortCol === col) { commSortDir = commSortDir === 'asc' ? 'desc' : 'asc'; }
+    else { commSortCol = col; commSortDir = 'asc'; }
+    renderLogPage(1);
 };
 
 function setLogPerPage(v) {

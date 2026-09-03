@@ -79,8 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // Handle photo upload
-    $photoUrl = '';
+    // Handle photo upload (or reuse existing photo from resubmission)
+    $photoUrl = trim($_POST['photo_url'] ?? '');
     if (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
         $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
         $allowedExts = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
