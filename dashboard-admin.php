@@ -49,14 +49,75 @@ while ($row = $result->fetch_assoc()) {
 }
 
 // ── Activity logs table ──
-$r = $conn->query("SELECT COUNT(*) AS c FROM activity_logs");
-$totalActCount = $r->fetch_assoc()['c'];
-$allActivity = [];
-$result = $conn->query("SELECT a.*, u.full_name FROM activity_logs a LEFT JOIN users u ON a.user_id = u.user_id ORDER BY a.created_at DESC");
-while ($row = $result->fetch_assoc()) {
-    $allActivity[] = $row;
+$actSearch = trim($_GET['act_search'] ?? '');
+$actAction = $_GET['act_action'] ?? '';
+$actUser = $_GET['act_user'] ?? '';
+$actSource = $_GET['act_source'] ?? '';
+$actDateFrom = $_GET['act_date_from'] ?? '';
+$actDateTo = $_GET['act_date_to'] ?? '';
+$actDateFilter = $_GET['act_date'] ?? '';
+if ($actDateFilter) {
+    $actDateFrom = $actDateFilter;
+    $actDateTo = $actDateFilter;
 }
+$actWhere = "WHERE 1=1";
+$actParams = [];
+$actTypes = "";
+if ($actSearch) {
+    $actWhere .= " AND (a.action LIKE ? OR a.details LIKE ? OR u.full_name LIKE ?)";
+    $s = "%$actSearch%";
+    $actParams = [$s, $s, $s];
+    $actTypes = "sss";
+}
+if ($actAction) {
+    $actWhere .= " AND a.action = ?";
+    $actParams[] = $actAction;
+    $actTypes .= "s";
+}
+if ($actUser) {
+    $actWhere .= " AND a.user_id = ?";
+    $actParams[] = intval($actUser);
+    $actTypes .= "i";
+}
+if ($actSource) {
+    if ($actSource === 'authentication') {
+        $actWhere .= " AND (a.action LIKE '%Login%' OR a.action LIKE '%Logout%' OR a.action LIKE '%Password%' OR a.action LIKE '%Failed%')";
+    } elseif ($actSource === 'user_management') {
+        $actWhere .= " AND (a.action LIKE '%User%' OR a.action LIKE '%Role%' OR a.action LIKE '%Status%' OR a.action LIKE '%Activate%' OR a.action LIKE '%Deactivate%' OR a.action LIKE '%Delete%')";
+    } elseif ($actSource === 'appointments') {
+        $actWhere .= " AND (a.action LIKE '%Appointment%')";
+    } elseif ($actSource === 'client_management') {
+        $actWhere .= " AND (a.action LIKE '%Client%' OR a.action LIKE '%Pet%' OR a.action LIKE '%Resident%')";
+    } elseif ($actSource === 'rescue_reports') {
+        $actWhere .= " AND (a.action LIKE '%Rescue%')";
+    } elseif ($actSource === 'vaccination') {
+        $actWhere .= " AND (a.action LIKE '%Vaccin%')";
+    } elseif ($actSource === 'reports_analytics') {
+        $actWhere .= " AND (a.action LIKE '%Report%' OR a.action LIKE '%Export%' OR a.action LIKE '%Analytics%')";
+    } elseif ($actSource === 'settings') {
+        $actWhere .= " AND (a.action LIKE '%Setting%')";
+    }
+}
+if ($actDateFrom) {
+    $actWhere .= " AND a.created_at >= ?";
+    $actParams[] = $actDateFrom . ' 00:00:00';
+    $actTypes .= "s";
+}
+if ($actDateTo) {
+    $actWhere .= " AND a.created_at <= ?";
+    $actParams[] = $actDateTo . ' 23:59:59';
+    $actTypes .= "s";
+}
+$actSql = "SELECT a.*, u.full_name, u.avatar_url FROM activity_logs a LEFT JOIN users u ON a.user_id = u.user_id $actWhere ORDER BY a.created_at DESC";
+$actQ = $conn->prepare($actSql);
+if ($actTypes) $actQ->bind_param($actTypes, ...$actParams);
+$actQ->execute();
+$allActivity = $actQ->get_result()->fetch_all(MYSQLI_ASSOC);
+$actQ->close();
 
+$allActUsers = [];
+$auResult = $conn->query("SELECT DISTINCT u.user_id, u.full_name FROM activity_logs a LEFT JOIN users u ON a.user_id = u.user_id WHERE a.user_id IS NOT NULL ORDER BY u.full_name ASC");
+if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
 
 // ── Fetch admin details from DB (single source of truth) ──
@@ -93,7 +154,7 @@ $activePage = 'users';
   <link rel="stylesheet" href="assets/css/dashboard.css" />
   <link rel="stylesheet" href="assets/css/responsive.css" />
   <style>
-    body { --topbar-h: 60px; }
+    body { --topbar-h: 60px; background:#ffffff; }
 
     .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:2rem; flex-wrap:wrap; gap:1rem; }
     .page-header-left { }
@@ -287,14 +348,89 @@ $activePage = 'users';
     .profile-photo-delete-btn:hover { background:#fecaca; }
     .btn-outline { display:inline-flex; align-items:center; gap:5px; padding:5px 12px; font-size:0.78rem; font-weight:600; border:1px solid #d0d5dd; border-radius:7px; background:#fff; color:#344054; cursor:pointer; transition:all 0.15s; }
     .btn-outline:hover { background:#f2f4f7; border-color:#98a2b3; }
-    .view-profile-modal .modal-content { max-width:560px; }
-    .view-profile-avatar { width:80px; height:80px; border-radius:50%; object-fit:cover; background:#e2e8f0; display:flex; align-items:center; justify-content:center; font-size:1.6rem; color:#94a3b8; font-weight:700; flex-shrink:0; }
-    .view-profile-header { display:flex; align-items:center; gap:16px; padding-bottom:1.25rem; border-bottom:1px solid #eef2f6; }
-    .view-profile-name { font-size:1.25rem; font-weight:700; color:#0f172a; margin:0; }
-    .view-profile-role { font-size:0.85rem; color:#64748b; margin:3px 0 0; }
-    .view-profile-grid { display:grid; grid-template-columns:1fr 1fr; gap:1rem 2rem; margin-top:1.25rem; }
-    .view-profile-field-label { font-size:0.72rem; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:4px; }
-    .view-profile-field-value { font-size:0.95rem; color:#0f172a; font-weight:500; word-break:break-word; }
+
+    /* ── Reused my-pets / shadcn table design ── */
+    .appt-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
+    .appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+    .appt-search-wrap{position:relative;}
+    .appt-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#71717a;pointer-events:none;}
+    .appt-search-input{height:36px;padding:0 12px 0 36px;width:280px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s,box-shadow .15s;}
+    .appt-search-input:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;background:#fff;}
+    .appt-search-input::placeholder{color:#a1a1aa;}
+    .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
+    .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+
+    .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
+    .appt-table{width:100%;border-collapse:collapse;color:#18181b;font-size:14px;}
+    .appt-table thead th{background:#fafafa;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#71717a;height:40px;padding:0 12px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:middle;white-space:nowrap;user-select:none;}
+    .appt-table thead th.sd-th-action{text-align:right;}
+    .appt-table tbody tr{border-bottom:1px solid #f4f4f5;cursor:pointer;transition:background .1s;}
+    .appt-table tbody tr:last-child{border-bottom:none;}
+    .appt-table tbody tr:hover{background:#f9fafb;}
+    .appt-table tbody tr.selected{background:#f4f4f5;}
+    .appt-table tbody td{padding:10px 12px;font-size:14px;color:#18181b;vertical-align:middle;}
+    .appt-table tbody td.sd-td-action{text-align:right;}
+
+    /* ── Sort buttons ── */
+    .sd-th{position:relative;}
+    .th-sort{display:inline-flex;align-items:center;gap:6px;height:28px;margin-left:-12px;padding:0 12px;border-radius:6px;background:transparent;border:none;font-size:14px;font-weight:500;color:#71717a;cursor:pointer;white-space:nowrap;font-family:inherit;transition:background .1s,color .1s;}
+    .th-sort:hover{background:#e4e4e7;color:#18181b;}
+    .th-sort.th-sorted{color:#18181b;}
+    .th-sort-icon{width:14px;height:14px;color:#a1a1aa;flex-shrink:0;}
+    .th-sorted .th-sort-icon{color:#18181b;}
+
+    .client-cell{display:flex;align-items:center;gap:10px;min-width:0;}
+    .client-name{font-family:'Inter','Segoe UI',sans-serif;font-weight:500;color:#18181b;font-size:14px;white-space:nowrap;}
+    .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
+
+    .appt-status-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;}
+    .pet-cat-tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;color:#52525b;background:#f4f4f5;border:1px solid #e4e4e7;white-space:nowrap;line-height:1.4;}
+    .pet-cat-tag.tag-admin{background:#f0fdf4;color:#166534;border-color:#bbf7d0;}
+    .pet-cat-tag.tag-staff{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
+    .pet-cat-tag.tag-resident{background:#fef3c7;color:#92400e;border-color:#fde68a;}
+    .pet-cat-tag.tag-barangay{background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe;}
+
+    .pet-action-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:transparent;border:none;color:#a1a1aa;cursor:pointer;text-decoration:none;transition:background .15s,color .15s;}
+    .pet-action-btn:hover{background:#f4f4f5;color:#18181b;}
+
+    .appt-pagination{display:flex;align-items:center;justify-content:flex-end;padding:12px 16px;border-top:1px solid #e4e4e7;}
+    .dt-pagination-right{display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
+    .dt-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}
+    .dt-rows select{height:32px;width:70px;border-radius:6px;border:1px solid #e4e4e7;background:#fff;padding:0 8px;font-size:14px;color:#18181b;cursor:pointer;font-family:inherit;}
+    .dt-rows select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+    .dt-page-label{width:110px;text-align:center;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
+    .dt-page-btns{display:flex;align-items:center;gap:4px;}
+    .dt-page-btn{height:32px;width:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid #e4e4e7;background:#fff;color:#18181b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+    .dt-page-btn:hover:not(:disabled){background:#f4f4f5;}
+    .dt-page-btn:disabled{opacity:.5;cursor:not-allowed;}
+
+    /* ── Reused sd-dialog (shadcn) style ── */
+    .sd-dialog{width:100%;display:flex;justify-content:center;}
+    .sd-dialog-content{position:relative;width:100%;max-width:560px;background:#ffffff;border:1px solid #e4e4e7;border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);animation:modalIn 0.2s ease;max-height:90vh;overflow-y:auto;}
+    .sd-dialog-close{position:absolute;top:16px;right:16px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;border:none;background:transparent;color:#71717a;cursor:pointer;transition:all 0.15s ease;}
+    .sd-dialog-close:hover{background:#f4f4f5;color:#18181b;}
+    .sd-dialog-header{display:flex;flex-direction:column;gap:6px;text-align:left;}
+    .sd-dialog-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-0.025em;color:#18181b;}
+    .sd-dialog-description{margin:0;font-size:14px;color:#71717a;line-height:1.5;}
+    .sd-dialog-footer{display:flex;align-items:center;gap:8px;}
+    .sd-field-group{display:flex;flex-direction:column;gap:16px;}
+    .sd-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+    .sd-field-full{grid-column:1 / -1;}
+    .sd-field{display:flex;flex-direction:column;gap:5px;}
+    .sd-label{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;line-height:1;color:#18181b;}
+    .sd-section{margin-bottom:16px;}
+    .sd-section:last-child{margin-bottom:0;}
+    .sd-section-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#18181b;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f4f4f5;}
+    .sd-section-title span{color:#71717a;font-size:12px;font-weight:600;}
+    .sd-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;}
+    .sd-info-item .sd-info-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#71717a;}
+    .sd-info-item .sd-info-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;margin-top:2px;word-break:break-word;}
+    .sd-avatar-lg{width:72px;height:72px;border-radius:50%;overflow:hidden;background:#e4e4e7;color:#71717a;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;flex-shrink:0;}
+    .sd-avatar-lg img{width:100%;height:100%;object-fit:cover;}
+    .sd-profile-head{display:flex;align-items:flex-start;gap:14px;padding-bottom:16px;border-bottom:1px solid #e4e4e7;}
+    .sd-profile-name{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;margin:0;}
+    .sd-profile-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#71717a;margin:2px 0 0;}
+    @keyframes modalIn{from{opacity:0;transform:scale(0.95);}to{opacity:1;transform:scale(1);}}
 
     .table-container {
       border:1px solid #eef2f6; border-radius:14px; overflow:hidden;
@@ -359,17 +495,17 @@ $activePage = 'users';
   .profile-settings-wrapper .ps-profile-left { display:flex; align-items:center; gap:16px; }
   .profile-settings-wrapper .ps-avatar { width:56px; height:56px; border-radius:50%; object-fit:cover; background:#d9d9d9; cursor:pointer; }
   .profile-settings-wrapper .ps-avatar-plain { width:56px; height:56px; border-radius:50%; background:#d9d9d9; display:flex; align-items:center; justify-content:center; font-size:1.3rem; color:#666; cursor:pointer; }
-  .profile-settings-wrapper .ps-profile-name { font-size:15px; font-weight:700; }
-  .profile-settings-wrapper .ps-profile-sub { font-size:13px; color:#6b7280; margin-top:2px; }
+  .profile-settings-wrapper .ps-profile-name { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+  .profile-settings-wrapper .ps-profile-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; margin-top:2px; }
   .profile-settings-wrapper .ps-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
-  .profile-settings-wrapper .ps-card-header h2 { font-size:16px; font-weight:700; margin:0; }
-  .profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; color:#1f2328; cursor:pointer; transition:background .15s,border-color .15s; }
+  .profile-settings-wrapper .ps-card-header h2 { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; margin:0; }
+  .profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; cursor:pointer; transition:background .15s,border-color .15s; }
   .profile-settings-wrapper .ps-edit-btn:hover { background:#f5f6f8; border-color:#c3c8d0; }
   .profile-settings-wrapper .ps-edit-btn.active { background:#f0f0f0; border-color:#000; color:#000; }
   .profile-settings-wrapper .ps-edit-btn svg { width:13px; height:13px; }
   .profile-settings-wrapper .ps-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
   .profile-settings-wrapper .ps-form-row.ps-single { grid-template-columns:1fr; }
-  .profile-settings-wrapper .ps-field label { display:block; font-size:13px; color:#4b5563; margin-bottom:6px; }
+  .profile-settings-wrapper .ps-field label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
   .profile-settings-wrapper .ps-field input,
   .profile-settings-wrapper .ps-field select,
   .profile-settings-wrapper .ps-field textarea { width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #e2e5ea; background:#f9fafb; color:#1f2328; outline:none; transition:background .15s,border-color .15s,box-shadow .15s; box-sizing:border-box; font-family:inherit; }
@@ -382,7 +518,7 @@ $activePage = 'users';
   .profile-settings-wrapper .ps-field input:not(:disabled):focus,
   .profile-settings-wrapper .ps-field select:not(:disabled):focus,
   .profile-settings-wrapper .ps-field textarea:not(:disabled):focus { border-color:#000; box-shadow:0 0 0 3px rgba(0,0,0,0.08); }
-  .profile-settings-wrapper .ps-btn { padding:9px 18px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+  .profile-settings-wrapper .ps-btn { padding:9px 18px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; border-radius:8px; cursor:pointer; border:1px solid transparent; }
   .profile-settings-wrapper .ps-btn-primary { background:#000; color:#fff; border-color:#000; }
   .profile-settings-wrapper .ps-btn-primary:hover { background:#1a1a1a; }
   .profile-settings-wrapper .ps-btn-primary:disabled { background:#c7c9d9; border-color:#c7c9d9; cursor:not-allowed; }
@@ -391,6 +527,7 @@ $activePage = 'users';
   .profile-settings-wrapper .ps-footer-actions { display:flex; justify-content:flex-start; gap:10px; margin-top:4px; }
   .profile-settings-wrapper .ps-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:#1f2328; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:9999; }
   .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  #settings.content-section { background:#fff; }
   </style>
 </head>
 <body>
@@ -400,106 +537,190 @@ $activePage = 'users';
 <main class="main-content">
 
   <section id="users" class="content-section active">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h1 class="page-title">User Management</h1>
-        <p class="page-subtitle">View and manage all registered accounts in the system.</p>
-      </div>
-      <div class="page-actions">
-        <a href="role-management.php" class="btn-primary" style="padding:8px 18px;font-size:0.8rem;">
-          <i class="fas fa-cog"></i> Full Role Management
-        </a>
-      </div>
+    <div class="page-header" style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
+      <a href="role-management.php" class="btn-primary" style="padding:8px 18px;font-size:0.8rem;">
+        <i class="fas fa-cog"></i> Full Role Management
+      </a>
     </div>
-    <div class="dash-card">
-      <div class="dash-card-header">
-        <h3>All Accounts</h3>
-        <span class="badge-count"><?php echo $totalUsersCount; ?> total</span>
-      </div>
-      <div class="table-container" style="border:none;border-radius:0;box-shadow:none;">
-        <div style="overflow-x:auto;">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Reference</th>
-                <th>Full Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Status</th>
-                <th>Registered</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php foreach ($allUsers as $u): ?>
-                <tr>
-                  <td><span style="font-size:0.75rem;color:#045e1f;font-weight:600;font-family:monospace;"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
-                  <td class="name-cell"><?php echo htmlspecialchars($u['full_name']); ?></td>
-                  <td><?php echo htmlspecialchars($u['email']); ?></td>
-                  <td><span class="role-chip"><i class="fas <?php echo $u['role']==='admin'?'fa-crown':($u['role']==='staff'?'fa-user-md':($u['role']==='barangay'?'fa-map-pin':'fa-user')); ?>"></i> <?php echo ucfirst($u['role']); ?></span></td>
-                  <td><span class="status-indicator"><span class="status-dot <?php echo $u['status']; ?>"></span> <?php echo ucfirst($u['status']); ?></span></td>
-                  <td style="font-size:0.78rem;color:#94a3b8;"><?php echo date('M d, Y', strtotime($u['created_at'])); ?></td>
-                  <td><button class="btn-sm btn-outline" onclick='viewUserProfile(<?php echo json_encode($u); ?>)'><i class="fas fa-eye"></i> View</button></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+
+    <div class="appt-card-header">
+      <div class="appt-header-right">
+        <div class="appt-search-wrap">
+          <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="adminUserSearch" class="appt-search-input" placeholder="Search by name, email, or role...">
         </div>
-        <div id="adminUserPagination" class="pagination-bar"></div>
+        <select id="adminRoleFilter" class="appt-status-select">
+          <option value="all">All Roles</option>
+          <option value="admin">Admin</option>
+          <option value="staff">Staff</option>
+          <option value="resident">Resident</option>
+          <option value="barangay">Barangay</option>
+        </select>
+        <select id="adminStatusFilter" class="appt-status-select">
+          <option value="all">All Status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
       </div>
     </div>
+
+    <div class="appt-db-table-area">
+      <div style="overflow-x:auto;">
+        <table class="appt-table">
+          <thead>
+            <tr>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="sortBy('ref')">Reference<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="name" onclick="sortBy('name')">Full Name<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="email" onclick="sortBy('email')">Email<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="role" onclick="sortBy('role')">Role<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="registered" onclick="sortBy('registered')">Registered<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th-action">Action</th>
+            </tr>
+          </thead>
+          <tbody id="adminUserBody">
+            <?php foreach ($allUsers as $u): ?>
+              <tr>
+                <td><span style="font-size:12px;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
+                <td><div class="client-cell"><span class="client-name"><?php echo htmlspecialchars($u['full_name']); ?></span></div></td>
+                <td><span class="contact-main"><?php echo htmlspecialchars($u['email']); ?></span></td>
+                <td><?php
+                  $roleTag = 'tag-resident';
+                  if ($u['role'] === 'admin') $roleTag = 'tag-admin';
+                  elseif ($u['role'] === 'staff') $roleTag = 'tag-staff';
+                  elseif ($u['role'] === 'barangay') $roleTag = 'tag-barangay';
+                ?><span class="pet-cat-tag <?php echo $roleTag; ?>"><?php echo ucfirst($u['role']); ?></span></td>
+                <td><?php
+                  $statusStyle = '';
+                  if ($u['status'] === 'active') $statusStyle = 'background:#f0fdf4;color:#166534;border-color:#bbf7d0;';
+                  elseif ($u['status'] === 'inactive') $statusStyle = 'background:#fef3c7;color:#92400e;border-color:#fde68a;';
+                  else $statusStyle = 'background:#f4f4f5;color:#52525b;border-color:#e4e4e7;';
+                ?><span class="appt-status-pill" style="<?php echo $statusStyle; ?>"><?php echo ucfirst($u['status']); ?></span></td>
+                <td><span class="contact-main"><?php echo date('M d, Y', strtotime($u['created_at'])); ?></span></td>
+                <td class="sd-td-action"><button class="pet-action-btn" title="View Profile" onclick='viewUserProfile(<?php echo json_encode($u); ?>)'><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></button></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="appt-pagination" id="adminUserPagination"></div>
   </section>
 
   <!-- ── ACTIVITY LOGS ── -->
   <section id="activity" class="content-section" style="display:none;">
-    <div class="page-header">
-      <div class="page-header-left">
-        <h1 class="page-title">Activity Logs</h1>
-        <p class="page-subtitle">Complete audit trail of all system actions.</p>
-      </div>
-    </div>
-    <div class="dash-card">
-      <div class="dash-card-header">
-        <h3>All Activity</h3>
-        <span class="badge-count"><?php echo $totalActCount; ?> total</span>
-      </div>
-      <div class="table-container" style="border:none;border-radius:0;box-shadow:none;">
-        <div style="overflow-x:auto;">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>User</th>
-                <th>Action</th>
-                <th>Details</th>
-                <th>Source</th>
-              </tr>
-            </thead>
-            <tbody>
-              <?php foreach ($allActivity as $act): ?>
-                <tr>
-                  <td style="font-size:0.78rem;color:#94a3b8;"><?php echo date('M d, Y h:i A', strtotime($act['created_at'])); ?></td>
-                  <td class="name-cell"><?php echo htmlspecialchars($act['full_name'] ?? 'System'); ?></td>
-                  <td><span style="color:#045e1f;font-weight:600;font-size:0.82rem;"><?php echo htmlspecialchars($act['action']); ?></span></td>
-                  <td style="font-size:0.82rem;color:#64748b;"><?php echo htmlspecialchars($act['details'] ?? ''); ?></td>
-                  <td><?php
-                    $src = $act['action'] ?? '';
-                    $srcLower = strtolower($src);
-                    if (strpos($srcLower, 'login') !== false) echo '<span style="color:#2563eb;font-size:0.78rem;"><i class="fas fa-sign-in-alt"></i> Login</span>';
-                    elseif (strpos($srcLower, 'logout') !== false) echo '<span style="color:#dc2626;font-size:0.78rem;"><i class="fas fa-sign-out-alt"></i> Logout</span>';
-                    elseif (strpos($srcLower, 'report') !== false) echo '<span style="color:#d97706;font-size:0.78rem;"><i class="fas fa-file-alt"></i> Reports</span>';
-                    elseif (strpos($srcLower, 'appointment') !== false) echo '<span style="color:#7c3aed;font-size:0.78rem;"><i class="fas fa-calendar-alt"></i> Appointments</span>';
-                    elseif (strpos($srcLower, 'register') !== false) echo '<span style="color:#059669;font-size:0.78rem;"><i class="fas fa-user-plus"></i> Registration</span>';
-                    else echo '<span style="color:#64748b;font-size:0.78rem;"><i class="fas fa-globe"></i> System</span>';
-                  ?></td>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
+    <div class="appt-card-header">
+      <div class="appt-header-right">
+        <div class="appt-search-wrap">
+          <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="adminActSearch" class="appt-search-input" placeholder="Search activity, user, or details..." value="<?php echo htmlspecialchars($actSearch); ?>">
         </div>
-        <div id="adminActPagination" class="pagination-bar"></div>
+        <select class="appt-status-select" id="actActionFilter">
+          <option value="">All Actions</option>
+          <option value="Login" <?php echo $actAction==='Login'?'selected':''; ?>>Login</option>
+          <option value="Logout" <?php echo $actAction==='Logout'?'selected':''; ?>>Logout</option>
+          <option value="Client Updated" <?php echo $actAction==='Client Updated'?'selected':''; ?>>Client Updated</option>
+          <option value="Appointment Scheduled" <?php echo $actAction==='Appointment Scheduled'?'selected':''; ?>>Appointment Scheduled</option>
+          <option value="User Created" <?php echo $actAction==='User Created'?'selected':''; ?>>User Created</option>
+          <option value="User Edited" <?php echo $actAction==='User Edited'?'selected':''; ?>>User Edited</option>
+          <option value="User Deleted" <?php echo $actAction==='User Deleted'?'selected':''; ?>>User Deleted</option>
+          <option value="Role Changed" <?php echo $actAction==='Role Changed'?'selected':''; ?>>Role Changed</option>
+          <option value="Status Changed" <?php echo $actAction==='Status Changed'?'selected':''; ?>>Status Changed</option>
+          <option value="Password Reset" <?php echo $actAction==='Password Reset'?'selected':''; ?>>Password Reset</option>
+        </select>
+        <select class="appt-status-select" id="actUserFilter">
+          <option value="">All Users</option>
+          <?php foreach ($allActUsers as $au): ?>
+            <option value="<?php echo $au['user_id']; ?>" <?php echo $actUser==$au['user_id']?'selected':''; ?>><?php echo htmlspecialchars($au['full_name']); ?></option>
+          <?php endforeach; ?>
+        </select>
+        <select class="appt-status-select" id="actSourceFilter">
+          <option value="">All Sources</option>
+          <option value="authentication" <?php echo $actSource==='authentication'?'selected':''; ?>>Authentication</option>
+          <option value="user_management" <?php echo $actSource==='user_management'?'selected':''; ?>>User Management</option>
+          <option value="appointments" <?php echo $actSource==='appointments'?'selected':''; ?>>Appointments</option>
+          <option value="client_management" <?php echo $actSource==='client_management'?'selected':''; ?>>Client Management</option>
+          <option value="rescue_reports" <?php echo $actSource==='rescue_reports'?'selected':''; ?>>Rescue Reports</option>
+          <option value="vaccination" <?php echo $actSource==='vaccination'?'selected':''; ?>>Vaccination Records</option>
+          <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
+          <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
+        </select>
+        <div style="position:relative;display:inline-block;">
+          <button class="pet-action-btn" id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></button>
+          <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <button onclick="actCalPrev()" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;font-size:16px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <select id="actCalMonth" onchange="actCalRender()" style="border:none;background:transparent;font-size:14px;font-weight:600;color:#18181b;cursor:pointer;font-family:inherit;outline:none;"></select>
+                <select id="actCalYear" onchange="actCalRender()" style="border:none;background:transparent;font-size:14px;font-weight:600;color:#18181b;cursor:pointer;font-family:inherit;outline:none;"></select>
+              </div>
+              <button onclick="actCalNext()" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;font-size:16px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;margin-bottom:4px;">
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Su</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Mo</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Tu</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">We</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Th</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Fr</span>
+              <span style="font-size:12px;font-weight:500;color:#71717a;padding:4px 0;">Sa</span>
+            </div>
+            <div id="actCalDays" style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center;"></div>
+          </div>
+        </div>
+        <input type="hidden" id="actDateFilterHidden" value="<?php echo htmlspecialchars($actDateFrom ?: $actDateTo); ?>">
+        <button class="pet-action-btn" id="actClearBtn" style="display:<?php echo ($actSearch||$actAction||$actUser||$actSource||$actDateFrom||$actDateTo)?'inline-flex':'none'; ?>;" onclick="clearActFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
       </div>
     </div>
+
+    <div class="appt-db-table-area">
+      <div style="overflow-x:auto;">
+        <table class="appt-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="actSortBy('date')">Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="actSortBy('time')">Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+              <th>Activity</th>
+              <th>Source</th>
+            </tr>
+          </thead>
+          <tbody id="adminActBody">
+            <?php foreach ($allActivity as $act): ?>
+              <tr>
+                <td>
+                  <div class="client-cell" style="display:flex;align-items:center;gap:8px;">
+                    <?php if (!empty($act['avatar_url'])): ?>
+                      <img src="<?php echo htmlspecialchars($act['avatar_url']); ?>" alt="" style="width:32px;height:32px;border-radius:50%;object-fit:cover;background:#f4f4f5;" />
+                    <?php else: ?>
+                      <div style="width:32px;height:32px;border-radius:50%;background:#f4f4f5;display:flex;align-items:center;justify-content:center;color:#71717a;font-size:13px;font-weight:600;flex-shrink:0;"><?php echo strtoupper(substr($act['full_name'] ?? 'S', 0, 1)); ?></div>
+                    <?php endif; ?>
+                    <span class="client-name"><?php echo htmlspecialchars($act['full_name'] ?? 'System'); ?></span>
+                  </div>
+                </td>
+                <td><span class="contact-main"><?php echo date('M d, Y', strtotime($act['created_at'])); ?></span></td>
+                <td><span class="contact-main"><?php echo date('h:i A', strtotime($act['created_at'])); ?></span></td>
+                <td><span class="contact-main"><?php echo htmlspecialchars($act['details'] ?? ''); ?></span></td>
+                <td><?php
+                  $src = $act['action'] ?? '';
+                  $srcLower = strtolower($src);
+                  if (strpos($srcLower, 'login') !== false || strpos($srcLower, 'logout') !== false || strpos($srcLower, 'password') !== false) echo '<span class="appt-status-pill" style="background:#eff6ff;color:#1e40af;border-color:#bfdbfe;">Authentication</span>';
+                  elseif (strpos($srcLower, 'user') !== false || strpos($srcLower, 'role') !== false || strpos($srcLower, 'status') !== false || strpos($srcLower, 'activate') !== false || strpos($srcLower, 'deactivate') !== false) echo '<span class="appt-status-pill" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0;">User Management</span>';
+                  elseif (strpos($srcLower, 'appointment') !== false) echo '<span class="appt-status-pill" style="background:#f5f3ff;color:#6d28d9;border-color:#ddd6fe;">Appointments</span>';
+                  elseif (strpos($srcLower, 'client') !== false || strpos($srcLower, 'pet') !== false || strpos($srcLower, 'resident') !== false) echo '<span class="appt-status-pill" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">Client Management</span>';
+                  elseif (strpos($srcLower, 'rescue') !== false) echo '<span class="appt-status-pill" style="background:#fef2f2;color:#991b1b;border-color:#fecaca;">Rescue Reports</span>';
+                  elseif (strpos($srcLower, 'vaccin') !== false) echo '<span class="appt-status-pill" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0;">Vaccination Records</span>';
+                  elseif (strpos($srcLower, 'report') !== false || strpos($srcLower, 'export') !== false || strpos($srcLower, 'analytics') !== false) echo '<span class="appt-status-pill" style="background:#faf5ff;color:#6b21a8;border-color:#e9d5ff;">Reports & Analytics</span>';
+                  elseif (strpos($srcLower, 'setting') !== false) echo '<span class="appt-status-pill" style="background:#f4f4f5;color:#52525b;border-color:#e4e4e7;">Settings</span>';
+                  else echo '<span class="appt-status-pill" style="background:#f4f4f5;color:#52525b;border-color:#e4e4e7;">System</span>';
+                ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="appt-pagination" id="adminActPagination"></div>
   </section>
 
 
@@ -507,12 +728,6 @@ $activePage = 'users';
   <!-- ── VISIT OUR OFFICE ── -->
   <!-- ── SETTINGS / ACCOUNT SETTINGS ── -->
   <section id="settings" class="content-section" style="display:none;">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title" style="font-size:22px;font-weight:800;margin:0;">My Profile</h1>
-        <p class="page-subtitle">Manage your admin profile and account information</p>
-      </div>
-    </div>
 
     <?php if (isset($_SESSION['profile_error'])): ?>
       <div id="profileError" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#991b1b;"><?php echo htmlspecialchars($_SESSION['profile_error']); unset($_SESSION['profile_error']); ?></div>
@@ -606,12 +821,9 @@ $activePage = 'users';
   if (target && document.getElementById(target)) {
     document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
     document.getElementById(target).style.display = 'block';
-    document.querySelectorAll('.sidebar .nav-link').forEach(function(l) { l.classList.remove('active'); });
-    var navId = 'nav' + target.charAt(0).toUpperCase() + target.slice(1);
-    var nav = document.getElementById(navId);
-    if (nav) nav.classList.add('active');
     var labels = {users:'User Management',activity:'Activity Logs',settings:'Settings'};
-    document.getElementById('breadcrumbCurrent').textContent = labels[target] || target;
+    var bc = document.getElementById('breadcrumbCurrent');
+    if (bc) bc.textContent = labels[target] || target;
   } else {
     document.getElementById('users').style.display = 'block';
   }
@@ -623,103 +835,348 @@ function switchSection(id) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   var target = document.getElementById(id);
   if (target) target.style.display = 'block';
-  document.querySelectorAll('.sidebar .nav-link').forEach(function(l) { l.classList.remove('active'); });
-  var nav = document.getElementById('nav' + id.charAt(0).toUpperCase() + id.slice(1));
-  if (nav) nav.classList.add('active');
   var labels = {users:'User Management',activity:'Activity Logs',settings:'Settings'};
-  document.getElementById('breadcrumbCurrent').textContent = labels[id] || id;
+  var bc = document.getElementById('breadcrumbCurrent');
+  if (bc) bc.textContent = labels[id] || id;
+  document.body.classList.add('white-page');
   currentSection = id;
   localStorage.setItem('adminActiveSection', id);
   window.location.hash = id;
   window.scrollTo({top:0});
 }
 
-document.querySelectorAll('.sidebar .nav-link').forEach(function(link) {
-  link.addEventListener('click', function(e) {
-    var section = link.getAttribute('data-section');
-    if (section) {
-      e.preventDefault();
-      switchSection(section);
-    }
-  });
-});
-
-// ── USERS: client pagination ──
+// ── USERS: client pagination + search/filter ──
 (function() {
   var PER_PAGE = 15;
-  var tbody = document.querySelector('#users-section .data-table tbody');
+  var tbody = document.getElementById('adminUserBody');
   var pag = document.getElementById('adminUserPagination');
+  var searchInput = document.getElementById('adminUserSearch');
+  var roleFilter = document.getElementById('adminRoleFilter');
+  var statusFilter = document.getElementById('adminStatusFilter');
   if (!tbody || !pag) return;
   var allRows = Array.from(tbody.querySelectorAll('tr'));
+  var filteredRows = allRows.slice();
   var currentPage = 1;
 
+  function applyFilters() {
+    var q = (searchInput ? searchInput.value : '').toLowerCase();
+    var role = roleFilter ? roleFilter.value : 'all';
+    var status = statusFilter ? statusFilter.value : 'all';
+    filteredRows = allRows.filter(function(r) {
+      var text = r.textContent.toLowerCase();
+      var matchQ = !q || text.indexOf(q) !== -1;
+      var matchRole = role === 'all' || text.indexOf(role) !== -1;
+      var matchStatus = status === 'all' || text.indexOf(status) !== -1;
+      return matchQ && matchRole && matchStatus;
+    });
+    currentPage = 1;
+    renderTable();
+  }
+
+  if (searchInput) searchInput.addEventListener('input', applyFilters);
+  if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+  if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+
   function renderTable() {
-    allRows.forEach(function(r) { r.style.display = ''; });
-    var total = allRows.length;
-    var tp = Math.ceil(total / PER_PAGE);
-    if (tp <= 1) { pag.innerHTML = ''; return; }
-    currentPage = Math.min(currentPage, tp);
     allRows.forEach(function(r) { r.style.display = 'none'; });
+    var total = filteredRows.length;
+    var tp = Math.max(1, Math.ceil(total / PER_PAGE));
+    if (currentPage > tp) currentPage = tp;
+    if (currentPage < 1) currentPage = 1;
     var start = (currentPage - 1) * PER_PAGE;
     var end = start + PER_PAGE;
-    allRows.slice(start, end).forEach(function(r) { r.style.display = ''; });
+    filteredRows.slice(start, end).forEach(function(r) { r.style.display = ''; });
+    renderPag(tp, total);
+  }
+
+  function renderPag(tp, total) {
     var h = '';
-    h += '<span class="pag-info">Page <strong>' + currentPage + '</strong> of <strong>' + tp + '</strong> | <strong>' + total + '</strong> total</span>';
-    h += '<div class="pag-btns">';
-    h += '<a href="#" onclick="window.adminUserGo(' + (currentPage - 1) + ');return false;" class="pag-btn' + (currentPage <= 1 ? ' disabled' : '') + '"><i class="fas fa-angle-left"></i></a>';
-    h += '<a href="#" onclick="window.adminUserGo(' + (currentPage + 1) + ');return false;" class="pag-btn' + (currentPage >= tp ? ' disabled' : '') + '"><i class="fas fa-angle-right"></i></a>';
-    h += '</div>';
+    h += '<div class="dt-pagination-right">';
+    h += '<div class="dt-rows"><span>Rows per page</span><select onchange="window.adminUserPerPage(this.value)"><option value="15">15</option><option value="25">25</option><option value="50">50</option></select></div>';
+    h += '<div class="dt-page-label">Page ' + currentPage + ' of ' + tp + '</div>';
+    h += '<div class="dt-page-btns">';
+    h += '<button class="dt-page-btn" onclick="window.adminUserGo(1)"' + (currentPage <= 1 ? ' disabled' : '') + ' title="First page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminUserGo(' + (currentPage - 1) + ')"' + (currentPage <= 1 ? ' disabled' : '') + ' title="Previous"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminUserGo(' + (currentPage + 1) + ')"' + (currentPage >= tp ? ' disabled' : '') + ' title="Next"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminUserGo(' + tp + ')"' + (currentPage >= tp ? ' disabled' : '') + ' title="Last page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>';
+    h += '</div></div>';
     pag.innerHTML = h;
   }
 
   window.adminUserGo = function(page) {
-    var total = allRows.length;
-    var tp = Math.ceil(total / PER_PAGE);
+    var tp = Math.ceil(filteredRows.length / PER_PAGE);
     if (page < 1 || page > tp) return;
     currentPage = page;
+    renderTable();
+  };
+  window.adminUserPerPage = function(v) {
+    PER_PAGE = parseInt(v, 10) || 15;
+    currentPage = 1;
     renderTable();
   };
 
   renderTable();
 })();
 
-// ── ACTIVITY LOGS: client pagination ──
+// ── ACTIVITY LOGS: server-side filter + client pagination ──
 (function() {
   var PER_PAGE = 15;
-  var tbody = document.querySelector('#activity .data-table tbody');
+  var tbody = document.getElementById('adminActBody');
   var pag = document.getElementById('adminActPagination');
   if (!tbody || !pag) return;
   var allRows = Array.from(tbody.querySelectorAll('tr'));
   var currentPage = 1;
 
   function renderTable() {
-    allRows.forEach(function(r) { r.style.display = ''; });
-    var total = allRows.length;
-    var tp = Math.ceil(total / PER_PAGE);
-    if (tp <= 1) { pag.innerHTML = ''; return; }
-    currentPage = Math.min(currentPage, tp);
     allRows.forEach(function(r) { r.style.display = 'none'; });
+    var total = allRows.length;
+    var tp = Math.max(1, Math.ceil(total / PER_PAGE));
+    if (currentPage > tp) currentPage = tp;
+    if (currentPage < 1) currentPage = 1;
     var start = (currentPage - 1) * PER_PAGE;
     var end = start + PER_PAGE;
     allRows.slice(start, end).forEach(function(r) { r.style.display = ''; });
     var h = '';
-    h += '<span class="pag-info">Page <strong>' + currentPage + '</strong> of <strong>' + tp + '</strong> | <strong>' + total + '</strong> total</span>';
-    h += '<div class="pag-btns">';
-    h += '<a href="#" onclick="window.adminActGo(' + (currentPage - 1) + ');return false;" class="pag-btn' + (currentPage <= 1 ? ' disabled' : '') + '"><i class="fas fa-angle-left"></i></a>';
-    h += '<a href="#" onclick="window.adminActGo(' + (currentPage + 1) + ');return false;" class="pag-btn' + (currentPage >= tp ? ' disabled' : '') + '"><i class="fas fa-angle-right"></i></a>';
-    h += '</div>';
+    h += '<div class="dt-pagination-right">';
+    h += '<div class="dt-rows"><span>Rows per page</span><select onchange="window.adminActPerPage(this.value)"><option value="15">15</option><option value="25">25</option><option value="50">50</option></select></div>';
+    h += '<div class="dt-page-label">Page ' + currentPage + ' of ' + tp + '</div>';
+    h += '<div class="dt-page-btns">';
+    h += '<button class="dt-page-btn" onclick="window.adminActGo(1)"' + (currentPage <= 1 ? ' disabled' : '') + ' title="First page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminActGo(' + (currentPage - 1) + ')"' + (currentPage <= 1 ? ' disabled' : '') + ' title="Previous"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminActGo(' + (currentPage + 1) + ')"' + (currentPage >= tp ? ' disabled' : '') + ' title="Next"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
+    h += '<button class="dt-page-btn" onclick="window.adminActGo(' + tp + ')"' + (currentPage >= tp ? ' disabled' : '') + ' title="Last page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>';
+    h += '</div></div>';
     pag.innerHTML = h;
   }
 
   window.adminActGo = function(page) {
-    var total = allRows.length;
-    var tp = Math.ceil(total / PER_PAGE);
+    var tp = Math.ceil(allRows.length / PER_PAGE);
     if (page < 1 || page > tp) return;
     currentPage = page;
     renderTable();
   };
+  window.adminActPerPage = function(v) {
+    PER_PAGE = parseInt(v, 10) || 15;
+    currentPage = 1;
+    renderTable();
+  };
+
+  window.adminActSort = function(col) {
+    if (actSortState.col === col) { actSortState.dir = actSortState.dir === 'asc' ? 'desc' : 'asc'; }
+    else { actSortState.col = col; actSortState.dir = 'asc'; }
+    allRows.sort(function(a, b) {
+      var cellsA = a.querySelectorAll('td');
+      var cellsB = b.querySelectorAll('td');
+      var ia = col === 'date' ? 1 : 2;
+      var va = cellsA[ia] ? cellsA[ia].textContent.trim() : '';
+      var vb = cellsB[ia] ? cellsB[ia].textContent.trim() : '';
+      if (col === 'date') {
+        var da = new Date(va);
+        var db = new Date(vb);
+        if (!isNaN(da) && !isNaN(db)) { var res = da - db; return actSortState.dir === 'asc' ? res : -res; }
+      }
+      var res = va.localeCompare(vb);
+      return actSortState.dir === 'asc' ? res : -res;
+    });
+    document.querySelectorAll('#activity .appt-table thead .th-sort').forEach(function(btn) {
+      var c = btn.getAttribute('data-col');
+      btn.classList.toggle('th-sorted', c === actSortState.col);
+      var icon = btn.querySelector('.th-sort-icon');
+      if (icon) {
+        if (c === actSortState.col) {
+          icon.innerHTML = actSortState.dir === 'asc' ? '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>' : '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>';
+        } else {
+          icon.innerHTML = '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>';
+        }
+      }
+    });
+    currentPage = 1;
+    renderTable();
+  };
 
   renderTable();
+})();
+
+var actSortState = { col: '', dir: 'asc' };
+function actSortBy(col) { window.adminActSort(col); }
+
+function buildActUrl() {
+  var p = [];
+  var s = document.getElementById('adminActSearch').value;
+  var a = document.getElementById('actActionFilter').value;
+  var u = document.getElementById('actUserFilter').value;
+  var src = document.getElementById('actSourceFilter').value;
+  var df = document.getElementById('actDateFilterHidden').value;
+  if (s) p.push('act_search=' + encodeURIComponent(s));
+  if (a) p.push('act_action=' + encodeURIComponent(a));
+  if (u) p.push('act_user=' + encodeURIComponent(u));
+  if (src) p.push('act_source=' + encodeURIComponent(src));
+  if (df) p.push('act_date=' + encodeURIComponent(df));
+  return 'dashboard-admin.php' + (p.length ? '?' + p.join('&') : '');
+}
+function clearActFilters() { window.location.href = 'dashboard-admin.php'; }
+
+var actTimer;
+document.getElementById('adminActSearch').addEventListener('input', function() {
+  clearTimeout(actTimer);
+  actTimer = setTimeout(function() { window.location.href = buildActUrl(); }, 500);
+});
+document.getElementById('actActionFilter').addEventListener('change', function() { window.location.href = buildActUrl(); });
+document.getElementById('actUserFilter').addEventListener('change', function() { window.location.href = buildActUrl(); });
+document.getElementById('actSourceFilter').addEventListener('change', function() { window.location.href = buildActUrl(); });
+
+// ── Custom calendar for activity logs ──
+var actCalDate = (function() {
+  var v = document.getElementById('actDateFilterHidden').value;
+  if (v) { var p = v.split('-'); return new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2])); }
+  return new Date();
+})();
+var actCalOpen = false;
+var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function actCalInit() {
+  var ms = document.getElementById('actCalMonth');
+  var ys = document.getElementById('actCalYear');
+  ms.innerHTML = '';
+  months.forEach(function(m, i) { ms.innerHTML += '<option value="'+i+'">'+m+'</option>'; });
+  ys.innerHTML = '';
+  var cy = new Date().getFullYear();
+  for (var y = cy - 5; y <= cy + 5; y++) { ys.innerHTML += '<option value="'+y+'">'+y+'</option>'; }
+}
+
+function actCalRender() {
+  var ms = document.getElementById('actCalMonth');
+  var ys = document.getElementById('actCalYear');
+  var m = parseInt(ms.value);
+  var y = parseInt(ys.value);
+  actCalDate.setMonth(m);
+  actCalDate.setFullYear(y);
+  var firstDay = new Date(y, m, 1).getDay();
+  var daysInMonth = new Date(y, m + 1, 0).getDate();
+  var daysInPrev = new Date(y, m, 0).getDate();
+  var today = new Date();
+  var sel = document.getElementById('actDateFilterHidden').value;
+  var selDate = sel ? new Date(sel + 'T00:00:00') : null;
+  var html = '';
+  var day = 1;
+  var nextDay = 1;
+  for (var row = 0; row < 6; row++) {
+    for (var col = 0; col < 7; col++) {
+      var idx = row * 7 + col;
+      if (idx < firstDay) {
+        var d = daysInPrev - firstDay + idx + 1;
+        html += '<button onclick="actCalSelect('+y+','+m+','+d+',true)" style="width:32px;height:32px;border-radius:8px;border:none;background:transparent;color:#a1a1aa;font-size:13px;cursor:pointer;font-family:inherit;">'+d+'</button>';
+      } else if (day <= daysInMonth) {
+        var isToday = day === today.getDate() && m === today.getMonth() && y === today.getFullYear();
+        var isSelected = selDate && day === selDate.getDate() && m === selDate.getMonth() && y === selDate.getFullYear();
+        var bg = isSelected ? '#18181b' : isToday ? '#f4f4f5' : 'transparent';
+        var clr = isSelected ? '#fff' : '#18181b';
+        var fw = isToday && !isSelected ? 600 : 400;
+        html += '<button onclick="actCalSelect('+y+','+m+','+day+',false)" style="width:32px;height:32px;border-radius:8px;border:none;background:'+bg+';color:'+clr+';font-size:13px;cursor:pointer;font-family:inherit;font-weight:'+fw+'">'+day+'</button>';
+        day++;
+      } else {
+        html += '<button onclick="actCalSelect('+y+','+m+','+nextDay+',true)" style="width:32px;height:32px;border-radius:8px;border:none;background:transparent;color:#a1a1aa;font-size:13px;cursor:pointer;font-family:inherit;">'+nextDay+'</button>';
+        nextDay++;
+      }
+    }
+    if (day > daysInMonth && row > 3) break;
+  }
+  document.getElementById('actCalDays').innerHTML = html;
+  ms.value = m;
+  ys.value = y;
+}
+
+function actCalSelect(y, m, d, overflow) {
+  if (overflow) {
+    if (d > 15) { m--; if (m < 0) { m = 11; y--; } } else { m++; if (m > 11) { m = 0; y++; } }
+  }
+  var dt = new Date(y, m, d);
+  var str = dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+  document.getElementById('actDateFilterHidden').value = str;
+  window.location.href = buildActUrl();
+}
+
+function actCalPrev() {
+  var ms = document.getElementById('actCalMonth');
+  var ys = document.getElementById('actCalYear');
+  var m = parseInt(ms.value) - 1;
+  var y = parseInt(ys.value);
+  if (m < 0) { m = 11; y--; }
+  ms.value = m;
+  ys.value = y;
+  actCalRender();
+}
+
+function actCalNext() {
+  var ms = document.getElementById('actCalMonth');
+  var ys = document.getElementById('actCalYear');
+  var m = parseInt(ms.value) + 1;
+  var y = parseInt(ys.value);
+  if (m > 11) { m = 0; y++; }
+  ms.value = m;
+  ys.value = y;
+  actCalRender();
+}
+
+function toggleActCalendar() {
+  var pop = document.getElementById('actCalendarPopup');
+  actCalOpen = !actCalOpen;
+  if (actCalOpen) {
+    actCalInit();
+    document.getElementById('actCalMonth').value = actCalDate.getMonth();
+    document.getElementById('actCalYear').value = actCalDate.getFullYear();
+    actCalRender();
+    pop.style.display = 'block';
+  } else {
+    pop.style.display = 'none';
+  }
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('#actCalendarPopup') && !e.target.closest('#actDateFilter')) {
+    document.getElementById('actCalendarPopup').style.display = 'none';
+    actCalOpen = false;
+  }
+});
+
+// ── Users table sort (all columns) ──
+(function() {
+  var tbody = document.getElementById('adminUserBody');
+  if (!tbody) return;
+  var allRows = Array.from(tbody.querySelectorAll('tr'));
+  var sortCol = '';
+  var sortDir = 'asc';
+
+  function getCellVal(row, col) {
+    var cells = row.querySelectorAll('td');
+    var idx = {ref:0, name:1, email:2, role:3, status:4, registered:5};
+    var i = idx[col];
+    return i !== undefined && cells[i] ? cells[i].textContent.trim().toLowerCase() : '';
+  }
+
+  window.sortBy = function(col) {
+    if (sortCol === col) { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; }
+    else { sortCol = col; sortDir = 'asc'; }
+    allRows.sort(function(a, b) {
+      var va = getCellVal(a, col), vb = getCellVal(b, col);
+      var res = va.localeCompare(vb);
+      return sortDir === 'asc' ? res : -res;
+    });
+    document.querySelectorAll('.appt-table thead .th-sort').forEach(function(btn) {
+      var c = btn.getAttribute('data-col');
+      btn.classList.toggle('th-sorted', c === sortCol);
+      var icon = btn.querySelector('.th-sort-icon');
+      if (icon) {
+        if (c === sortCol) {
+          icon.innerHTML = sortDir === 'asc' ? '<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>' : '<path d="M12 5v14"/><path d="m19 12-7 7-7-7"/>';
+        } else {
+          icon.innerHTML = '<path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/>';
+        }
+      }
+    });
+    tbody.innerHTML = '';
+    allRows.forEach(function(r) { tbody.appendChild(r); });
+  };
 })();
 
 // ── Profile Settings Edit Toggle ──
@@ -784,8 +1241,8 @@ function viewUserProfile(u) {
   document.getElementById('vpAddress').textContent = u.address || '—';
   document.getElementById('vpBarangay').textContent = u.barangay_name || '—';
   var statusEl = document.getElementById('vpStatus');
-  if (u.status === 'active') { statusEl.innerHTML = '<span style="color:#16a34a;font-weight:600;">Active</span>'; }
-  else if (u.status === 'inactive') { statusEl.innerHTML = '<span style="color:#94a3b8;font-weight:600;">Inactive</span>'; }
+  if (u.status === 'active') { statusEl.innerHTML = '<span class="appt-status-pill" style="background:#f0fdf4;color:#166534;border-color:#bbf7d0;">Active</span>'; }
+  else if (u.status === 'inactive') { statusEl.innerHTML = '<span class="appt-status-pill" style="background:#fef3c7;color:#92400e;border-color:#fde68a;">Inactive</span>'; }
   else { statusEl.textContent = u.status || '—'; }
   document.getElementById('vpRegistered').textContent = u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'}) : '—';
   var avatarEl = document.getElementById('vpAvatar');
@@ -808,26 +1265,24 @@ function confirmRemoveAvatar() {
 
 <!-- Profile Photo Modal -->
 <div class="modal" id="profilePhotoModal">
-  <div class="modal-content" style="max-width:500px;">
-    <div class="modal-header">
-      <h3>Profile Photo</h3>
-      <button class="modal-close" onclick="closeModal('profilePhotoModal')">
-        <i class="fas fa-times"></i>
+  <div class="sd-dialog">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true">
+      <button type="button" class="sd-dialog-close" onclick="closeModal('profilePhotoModal')" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
       </button>
-    </div>
-    <div class="modal-body" style="text-align:center;">
-      <?php if (!empty($adminAvatar)): ?>
-        <button class="profile-photo-delete-btn" onclick="confirmRemoveAvatar(); closeModal('profilePhotoModal');" title="Delete Photo">
-          <i class="fas fa-trash"></i>
-        </button>
-      <?php endif; ?>
-      <div class="profile-photo-view">
+      <div class="sd-dialog-header">
+        <h2 class="sd-dialog-title">Profile Photo</h2>
+        <p class="sd-dialog-description">View your uploaded profile photo.</p>
+      </div>
+      <div style="text-align:center;padding:16px 0;">
         <?php if (!empty($adminAvatar)): ?>
-          <img src="<?php echo htmlspecialchars($adminAvatar); ?>" alt="Profile Photo" id="profilePhotoViewImg">
+          <img src="<?php echo htmlspecialchars($adminAvatar); ?>" alt="Profile Photo" style="max-width:100%;max-height:400px;border-radius:8px;object-fit:contain;">
+          <div style="margin-top:16px;">
+            <button class="pet-action-btn danger" onclick="confirmRemoveAvatar(); closeModal('profilePhotoModal');"><i class="fas fa-trash"></i> Remove Photo</button>
+          </div>
         <?php else: ?>
-          <div class="no-profile-photo">
-            <i class="fas fa-user"></i>
-            <p>No profile photo uploaded</p>
+          <div style="padding:40px 20px;color:#71717a;">
+            <p style="font-size:14px;margin:0;">No profile photo uploaded</p>
           </div>
         <?php endif; ?>
       </div>
@@ -836,29 +1291,42 @@ function confirmRemoveAvatar() {
 </div>
 
 <!-- View User Profile Modal -->
-<div class="modal view-profile-modal" id="viewProfileModal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3>User Profile</h3>
-      <button class="modal-close" onclick="closeModal('viewProfileModal')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <div class="view-profile-header">
-        <div class="view-profile-avatar" id="vpAvatar"></div>
-        <div>
-          <div class="view-profile-name" id="vpName"></div>
-          <div class="view-profile-role" id="vpRole"></div>
-        </div>
+<div class="modal" id="viewProfileModal">
+  <div class="sd-dialog">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true">
+      <button type="button" class="sd-dialog-close" onclick="closeModal('viewProfileModal')" aria-label="Close">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+      </button>
+      <div class="sd-dialog-header">
+        <h2 class="sd-dialog-title">User Profile</h2>
+        <p class="sd-dialog-description">View user account details and information.</p>
       </div>
-      <div class="view-profile-grid">
-        <div class="view-profile-field"><div class="view-profile-field-label">Reference ID</div><div class="view-profile-field-value" id="vpRef">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Username</div><div class="view-profile-field-value" id="vpUsername">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Email</div><div class="view-profile-field-value" id="vpEmail">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Phone</div><div class="view-profile-field-value" id="vpPhone">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Address</div><div class="view-profile-field-value" id="vpAddress">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Barangay</div><div class="view-profile-field-value" id="vpBarangay">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Status</div><div class="view-profile-field-value" id="vpStatus">—</div></div>
-        <div class="view-profile-field"><div class="view-profile-field-label">Registered</div><div class="view-profile-field-value" id="vpRegistered">—</div></div>
+      <div class="sd-field-group">
+        <div class="sd-profile-head">
+          <div class="sd-avatar-lg" id="vpAvatar"></div>
+          <div>
+            <div class="sd-profile-name" id="vpName"></div>
+            <div class="sd-profile-sub" id="vpRole"></div>
+          </div>
+        </div>
+        <div class="sd-section">
+          <div class="sd-section-title"><span>01</span> Account Information</div>
+          <div class="sd-info-grid">
+            <div class="sd-info-item"><div class="sd-info-label">Reference ID</div><div class="sd-info-value" id="vpRef">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Username</div><div class="sd-info-value" id="vpUsername">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Email</div><div class="sd-info-value" id="vpEmail">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Phone</div><div class="sd-info-value" id="vpPhone">—</div></div>
+          </div>
+        </div>
+        <div class="sd-section">
+          <div class="sd-section-title"><span>02</span> Personal Details</div>
+          <div class="sd-info-grid">
+            <div class="sd-info-item sd-field-full"><div class="sd-info-label">Address</div><div class="sd-info-value" id="vpAddress">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Barangay</div><div class="sd-info-value" id="vpBarangay">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Status</div><div class="sd-info-value" id="vpStatus">—</div></div>
+            <div class="sd-info-item"><div class="sd-info-label">Registered</div><div class="sd-info-value" id="vpRegistered">—</div></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>

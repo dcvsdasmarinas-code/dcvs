@@ -57,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET
     if ($stmt->execute()) {
         error_log("Pet archived successfully. Pet ID: $petId");
         $_SESSION['pet_success'] = "Pet archived successfully!";
-        header('Location: dashboard-resident.php');
+        header('Location: dashboard-resident.php#archive');
         exit;
     } else {
         error_log("Failed to archive pet. Error: " . $stmt->error);

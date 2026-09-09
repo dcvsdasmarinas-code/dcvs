@@ -1,0 +1,723 @@
+/* Resident dashboard overview - consistent, reference-aligned design */
+.resident-overview {
+  --ro-green: #0E8131;
+  --ro-green-dark: #086B28;
+  --ro-dark: #111827;
+  --ro-muted: #667085;
+  --ro-border: #E4E7EC;
+  --ro-soft: #EAF6EE;
+  --ro-page: #F7F9F8;
+  --ro-amber: #F79009;
+  --ro-amber-soft: #FFF7D6;
+  --ro-red: #D92D20;
+  --ro-red-soft: #FEF3F2;
+  --ro-radius: 12px;
+  --ro-gap: 20px;
+  --ro-card-pad: 20px;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  color: var(--ro-dark);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Header */
+.resident-overview .ro-head {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.resident-overview .ro-head-left h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+.resident-overview .ro-head-left p {
+  font-size: 13px;
+  color: var(--ro-muted);
+  margin: 4px 0 0;
+}
+.resident-overview .ro-head-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.resident-overview .ro-primary {
+  height: 40px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--ro-green);
+  color: #fff;
+  padding: 0 18px;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+.resident-overview .ro-primary:hover { background: var(--ro-green-dark); }
+.resident-overview .ro-primary:active { transform: translateY(1px); }
+
+/* KPI Cards */
+.resident-overview .ro-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--ro-gap);
+  margin-bottom: 26px;
+}
+.resident-overview .ro-kpi,
+.resident-overview .ro-card {
+  background: #fff;
+  border: 1px solid var(--ro-border);
+  border-radius: var(--ro-radius);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.04);
+}
+.resident-overview .ro-kpi {
+  min-height: auto;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+.resident-overview .ro-kpi-icon {
+  display: none;
+}
+.resident-overview .ro-kpi-label {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  color: #18181b;
+  margin: 0 0 6px;
+}
+.resident-overview .ro-kpi-value {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #18181b;
+  margin: 0 0 6px;
+}
+.resident-overview .ro-kpi-sub {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  margin: 0;
+}
+.resident-overview .ro-link {
+  color: var(--ro-green);
+  font-weight: 600;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+
+/* Main Grid */
+.resident-overview .ro-grid {
+  display: grid;
+  grid-template-columns: 1.1fr 1.1fr 0.9fr;
+  gap: var(--ro-gap);
+  align-items: stretch;
+}
+.resident-overview .ro-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ro-gap);
+}
+
+/* Cards */
+.resident-overview .ro-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.resident-overview .ro-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px var(--ro-card-pad);
+  border-bottom: 1px solid var(--ro-border);
+}
+.resident-overview .ro-card-head h2 {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: #18181b;
+  margin: 0;
+}
+.resident-overview .ro-card-head small {
+  display: block;
+  font-size: 12px;
+  color: var(--ro-muted);
+  margin-top: 2px;
+  font-weight: 400;
+}
+.resident-overview .ro-view {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ro-green);
+}
+.resident-overview .ro-card-body {
+  padding: var(--ro-card-pad);
+  flex: 1;
+}
+.resident-overview .ro-outline {
+  height: 34px;
+  border: 1px solid var(--ro-border);
+  border-radius: 8px;
+  background: #fff;
+  color: #344054;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 0 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.resident-overview .ro-outline:hover {
+  background: #F9FAFB;
+  border-color: #D0D5DD;
+}
+
+/* Today's Schedule / Timeline */
+.resident-overview .ro-timeline {
+  position: relative;
+  padding-bottom: 4px;
+}
+.resident-overview .ro-timeline:before {
+  content: '';
+  position: absolute;
+  left: 66px;
+  top: 16px;
+  bottom: 32px;
+  width: 1px;
+  background: var(--ro-border);
+}
+.resident-overview .ro-appt {
+  display: grid;
+  grid-template-columns: 58px 18px 1fr;
+  gap: 0 10px;
+  align-items: start;
+  margin-bottom: 18px;
+  position: relative;
+}
+.resident-overview .ro-time {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #71717a;
+  padding-top: 14px;
+  white-space: nowrap;
+  text-align: right;
+}
+.resident-overview .ro-dot {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--ro-green);
+  background: var(--ro-soft);
+  border-radius: 50%;
+  margin: 14px 0 0 1px;
+  z-index: 1;
+}
+.resident-overview .ro-dot.pending {
+  border-color: #98A2B3;
+  background: #fff;
+}
+.resident-overview .ro-appt-card {
+  border: 1px solid var(--ro-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  background: #fff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.resident-overview .ro-appt-card:hover {
+  border-color: #D0D5DD;
+  box-shadow: 0 2px 8px rgba(16, 24, 40, 0.04);
+}
+.resident-overview .ro-pet-img {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--ro-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ro-green);
+  font-size: 13px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.resident-overview .ro-appt-info {
+  min-width: 0;
+  flex: 1;
+}
+.resident-overview .ro-appt-info strong {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  color: #18181b;
+  display: block;
+}
+.resident-overview .ro-appt-info span {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  display: block;
+  margin-top: 2px;
+}
+.resident-overview .ro-status {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 0;
+  white-space: nowrap;
+  background: var(--ro-soft);
+  color: var(--ro-green);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.resident-overview .ro-status.pending {
+  background: #fffbeb;
+  color: #b45309;
+}
+.resident-overview .ro-status.confirmed,
+.resident-overview .ro-status.scheduled {
+  background: var(--ro-soft);
+  color: var(--ro-green);
+}
+.resident-overview .ro-full-btn {
+  width: 100%;
+  height: 40px;
+  background: #fff;
+  border: 1px solid var(--ro-border);
+  border-radius: 8px;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #344054;
+  cursor: pointer;
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s ease;
+}
+.resident-overview .ro-full-btn:hover { background: #F9FAFB; }
+.resident-overview .ro-full-btn span {
+  transition: transform 0.15s ease;
+}
+.resident-overview .ro-full-btn:hover span { transform: translateX(3px); }
+
+/* My Pets Overview */
+.resident-overview .ro-pets {
+  display: flex;
+  align-items: stretch;
+  padding: var(--ro-card-pad);
+  overflow-x: auto;
+}
+.resident-overview .ro-pet {
+  flex: 1;
+  min-width: 92px;
+  text-align: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--ro-border);
+}
+.resident-overview .ro-pet:last-child { border-right: 0; }
+.resident-overview .ro-pet .ro-pet-img {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 10px;
+  font-size: 16px;
+}
+.resident-overview .ro-pet strong {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  color: #18181b;
+  display: block;
+}
+.resident-overview .ro-pet span {
+  display: block;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  margin-top: 3px;
+}
+.resident-overview .ro-pet-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 3px 10px;
+  border-radius: 0;
+  margin-top: 4px;
+}
+.resident-overview .ro-add-pet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #71717a;
+  cursor: pointer;
+  transition: color 0.15s ease;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+.resident-overview .ro-add-pet:hover { color: var(--ro-green); }
+.resident-overview .ro-add-pet .ro-plus {
+  width: 64px;
+  height: 64px;
+  border: 1px dashed #D0D5DD;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #667085;
+  font-size: 20px;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.resident-overview .ro-add-pet:hover .ro-plus {
+  border-color: var(--ro-green);
+  color: var(--ro-green);
+}
+
+/* My Tasks */
+.resident-overview .ro-tasks {
+  padding: 0 var(--ro-card-pad) var(--ro-card-pad);
+}
+.resident-overview .ro-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--ro-border);
+  font-size: 13px;
+}
+.resident-overview .ro-task:last-child { border-bottom: 0; }
+.resident-overview .ro-task input {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1px solid #98A2B3;
+  border-radius: 4px;
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.resident-overview .ro-task input:checked {
+  background: var(--ro-green);
+  border-color: var(--ro-green);
+}
+.resident-overview .ro-task input:checked:after {
+  content: '';
+  width: 5px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.resident-overview .ro-task-text {
+  flex: 1;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #18181b;
+}
+.resident-overview .ro-task-date {
+  color: var(--ro-green);
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.resident-overview .ro-task-date i { margin-right: 5px; }
+
+/* Clinic Status */
+.resident-overview .ro-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px var(--ro-card-pad);
+  border-bottom: 1px solid var(--ro-border);
+  font-size: 13px;
+}
+.resident-overview .ro-row:last-child { border-bottom: 0; }
+.resident-overview .ro-row i {
+  color: var(--ro-muted);
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+.resident-overview .ro-row-label {
+  flex: 1;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: #18181b;
+}
+.resident-overview .ro-row strong {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+}
+.resident-overview .ro-live {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ro-green);
+  background: var(--ro-soft);
+  border-radius: 8px;
+  padding: 5px 10px;
+}
+.resident-overview .ro-live:before {
+  content: '•';
+  margin-right: 5px;
+}
+.resident-overview .ro-moderate {
+  background: #fffbeb;
+  color: #b45309;
+  border-radius: 0;
+  padding: 3px 10px;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Announcements */
+.resident-overview .ro-announcement {
+  padding: 16px var(--ro-card-pad);
+  border-bottom: 1px solid var(--ro-border);
+  display: flex;
+  gap: 12px;
+}
+.resident-overview .ro-announcement:last-child { border-bottom: 0; }
+.resident-overview .ro-announcement .ro-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+.resident-overview .ro-announcement strong {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  color: #18181b;
+  display: block;
+}
+.resident-overview .ro-announcement p {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  line-height: 1.45;
+  margin: 4px 0;
+}
+.resident-overview .ro-announcement time {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #98A2B3;
+}
+
+/* Bottom section */
+.resident-overview .ro-bottom {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;
+  gap: var(--ro-gap);
+  margin-top: var(--ro-gap);
+}
+
+/* Recent Activity Table */
+.resident-overview .ro-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+.resident-overview .ro-table th {
+  text-align: left;
+  color: #71717a;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  letter-spacing: 0.03em;
+  font-weight: 600;
+  padding: 0 10px 12px;
+  text-transform: uppercase;
+}
+.resident-overview .ro-table td {
+  padding: 13px 10px;
+  border-top: 1px solid var(--ro-border);
+  color: #71717a;
+  vertical-align: top;
+}
+.resident-overview .ro-table td:first-child { color: #18181b; }
+.resident-overview .ro-table tr:first-child td { border-top: 0; }
+.resident-overview .ro-badge {
+  display: inline-block;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  color: var(--ro-green);
+  background: var(--ro-soft);
+}
+.resident-overview .ro-badge.success,
+.resident-overview .ro-badge.completed {
+  color: var(--ro-green);
+  background: var(--ro-soft);
+}
+.resident-overview .ro-badge.resolved {
+  color: var(--ro-green);
+  background: var(--ro-soft);
+}
+.resident-overview .ro-badge.pending {
+  color: #A15C00;
+  background: var(--ro-amber-soft);
+}
+
+/* Need Help */
+.resident-overview .ro-help {
+  padding: var(--ro-card-pad);
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.resident-overview .ro-help .ro-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  font-size: 24px;
+}
+.resident-overview .ro-help-copy { flex: 1; }
+.resident-overview .ro-help-copy strong {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: #18181b;
+  display: block;
+}
+.resident-overview .ro-help-copy p {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.resident-overview .ro-contact {
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  color: #71717a;
+  line-height: 1.9;
+}
+.resident-overview .ro-contact i {
+  color: var(--ro-green);
+  width: 18px;
+  text-align: center;
+  margin-right: 4px;
+}
+.resident-overview .ro-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 120px;
+}
+.resident-overview .ro-actions button {
+  height: 36px;
+  border: 1px solid var(--ro-border);
+  background: #fff;
+  border-radius: 8px;
+  color: #344054;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.resident-overview .ro-actions button:hover {
+  background: #F9FAFB;
+  border-color: #D0D5DD;
+}
+.resident-overview .ro-actions i {
+  color: var(--ro-green);
+  font-size: 11px;
+}
+
+/* Empty state */
+.resident-overview .ro-empty {
+  padding: 32px 0;
+  text-align: center;
+  color: #71717a;
+  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 1180px) {
+  .resident-overview .ro-kpis { grid-template-columns: repeat(3, 1fr); }
+  .resident-overview .ro-grid { grid-template-columns: 1fr 1fr; }
+  .resident-overview .ro-grid > .ro-schedule { grid-row: span 2; }
+  .resident-overview .ro-bottom { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .resident-overview .ro-head { flex-direction: column; align-items: flex-start; }
+  .resident-overview .ro-head-right { justify-content: flex-start; }
+  .resident-overview .ro-kpis,
+  .resident-overview .ro-grid,
+  .resident-overview .ro-bottom { grid-template-columns: 1fr; }
+  .resident-overview .ro-grid > .ro-schedule { grid-row: auto; }
+  .resident-overview .ro-table-wrap { overflow-x: auto; }
+  .resident-overview .ro-table { min-width: 560px; }
+  .resident-overview .ro-help { flex-wrap: wrap; }
+  .resident-overview .ro-actions { width: 100%; flex-direction: row; }
+  .resident-overview .ro-actions button { flex: 1; }
+}
+
+

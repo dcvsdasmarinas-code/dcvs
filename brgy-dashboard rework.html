@@ -1,0 +1,3116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operations Overview — BRGY. PALIPARAN I Records & Incident Portal</title>
+  
+  <!-- Modern Typography from Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ==========================================================================
+       DESIGN SYSTEM & CSS VARIABLES
+       Clean White Theme / Responsive Architecture
+       ========================================================================== */
+    :root {
+      /* Brand Greens */
+      --primary-green: #0B4D26;
+      --primary-green-hover: #083B1D;
+      --primary-green-light: #EBF7EE;
+      --primary-green-soft: #D1EEDB;
+      --primary-green-text: #0E6231;
+      --accent-green: #107C41;
+
+      /* Neutrals & Surfaces - Pure White Page */
+      --bg-page: #FFFFFF;
+      --bg-card: #FFFFFF;
+      --bg-subtle: #F9FAFB;
+      --bg-hover: #F3F4F6;
+      --border-color: #E5E7EB;
+      --border-color-light: #F0F2F5;
+      --border-color-dark: #D1D5DB;
+
+      /* Typography Colors */
+      --text-main: #111827;
+      --text-secondary: #4B5563;
+      --text-muted: #6B7280;
+      --text-faint: #9CA3AF;
+
+      /* Status & Priority Accents */
+      --badge-red-bg: #FEE4E2;
+      --badge-red-text: #D92D20;
+      --badge-red-dot: #F04438;
+
+      --badge-amber-bg: #FEF0C7;
+      --badge-amber-text: #B54708;
+      --badge-amber-dot: #F79009;
+
+      --badge-blue-bg: #E0F2FE;
+      --badge-blue-text: #0284C7;
+      --badge-blue-dot: #0BA5EC;
+
+      --badge-green-bg: #ECFDF3;
+      --badge-green-text: #027A48;
+      --badge-green-dot: #12B76A;
+
+      --badge-gray-bg: #F2F4F7;
+      --badge-gray-text: #344054;
+      --badge-gray-dot: #667085;
+
+      /* Metric Step Accent Backgrounds */
+      --metric-new-bg: #EBFDF2;
+      --metric-new-icon: #0F973D;
+      --metric-validation-bg: #FEF6EE;
+      --metric-validation-icon: #E07A16;
+      --metric-progress-bg: #EFF8FF;
+      --metric-progress-icon: #175CD3;
+      --metric-resolved-bg: #EDFDF5;
+      --metric-resolved-icon: #12B76A;
+      --metric-closed-bg: #F8F9FC;
+      --metric-closed-icon: #475467;
+
+      /* Timeline Node Colors */
+      --ring-teal: #0D9488;
+      --ring-green: #10B981;
+      --ring-red: #EF4444;
+      --ring-amber: #F59E0B;
+
+      /* Dimensions & Shadows */
+      --header-height: 70px;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 18px;
+      --shadow-card: 0 1px 3px rgba(16, 24, 40, 0.05), 0 1px 2px rgba(16, 24, 40, 0.03);
+      --shadow-dropdown: 0 12px 24px -4px rgba(0, 0, 0, 0.12), 0 4px 8px -2px rgba(0, 0, 0, 0.04);
+      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Reset & Global */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-page);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13.5px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      overflow-x: hidden;
+      min-height: 100vh;
+    }
+
+    .app-wrapper {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-color: var(--bg-page);
+    }
+
+    /* ==========================================================================
+       TOP NAVIGATION BAR
+       ========================================================================== */
+    .topbar {
+      height: var(--header-height);
+      background-color: #FFFFFF;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    }
+
+    .topbar-left {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .brand-seal-wrapper {
+      width: 40px;
+      height: 40px;
+      flex-shrink: 0;
+    }
+
+    .brand-seal-svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .brand-title {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      color: var(--primary-green);
+      line-height: 1.2;
+    }
+
+    .brand-subtitle {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-weight: 500;
+      line-height: 1.3;
+      margin-top: 1px;
+    }
+
+    .header-divider {
+      width: 1px;
+      height: 28px;
+      background-color: var(--border-color);
+    }
+
+    .page-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .page-title {
+      font-size: 17.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.015em;
+    }
+
+    .barangay-selector {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .barangay-selector:hover {
+      background-color: var(--bg-hover);
+      border-color: var(--border-color-dark);
+    }
+
+    .barangay-selector svg {
+      color: var(--primary-green);
+    }
+
+    .topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    /* Search Box */
+    .search-container {
+      position: relative;
+      width: 320px;
+    }
+
+    .search-input-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 11px;
+      width: 15px;
+      height: 15px;
+      color: var(--text-muted);
+      pointer-events: none;
+    }
+
+    .search-input {
+      width: 100%;
+      height: 36px;
+      padding: 0 44px 0 34px;
+      background-color: #FAFAFA;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      color: var(--text-main);
+      font-family: inherit;
+      transition: var(--transition);
+      outline: none;
+    }
+
+    .search-input:focus {
+      background-color: #FFFFFF;
+      border-color: var(--primary-green);
+      box-shadow: 0 0 0 3px rgba(11, 77, 38, 0.1);
+    }
+
+    .search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .search-shortcut {
+      position: absolute;
+      right: 9px;
+      background-color: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 10.5px;
+      font-family: 'IBM Plex Mono', monospace;
+      color: var(--text-muted);
+      padding: 1px 5px;
+      font-weight: 600;
+      pointer-events: none;
+    }
+
+    /* Notification Bell */
+    .notif-btn {
+      position: relative;
+      background: none;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: var(--transition);
+    }
+
+    .notif-btn:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-main);
+    }
+
+    .notif-badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      background-color: #E63946;
+      color: #FFFFFF;
+      font-size: 10px;
+      font-weight: 700;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 2px solid #FFFFFF;
+    }
+
+    /* User Profile Pill */
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: var(--transition);
+      border: 1px solid transparent;
+    }
+
+    .user-profile:hover {
+      background-color: var(--bg-hover);
+      border-color: var(--border-color-light);
+    }
+
+    .user-avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: #D5ECE0;
+      border: 1px solid #B8DEC9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary-green);
+      font-weight: 700;
+      font-size: 12px;
+      overflow: hidden;
+    }
+
+    .user-meta {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.25;
+    }
+
+    .user-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .user-role {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* ==========================================================================
+       DASHBOARD CONTENT AREA
+       ========================================================================== */
+    .dashboard-content {
+      padding: 24px 32px 50px;
+      max-width: 1440px;
+      margin: 0 auto;
+      width: 100%;
+      flex: 1;
+    }
+
+    /* Action & Date Filter Bar */
+    .action-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 22px;
+      flex-wrap: wrap;
+      gap: 12px;
+      position: relative;
+    }
+
+    .date-filter-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: relative;
+    }
+
+    .date-dropdown-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 7.5px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+      user-select: none;
+    }
+
+    .date-dropdown-btn:hover {
+      background-color: var(--bg-hover);
+      border-color: var(--border-color-dark);
+    }
+
+    .date-dropdown-btn.active {
+      border-color: var(--primary-green);
+      box-shadow: 0 0 0 3px rgba(11, 77, 38, 0.1);
+    }
+
+    .date-comparison-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+      transition: var(--transition);
+    }
+
+    /* Interactive Date Range Dropdown Popover */
+    .date-picker-popover {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-dropdown);
+      padding: 16px;
+      width: 330px;
+      z-index: 50;
+      display: none;
+      animation: popoverFadeIn 0.2s ease;
+    }
+
+    @keyframes popoverFadeIn {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .date-picker-popover.show {
+      display: block;
+    }
+
+    .date-preset-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 14px;
+    }
+
+    .date-preset-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: var(--transition);
+      text-align: left;
+      width: 100%;
+    }
+
+    .date-preset-item:hover {
+      background-color: var(--primary-green-light);
+      color: var(--primary-green);
+    }
+
+    .date-preset-item.selected {
+      background-color: var(--primary-green);
+      color: #FFFFFF;
+    }
+
+    .custom-range-divider {
+      height: 1px;
+      background-color: var(--border-color-light);
+      margin: 12px 0;
+    }
+
+    .custom-range-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 8px;
+    }
+
+    .custom-range-inputs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .custom-range-inputs input {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      font-size: 11.5px;
+      font-family: inherit;
+      color: var(--text-main);
+      outline: none;
+    }
+
+    .custom-range-inputs input:focus {
+      border-color: var(--primary-green);
+    }
+
+    .apply-custom-date-btn {
+      width: 100%;
+      padding: 8px;
+      background-color: var(--primary-green);
+      color: #FFFFFF;
+      font-weight: 700;
+      font-size: 12px;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .apply-custom-date-btn:hover {
+      background-color: var(--primary-green-hover);
+    }
+
+    .action-buttons-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 7.5px 14px;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--bg-hover);
+      border-color: var(--border-color-dark);
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--primary-green);
+      border: 1px solid var(--primary-green);
+      border-radius: var(--radius-sm);
+      padding: 7.5px 16px;
+      font-size: 12.5px;
+      font-weight: 700;
+      color: #FFFFFF;
+      cursor: pointer;
+      transition: var(--transition);
+      box-shadow: 0 1px 3px rgba(11, 77, 38, 0.25);
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-green-hover);
+    }
+
+    /* ==========================================================================
+       METRIC KPI CARDS (INDIVIDUAL CONTAINERS)
+       ========================================================================== */
+    .metric-pipeline-container {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+    }
+
+    .pipeline-step {
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px;
+      box-shadow: var(--shadow-card);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      cursor: default;
+      transition: var(--transition);
+      min-width: 0;
+    }
+
+    .pipeline-step:hover {
+      border-color: var(--border-color-dark);
+      box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+    }
+
+    .step-icon-box {
+      width: 42px;
+      height: 42px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: var(--transition);
+    }
+
+    .step-icon-box.new {
+      background-color: var(--metric-new-bg);
+      color: var(--metric-new-icon);
+      border: 1px solid #D2F4DC;
+    }
+
+    .step-icon-box.validation {
+      background-color: var(--metric-validation-bg);
+      color: var(--metric-validation-icon);
+      border: 1px solid #FEE5C8;
+    }
+
+    .step-icon-box.progress {
+      background-color: var(--metric-progress-bg);
+      color: var(--metric-progress-icon);
+      border: 1px solid #D5E9FD;
+    }
+
+    .step-icon-box.resolved {
+      background-color: var(--metric-resolved-bg);
+      color: var(--metric-resolved-icon);
+      border: 1px solid #CEF6DE;
+    }
+
+    .step-icon-box.closed {
+      background-color: var(--metric-closed-bg);
+      color: var(--metric-closed-icon);
+      border: 1px solid #E4E7EC;
+    }
+
+    .step-icon-box svg {
+      width: 20px;
+      height: 20px;
+    }
+
+    .step-content {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .step-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 2px;
+    }
+
+    .step-value {
+      font-size: 22px;
+      font-weight: 800;
+      color: var(--text-main);
+      line-height: 1.1;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      transition: transform 0.2s ease;
+    }
+
+    .step-trend {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--badge-green-text);
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      margin-top: 3px;
+    }
+
+    .pipeline-arrow {
+      color: var(--border-color-dark);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      padding: 0 4px;
+      user-select: none;
+    }
+
+    /* ==========================================================================
+       MAIN GRID LAYOUT (Left Content vs Right Sidebar)
+       ========================================================================== */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 350px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .grid-left {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      min-width: 0;
+    }
+
+    .grid-right {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Reusable Card */
+    .dashboard-card {
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+    }
+
+    .card-header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-color-light);
+    }
+
+    .card-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title {
+      font-size: 14.5px;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.01em;
+    }
+
+    .count-badge {
+      background-color: var(--bg-hover);
+      color: var(--text-secondary);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border-color);
+    }
+
+    .card-action-link {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--primary-green);
+      text-decoration: none;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .card-action-link:hover {
+      text-decoration: underline;
+    }
+
+    .card-action-btn {
+      background: none;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 4px 8px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .card-action-btn:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-main);
+    }
+
+    /* ==========================================================================
+       DATA TABLE: REPORTS REQUIRING ATTENTION
+       ========================================================================== */
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 12.5px;
+    }
+
+    .data-table th {
+      padding: 11px 16px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-muted);
+      background-color: #FAFAFA;
+      border-bottom: 1px solid var(--border-color);
+      white-space: nowrap;
+      text-transform: none;
+    }
+
+    .data-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-color-light);
+      color: var(--text-secondary);
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    .data-table tbody tr {
+      transition: var(--transition);
+      cursor: pointer;
+    }
+
+    .data-table tbody tr:hover {
+      background-color: #F9FBFA;
+    }
+
+    .data-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .report-id-cell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: var(--text-main);
+    }
+
+    .priority-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .priority-dot.high { background-color: var(--badge-red-dot); }
+    .priority-dot.medium { background-color: var(--badge-amber-dot); }
+    .priority-dot.low { background-color: var(--badge-green-dot); }
+
+    .category-cell {
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .location-cell {
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .submitted-cell {
+      color: var(--text-muted);
+      font-size: 11.5px;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2.5px 8.5px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .status-badge.priority-high {
+      background-color: var(--badge-red-bg);
+      color: var(--badge-red-text);
+    }
+
+    .status-badge.priority-medium {
+      background-color: var(--badge-amber-bg);
+      color: var(--badge-amber-text);
+    }
+
+    .status-badge.priority-low {
+      background-color: var(--badge-green-bg);
+      color: var(--badge-green-text);
+    }
+
+    .status-badge.status-new {
+      background-color: var(--badge-green-bg);
+      color: var(--badge-green-text);
+    }
+
+    .status-badge.status-validation {
+      background-color: var(--badge-amber-bg);
+      color: var(--badge-amber-text);
+    }
+
+    .status-badge.status-progress {
+      background-color: #EBF5FF;
+      color: #175CD3;
+    }
+
+    .status-badge.status-resolved {
+      background-color: #ECFDF3;
+      color: #027A48;
+    }
+
+    .assignee-cell {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-main);
+    }
+
+    .assignee-cell.unassigned {
+      color: var(--text-faint);
+    }
+
+    .row-action-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: var(--transition);
+    }
+
+    .row-action-btn:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-main);
+    }
+
+    /* ==========================================================================
+       MODERN WAVE CHART (WITH GRADIENT FILL & FLOATING CARD TOOLTIP)
+       ========================================================================== */
+    .chart-container {
+      padding: 18px 24px 24px;
+      position: relative;
+    }
+
+    .chart-legend {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 18px;
+      font-size: 12.5px;
+      font-weight: 600;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #64748B;
+    }
+
+    .legend-dot-blue {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background-color: #2563EB;
+      display: inline-block;
+    }
+
+    .legend-line-dashed {
+      width: 20px;
+      height: 0;
+      border-top: 2px dashed #94A3B8;
+      display: inline-block;
+    }
+
+    .chart-svg-wrapper {
+      position: relative;
+      width: 100%;
+      height: 250px;
+      cursor: crosshair;
+    }
+
+    .chart-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    /* Floating Tooltip Card matching Reference Image */
+    .chart-tooltip-popover {
+      position: absolute;
+      background: #FFFFFF;
+      border: 1px solid #E2E8F0;
+      border-radius: 12px;
+      box-shadow: 0 12px 28px -4px rgba(15, 23, 42, 0.14), 0 4px 10px -2px rgba(15, 23, 42, 0.05);
+      padding: 12px 16px 14px;
+      pointer-events: none;
+      z-index: 60;
+      min-width: 195px;
+      transform: translate(-50%, -122%);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+      opacity: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .chart-tooltip-popover.show {
+      opacity: 1;
+    }
+
+    .chart-tooltip-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: #94A3B8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 2px;
+    }
+
+    .chart-tooltip-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      color: #475569;
+    }
+
+    .tooltip-label-group {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 500;
+    }
+
+    .tooltip-blue-dot {
+      width: 7.5px;
+      height: 7.5px;
+      border-radius: 50%;
+      background-color: #2563EB;
+      flex-shrink: 0;
+    }
+
+    .tooltip-dashed-line {
+      width: 12px;
+      height: 0;
+      border-top: 1.5px dashed #94A3B8;
+      flex-shrink: 0;
+    }
+
+    .chart-tooltip-val {
+      font-weight: 800;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      color: #0F172A;
+      font-size: 13.5px;
+    }
+
+    .chart-tooltip-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background-color: #ECFDF3;
+      color: #027A48;
+      font-weight: 700;
+      font-size: 11px;
+      padding: 3.5px 8px;
+      border-radius: 6px;
+      margin-top: 4px;
+      align-self: flex-start;
+      border: 1px solid #D1FADF;
+    }
+
+    /* Vertical Guideline inside SVG */
+    .chart-crosshair-line {
+      stroke: #CBD5E1;
+      stroke-width: 1.5;
+      stroke-dasharray: 4 4;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .chart-focus-dot {
+      transition: transform 0.15s ease, opacity 0.15s ease;
+      opacity: 0;
+    }
+
+    /* Category List Card */
+    .category-list-body {
+      padding: 14px 18px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .category-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .category-info {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      width: 125px;
+      flex-shrink: 0;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      white-space: nowrap;
+    }
+
+    .category-icon {
+      width: 15px;
+      height: 15px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+
+    .progress-track {
+      flex: 1;
+      height: 7px;
+      background-color: #F1F3F5;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background-color: var(--primary-green);
+      border-radius: 999px;
+      transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .category-stat {
+      width: 50px;
+      text-align: right;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      font-family: 'IBM Plex Mono', monospace;
+      flex-shrink: 0;
+    }
+
+    .category-footer {
+      margin-top: 6px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-color-light);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .category-total-label {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--primary-green);
+    }
+
+    .category-total-val {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text-main);
+      font-family: 'IBM Plex Mono', monospace;
+    }
+
+    /* ==========================================================================
+       RIGHT COLUMN: TODAY'S WORKLOAD & CUSTOM TIMELINE FEED
+       ========================================================================== */
+    .workload-body {
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .workload-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px;
+      background-color: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: var(--transition);
+    }
+
+    .workload-item:hover {
+      border-color: var(--primary-green-soft);
+      background-color: #FBFDFB;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.03);
+    }
+
+    .workload-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .workload-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .workload-icon-box.amber {
+      background-color: #FEF6EE;
+      color: #E07A16;
+      border: 1px solid #FEE5C8;
+    }
+
+    .workload-icon-box.red {
+      background-color: #FEF3F2;
+      color: #D92D20;
+      border: 1px solid #FEE4E2;
+    }
+
+    .workload-icon-box.green {
+      background-color: #ECFDF3;
+      color: #027A48;
+      border: 1px solid #D1FADF;
+    }
+
+    .workload-texts {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .workload-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .workload-sub {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-top: 1px;
+    }
+
+    .workload-sub.alert-red {
+      color: #D92D20;
+    }
+
+    .workload-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .workload-count {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    .workload-chevron {
+      color: var(--text-faint);
+      font-size: 14px;
+    }
+
+    /* ==========================================================================
+       CUSTOM TIMELINE / HISTORY FEED WITH DATE & HOLLOW RING DONUT NODES
+       ========================================================================== */
+    .activity-feed-body {
+      padding: 16px 18px 20px;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    .activity-feed-item {
+      position: relative;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding-bottom: 22px;
+    }
+
+    .activity-feed-item:last-child {
+      padding-bottom: 4px;
+    }
+
+    /* Left Date Column (e.g. 16 Oct / 31 May) */
+    .activity-date-col {
+      width: 28px;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      flex-shrink: 0;
+      text-align: left;
+      padding-top: 1px;
+    }
+
+    .activity-date-day {
+      font-size: 14px;
+      font-weight: 800;
+      color: #111827;
+      line-height: 1.05;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      letter-spacing: -0.02em;
+    }
+
+    .activity-date-month {
+      font-size: 11px;
+      font-weight: 600;
+      color: #9CA3AF;
+      line-height: 1.2;
+    }
+
+    /* Middle Timeline Track & Hollow Ring Donut Node */
+    .activity-track-col {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 18px;
+      flex-shrink: 0;
+      align-self: stretch;
+    }
+
+    /* The continuous vertical connector line */
+    .activity-timeline-line {
+      position: absolute;
+      top: 10px;
+      bottom: -18px;
+      width: 1.5px;
+      background-color: #E5E7EB;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1;
+    }
+
+    .activity-feed-item:last-child .activity-timeline-line {
+      display: none;
+    }
+
+    /* The circular hollow donut ring node */
+    .activity-ring-node {
+      width: 13.5px;
+      height: 13.5px;
+      border-radius: 50%;
+      background-color: #FFFFFF;
+      position: relative;
+      z-index: 2;
+      margin-top: 2px;
+      box-shadow: 0 0 0 2.5px #FFFFFF;
+      flex-shrink: 0;
+      border: 3px solid #0D9488;
+    }
+
+    /* Ring Color Accents (Matching user reference) */
+    .activity-ring-node.teal {
+      border-color: #0D9488;
+    }
+
+    .activity-ring-node.green {
+      border-color: #10B981;
+    }
+
+    .activity-ring-node.red {
+      border-color: #EF4444;
+    }
+
+    .activity-ring-node.amber {
+      border-color: #F59E0B;
+    }
+
+    /* Right Details Container */
+    .activity-content {
+      flex: 1;
+      min-width: 0;
+      padding-top: 0px;
+    }
+
+    .activity-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      line-height: 1.35;
+    }
+
+    .activity-title strong {
+      color: var(--primary-green-text);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+    }
+
+    .activity-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 3px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .activity-desc {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+
+    .activity-time {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+      margin-left: 6px;
+    }
+
+    /* ==========================================================================
+       MODALS & DIALOGS
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(17, 24, 39, 0.45);
+      backdrop-filter: blur(3px);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+      padding: 16px;
+    }
+
+    .modal-backdrop.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-dialog {
+      background: #FFFFFF;
+      border-radius: var(--radius-xl);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+      width: 100%;
+      max-width: 540px;
+      overflow: hidden;
+      transform: translateY(12px) scale(0.98);
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .modal-backdrop.open .modal-dialog {
+      transform: translateY(0) scale(1);
+    }
+
+    .modal-header {
+      padding: 18px 22px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .modal-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .modal-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close-btn:hover {
+      background-color: var(--bg-hover);
+      color: var(--text-main);
+    }
+
+    .modal-body {
+      padding: 22px;
+      max-height: 75vh;
+      overflow-y: auto;
+    }
+
+    .form-group {
+      margin-bottom: 16px;
+    }
+
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text-main);
+      margin-bottom: 6px;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      color: var(--text-main);
+      font-family: inherit;
+      outline: none;
+      transition: var(--transition);
+      background-color: #FFFFFF;
+    }
+
+    .form-control:focus {
+      border-color: var(--primary-green);
+      box-shadow: 0 0 0 3px rgba(11, 77, 38, 0.1);
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .modal-footer {
+      padding: 16px 22px;
+      background-color: #FAFAFA;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+    }
+
+    /* Toast Notification */
+    .toast-notification {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background-color: #111827;
+      color: #FFFFFF;
+      padding: 12px 18px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 200;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .toast-notification.show {
+      transform: translateY(0);
+      opacity: 1;
+    }
+
+    /* Quick Action Dropdown Menu */
+    .quick-dropdown {
+      position: absolute;
+      background: #FFFFFF;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-dropdown);
+      padding: 6px;
+      z-index: 50;
+      min-width: 170px;
+      display: none;
+    }
+
+    .quick-dropdown.show {
+      display: block;
+    }
+
+    .quick-dropdown-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 10px;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--text-main);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: var(--transition);
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .quick-dropdown-item:hover {
+      background-color: var(--bg-hover);
+      color: var(--primary-green);
+    }
+
+    /* ==========================================================================
+       RESPONSIVE BREAKPOINTS
+       ========================================================================== */
+    @media (max-width: 1200px) {
+      .metric-pipeline-container {
+        grid-template-columns: repeat(3, 1fr);
+      }
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      .grid-right {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 992px) {
+      .topbar {
+        padding: 0 20px;
+      }
+      .dashboard-content {
+        padding: 20px 20px 40px;
+      }
+      .bottom-cards-row {
+        grid-template-columns: 1fr;
+      }
+      .grid-right {
+        grid-template-columns: 1fr;
+      }
+      .search-container {
+        width: 220px;
+      }
+      .header-divider {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .metric-pipeline-container {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .brand-text {
+        display: none;
+      }
+      .topbar {
+        padding: 0 16px;
+      }
+      .dashboard-content {
+        padding: 16px;
+      }
+      .action-bar {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      .action-buttons-group {
+        width: 100%;
+        justify-content: flex-end;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .barangay-selector {
+        display: none;
+      }
+      .search-container {
+        display: none;
+      }
+      .user-meta {
+        display: none;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .metric-pipeline-container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app-wrapper">
+
+  <!-- ==========================================================================
+       TOP NAVIGATION BAR
+       ========================================================================== -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <!-- Official Barangay Seal & Branding -->
+      <a href="#" class="header-brand">
+        <div class="brand-seal-wrapper">
+          <svg class="brand-seal-svg" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="50" r="46" stroke="#0B4D26" stroke-width="4" fill="#FFFFFF"/>
+            <circle cx="50" cy="50" r="41" stroke="#0B4D26" stroke-width="1.5" stroke-dasharray="3 3"/>
+            <path d="M50 18L30 30V48C30 65 50 78 50 78C50 78 70 65 70 48V30L50 18Z" fill="#EBF7EE" stroke="#0B4D26" stroke-width="2.5"/>
+            <path d="M50 26L40 33V44C40 54 50 63 50 63C50 63 60 54 60 44V33L50 26Z" fill="#0B4D26"/>
+            <path d="M46 45L49 48L55 39" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M26 50C26 63.2548 36.7452 74 50 74C63.2548 74 74 63.2548 74 50" stroke="#0B4D26" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-title">BRGY. PALIPARAN I</span>
+          <span class="brand-subtitle">Dasmariñas City, Cavite · Portal</span>
+        </div>
+      </a>
+
+      <div class="header-divider"></div>
+
+      <!-- Page Title & Barangay Dropdown -->
+      <div class="page-title-group">
+        <h1 class="page-title">Operations Overview</h1>
+        
+        <div class="barangay-selector" title="Switch Jurisdiction / Barangay">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21h18"/>
+            <path d="M5 21V7l7-4 7 4v14"/>
+            <path d="M9 10a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v11"/>
+          </svg>
+          <span>Brgy. Paliparan I</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <!-- Global Search -->
+      <div class="search-container">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="global-search" class="search-input" placeholder="Search reports, residents, services...">
+          <span class="search-shortcut">⌘ K</span>
+        </div>
+      </div>
+
+      <!-- Notification Bell -->
+      <button class="notif-btn" id="notif-btn" title="6 unread notifications">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span class="notif-badge">6</span>
+      </button>
+
+      <!-- User Profile Pill -->
+      <div class="user-profile" id="user-profile-btn" title="View Profile">
+        <div class="user-avatar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <div class="user-meta">
+          <span class="user-name">Bords Bordagul</span>
+          <span class="user-role">Barangay Officer</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ==========================================================================
+       MAIN DASHBOARD VIEW CONTAINER (Pure White Page)
+       ========================================================================== -->
+  <main class="dashboard-content">
+
+    <!-- Action & Date Range Controls -->
+    <section class="action-bar">
+      <div class="date-filter-group">
+        <!-- Interactive Date Range Dropdown Button -->
+        <button class="date-dropdown-btn" id="date-range-btn" aria-expanded="false" aria-haspopup="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span id="current-date-range-text">May 1 – May 31, 2025</span>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <span class="date-comparison-label" id="date-comparison-text">Compared to Apr 1 - Apr 30, 2025</span>
+
+        <!-- Functional Date Picker Popover Menu -->
+        <div class="date-picker-popover" id="date-picker-popover">
+          <div class="date-preset-list">
+            <button class="date-preset-item selected" data-preset="this-month" data-label="May 1 – May 31, 2025" data-comp="Compared to Apr 1 - Apr 30, 2025">
+              <span>This Month (May 2025)</span>
+              <span>✓</span>
+            </button>
+            <button class="date-preset-item" data-preset="last-month" data-label="Apr 1 – Apr 30, 2025" data-comp="Compared to Mar 1 - Mar 31, 2025">
+              <span>Last Month (April 2025)</span>
+              <span></span>
+            </button>
+            <button class="date-preset-item" data-preset="last-7-days" data-label="May 24 – May 31, 2025" data-comp="Compared to May 16 - May 23, 2025">
+              <span>Last 7 Days</span>
+              <span></span>
+            </button>
+            <button class="date-preset-item" data-preset="last-30-days" data-label="May 1 – May 31, 2025 (30 Days)" data-comp="Compared to previous 30 days">
+              <span>Last 30 Days</span>
+              <span></span>
+            </button>
+            <button class="date-preset-item" data-preset="year-to-date" data-label="Jan 1 – May 31, 2025" data-comp="Compared to Jan 1 - May 31, 2024">
+              <span>Year to Date (2025)</span>
+              <span></span>
+            </button>
+          </div>
+
+          <div class="custom-range-divider"></div>
+          <div class="custom-range-title">Custom Date Range</div>
+          <div class="custom-range-inputs">
+            <div>
+              <label style="font-size: 10.5px; color: var(--text-muted); display: block; margin-bottom: 2px;">Start Date</label>
+              <input type="date" id="custom-start-date" value="2025-05-01">
+            </div>
+            <div>
+              <label style="font-size: 10.5px; color: var(--text-muted); display: block; margin-bottom: 2px;">End Date</label>
+              <input type="date" id="custom-end-date" value="2025-05-31">
+            </div>
+          </div>
+          <button type="button" class="apply-custom-date-btn" id="apply-custom-date-btn">Apply Custom Range</button>
+        </div>
+      </div>
+
+      <div class="action-buttons-group">
+        <button class="btn-secondary" id="export-btn" title="Export report data">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span>Export</span>
+        </button>
+
+        <button class="btn-primary" id="open-create-report-modal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          <span>Create report</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Metric KPI Cards (5 Individual Containers) -->
+    <section class="metric-pipeline-container" id="pipeline-steps">
+      <!-- 1. New -->
+      <div class="pipeline-step">
+        <div class="step-icon-box new">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+        </div>
+        <div class="step-content">
+          <span class="step-label">New</span>
+          <span class="step-value" id="kpi-new-val">24</span>
+          <span class="step-trend">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="18 15 12 9 6 15" transform="rotate(180 12 12)"/>
+            </svg>
+            <span id="trend-new-val">↑ 20% vs last month</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- 2. For validation -->
+      <div class="pipeline-step">
+        <div class="step-icon-box validation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            <path d="M9 14h6"/>
+            <path d="M9 18h6"/>
+            <path d="M9 10h6"/>
+          </svg>
+        </div>
+        <div class="step-content">
+          <span class="step-label">For validation</span>
+          <span class="step-value" id="kpi-validation-val">8</span>
+          <span class="step-trend">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="18 15 12 9 6 15" transform="rotate(180 12 12)"/>
+            </svg>
+            <span id="trend-validation-val">↑ 14% vs last month</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- 3. In progress -->
+      <div class="pipeline-step">
+        <div class="step-icon-box progress">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <div class="step-content">
+          <span class="step-label">In progress</span>
+          <span class="step-value" id="kpi-progress-val">12</span>
+          <span class="step-trend">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="18 15 12 9 6 15" transform="rotate(180 12 12)"/>
+            </svg>
+            <span id="trend-progress-val">↑ 9% vs last month</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- 4. Resolved -->
+      <div class="pipeline-step">
+        <div class="step-icon-box resolved">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <div class="step-content">
+          <span class="step-label">Resolved</span>
+          <span class="step-value" id="kpi-resolved-val">31</span>
+          <span class="step-trend">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="18 15 12 9 6 15" transform="rotate(180 12 12)"/>
+            </svg>
+            <span id="trend-resolved-val">↑ 22% vs last month</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- 5. Closed -->
+      <div class="pipeline-step">
+        <div class="step-icon-box closed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <div class="step-content">
+          <span class="step-label">Closed</span>
+          <span class="step-value" id="kpi-closed-val">18</span>
+          <span class="step-trend">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <polyline points="18 15 12 9 6 15" transform="rotate(180 12 12)"/>
+            </svg>
+            <span id="trend-closed-val">↑ 12% vs last month</span>
+          </span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Dashboard 2-Column Grid -->
+    <div class="dashboard-grid">
+
+      <!-- ====================================================================
+           LEFT COLUMN (Table + Bottom Charts)
+           ==================================================================== -->
+      <div class="grid-left">
+
+        <!-- Table: Reports requiring attention -->
+        <div class="dashboard-card">
+          <div class="card-header">
+            <div class="card-title-wrap">
+              <h2 class="card-title">Reports requiring attention</h2>
+              <span class="count-badge" id="table-row-count-badge">8</span>
+            </div>
+            <a href="#view-all-reports" class="card-action-link" id="view-all-reports-btn">View all</a>
+          </div>
+
+          <div class="table-container">
+            <table class="data-table" id="reports-table">
+              <thead>
+                <tr>
+                  <th>Report ID</th>
+                  <th>Category</th>
+                  <th>Location</th>
+                  <th>Submitted</th>
+                  <th>Priority</th>
+                  <th>Status</th>
+                  <th>Assigned to</th>
+                  <th style="width: 36px;"></th>
+                </tr>
+              </thead>
+              <tbody id="reports-table-body">
+                <!-- Dynamic rows rendered via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Card 2: Expanded Report Volume & Resolution Trend Chart -->
+        <div class="dashboard-card">
+          <div class="card-header">
+            <h2 class="card-title">Report volume and resolution trend</h2>
+            <button class="card-action-btn" id="chart-interval-btn">
+              <span id="chart-interval-label">Daily</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="chart-container">
+            <div class="chart-legend">
+              <div class="legend-item">
+                <span class="legend-dot-blue"></span>
+                <span>This period</span>
+              </div>
+              <div class="legend-item">
+                <span class="legend-line-dashed"></span>
+                <span>Previous</span>
+              </div>
+            </div>
+
+            <!-- Interactive Chart Area -->
+            <div class="chart-svg-wrapper" id="trend-chart-container">
+              <!-- Hover Popout Tooltip Box Matching Reference Image -->
+              <div class="chart-tooltip-popover show" id="chart-tooltip">
+                <div class="chart-tooltip-header" id="tooltip-date">JAN 19</div>
+                <div class="chart-tooltip-row">
+                  <div class="tooltip-label-group">
+                    <span class="tooltip-blue-dot"></span>
+                    <span>This period</span>
+                  </div>
+                  <span class="chart-tooltip-val" id="tooltip-submitted">$3,840</span>
+                </div>
+                <div class="chart-tooltip-row">
+                  <div class="tooltip-label-group">
+                    <span class="tooltip-dashed-line"></span>
+                    <span>Previous</span>
+                  </div>
+                  <span class="chart-tooltip-val" id="tooltip-resolved">$3,020</span>
+                </div>
+                <div class="chart-tooltip-badge" id="tooltip-badge">
+                  <span>&uarr;</span>
+                  <span id="tooltip-rate">27.2% vs previous period</span>
+                </div>
+              </div>
+
+              <!-- SVG Chart with Linear Gradient Fill, Waves & Hover Guides -->
+              <svg class="chart-svg" viewBox="0 0 700 210" preserveAspectRatio="none" id="trend-chart-svg">
+                <defs>
+                  <linearGradient id="chartWaveGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stop-color="#2563EB" stop-opacity="0.18" />
+                    <stop offset="100%" stop-color="#2563EB" stop-opacity="0.0" />
+                  </linearGradient>
+                </defs>
+
+                <!-- Grid Lines -->
+                <g stroke="#F1F5F9" stroke-width="1">
+                  <line x1="50" y1="20" x2="685" y2="20" />
+                  <line x1="50" y1="58" x2="685" y2="58" />
+                  <line x1="50" y1="96" x2="685" y2="96" />
+                  <line x1="50" y1="134" x2="685" y2="134" />
+                  <line x1="50" y1="172" x2="685" y2="172" />
+                </g>
+                
+                <!-- Y Axis Labels -->
+                <g font-family="Plus Jakarta Sans, sans-serif" font-size="10.5" font-weight="500" fill="#94A3B8" text-anchor="end">
+                  <text x="42" y="24">$4.1k</text>
+                  <text x="42" y="62">$3.5k</text>
+                  <text x="42" y="100">$2.8k</text>
+                  <text x="42" y="138">$2.2k</text>
+                  <text x="42" y="176">$1.5k</text>
+                </g>
+                
+                <!-- X Axis Labels -->
+                <g font-family="Plus Jakarta Sans, sans-serif" font-size="10.5" font-weight="500" fill="#94A3B8" text-anchor="middle" id="chart-x-labels">
+                  <text x="55" y="202">Jan 1</text>
+                  <text x="210" y="202">Jan 8</text>
+                  <text x="360" y="202">Jan 15</text>
+                  <text x="515" y="202">Jan 22</text>
+                  <text x="660" y="202">Jan 28</text>
+                </g>
+
+                <!-- Filled Gradient Area Under Main Blue Wave -->
+                <path id="path-wave-fill" d="M 55,160 C 65,145 75,130 85,132 C 95,134 105,145 115,138 C 125,131 135,115 145,118 C 155,121 165,132 175,125 C 185,118 195,102 205,105 C 215,108 225,120 235,112 C 245,104 255,88 265,92 C 275,96 285,108 295,100 C 305,92 315,75 325,78 C 335,81 345,94 355,86 C 365,78 375,62 385,66 C 395,70 405,82 415,74 C 425,66 435,50 445,42 C 455,34 460,24 465,24 C 475,24 485,42 495,48 C 505,54 515,48 525,44 C 535,40 545,46 555,50 C 565,54 575,46 585,38 C 595,30 605,26 615,28 C 625,30 635,40 645,36 C 650,34 655,22 660,20 L 660,178 L 55,178 Z"
+                      fill="url(#chartWaveGradient)" />
+
+                <!-- Previous Period Dashed Grey Curve -->
+                <path id="path-previous" d="M 55,175 C 65,165 75,152 85,154 C 95,156 105,165 115,160 C 125,155 135,140 145,142 C 155,144 165,153 175,147 C 185,141 195,128 205,130 C 215,132 225,142 235,135 C 245,128 255,115 265,118 C 275,121 285,130 295,124 C 305,118 315,102 325,105 C 335,108 345,118 355,112 C 365,106 375,92 385,95 C 395,98 405,108 415,102 C 425,96 435,82 445,76 C 455,70 460,62 465,62 C 475,62 485,78 495,82 C 505,86 515,80 525,76 C 535,72 545,78 555,80 C 565,82 575,76 585,70 C 595,64 605,60 615,62 C 625,64 635,72 645,68 C 650,66 655,56 660,54"
+                      fill="none" stroke="#94A3B8" stroke-width="1.8" stroke-dasharray="4 4" stroke-linecap="round" stroke-linejoin="round" />
+
+                <!-- Main Oscillating Blue Wave Curve (This Period) -->
+                <path id="path-this-period" d="M 55,160 C 65,145 75,130 85,132 C 95,134 105,145 115,138 C 125,131 135,115 145,118 C 155,121 165,132 175,125 C 185,118 195,102 205,105 C 215,108 225,120 235,112 C 245,104 255,88 265,92 C 275,96 285,108 295,100 C 305,92 315,75 325,78 C 335,81 345,94 355,86 C 365,78 375,62 385,66 C 395,70 405,82 415,74 C 425,66 435,50 445,42 C 455,34 460,24 465,24 C 475,24 485,42 495,48 C 505,54 515,48 525,44 C 535,40 545,46 555,50 C 565,54 575,46 585,38 C 595,30 605,26 615,28 C 625,30 635,40 645,36 C 650,34 655,22 660,20"
+                      fill="none" stroke="#2563EB" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+
+                <!-- Interactive Vertical Crosshair Guideline -->
+                <line id="chart-crosshair" class="chart-crosshair-line" x1="465" y1="15" x2="465" y2="180" style="opacity: 1;" />
+
+                <!-- Static / Highlight Peak Dots matching image -->
+                <circle cx="660" cy="20" r="4.5" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" />
+                <circle id="focus-dot-peak" cx="465" cy="24" r="4.5" fill="#FFFFFF" stroke="#2563EB" stroke-width="2.5" />
+
+                <!-- Dynamic Focus Highlight Dot on Curve -->
+                <circle id="focus-dot-this" class="chart-focus-dot" cx="465" cy="24" r="5" fill="#2563EB" stroke="#FFFFFF" stroke-width="2" style="opacity: 1;" />
+              </svg>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ====================================================================
+           RIGHT COLUMN (Recent Activity & Reports by Category)
+           ==================================================================== -->
+      <div class="grid-right">
+
+        <!-- Card 1: Recent Activity Timeline -->
+        <div class="dashboard-card">
+          <div class="card-header">
+            <h2 class="card-title">Recent activity</h2>
+            <a href="#view-activity" class="card-action-link" id="view-all-activity-btn">View all</a>
+          </div>
+
+          <div class="activity-feed-body" id="activity-feed-container">
+            <!-- Dynamic timeline items rendered via JS with Left Date & Donut Rings -->
+          </div>
+        </div>
+
+        <!-- Card 2: Reports by category -->
+        <div class="dashboard-card">
+          <div class="card-header">
+            <h2 class="card-title">Reports by category</h2>
+            <button class="card-action-btn" id="category-period-btn">
+              <span>This month</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          </div>
+
+          <div class="category-list-body" id="category-list-container">
+            <!-- Dynamic Category Bars rendered via JS -->
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+</div>
+
+<!-- ==========================================================================
+     MODALS & DIALOGS
+     ========================================================================== -->
+
+<!-- Create Report Modal -->
+<div class="modal-backdrop" id="create-report-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <h3 class="modal-title">+ Create Incident / Service Report</h3>
+      <button class="modal-close-btn" id="close-create-modal-btn">&times;</button>
+    </div>
+    <form id="create-report-form">
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label" for="rpt-category">Report Category</label>
+          <select class="form-control" id="rpt-category" required>
+            <option value="Animal welfare">🐾 Animal welfare</option>
+            <option value="Streetlight">💡 Streetlight</option>
+            <option value="Noise complaint">🔊 Noise complaint</option>
+            <option value="Road obstruction">🚧 Road obstruction</option>
+            <option value="Garbage collection">🗑️ Garbage collection</option>
+            <option value="Drainage">💧 Drainage</option>
+            <option value="Other">🔄 Other Public Concern</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="rpt-zone">Zone</label>
+            <select class="form-control" id="rpt-zone" required>
+              <option value="Zone 1">Zone 1</option>
+              <option value="Zone 2">Zone 2</option>
+              <option value="Zone 3">Zone 3</option>
+              <option value="Zone 4">Zone 4</option>
+              <option value="Zone 5">Zone 5</option>
+              <option value="Zone 6">Zone 6</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="rpt-purok">Purok</label>
+            <input type="text" class="form-control" id="rpt-purok" placeholder="e.g. Purok 3" required value="Purok 1">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="rpt-priority">Priority Level</label>
+            <select class="form-control" id="rpt-priority">
+              <option value="High">High Priority</option>
+              <option value="Medium" selected>Medium Priority</option>
+              <option value="Low">Low Priority</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="rpt-assignee">Assign To</label>
+            <select class="form-control" id="rpt-assignee">
+              <option value="Unassigned">Unassigned</option>
+              <option value="Bords Bordagul">Bords Bordagul (You)</option>
+              <option value="Maria Santos">Maria Santos</option>
+              <option value="Jose Dela Cruz">Jose Dela Cruz</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="rpt-desc">Incident Description / Resident Note</label>
+          <textarea class="form-control" id="rpt-desc" rows="3" placeholder="Provide incident details, reporter info, or immediate observations..." required></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn-secondary" id="cancel-create-modal-btn">Cancel</button>
+        <button type="submit" class="btn-primary">Submit Report</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Report Details Drawer Modal -->
+<div class="modal-backdrop" id="report-detail-modal">
+  <div class="modal-dialog">
+    <div class="modal-header">
+      <div>
+        <span style="font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-muted);" id="detail-id">RP-2025-0517</span>
+        <h3 class="modal-title" id="detail-category" style="margin-top:2px;">Incident Details</h3>
+      </div>
+      <button class="modal-close-btn" id="close-detail-modal-btn">&times;</button>
+    </div>
+    <div class="modal-body" id="detail-modal-body">
+      <!-- Dynamic detailed summary -->
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-secondary" id="close-detail-footer-btn">Close</button>
+      <button type="button" class="btn-primary" id="update-status-btn">Update Status</button>
+    </div>
+  </div>
+</div>
+
+<!-- Floating Action Dropdown Menu for Table Actions (⋮) -->
+<div class="quick-dropdown" id="quick-action-dropdown">
+  <button class="quick-dropdown-item" data-action="view">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    <span>View Details</span>
+  </button>
+  <button class="quick-dropdown-item" data-action="assign">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+    <span>Reassign Officer</span>
+  </button>
+  <button class="quick-dropdown-item" data-action="progress">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    <span>Mark In Progress</span>
+  </button>
+  <button class="quick-dropdown-item" data-action="resolve">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    <span>Mark Resolved</span>
+  </button>
+</div>
+
+<!-- Toast notification box -->
+<div class="toast-notification" id="toast-msg">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+  <span id="toast-text">Report updated successfully.</span>
+</div>
+
+<!-- ==========================================================================
+     INTERACTIVE JAVASCRIPT & DATA BINDINGS
+     ========================================================================== -->
+<script>
+/**
+ * BARANGAY INCIDENT & OPERATIONS DASHBOARD DATA STORE
+ */
+const DASHBOARD_CONFIG = {
+  barangayName: "BRGY. PALIPARAN I",
+  location: "Dasmariñas City, Cavite",
+  user: {
+    name: "Bords Bordagul",
+    role: "Barangay Officer"
+  },
+  // Time-series Trend Data for Interactive Wave Chart Tooltips
+  chartData: [
+    { x: 55,  date: "JAN 1",  thisPeriod: "$1,850", previous: "$1,420", rate: "30.3% vs previous period", subY: 160, resY: 175 },
+    { x: 85,  date: "JAN 4",  thisPeriod: "$2,100", previous: "$1,650", rate: "27.3% vs previous period", subY: 132, resY: 154 },
+    { x: 145, date: "JAN 8",  thisPeriod: "$2,380", previous: "$1,890", rate: "25.9% vs previous period", subY: 118, resY: 142 },
+    { x: 205, date: "JAN 11", thisPeriod: "$2,640", previous: "$2,100", rate: "25.7% vs previous period", subY: 105, resY: 130 },
+    { x: 265, date: "JAN 13", thisPeriod: "$2,950", previous: "$2,310", rate: "27.7% vs previous period", subY: 92,  resY: 118 },
+    { x: 325, date: "JAN 15", thisPeriod: "$3,240", previous: "$2,560", rate: "26.6% vs previous period", subY: 78,  resY: 105 },
+    { x: 385, date: "JAN 17", thisPeriod: "$3,520", previous: "$2,780", rate: "26.6% vs previous period", subY: 66,  resY: 95 },
+    { x: 465, date: "JAN 19", thisPeriod: "$3,840", previous: "$3,020", rate: "27.2% vs previous period", subY: 24,  resY: 62 },
+    { x: 525, date: "JAN 22", thisPeriod: "$3,620", previous: "$2,910", rate: "24.4% vs previous period", subY: 44,  resY: 76 },
+    { x: 585, date: "JAN 25", thisPeriod: "$3,780", previous: "$3,010", rate: "25.6% vs previous period", subY: 38,  resY: 70 },
+    { x: 660, date: "JAN 28", thisPeriod: "$3,920", previous: "$3,110", rate: "26.0% vs previous period", subY: 20,  resY: 54 }
+  ],
+  metrics: {
+    new: 24,
+    forValidation: 8,
+    inProgress: 12,
+    resolved: 31,
+    closed: 18
+  },
+  reports: [
+    {
+      id: "RP-2025-0517",
+      category: "Animal welfare",
+      location: "Zone 2, Purok 3",
+      submitted: "May 31, 2025 08:45 AM",
+      priority: "High",
+      status: "New",
+      assignedTo: "Unassigned"
+    },
+    {
+      id: "RP-2025-0516",
+      category: "Streetlight",
+      location: "Zone 5, Purok 1",
+      submitted: "May 31, 2025 07:20 AM",
+      priority: "Medium",
+      status: "For validation",
+      assignedTo: "Bords Bordagul"
+    },
+    {
+      id: "RP-2025-0515",
+      category: "Noise complaint",
+      location: "Zone 1, Purok 6",
+      submitted: "May 30, 2025 10:15 PM",
+      priority: "High",
+      status: "For validation",
+      assignedTo: "Maria Santos"
+    },
+    {
+      id: "RP-2025-0514",
+      category: "Road obstruction",
+      location: "Zone 3, Purok 2",
+      submitted: "May 30, 2025 04:05 PM",
+      priority: "Medium",
+      status: "In progress",
+      assignedTo: "Jose Dela Cruz"
+    },
+    {
+      id: "RP-2025-0513",
+      category: "Garbage collection",
+      location: "Zone 4, Purok 5",
+      submitted: "May 30, 2025 01:30 PM",
+      priority: "Low",
+      status: "In progress",
+      assignedTo: "Maria Santos"
+    },
+    {
+      id: "RP-2025-0512",
+      category: "Streetlight",
+      location: "Zone 6, Purok 4",
+      submitted: "May 30, 2025 11:05 AM",
+      priority: "Medium",
+      status: "For validation",
+      assignedTo: "Bords Bordagul"
+    },
+    {
+      id: "RP-2025-0511",
+      category: "Drainage",
+      location: "Zone 2, Purok 1",
+      submitted: "May 29, 2025 09:10 PM",
+      priority: "Low",
+      status: "In progress",
+      assignedTo: "Jose Dela Cruz"
+    },
+    {
+      id: "RP-2025-0510",
+      category: "Animal welfare",
+      location: "Zone 5, Purok 3",
+      submitted: "May 29, 2025 06:45 PM",
+      priority: "High",
+      status: "New",
+      assignedTo: "Unassigned"
+    }
+  ],
+  categories: [
+    { name: "Animal welfare", count: 37, percentage: 22, icon: "paw" },
+    { name: "Streetlight", count: 31, percentage: 18, icon: "light" },
+    { name: "Garbage collection", count: 28, percentage: 17, icon: "trash" },
+    { name: "Noise complaint", count: 24, percentage: 14, icon: "volume" },
+    { name: "Road obstruction", count: 22, percentage: 13, icon: "road" },
+    { name: "Others", count: 24, percentage: 16, icon: "more" }
+  ],
+  // Recent Activity Timeline Feed matching user's custom date & donut node format
+  activities: [
+    {
+      id: "act-1",
+      day: "16",
+      month: "Oct",
+      color: "teal",
+      reportId: "RP-2025-0513",
+      action: "marked as In progress",
+      detail: "Garbage collection · Zone 4, Purok 5",
+      time: "Today 1:30 PM"
+    },
+    {
+      id: "act-2",
+      day: "15",
+      month: "Oct",
+      color: "red",
+      reportId: "RP-2025-0515",
+      action: "assigned to Maria Santos",
+      detail: "Noise complaint · Zone 1, Purok 6",
+      time: "10:18 AM"
+    },
+    {
+      id: "act-3",
+      day: "14",
+      month: "Oct",
+      color: "amber",
+      reportId: "RP-2025-0514",
+      action: "status updated to In progress",
+      detail: "Road obstruction · Zone 3, Purok 2",
+      time: "Yesterday 4:22 PM"
+    },
+    {
+      id: "act-4",
+      day: "13",
+      month: "Oct",
+      color: "teal",
+      reportId: "RP-2025-0512",
+      action: "submitted by Juan Dela Cruz",
+      detail: "Streetlight · Zone 6, Purok 4",
+      time: "11:07 AM"
+    },
+    {
+      id: "act-5",
+      day: "12",
+      month: "Oct",
+      color: "teal",
+      reportId: "RP-2025-0510",
+      action: "created",
+      detail: "Animal welfare · Zone 5, Purok 3",
+      time: "6:48 PM"
+    }
+  ]
+};
+
+// Global App State
+let activeFilter = null;
+let currentSelectedReport = null;
+
+// Helper: Get Icon SVG for Categories
+function getCategoryIconSvg(type) {
+  switch (type) {
+    case 'paw':
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><path d="M12 18c-3 0-5-1.5-5-4.5 0-2.5 2-4.5 5-4.5s5 2 5 4.5c0 3-2 4.5-5 4.5z"/></svg>`;
+    case 'light':
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="9" y1="18" x2="15" y2="18"/><line x1="10" y1="22" x2="14" y2="22"/><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-1 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/></svg>`;
+    case 'trash':
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`;
+    case 'volume':
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>`;
+    case 'road':
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M12 2v4"/><path d="M12 18v4"/></svg>`;
+    default:
+      return `<svg class="category-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>`;
+  }
+}
+
+// Render Reports Table
+function renderReportsTable(filterStatus = null, searchQuery = '') {
+  const tbody = document.getElementById('reports-table-body');
+  const countBadge = document.getElementById('table-row-count-badge');
+  tbody.innerHTML = '';
+
+  let filtered = DASHBOARD_CONFIG.reports;
+
+  if (filterStatus) {
+    filtered = filtered.filter(r => r.status.toLowerCase() === filterStatus.toLowerCase());
+  }
+
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    filtered = filtered.filter(r => 
+      r.id.toLowerCase().includes(q) ||
+      r.category.toLowerCase().includes(q) ||
+      r.location.toLowerCase().includes(q) ||
+      r.assignedTo.toLowerCase().includes(q) ||
+      r.priority.toLowerCase().includes(q)
+    );
+  }
+
+  countBadge.textContent = filtered.length;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="8" style="text-align: center; padding: 32px; color: var(--text-muted);">
+          No reports found matching your criteria.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  filtered.forEach(report => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = report.id;
+
+    // Priority class & dot
+    const pLow = report.priority.toLowerCase();
+    const priorityClass = pLow === 'high' ? 'priority-high' : (pLow === 'medium' ? 'priority-medium' : 'priority-low');
+    const priorityDotClass = pLow === 'high' ? 'high' : (pLow === 'medium' ? 'medium' : 'low');
+
+    // Status class
+    const sLow = report.status.toLowerCase();
+    let statusClass = 'status-new';
+    if (sLow.includes('validation')) statusClass = 'status-validation';
+    else if (sLow.includes('progress')) statusClass = 'status-progress';
+    else if (sLow.includes('resolved')) statusClass = 'status-resolved';
+
+    tr.innerHTML = `
+      <td>
+        <div class="report-id-cell">
+          <span class="priority-dot ${priorityDotClass}"></span>
+          <span>${report.id}</span>
+        </div>
+      </td>
+      <td class="category-cell">${report.category}</td>
+      <td class="location-cell">${report.location}</td>
+      <td class="submitted-cell">${report.submitted}</td>
+      <td>
+        <span class="status-badge ${priorityClass}">${report.priority}</span>
+      </td>
+      <td>
+        <span class="status-badge ${statusClass}">${report.status}</span>
+      </td>
+      <td class="assignee-cell ${report.assignedTo === 'Unassigned' ? 'unassigned' : ''}">
+        ${report.assignedTo}
+      </td>
+      <td style="text-align: right;">
+        <button class="row-action-btn action-dots-btn" data-id="${report.id}" title="Quick actions">⋮</button>
+      </td>
+    `;
+
+    // Row Click: Open Details
+    tr.addEventListener('click', (e) => {
+      if (e.target.closest('.action-dots-btn')) return;
+      openReportDetails(report.id);
+    });
+
+    tbody.appendChild(tr);
+  });
+}
+
+// Render Categories Progress List
+function renderCategories() {
+  const container = document.getElementById('category-list-container');
+  container.innerHTML = '';
+
+  DASHBOARD_CONFIG.categories.forEach(cat => {
+    const item = document.createElement('div');
+    item.className = 'category-item';
+    item.innerHTML = `
+      <div class="category-info">
+        ${getCategoryIconSvg(cat.icon)}
+        <span>${cat.name}</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-bar-fill" style="width: ${cat.percentage * 1.6}%;"></div>
+      </div>
+      <div class="category-stat">${cat.count} (${cat.percentage}%)</div>
+    `;
+    container.appendChild(item);
+  });
+
+  // Footer Total
+  const footer = document.createElement('div');
+  footer.className = 'category-footer';
+  footer.innerHTML = `
+    <span class="category-total-label">Total</span>
+    <span class="category-total-val">166</span>
+  `;
+  container.appendChild(footer);
+}
+
+// Render Redesigned Activity Feed with Left Date & Ring Nodes
+function renderActivities() {
+  const container = document.getElementById('activity-feed-container');
+  container.innerHTML = '';
+
+  DASHBOARD_CONFIG.activities.forEach(act => {
+    const item = document.createElement('div');
+    item.className = 'activity-feed-item';
+    
+    // Ring Color class
+    const ringColor = act.color || 'teal';
+
+    item.innerHTML = `
+      <div class="activity-date-col">
+        <span class="activity-date-day">${act.day || '16'}</span>
+        <span class="activity-date-month">${act.month || 'Oct'}</span>
+      </div>
+      <div class="activity-track-col">
+        <div class="activity-ring-node ${ringColor}"></div>
+        <div class="activity-timeline-line"></div>
+      </div>
+      <div class="activity-content">
+        <div class="activity-title">
+          <strong>${act.reportId}</strong> ${act.action}
+        </div>
+        <div class="activity-meta-row">
+          <span class="activity-desc">${act.detail}</span>
+          <span class="activity-time">${act.time}</span>
+        </div>
+      </div>
+    `;
+    container.appendChild(item);
+  });
+}
+
+// Toast Helper
+function showToast(message) {
+  const toast = document.getElementById('toast-msg');
+  const text = document.getElementById('toast-text');
+  text.textContent = message;
+  toast.classList.add('show');
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, 3200);
+}
+
+// Open Details Modal
+function openReportDetails(reportId) {
+  const report = DASHBOARD_CONFIG.reports.find(r => r.id === reportId);
+  if (!report) return;
+  currentSelectedReport = report;
+
+  document.getElementById('detail-id').textContent = report.id;
+  document.getElementById('detail-category').textContent = report.category;
+
+  const modalBody = document.getElementById('detail-modal-body');
+  modalBody.innerHTML = `
+    <div style="display:flex; gap:10px; margin-bottom:16px;">
+      <span class="status-badge priority-${report.priority.toLowerCase()}">Priority: ${report.priority}</span>
+      <span class="status-badge status-${report.status.toLowerCase().replace(' ', '-')}">Status: ${report.status}</span>
+    </div>
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; font-size:13px;">
+      <div>
+        <span style="color:var(--text-muted); font-size:11.5px; display:block;">Location</span>
+        <strong>${report.location}</strong>
+      </div>
+      <div>
+        <span style="color:var(--text-muted); font-size:11.5px; display:block;">Assigned Officer</span>
+        <strong>${report.assignedTo}</strong>
+      </div>
+      <div>
+        <span style="color:var(--text-muted); font-size:11.5px; display:block;">Date Submitted</span>
+        <strong>${report.submitted}</strong>
+      </div>
+      <div>
+        <span style="color:var(--text-muted); font-size:11.5px; display:block;">Barangay Sector</span>
+        <strong>Paliparan I - Operations</strong>
+      </div>
+    </div>
+    <div style="background:var(--bg-subtle); padding:12px 14px; border-radius:var(--radius-md); border:1px solid var(--border-color-light);">
+      <span style="font-size:11.5px; font-weight:700; color:var(--text-secondary); display:block; margin-bottom:4px;">OFFICIAL REPORT LOG / SUMMARY</span>
+      <p style="font-size:12.5px; color:var(--text-main); line-height:1.5;">
+        Incident reported by local resident. Dispatched to the monitoring queue for verification and response protocol.
+      </p>
+    </div>
+  `;
+
+  document.getElementById('report-detail-modal').classList.add('open');
+}
+
+/**
+ * ==========================================================================
+ * FUNCTIONAL DATE RANGE PICKER HANDLERS
+ * ==========================================================================
+ */
+function initDateRangePicker() {
+  const dateBtn = document.getElementById('date-range-btn');
+  const popover = document.getElementById('date-picker-popover');
+  const currentText = document.getElementById('current-date-range-text');
+  const compText = document.getElementById('date-comparison-text');
+  const presetItems = document.querySelectorAll('.date-preset-item');
+  const applyCustomBtn = document.getElementById('apply-custom-date-btn');
+  const customStart = document.getElementById('custom-start-date');
+  const customEnd = document.getElementById('custom-end-date');
+
+  // Toggle Popover
+  dateBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = popover.classList.contains('show');
+    if (isOpen) {
+      popover.classList.remove('show');
+      dateBtn.classList.remove('active');
+    } else {
+      popover.classList.add('show');
+      dateBtn.classList.add('active');
+    }
+  });
+
+  // Close when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target) && !dateBtn.contains(e.target)) {
+      popover.classList.remove('show');
+      dateBtn.classList.remove('active');
+    }
+  });
+
+  // Handle Preset Click
+  presetItems.forEach(item => {
+    item.addEventListener('click', () => {
+      presetItems.forEach(i => {
+        i.classList.remove('selected');
+        i.querySelector('span:last-child').textContent = '';
+      });
+      item.classList.add('selected');
+      item.querySelector('span:last-child').textContent = '✓';
+
+      const label = item.dataset.label;
+      const comp = item.dataset.comp;
+      const preset = item.dataset.preset;
+
+      currentText.textContent = label;
+      compText.textContent = comp;
+
+      // Dynamically simulate metric variations per period
+      updateDashboardDataForRange(preset, label);
+
+      popover.classList.remove('show');
+      dateBtn.classList.remove('active');
+      showToast(`Date range set to: ${label}`);
+    });
+  });
+
+  // Handle Custom Date Range Apply
+  if (applyCustomBtn) {
+    applyCustomBtn.addEventListener('click', () => {
+      const startVal = customStart.value;
+      const endVal = customEnd.value;
+      if (!startVal || !endVal) {
+        showToast('Please select valid start and end dates.');
+        return;
+      }
+
+      const formatDate = (dStr) => {
+        const d = new Date(dStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      };
+
+      const customRangeText = `${formatDate(startVal)} – ${formatDate(endVal)}`;
+      currentText.textContent = customRangeText;
+      compText.textContent = `Compared to previous period`;
+
+      presetItems.forEach(i => {
+        i.classList.remove('selected');
+        i.querySelector('span:last-child').textContent = '';
+      });
+
+      updateDashboardDataForRange('custom', customRangeText);
+      popover.classList.remove('show');
+      dateBtn.classList.remove('active');
+      showToast(`Applied custom date range: ${customRangeText}`);
+    });
+  }
+}
+
+// Function to update metric values when date range changes
+function updateDashboardDataForRange(rangeKey, label) {
+  let multiplier = 1.0;
+  if (rangeKey === 'last-7-days') multiplier = 0.35;
+  else if (rangeKey === 'last-month') multiplier = 0.95;
+  else if (rangeKey === 'year-to-date') multiplier = 4.2;
+
+  const newCount = Math.round(24 * multiplier);
+  const valCount = Math.round(8 * multiplier);
+  const progCount = Math.round(12 * multiplier);
+  const resCount = Math.round(31 * multiplier);
+  const closedCount = Math.round(18 * multiplier);
+
+  document.getElementById('kpi-new-val').textContent = newCount;
+  document.getElementById('kpi-validation-val').textContent = valCount;
+  document.getElementById('kpi-progress-val').textContent = progCount;
+  document.getElementById('kpi-resolved-val').textContent = resCount;
+  document.getElementById('kpi-closed-val').textContent = closedCount;
+
+  // Animate numbers slightly for feedback
+  const vals = document.querySelectorAll('.step-value');
+  vals.forEach(v => {
+    v.style.transform = 'scale(1.1)';
+    setTimeout(() => v.style.transform = 'scale(1)', 200);
+  });
+}
+
+/**
+ * ==========================================================================
+ * INTERACTIVE TREND CHART HOVER POPOUT / TOOLTIP SYSTEM
+ * ==========================================================================
+ */
+function initInteractiveTrendChart() {
+  const chartContainer = document.getElementById('trend-chart-container');
+  const svg = document.getElementById('trend-chart-svg');
+  const tooltip = document.getElementById('chart-tooltip');
+  const tooltipDate = document.getElementById('tooltip-date');
+  const tooltipSub = document.getElementById('tooltip-submitted');
+  const tooltipRes = document.getElementById('tooltip-resolved');
+  const tooltipRate = document.getElementById('tooltip-rate');
+  const crosshair = document.getElementById('chart-crosshair');
+  const dotThis = document.getElementById('focus-dot-this');
+
+  if (!chartContainer || !svg || !tooltip) return;
+
+  const defaultPoint = DASHBOARD_CONFIG.chartData.find(p => p.date === 'JAN 19') || DASHBOARD_CONFIG.chartData[7];
+
+  function renderPoint(point) {
+    if (!point) return;
+    const rect = svg.getBoundingClientRect();
+    const svgWidth = rect.width || 600;
+    const svgHeight = rect.height || 210;
+
+    tooltipDate.textContent = point.date;
+    tooltipSub.textContent = point.thisPeriod;
+    tooltipRes.textContent = point.previous;
+    tooltipRate.textContent = point.rate;
+
+    const pointClientX = (point.x / 700) * svgWidth;
+    const pointClientY = (point.subY / 210) * svgHeight;
+
+    tooltip.style.left = `${pointClientX}px`;
+    tooltip.style.top = `${pointClientY - 10}px`;
+    tooltip.classList.add('show');
+
+    if (crosshair) {
+      crosshair.setAttribute('x1', point.x);
+      crosshair.setAttribute('x2', point.x);
+      crosshair.style.opacity = '1';
+    }
+
+    if (dotThis) {
+      dotThis.setAttribute('cx', point.x);
+      dotThis.setAttribute('cy', point.subY);
+      dotThis.style.opacity = '1';
+    }
+  }
+
+  // Position default point on load
+  setTimeout(() => renderPoint(defaultPoint), 100);
+  window.addEventListener('resize', () => renderPoint(defaultPoint));
+
+  chartContainer.addEventListener('mousemove', (e) => {
+    const rect = svg.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const svgWidth = rect.width;
+    
+    // Convert client pixel to SVG coordinate (0 to 700)
+    const svgX = (mouseX / svgWidth) * 700;
+
+    // Find closest data point from DASHBOARD_CONFIG.chartData
+    let closestPoint = DASHBOARD_CONFIG.chartData[0];
+    let minDiff = Math.abs(svgX - closestPoint.x);
+
+    for (let i = 1; i < DASHBOARD_CONFIG.chartData.length; i++) {
+      const diff = Math.abs(svgX - DASHBOARD_CONFIG.chartData[i].x);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestPoint = DASHBOARD_CONFIG.chartData[i];
+      }
+    }
+
+    renderPoint(closestPoint);
+  });
+
+  // On Mouse Leave, smoothly return to the featured Jan 19 peak point
+  chartContainer.addEventListener('mouseleave', () => {
+    renderPoint(defaultPoint);
+  });
+
+  // Chart Interval Toggle (Daily / Weekly / Monthly)
+  const intervalBtn = document.getElementById('chart-interval-btn');
+  const intervalLabel = document.getElementById('chart-interval-label');
+  const intervals = ['Daily', 'Weekly', 'Monthly'];
+  let currentIntervalIdx = 0;
+
+  if (intervalBtn) {
+    intervalBtn.addEventListener('click', () => {
+      currentIntervalIdx = (currentIntervalIdx + 1) % intervals.length;
+      const nextInterval = intervals[currentIntervalIdx];
+      intervalLabel.textContent = nextInterval;
+      showToast(`Chart trend grouped by: ${nextInterval}`);
+    });
+  }
+}
+
+// Document Ready Initialization
+document.addEventListener('DOMContentLoaded', () => {
+  // Initial renders
+  renderReportsTable();
+  renderCategories();
+  renderActivities();
+  initDateRangePicker();
+  initInteractiveTrendChart();
+
+  // Global Search
+  const globalSearch = document.getElementById('global-search');
+  if (globalSearch) {
+    globalSearch.addEventListener('input', (e) => {
+      renderReportsTable(activeFilter, e.target.value);
+    });
+  }
+
+  // Modal Controls: Create Report
+  const createModal = document.getElementById('create-report-modal');
+  const openCreateBtn = document.getElementById('open-create-report-modal');
+  const closeCreateBtn = document.getElementById('close-create-modal-btn');
+  const cancelCreateBtn = document.getElementById('cancel-create-modal-btn');
+  const createForm = document.getElementById('create-report-form');
+
+  if (openCreateBtn && createModal) {
+    openCreateBtn.addEventListener('click', () => createModal.classList.add('open'));
+  }
+
+  const closeCreateModal = () => {
+    if (createModal) createModal.classList.remove('open');
+    if (createForm) createForm.reset();
+  };
+
+  if (closeCreateBtn) closeCreateBtn.addEventListener('click', closeCreateModal);
+  if (cancelCreateBtn) cancelCreateBtn.addEventListener('click', closeCreateModal);
+
+  // Form Submit: New Report
+  if (createForm) {
+    createForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const newId = `RP-2025-0${518 + DASHBOARD_CONFIG.reports.length}`;
+      const category = document.getElementById('rpt-category').value;
+      const zone = document.getElementById('rpt-zone').value;
+      const purok = document.getElementById('rpt-purok').value;
+      const priority = document.getElementById('rpt-priority').value;
+      const assignee = document.getElementById('rpt-assignee').value;
+
+      const newReport = {
+        id: newId,
+        category: category,
+        location: `${zone}, ${purok}`,
+        submitted: "Just now",
+        priority: priority,
+        status: "New",
+        assignedTo: assignee
+      };
+
+      DASHBOARD_CONFIG.reports.unshift(newReport);
+      DASHBOARD_CONFIG.metrics.new += 1;
+      document.getElementById('kpi-new-val').textContent = DASHBOARD_CONFIG.metrics.new;
+
+      // Add to activity with day and donut ring
+      const now = new Date();
+      DASHBOARD_CONFIG.activities.unshift({
+        id: `act-${Date.now()}`,
+        day: String(now.getDate()),
+        month: now.toLocaleDateString('en-US', { month: 'short' }),
+        color: "teal",
+        reportId: newId,
+        action: "created",
+        detail: `${category} · ${zone}, ${purok}`,
+        time: "Just now"
+      });
+
+      renderReportsTable(activeFilter);
+      renderActivities();
+      closeCreateModal();
+      showToast(`Report ${newId} created successfully.`);
+    });
+  }
+
+  // Details Modal Close
+  const detailModal = document.getElementById('report-detail-modal');
+  const closeDetailBtn = document.getElementById('close-detail-modal-btn');
+  const closeDetailFooterBtn = document.getElementById('close-detail-footer-btn');
+  const updateStatusBtn = document.getElementById('update-status-btn');
+
+  const closeDetailModal = () => {
+    if (detailModal) detailModal.classList.remove('open');
+  };
+
+  if (closeDetailBtn) closeDetailBtn.addEventListener('click', closeDetailModal);
+  if (closeDetailFooterBtn) closeDetailFooterBtn.addEventListener('click', closeDetailModal);
+
+  if (updateStatusBtn) {
+    updateStatusBtn.addEventListener('click', () => {
+      if (currentSelectedReport) {
+        currentSelectedReport.status = currentSelectedReport.status === 'Resolved' ? 'Closed' : 'Resolved';
+        renderReportsTable(activeFilter);
+        closeDetailModal();
+        showToast(`Status for ${currentSelectedReport.id} updated to ${currentSelectedReport.status}.`);
+      }
+    });
+  }
+
+  // Quick Action Dropdown Menu
+  const quickDropdown = document.getElementById('quick-action-dropdown');
+  document.addEventListener('click', (e) => {
+    const dotsBtn = e.target.closest('.action-dots-btn');
+    if (dotsBtn) {
+      const reportId = dotsBtn.dataset.id;
+      currentSelectedReport = DASHBOARD_CONFIG.reports.find(r => r.id === reportId);
+      const rect = dotsBtn.getBoundingClientRect();
+      quickDropdown.style.top = `${rect.bottom + window.scrollY + 4}px`;
+      quickDropdown.style.left = `${rect.right - 170 + window.scrollX}px`;
+      quickDropdown.classList.add('show');
+    } else if (!e.target.closest('#quick-action-dropdown')) {
+      if (quickDropdown) quickDropdown.classList.remove('show');
+    }
+  });
+
+  // Handle Quick Dropdown Actions
+  const dropdownItems = document.querySelectorAll('.quick-dropdown-item');
+  dropdownItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const action = item.dataset.action;
+      if (!currentSelectedReport) return;
+      
+      if (action === 'view') {
+        openReportDetails(currentSelectedReport.id);
+      } else if (action === 'assign') {
+        currentSelectedReport.assignedTo = DASHBOARD_CONFIG.user.name;
+        showToast(`Assigned ${currentSelectedReport.id} to ${DASHBOARD_CONFIG.user.name}.`);
+      } else if (action === 'progress') {
+        currentSelectedReport.status = "In progress";
+        showToast(`Marked ${currentSelectedReport.id} as In progress.`);
+      } else if (action === 'resolve') {
+        currentSelectedReport.status = "Resolved";
+        showToast(`Marked ${currentSelectedReport.id} as Resolved.`);
+      }
+      
+      quickDropdown.classList.remove('show');
+      renderReportsTable(activeFilter);
+    });
+  });
+
+  // Export Data Action
+  const exportBtn = document.getElementById('export-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', () => {
+      const csvRows = [
+        ["Report ID", "Category", "Location", "Submitted", "Priority", "Status", "Assigned To"]
+      ];
+      DASHBOARD_CONFIG.reports.forEach(r => {
+        csvRows.push([r.id, r.category, r.location, r.submitted, r.priority, r.status, r.assignedTo]);
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Paliparan_Reports_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast("Reports data exported as CSV file.");
+    });
+  }
+});
+</script>
+
+</body>
+</html>

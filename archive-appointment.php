@@ -22,8 +22,8 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $appointmentId = intval($_POST['appointment_id'] ?? 0);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET') {
+    $appointmentId = intval($_POST['appointment_id'] ?? $_GET['id'] ?? 0);
 
     if ($appointmentId === 0) {
         $_SESSION['appointment_error'] = "Invalid appointment ID.";
@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($stmt->execute()) {
         $_SESSION['appointment_success'] = "Appointment archived successfully!";
-        header('Location: dashboard-resident.php');
+        header('Location: dashboard-resident.php#archive');
         exit;
     } else {
         $_SESSION['appointment_error'] = "Failed to archive appointment. Please try again.";

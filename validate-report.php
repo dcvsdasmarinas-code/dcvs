@@ -1,4 +1,9 @@
 <?php
+/**
+ * Barangay Report Validation / Rejection Handler
+ * Validates a pending report (forwards to DCVS staff) or rejects it with a reason.
+ */
+
 session_name('DCVS_BARANGAY_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
@@ -10,99 +15,115 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/mailer.php';
 
-require_once 'db.php';
+header('Content-Type: application/json');
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'barangay') {
-    header('Location: login-barangay.php');
+    http_response_code(401);
+    echo json_encode(['success' => false, 'message' => 'Unauthorized']);
     exit;
 }
 
-// Verify session user still exists in database
-$userCheck = $conn->prepare("SELECT user_id FROM users WHERE user_id = ? AND status = 'active'");
-$userCheck->bind_param("i", $_SESSION['user_id']);
-$userCheck->execute();
-if (!$userCheck->get_result()->fetch_assoc()) {
-    session_destroy();
-    header('Location: login-barangay.php');
+$userId     = (int)$_SESSION['user_id'];
+$barangayId = (int)($_SESSION['barangay_id'] ?? 0);
+$fullName   = $_SESSION['full_name'] ?? 'Barangay Officer';
+
+// Parse JSON body
+$input = json_decode(file_get_contents('php://input'), true);
+if (!$input) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Invalid request']);
     exit;
 }
-$userCheck->close();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $reportId = intval($_POST['report_id'] ?? 0);
+$reportId = (int)($input['report_id'] ?? 0);
+$action   = trim($input['action'] ?? '');
+$reason   = trim($input['reason'] ?? '');
 
-    if ($reportId === 0) {
-        $_SESSION['report_error'] = "Invalid report ID.";
-        header('Location: dashboard-barangay.php');
-        exit;
-    }
+if ($reportId <= 0 || !in_array($action, ['validate', 'reject'], true)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Invalid parameters']);
+    exit;
+}
 
-    $checkReport = $conn->prepare("SELECT report_id, barangay_id FROM reports WHERE report_id = ?");
-    $checkReport->bind_param("i", $reportId);
-    $checkReport->execute();
-    $reportData = $checkReport->get_result()->fetch_assoc();
-    $checkReport->close();
+// Fetch report (must belong to this barangay and be pending)
+$stmt = $conn->prepare("
+    SELECT r.report_id, r.reference_id, r.status, r.reporter_id, r.report_type,
+           b.barangay_name
+    FROM reports r
+    LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
+    WHERE r.report_id = ? AND r.barangay_id = ? AND r.archived_at IS NULL
+");
+$stmt->bind_param('ii', $reportId, $barangayId);
+$stmt->execute();
+$report = $stmt->get_result()->fetch_assoc();
+$stmt->close();
 
-    if (!$reportData || $reportData['barangay_id'] != $_SESSION['barangay_id']) {
-        $_SESSION['report_error'] = "Invalid report selected.";
-        header('Location: dashboard-barangay.php');
-        exit;
-    }
+if (!$report) {
+    http_response_code(404);
+    echo json_encode(['success' => false, 'message' => 'Report not found']);
+    exit;
+}
 
-    $barangayNotes = trim($_POST['barangay_notes'] ?? '');
+if ($report['status'] !== 'pending') {
+    http_response_code(409);
+    echo json_encode(['success' => false, 'message' => 'Report is no longer pending']);
+    exit;
+}
 
-    $stmt = $conn->prepare("UPDATE reports SET status = 'validated', validated_by = ?, validated_at = NOW(), barangay_notes = ? WHERE report_id = ?");
-    $stmt->bind_param("isi", $_SESSION['user_id'], $barangayNotes, $reportId);
+$brgyName = $report['barangay_name'] ?: 'Barangay';
+$reporterId = (int)$report['reporter_id'];
+$referenceId = $report['reference_id'] ?? ('RPT-' . $reportId);
 
-    if ($stmt->execute()) {
-        // Notify resident that their report was forwarded
-        $repStmt = $conn->prepare("SELECT reporter_id FROM reports WHERE report_id = ?");
-        $repStmt->bind_param("i", $reportId);
-        $repStmt->execute();
-        $repRow = $repStmt->get_result()->fetch_assoc();
-        $repStmt->close();
-        if ($repRow) {
-            createNotification($conn, $repRow['reporter_id'], 'report_validated',
-                'Report Validated by Barangay',
-                'Your report has been validated by ' . htmlspecialchars($_SESSION['full_name'] ?? 'Barangay') . ' and forwarded to DCVS for confirmation.',
-                'report', $reportId);
-        }
-
-        // Notify all staff
-        $staffStmt = $conn->prepare("SELECT user_id FROM users WHERE role = 'staff' AND status = 'active'");
-        if ($staffStmt) {
-            $staffStmt->execute();
-            $sr = $staffStmt->get_result();
-            while ($staff = $sr->fetch_assoc()) {
-                createNotification($conn, $staff['user_id'], 'report_validated',
-                    'New Validated Report from Barangay',
-                    htmlspecialchars($_SESSION['full_name'] ?? 'A barangay officer') . ' validated and forwarded a report to DCVS.',
-                    'report', $reportId);
-            }
-            $staffStmt->close();
-        }
-
-        $action = "Report Validated & Forwarded";
-        $details = "Report #$reportId validated and forwarded to DCVS.";
-        $ip = $_SERVER['REMOTE_ADDR'];
-        $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
-        $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
-        $logStmt->execute();
-        $logStmt->close();
-
-        $_SESSION['report_success'] = "Report validated successfully! It has been forwarded to DCVS.";
-        header('Location: dashboard-barangay.php');
-        exit;
-    } else {
-        error_log("validate-report.php UPDATE failed: " . $stmt->error);
-        $_SESSION['report_error'] = "Failed to validate report. Please try again.";
-        header('Location: dashboard-barangay.php');
-        exit;
-    }
-
+if ($action === 'validate') {
+    // Mark as validated
+    $stmt = $conn->prepare("UPDATE reports SET status = 'validated', validated_by = ?, validated_at = NOW() WHERE report_id = ?");
+    $stmt->bind_param('ii', $userId, $reportId);
+    $stmt->execute();
     $stmt->close();
-}
 
-$conn->close();
-?>
+    // Notify the resident reporter
+    createNotification($conn, $reporterId, 'report_validated', 'Report Validated by Barangay',
+        'Your report has been validated by ' . $fullName . ' and forwarded to DCVS for confirmation.',
+        'report', $reportId);
+
+    // Notify all DCVS staff
+    $staffStmt = $conn->prepare("SELECT user_id FROM users WHERE role = 'staff' AND status = 'active'");
+    $staffStmt->execute();
+    $staffResult = $staffStmt->get_result();
+    while ($staffRow = $staffResult->fetch_assoc()) {
+        createNotification($conn, (int)$staffRow['user_id'], 'report_validated', 'New Validated Report from Barangay',
+            $fullName . ' validated and forwarded a report from ' . $brgyName . ' to DCVS.',
+            'report', $reportId);
+    }
+    $staffStmt->close();
+
+    // Send email to resident reporter
+    sendReportEmail($conn, $reportId, 'validated', '', $fullName);
+
+    echo json_encode(['success' => true, 'message' => 'Report validated and forwarded to DCVS staff']);
+} else {
+    // Reject with reason
+    if ($reason === '') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'message' => 'Rejection reason is required']);
+        exit;
+    }
+
+    $stmt = $conn->prepare("UPDATE reports SET status = 'rejected', rejection_reason = ?, validated_by = ?, validated_at = NOW() WHERE report_id = ?");
+    $stmt->bind_param('sii', $reason, $userId, $reportId);
+    $stmt->execute();
+    $stmt->close();
+
+    // Notify the resident reporter
+    createNotification($conn, $reporterId, 'report_rejected', 'Report Rejected',
+        'Your report has been rejected by ' . $fullName . '. Reason: ' . $reason,
+        'report', $reportId);
+
+    // Send email to resident reporter
+    sendReportEmail($conn, $reportId, 'rejected', $reason, $fullName);
+
+    echo json_encode(['success' => true, 'message' => 'Report rejected']);
+}

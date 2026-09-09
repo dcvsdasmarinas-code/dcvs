@@ -113,7 +113,7 @@ $timeline = [];
 $timeline[] = [
     'event' => 'Pet Registration Approved',
     'date' => $pet['created_at'],
-    'details' => 'Registered by ' . htmlspecialchars($pet['owner_name']) . ' â€” ' . htmlspecialchars($pet['barangay_name'] ?? 'N/A'),
+    'details' => 'Registered by ' . htmlspecialchars($pet['owner_name']) . ' — ' . htmlspecialchars($pet['barangay_name'] ?? 'N/A'),
     'type' => 'registration'
 ];
 
@@ -199,160 +199,187 @@ if ($docTableCheck && $docTableCheck->num_rows > 0) {
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 <style>
-  :root{--bg:#f5f5f5;--card:#fff;--border:#e4e4e7;--border-light:#f4f4f5;--ink:#18181b;--ink-soft:#52525b;--muted:#71717a;--placeholder:#a1a1aa;--green:#045e1f;--green-tint:#f0fdf4;--green-border:#bbf7d0;--amber:#92400e;--amber-tint:#fef3c7;--red:#991b1b;--red-tint:#fee2e2;--blue:#1e40af;--blue-tint:#eff6ff}
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:var(--bg);font-family:'Inter','Segoe UI',sans-serif;color:var(--ink);font-size:14px;line-height:1.5}
-  .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;background:#fff;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:10}
+  :root{--green:#0E8131;--green-tint:#E7F5EA;--green-line:#BFE3C9;--ink:#1A2233;--ink-soft:#5B6472;--muted:#8A93A1;--bg:#F5F6F8;--card:#FFFFFF;--line:#E7E9EE;--amber:#A66A0A;--amber-tint:#FBEFDA;--slate:#5B6472;--slate-tint:#EEF0F3;--danger:#9A3B3B}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);font-family:'Inter','Segoe UI',sans-serif;color:var(--ink)}
+  .page{max-width:1180px;margin:0 auto;padding:32px 24px 64px}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:22px;flex-wrap:wrap;gap:12px}
   .breadcrumb{font-size:13px;color:var(--muted)}
   .breadcrumb a{color:var(--ink);text-decoration:none;font-weight:500}
   .breadcrumb a:hover{text-decoration:underline}
   .breadcrumb strong{color:var(--ink);font-weight:600}
-  .topbar-actions{display:flex;gap:8px}
-  .btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;padding:8px 14px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;color:var(--ink-soft);transition:background .15s,border-color .15s;text-decoration:none;font-family:inherit}
-  .btn:hover{background:#f4f4f5}
-  .btn-primary{background:var(--ink);color:#fafafa;border-color:var(--ink)}
-  .btn-primary:hover{background:#27272a}
-  .btn i,.btn svg{font-size:13px}
-  .record-layout{display:grid;grid-template-columns:300px 1fr 300px;gap:0;min-height:calc(100vh - 57px)}
-  .record-sidebar{background:#fff;border-right:1px solid var(--border);padding:28px 24px;position:sticky;top:57px;height:calc(100vh - 57px);overflow-y:auto}
-  .sidebar-avatar{width:100%;aspect-ratio:1;border-radius:12px;overflow:hidden;background:#f4f4f5;display:flex;align-items:center;justify-content:center;margin-bottom:20px;border:1px solid var(--border)}
-  .sidebar-avatar img{width:100%;height:100%;object-fit:cover}
-  .sidebar-avatar .initials{font-size:56px;font-weight:700;color:var(--muted)}
-  .sidebar-name{font-size:20px;font-weight:700;color:var(--ink);margin-bottom:4px;line-height:1.2}
-  .sidebar-id{font-size:13px;color:var(--muted);margin-bottom:12px}
-  .sidebar-badge{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600;margin-bottom:24px}
-  .sidebar-badge.vaccinated{background:var(--green-tint);color:var(--green);border:1px solid var(--green-border)}
-  .sidebar-badge.pending{background:var(--amber-tint);color:var(--amber);border:1px solid #fde68a}
-  .sidebar-badge.unvaccinated{background:var(--red-tint);color:var(--red);border:1px solid #fecaca}
-  .sidebar-badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
-  .sidebar-section{margin-bottom:24px}
-  .sidebar-section-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-  .sidebar-field{display:flex;flex-direction:column;gap:3px;margin-bottom:14px}
-  .sidebar-field:last-child{margin-bottom:0}
-  .sidebar-field .label{font-size:12px;font-weight:500;color:var(--muted)}
-  .sidebar-field .value{font-size:14px;font-weight:500;color:var(--ink)}
-  .sidebar-field .value.empty{color:var(--placeholder);font-style:italic}
-  .sidebar-actions{display:flex;flex-direction:column;gap:8px;margin-top:24px;padding-top:20px;border-top:1px solid var(--border)}
-  .sidebar-actions .btn{width:100%;justify-content:center}
-  .record-center{padding:28px 32px;overflow-y:auto}
-  .center-section{margin-bottom:28px}
-  .center-section:last-child{margin-bottom:0}
-  .section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
-  .section-title{font-size:15px;font-weight:600;color:var(--ink)}
-  .section-subtitle{font-size:13px;color:var(--muted);margin-top:2px}
-  .timeline{position:relative;padding-left:24px}
-  .timeline::before{content:'';position:absolute;left:7px;top:4px;bottom:4px;width:2px;background:var(--border);border-radius:1px}
-  .timeline-item{position:relative;padding-bottom:20px}
-  .timeline-item:last-child{padding-bottom:0}
-  .timeline-dot{position:absolute;left:-20px;top:4px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid var(--border);z-index:1}
-  .timeline-dot.completed{border-color:var(--green);background:var(--green-tint)}
-  .timeline-dot.scheduled{border-color:#2563eb;background:#eff6ff}
-  .timeline-dot.registration{border-color:var(--muted);background:#f4f4f5}
-  .timeline-event{font-size:14px;font-weight:600;color:var(--ink)}
-  .timeline-date{font-size:12px;color:var(--muted);margin-left:auto}
-  .timeline-top{display:flex;align-items:center;gap:8px;margin-bottom:4px}
-  .timeline-details{font-size:13px;color:var(--ink-soft)}
-  .timeline-tag{display:inline-flex;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-top:4px}
-  .timeline-tag.completed{background:var(--green-tint);color:var(--green)}
-  .timeline-tag.registered{background:#f4f4f5;color:var(--muted)}
-  .timeline-tag.scheduled{background:var(--blue-tint);color:var(--blue)}
-  .doc-list{display:flex;flex-direction:column;gap:6px}
-  .doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--ink);transition:background .15s}
-  .doc-item:hover{background:#f9fafb}
-  .doc-item svg{width:18px;height:18px;color:var(--muted);flex-shrink:0}
-  .doc-item span{font-size:13px;font-weight:500}
-  .doc-item .doc-type{margin-left:auto;font-size:12px;color:var(--muted);font-weight:400}
-  .empty-state{text-align:center;padding:32px 16px;color:var(--muted)}
-  .empty-state svg{width:40px;height:40px;margin-bottom:10px;color:var(--placeholder)}
-  .empty-state div{font-size:13px}
-  .record-right{background:#fff;border-left:1px solid var(--border);padding:28px 24px;position:sticky;top:57px;height:calc(100vh - 57px);overflow-y:auto}
-  .owner-card{display:flex;align-items:center;gap:12px;margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)}
-  .owner-avatar{width:44px;height:44px;border-radius:50%;background:#f4f4f5;border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--muted);flex-shrink:0}
-  .owner-name{font-size:14px;font-weight:600;color:var(--ink)}
-  .owner-label{font-size:12px;color:var(--muted)}
-  .upcoming-card{background:var(--green-tint);border:1px solid var(--green-border);border-radius:8px;padding:16px;margin-bottom:24px}
-  .upcoming-title{font-size:13px;font-weight:600;color:var(--green);margin-bottom:12px;display:flex;align-items:center;gap:6px}
-  .upcoming-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px}
-  .upcoming-row .k{color:var(--muted)}
-  .upcoming-row .v{font-weight:500;color:var(--ink)}
-  .upcoming-status{display:inline-flex;padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;margin-top:8px;background:#fff;color:var(--green);border:1px solid var(--green-border)}
-  .quick-info-grid{display:grid;grid-template-columns:1fr;gap:16px}
-  .quick-stat{display:flex;flex-direction:column;gap:2px}
-  .quick-stat .label{font-size:12px;font-weight:500;color:var(--muted)}
-  .quick-stat .value{font-size:16px;font-weight:700;color:var(--ink)}
-  @media(max-width:1200px){.record-layout{grid-template-columns:280px 1fr}.record-right{display:none}}
-  @media(max-width:768px){.record-layout{grid-template-columns:1fr}.record-sidebar{position:static;height:auto}.record-right{display:none}}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;padding:9px 14px;border-radius:8px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--ink-soft);transition:background .15s,border-color .15s}
+  .btn svg{width:15px;height:15px}
+  .btn:hover{background:#FAFAFB}
+  .btn.primary{background:var(--green);border-color:var(--green);color:#fff}
+  .btn.primary:hover{background:#0B6E2A}
+  .btn.danger-outline{color:var(--danger)}
+  /* Dialog (sd-btn) button style */
+  .sd-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background-color .15s ease,border-color .15s ease,color .15s ease;text-decoration:none}
+  .sd-btn svg{width:15px;height:15px}
+  .sd-btn-default{background:#18181b;color:#fafafa}
+  .sd-btn-default:hover{background:#27272a}
+  .sd-btn-outline{background:#ffffff;border-color:#e4e4e7;color:#18181b}
+  .sd-btn-outline:hover{background:#f4f4f5}
+  .sd-btn-danger{background:#ffffff;border-color:#fecaca;color:#b91c1c}
+  .sd-btn-danger:hover{background:#fef2f2}
+  .profile-header{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;display:flex;gap:28px;margin-bottom:22px;box-shadow:0 1px 2px rgba(16,24,40,0.03)}
+  .profile-photo{width:190px;height:190px;border-radius:12px;overflow:hidden;flex-shrink:0;background:var(--green-tint);display:flex;align-items:center;justify-content:center}
+  .profile-photo img{width:100%;height:100%;object-fit:cover}
+  .profile-photo .initials{font-size:48px;font-weight:700;color:var(--green)}
+  .profile-main{flex:1;min-width:0}
+  .name-row{display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap}
+  .pet-name{font-size:28px;font-weight:700;margin:0}
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;line-height:1.4;border:1px solid transparent;white-space:nowrap}
+  .badge.vaccinated{background:var(--green-tint);color:var(--green);border-color:#a8d5b4}
+  .badge.unvaccinated{background:var(--amber-tint);color:var(--amber);border-color:#e8cf9a}
+  .badge.pending{background:var(--slate-tint);color:var(--slate);border-color:#d5d9e0}
+  .badge .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .pet-id{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .summary-line{display:flex;flex-wrap:wrap;gap:6px 0;font-size:13.5px;color:var(--ink-soft)}
+  .summary-line span:not(:last-child)::after{content:"\2022";margin:0 10px;color:var(--line)}
+  .layout{display:grid;grid-template-columns:2fr 1fr;gap:22px;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin-bottom:22px;box-shadow:0 1px 2px rgba(16,24,40,0.03)}
+  .card-title{font-size:15px;font-weight:700;margin:0 0 4px}
+  .card-subtitle{font-size:12.5px;color:var(--muted);margin:0 0 18px}
+  .field-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px 20px}
+  .field .label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;margin-bottom:4px}
+  .field .value{font-size:14px;color:var(--ink);font-weight:500}
+  .field .value.empty{color:var(--muted);font-weight:400;font-style:italic}
+  .empty-state{text-align:center;padding:28px 20px;color:var(--muted);font-size:13.5px}
+  .empty-state svg{width:30px;height:30px;color:#C7CCD4;margin-bottom:10px}
+  .timeline{display:flex;flex-direction:column}
+  .timeline-item{display:flex;gap:14px;padding-bottom:20px;position:relative}
+  .timeline-item:not(:last-child)::before{content:"";position:absolute;left:6px;top:18px;bottom:-2px;width:1px;background:var(--line)}
+  .timeline-dot{width:13px;height:13px;border-radius:50%;background:var(--green-tint);border:2px solid var(--green);flex-shrink:0;margin-top:3px}
+  .timeline-body{flex:1}
+  .timeline-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:3px}
+  .timeline-event{font-size:13.5px;font-weight:600;color:var(--ink)}
+  .timeline-date{font-size:12px;color:var(--muted);white-space:nowrap}
+  .timeline-status{font-size:12px;color:var(--ink-soft)}
+  .status-tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-family:'Inter',sans-serif;font-size:11px;font-weight:500;line-height:1.4;border:1px solid transparent;white-space:nowrap}
+  .status-tag.registration{background:var(--slate-tint);color:var(--slate);border-color:#d5d9e0}
+  .status-tag.completed{background:var(--green-tint);color:var(--green);border-color:#a8d5b4}
+  .status-tag.scheduled{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
+  .doc-list{display:flex;flex-direction:column;gap:10px}
+  .doc-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;text-decoration:none;color:var(--ink)}
+  .doc-item svg{width:16px;height:16px;color:var(--muted)}
+  .appointment-card{background:var(--green-tint);border:1px solid var(--green-line);border-radius:14px;padding:20px;margin-bottom:22px}
+  .appointment-card .card-title{color:#0B5F25}
+  .appt-row{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px solid rgba(14,129,49,0.12)}
+  .appt-row:last-child{border-bottom:none}
+  .appt-row .k{color:#3E6B4C}
+  .appt-row .v{font-weight:600;color:#0B5F25}
+  .appt-status{display:inline-block;margin-top:12px;font-size:11.5px;font-weight:700;color:#fff;background:var(--green);padding:5px 11px;border-radius:999px}
+  @media(max-width:880px){.layout{grid-template-columns:1fr}.profile-header{flex-direction:column}.field-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-<div class="topbar">
-  <div class="breadcrumb"><a href="dashboard-resident.php#my-pets">My Pets</a> / <strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong></div>
-  <div class="topbar-actions">
-    <button class="btn" onclick="window.location.href='dashboard-resident.php#my-pets'"><i class="fas fa-arrow-left"></i> Back to My Pets</button>
-    <?php if ($isStaff || $isAdmin): ?><button class="btn btn-primary" onclick="alert('Edit coming soon.')"><i class="fas fa-edit"></i> Edit Pet</button><?php endif; ?>
+<div class="page">
+  <div class="topbar">
+    <div class="breadcrumb"><a href="dashboard-resident.php#my-pets">Pet Records</a> / <strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong></div>
+    <div class="actions">
+      <?php if ($isStaff || $isAdmin): ?><button class="sd-btn sd-btn-default" onclick="alert('Edit coming soon.')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Edit Pet Profile</button><?php endif; ?>
+      <button class="sd-btn sd-btn-outline" onclick="window.print()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V4h12v5M6 18h12v3H6zM4 9h16v6H4z"/></svg>Print Pet Profile</button>
+      <button class="sd-btn sd-btn-outline" onclick="window.location.href='dashboard-resident.php#my-pets'"><i class="fas fa-arrow-left"></i>Back to My Pets</button>
+    </div>
   </div>
-</div>
-<div class="record-layout">
-  <aside class="record-sidebar">
-    <div class="sidebar-avatar"><?php if (!empty($pet['photo_url'])): ?><img src="<?php echo htmlspecialchars($pet['photo_url']); ?>" alt="<?php echo htmlspecialchars($pet['pet_name']); ?>"><?php else: ?><span class="initials"><?php echo strtoupper(substr($pet['pet_name'], 0, 1)); ?></span><?php endif; ?></div>
-    <h1 class="sidebar-name"><?php echo htmlspecialchars($pet['pet_name']); ?></h1>
-    <div class="sidebar-id"><?php echo htmlspecialchars($pet['reference_id'] ?? '#PET-' . str_pad($pet['pet_id'], 5, '0', STR_PAD_LEFT)); ?></div>
-    <div class="sidebar-badge <?php echo $badgeClass; ?>"><span class="dot"></span><?php echo $badgeText; ?></div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Pet Details</div>
-      <div class="sidebar-field"><div class="label">Species</div><div class="value"><?php echo ucfirst($pet['pet_type']); ?></div></div>
-      <div class="sidebar-field"><div class="label">Breed</div><div class="value"><?php echo htmlspecialchars($pet['breed'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Sex</div><div class="value"><?php echo ucfirst($pet['gender'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Age</div><div class="value"><?php echo $ageDisplay; ?></div></div>
-      <div class="sidebar-field"><div class="label">Date of Birth</div><div class="value <?php echo empty($pet['date_of_birth']) ? 'empty' : ''; ?>"><?php echo !empty($pet['date_of_birth']) ? date('M d, Y', strtotime($pet['date_of_birth'])) : 'Not recorded'; ?></div></div>
-      <div class="sidebar-field"><div class="label">Color / Markings</div><div class="value"><?php echo htmlspecialchars($pet['color'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Weight</div><div class="value <?php echo empty($pet['weight']) ? 'empty' : ''; ?>"><?php echo !empty($pet['weight']) ? $pet['weight'] . ' kg' : 'Not recorded'; ?></div></div>
-      <div class="sidebar-field"><div class="label">Microchip</div><div class="value <?php echo empty($pet['microchip_id']) ? 'empty' : ''; ?>"><?php echo htmlspecialchars($pet['microchip_id'] ?? 'Not yet implemented'); ?></div></div>
+
+  <div class="profile-header">
+    <div class="profile-photo"><?php if (!empty($pet['photo_url'])): ?><img src="<?php echo htmlspecialchars($pet['photo_url']); ?>" alt="<?php echo htmlspecialchars($pet['pet_name']); ?>"><?php else: ?><span class="initials"><?php echo strtoupper(substr($pet['pet_name'], 0, 1)); ?></span><?php endif; ?></div>
+    <div class="profile-main">
+      <div class="name-row">
+        <h1 class="pet-name"><?php echo htmlspecialchars($pet['pet_name']); ?></h1>
+        <span class="badge <?php echo $badgeClass; ?>"><span class="dot"></span><?php echo $badgeText; ?></span>
+      </div>
+      <div class="pet-id">Pet ID: <?php echo htmlspecialchars($pet['reference_id'] ?? '#PET-' . str_pad($pet['pet_id'], 5, '0', STR_PAD_LEFT)); ?></div>
+      <div class="summary-line">
+        <span><?php echo ucfirst($pet['pet_type']); ?></span>
+        <span><?php echo htmlspecialchars($pet['breed'] ?? '—'); ?></span>
+        <span><?php echo ucfirst($pet['gender'] ?? '—'); ?></span>
+        <span><?php echo $ageDisplay; ?></span>
+        <span><?php echo htmlspecialchars($pet['color'] ?? '—'); ?></span>
+        <span>Registered <?php echo date('M d, Y', strtotime($pet['created_at'])); ?></span>
+      </div>
     </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Health</div>
-      <div class="sidebar-field"><div class="label">Vaccination</div><div class="value"><?php echo htmlspecialchars($vaxStatus ?: 'Not recorded'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Sterilization</div><div class="value"><?php echo !empty($pet['sterilization_status']) && $pet['sterilization_status'] === 'sterilized' ? 'Sterilized' : 'Not recorded'; ?></div></div>
-      <div class="sidebar-field"><div class="label">Allergies</div><div class="value <?php echo empty($pet['allergies']) ? 'empty' : ''; ?>"><?php echo htmlspecialchars($pet['allergies'] ?? 'None recorded'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Medications</div><div class="value <?php echo empty($pet['current_medications']) ? 'empty' : ''; ?>"><?php echo htmlspecialchars($pet['current_medications'] ?? 'None recorded'); ?></div></div>
+  </div>
+
+  <div class="layout">
+    <div>
+      <div class="card">
+        <h2 class="card-title">Complete Profile</h2>
+        <p class="card-subtitle">Registered pet information on file</p>
+        <div class="field-grid">
+          <div class="field"><div class="label">Species</div><div class="value"><?php echo ucfirst($pet['pet_type']); ?></div></div>
+          <div class="field"><div class="label">Breed</div><div class="value"><?php echo htmlspecialchars($pet['breed'] ?? '—'); ?></div></div>
+          <div class="field"><div class="label">Sex</div><div class="value"><?php echo ucfirst($pet['gender'] ?? '—'); ?></div></div>
+          <div class="field"><div class="label">Age</div><div class="value"><?php echo $ageDisplay; ?></div></div>
+          <div class="field"><div class="label">Date of Birth</div><div class="value"><?php echo !empty($pet['date_of_birth']) ? date('M d, Y', strtotime($pet['date_of_birth'])) : '—'; ?></div></div>
+          <div class="field"><div class="label">Color / Markings</div><div class="value"><?php echo htmlspecialchars($pet['color'] ?? '—'); ?></div></div>
+          <div class="field"><div class="label">Weight</div><div class="value"><?php echo !empty($pet['weight']) ? $pet['weight'] . ' kg' : '—'; ?></div></div>
+          <div class="field"><div class="label">Microchip Number</div><div class="value empty"><?php echo htmlspecialchars($pet['microchip_id'] ?? 'Not yet implemented'); ?></div></div>
+          <div class="field"><div class="label">Vaccination Status</div><div class="value"><?php echo htmlspecialchars($vaxStatus ?: 'Not recorded'); ?></div></div>
+          <div class="field"><div class="label">Registration Date</div><div class="value"><?php echo date('M d, Y', strtotime($pet['created_at'])); ?></div></div>
+          <div class="field"><div class="label">Owner Relationship</div><div class="value">Primary Owner<?php if (!empty($pet['from_adoption'])) echo ' (Adopted)'; ?></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Owner Information</h2>
+        <p class="card-subtitle">Read-only — registered under resident account</p>
+        <div class="field-grid">
+          <div class="field"><div class="label">Full Name</div><div class="value"><?php echo htmlspecialchars($pet['owner_name']); ?></div></div>
+          <div class="field"><div class="label">Email Address</div><div class="value"><?php echo htmlspecialchars($pet['owner_email']); ?></div></div>
+          <div class="field"><div class="label">Contact Number</div><div class="value"><?php echo htmlspecialchars($pet['owner_phone'] ?? '—'); ?></div></div>
+          <div class="field"><div class="label">Home Address</div><div class="value"><?php echo htmlspecialchars($pet['owner_address'] ?? '—'); ?></div></div>
+          <div class="field"><div class="label">Barangay</div><div class="value"><?php echo htmlspecialchars($pet['barangay_name'] ?? '—'); ?></div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Medical Summary</h2>
+        <p class="card-subtitle">Vaccination, treatment, and health records</p>
+        <div class="field-grid" style="margin-bottom:18px;">
+          <div class="field"><div class="label">Vaccination Status</div><div class="value"><?php echo htmlspecialchars($vaxStatus ?: 'Not recorded'); ?></div></div>
+          <div class="field"><div class="label">Sterilization Status</div><div class="value <?php echo empty($pet['sterilization_status']) ? 'empty' : ''; ?>"><?php echo !empty($pet['sterilization_status']) && $pet['sterilization_status'] === 'sterilized' ? 'Sterilized' : 'Not recorded'; ?></div></div>
+          <div class="field"><div class="label">Allergies</div><div class="value <?php echo empty($pet['allergies']) ? 'empty' : ''; ?>"><?php echo htmlspecialchars($pet['allergies'] ?? 'None recorded'); ?></div></div>
+          <div class="field"><div class="label">Current Medications</div><div class="value <?php echo empty($pet['current_medications']) ? 'empty' : ''; ?>"><?php echo htmlspecialchars($pet['current_medications'] ?? 'None recorded'); ?></div></div>
+        </div>
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg>
+          <div>No medical records available yet.</div>
+        </div>
+      </div>
     </div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Registration</div>
-      <div class="sidebar-field"><div class="label">Registered</div><div class="value"><?php echo date('M d, Y', strtotime($pet['created_at'])); ?></div></div>
-      <div class="sidebar-field"><div class="label">Category</div><div class="value"><?php echo $pet['from_adoption'] ? 'Adopted' : 'Owned'; ?></div></div>
+
+    <div>
+      <div class="card">
+        <h2 class="card-title">Service History</h2>
+        <p class="card-subtitle">Chronological record of all pet-related interactions</p>
+        <?php if (empty($timeline)): ?><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg><div>No activity recorded yet.</div></div>
+        <?php else: ?><div class="timeline"><?php foreach ($timeline as $entry): ?><div class="timeline-item"><div class="timeline-dot"></div><div class="timeline-body"><div class="timeline-top"><span class="timeline-event"><?php echo htmlspecialchars($entry['event']); ?></span><span class="timeline-date"><?php echo date('M d, Y', strtotime($entry['date'])); ?></span></div><div class="timeline-status"><?php echo htmlspecialchars($entry['details']); ?>           <span class="status-tag <?php echo htmlspecialchars($entry['type']); ?>"><?php echo ucfirst($entry['type']); ?></span></div></div></div><?php endforeach; ?></div><?php endif; ?>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Documents &amp; Attachments</h2>
+        <p class="card-subtitle">Vaccination certificates, lab results, and clearances</p>
+        <?php if (empty($documents)): ?><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><div>No documents are currently available.</div></div>
+        <?php else: ?><div class="doc-list"><?php foreach ($documents as $doc): ?><a href="<?php echo htmlspecialchars($doc['file_url']); ?>" class="doc-item" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><?php echo htmlspecialchars($doc['file_name']); ?></a><?php endforeach; ?></div><?php endif; ?>
+      </div>
+
+      <?php if ($upcomingAppt): ?>
+      <?php $typeLabels=['vaccination'=>'Annual Vaccination Booster','checkup'=>'Wellness Checkup','kapon'=>'Kapon (Spay/Neuter)','adoption'=>'Adoption Appointment']; $apptType=$typeLabels[$upcomingAppt['appointment_type']]??ucfirst($upcomingAppt['appointment_type']); ?>
+      <div class="appointment-card">
+        <h2 class="card-title">Upcoming Appointment</h2>
+        <div class="appt-row"><span class="k">Service</span><span class="v"><?php echo $apptType; ?></span></div>
+        <div class="appt-row"><span class="k">Date</span><span class="v"><?php echo date('M d, Y', strtotime($upcomingAppt['preferred_date'])); ?></span></div>
+        <div class="appt-row"><span class="k">Time</span><span class="v"><?php echo date('g:i A', strtotime($upcomingAppt['preferred_time'])); ?></span></div>
+        <span class="appt-status"><?php echo ucfirst($upcomingAppt['status']); ?></span>
+      </div>
+      <?php endif; ?>
     </div>
-    <div class="sidebar-actions"><button class="btn" onclick="window.location.href='dashboard-resident.php#my-pets'"><i class="fas fa-arrow-left"></i> Back to List</button></div>
-  </aside>
-  <main class="record-center">
-    <div class="center-section">
-      <div class="section-header"><div><div class="section-title">Activity</div><div class="section-subtitle">Service history and registration events</div></div></div>
-      <?php if (empty($timeline)): ?><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 12h6M9 16h6M9 8h6M5 4h14a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/></svg><div>No activity recorded yet.</div></div>
-      <?php else: ?><div class="timeline"><?php foreach ($timeline as $entry): ?><div class="timeline-item"><div class="timeline-dot <?php echo $entry['type']; ?>"></div><div class="timeline-top"><span class="timeline-event"><?php echo htmlspecialchars($entry['event']); ?></span><span class="timeline-date"><?php echo date('M d, Y', strtotime($entry['date'])); ?></span></div><div class="timeline-details"><?php echo htmlspecialchars($entry['details']); ?></div><span class="timeline-tag <?php echo $entry['type']; ?>"><?php echo ucfirst($entry['type']); ?></span></div><?php endforeach; ?></div><?php endif; ?>
-    </div>
-    <div class="center-section">
-      <div class="section-header"><div><div class="section-title">Documents &amp; Attachments</div><div class="section-subtitle">Vaccination certificates, lab results, and clearances</div></div></div>
-      <?php if (empty($documents)): ?><div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><div>No documents are currently available.</div></div>
-      <?php else: ?><div class="doc-list"><?php foreach ($documents as $doc): ?><a href="<?php echo htmlspecialchars($doc['file_url']); ?>" class="doc-item" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg><span><?php echo htmlspecialchars($doc['file_name']); ?></span><span class="doc-type"><?php echo ucfirst(str_replace('_', ' ', $doc['document_type'])); ?></span></a><?php endforeach; ?></div><?php endif; ?>
-      <?php if ($isStaff || $isAdmin): ?><div style="margin-top:12px;text-align:right;"><button class="btn" onclick="alert('Document upload coming soon.')"><i class="fas fa-upload"></i> Upload Document</button></div><?php endif; ?>
-    </div>
-  </main>
-  <aside class="record-right">
-    <div class="owner-card"><div class="owner-avatar"><?php echo strtoupper(substr($pet['owner_name'], 0, 1)); ?></div><div><div class="owner-name"><?php echo htmlspecialchars($pet['owner_name']); ?></div><div class="owner-label">Pet Owner</div></div></div>
-    <div class="sidebar-section">
-      <div class="sidebar-section-title">Owner Information</div>
-      <div class="sidebar-field"><div class="label">Full Name</div><div class="value"><?php echo htmlspecialchars($pet['owner_name']); ?></div></div>
-      <div class="sidebar-field"><div class="label">Email</div><div class="value"><?php echo htmlspecialchars($pet['owner_email']); ?></div></div>
-      <div class="sidebar-field"><div class="label">Phone</div><div class="value"><?php echo htmlspecialchars($pet['owner_phone'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Address</div><div class="value"><?php echo htmlspecialchars($pet['owner_address'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Barangay</div><div class="value"><?php echo htmlspecialchars($pet['barangay_name'] ?? '—'); ?></div></div>
-      <div class="sidebar-field"><div class="label">Owner Since</div><div class="value"><?php echo date('M d, Y', strtotime($pet['owner_reg_date'])); ?></div></div>
-    </div>
-    <?php if ($upcomingAppt): ?>
-    <?php $typeLabels=['vaccination'=>'Vaccination','checkup'=>'Wellness Checkup','kapon'=>'Kapon (Spay/Neuter)','adoption'=>'Adoption']; $apptType=$typeLabels[$upcomingAppt['appointment_type']]??ucfirst($upcomingAppt['appointment_type']); ?>
-    <div class="upcoming-card"><div class="upcoming-title"><i class="fas fa-calendar-check"></i> Upcoming Appointment</div><div class="upcoming-row"><span class="k">Service</span><span class="v"><?php echo $apptType; ?></span></div><div class="upcoming-row"><span class="k">Date</span><span class="v"><?php echo date('M d, Y', strtotime($upcomingAppt['preferred_date'])); ?></span></div><div class="upcoming-row"><span class="k">Time</span><span class="v"><?php echo date('g:i A', strtotime($upcomingAppt['preferred_time'])); ?></span></div><span class="upcoming-status"><?php echo ucfirst($upcomingAppt['status']); ?></span></div>
-    <?php endif; ?>
-    <div class="sidebar-section"><div class="sidebar-section-title">Quick Stats</div><div class="quick-info-grid"><div class="quick-stat"><div class="label">Total Services</div><div class="value"><?php echo count($timeline); ?></div></div><div class="quick-stat"><div class="label">Documents on File</div><div class="value"><?php echo count($documents); ?></div></div></div></div>
-  </aside>
+  </div>
 </div>
 </body>
 </html>

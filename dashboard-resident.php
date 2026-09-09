@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -23,7 +23,7 @@ if ($_SESSION['role'] !== 'resident') {
     exit;
 }
 
-// Adoption flow ï¿½ check if user came from "Adopt Me" on petlist.php
+// Adoption flow � check if user came from "Adopt Me" on petlist.php
 $showAdoptModal = $_SESSION['show_adopt_modal'] ?? false;
 $adoptData = $_SESSION['adopt_data'] ?? null;
 $adoptListingId = $_SESSION['adopt_listing_id'] ?? null;
@@ -62,7 +62,7 @@ $stmt->close();
 
 // Fetch archived pets
 $archivedPets = [];
-$stmt = $conn->prepare("SELECT pet_id, reference_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, archived_at, photo_url FROM pets WHERE owner_id = ? AND archived_at IS NOT NULL ORDER BY pet_id ASC");
+$stmt = $conn->prepare("SELECT pet_id, reference_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, created_at, archived_at, photo_url FROM pets WHERE owner_id = ? AND archived_at IS NOT NULL ORDER BY pet_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -95,7 +95,7 @@ $stmt->close();
 
 // Fetch user's appointments from database (excluding archived)
 $appointments = [];
-$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '—') AS pet_name FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
+$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -106,7 +106,7 @@ $stmt->close();
 
 // Fetch archived appointments
 $archivedAppointments = [];
-$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.archived_at, COALESCE(p.pet_name, '—') AS pet_name FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NOT NULL ORDER BY a.appointment_id ASC");
+$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.archived_at, COALESCE(p.pet_name, '-') AS pet_name FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NOT NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -213,7 +213,7 @@ $stmt->close();
 $adoptionListings = [];
 $userId = $_SESSION['user_id'];
 $alq = $conn->prepare("
-    SELECT al.*, p.pet_name, p.pet_type, p.breed, p.age, p.gender, p.color, p.photo_url, p.reference_id AS pet_ref_id,
+    SELECT al.*, p.pet_name, p.pet_type, p.breed, p.age, p.gender, p.color, p.weight, p.photo_url, p.reference_id AS pet_ref_id,
            pl.description AS source_description,
            (SELECT status FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_status,
            (SELECT preferred_date FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_date,
@@ -231,14 +231,105 @@ $alResult = $alq->get_result();
 while ($row = $alResult->fetch_assoc()) $adoptionListings[] = $row;
 $alq->close();
 
+// ?? New Dashboard Queries ??
+
+// Today's appointments (for the timeline)
+$todayAppts = [];
+ $taStmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo, COALESCE(p.breed, '') AS pet_breed FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL AND LOWER(a.status) = 'pending' ORDER BY a.preferred_date ASC, a.preferred_time ASC LIMIT 3");
+$todayDate = date('Y-m-d');
+ $taStmt->bind_param("i", $_SESSION['user_id']);
+$taStmt->execute();
+$taResult = $taStmt->get_result();
+ while ($row = $taResult->fetch_assoc()) $todayAppts[] = $row;
+ $taStmt->close();
+
+ // Fall back to the already-loaded appointments so pending records with incomplete
+ // or differently formatted dates are still visible on the resident dashboard.
+ if (empty($todayAppts)) {
+     foreach ($appointments as $appointment) {
+         $status = strtolower((string)$appointment['status']);
+         if ($status === 'pending') {
+             $appointment['pet_photo'] = '';
+             $appointment['pet_breed'] = '';
+             foreach ($pets as $pet) {
+                 if ((int)$pet['pet_id'] === (int)$appointment['pet_id']) {
+                     $appointment['pet_photo'] = $pet['photo_url'] ?? '';
+                     $appointment['pet_breed'] = $pet['breed'] ?? '';
+                     break;
+                 }
+             }
+             $todayAppts[] = $appointment;
+         }
+     }
+     usort($todayAppts, function ($a, $b) {
+         return strtotime(($a['preferred_date'] ?? '') . ' ' . ($a['preferred_time'] ?? '')) <=> strtotime(($b['preferred_date'] ?? '') . ' ' . ($b['preferred_time'] ?? ''));
+     });
+     $todayAppts = array_slice($todayAppts, 0, 3);
+ }
+
+ // Upcoming appointments (next 30 days, for timeline fallback)
+$upcomingAppts = [];
+$uaStmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo, COALESCE(p.breed, '') AS pet_breed FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.preferred_date >= ? AND a.preferred_date <= DATE_ADD(?, INTERVAL 30 DAY) AND a.archived_at IS NULL ORDER BY a.preferred_date ASC, a.preferred_time ASC");
+$uaStmt->bind_param("iss", $_SESSION['user_id'], $todayDate, $todayDate);
+$uaStmt->execute();
+$uaResult = $uaStmt->get_result();
+while ($row = $uaResult->fetch_assoc()) $upcomingAppts[] = $row;
+$uaStmt->close();
+
+// Active treatments count (appointments with status scheduled/in_progress)
+$activeTreatments = 0;
+$atStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND status IN ('scheduled','in_progress') AND archived_at IS NULL");
+$atStmt->bind_param("i", $_SESSION['user_id']);
+$atStmt->execute();
+$activeTreatments = (int)$atStmt->get_result()->fetch_row()[0];
+$atStmt->close();
+
+// Reports submitted this month
+$reportsThisMonth = 0;
+$rtmStmt = $conn->prepare("SELECT COUNT(*) FROM reports WHERE reporter_id = ? AND MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE()) AND archived_at IS NULL");
+$rtmStmt->bind_param("i", $_SESSION['user_id']);
+$rtmStmt->execute();
+$reportsThisMonth = (int)$rtmStmt->get_result()->fetch_row()[0];
+$rtmStmt->close();
+
+// Upcoming appointments count (today onward)
+$upcomingApptCount = count(array_filter($appointments, fn($a) => strtotime($a['preferred_date']) >= strtotime('today') && $a['status'] !== 'completed' && $a['status'] !== 'cancelled'));
+
+// Recent activity logs
+$recentActivities = [];
+$actStmt = $conn->prepare("SELECT log_id, action, details, created_at FROM activity_logs WHERE user_id = ? ORDER BY created_at DESC LIMIT 5");
+$actStmt->bind_param("i", $_SESSION['user_id']);
+$actStmt->execute();
+$actResult = $actStmt->get_result();
+while ($row = $actResult->fetch_assoc()) $recentActivities[] = $row;
+$actStmt->close();
+
+// Published announcements
+$announcements = [];
+$annStmt = $conn->prepare("SELECT announcement_id, title, content, category, created_at FROM announcements WHERE status = 'published' AND is_active = 1 ORDER BY created_at DESC LIMIT 3");
+$annStmt->execute();
+$annResult = $annStmt->get_result();
+ while ($row = $annResult->fetch_assoc()) $announcements[] = $row;
+ $annStmt->close();
+
+ // The sidebar is rendered after the page content, so load the header badge here too.
+ $dashboardUnreadCount = 0;
+ $badgeStmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'staff_message' AND is_read = 0");
+ if ($badgeStmt) {
+     $badgeStmt->bind_param("i", $_SESSION['user_id']);
+     $badgeStmt->execute();
+     $dashboardUnreadCount = (int)$badgeStmt->get_result()->fetch_row()[0];
+     $badgeStmt->close();
+ }
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Resident Dashboard — Dasmari&ntilde;as City Veterinary Services Animal Welfare System" />
-  <title><?php echo htmlspecialchars($pageTitle); ?> — Resident | DCVS</title>
+  <meta name="description" content="Resident Dashboard - Dasmari&ntilde;as City Veterinary Services Animal Welfare System" />
+  <title><?php echo htmlspecialchars($pageTitle); ?> - Resident | DCVS</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -252,8 +343,8 @@ $alq->close();
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
-    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Montserrat',sans-serif; }
-    .page-subtitle { font-size:0.88rem; color:#64748b; margin:4px 0 0; }
+    .page-title { font-size:1.5rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.025em; }
+    .page-subtitle { font-size:0.9rem; color:#71717a; margin:4px 0 0; font-family:'Inter','Segoe UI',sans-serif; }
     .header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .dashboard-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .card-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
@@ -332,8 +423,14 @@ $alq->close();
 
     .view-all { font-size:0.78rem; color:#045e1f; font-weight:600; cursor:pointer; }
     .view-all:hover { text-decoration:underline; }
-    .archive-section { margin-top:2rem; padding-top:1.5rem; border-top:2px dashed #e2e8f0; }
-    .archive-section h2 { font-size:1.1rem; font-weight:700; color:#0f172a; margin:0 0 1rem 0; }
+    .archive-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem; }
+    .archive-title { font-size:1.1rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.01em; }
+    .archive-section { margin-top:0; padding-top:0; border-top:none; }
+    .archive-section h2 { font-size:1.1rem; font-weight:600; color:#18181b; margin:0 0 1rem 0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.01em; }
+    #archive .appt-table { font-family:'Inter','Segoe UI',sans-serif; }
+    .archive-empty { text-align:center; padding:2.5rem 1rem; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; }
+    .archive-empty i { font-size:1.75rem; color:#d4d4d8; display:block; margin-bottom:0.6rem; }
+    .archive-empty p { margin:0; font-size:0.9rem; }
 
     .compact-list { padding: 0.5rem 1.5rem 1.25rem; display: flex; flex-direction: column; gap: 0.25rem; }
     .compact-item { display:flex; align-items:center; gap:0.85rem; padding:0.75rem 0.85rem; border-bottom:1px solid #f1f5f9; border-radius:8px; }
@@ -343,13 +440,13 @@ $alq->close();
     .compact-title { font-size:0.85rem; font-weight:600; color:#0f172a; flex:1; }
     .compact-main { flex:1; }
     .filter-bar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:1rem; }
-    .search-box { display:inline-flex; align-items:center; background:#f8fafc; border:1.5px solid #e2e8f0; border-radius:8px; padding:0 12px; transition:border-color 0.15s,box-shadow 0.15s; }
-    .search-box:focus-within { border-color:var(--green); box-shadow:0 0 0 3px rgba(14,129,49,0.1); }
-    .search-box i { color:#94a3b8; font-size:0.85rem; }
-    .search-box input { border:none; background:transparent; padding:8px 10px; font-size:0.85rem; color:#1e293b; outline:none; width:100%; min-width:180px; }
-    .search-box input::placeholder { color:#94a3b8; }
-    .filter-select { padding:8px 14px; border-radius:8px; border:1.5px solid #e2e8f0; font-size:0.82rem; background:#fff; color:#334155; cursor:pointer; transition:border-color 0.15s; }
-    .filter-select:focus { border-color:var(--green); outline:none; box-shadow:0 0 0 3px rgba(14,129,49,0.1); }
+    .search-box { display:inline-flex; align-items:center; background:#fff; border:1px solid #e4e4e7; border-radius:6px; padding:0 12px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); transition:border-color 0.15s,box-shadow 0.15s; }
+    .search-box:focus-within { border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    .search-box i { color:#71717a; font-size:0.85rem; }
+    .search-box input { border:none; background:transparent; padding:8px 10px; font-size:0.85rem; color:#18181b; outline:none; width:100%; min-width:180px; font-family:'Inter','Segoe UI',sans-serif; }
+    .search-box input::placeholder { color:#71717a; }
+    .filter-select { padding:8px 14px; border-radius:6px; border:1px solid #e4e4e7; font-size:0.85rem; background:#fff; color:#18181b; cursor:pointer; transition:border-color 0.15s; font-family:'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
+    .filter-select:focus { border-color:#18181b; outline:none; box-shadow:0 0 0 1px #18181b; }
     .action-btn-sm { padding:6px 14px; border-radius:6px; border:none; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; display:inline-flex; align-items:center; gap:6px; }
     .action-btn-sm.green { background:#f0fdf4; color:var(--green); } .action-btn-sm.green:hover { background:#dcfce7; }
     .action-btn-sm.red { background:#fef2f2; color:#dc2626; } .action-btn-sm.red:hover { background:#fee2e2; }
@@ -381,7 +478,7 @@ $alq->close();
     .no-profile-photo { text-align:center; padding:1.5rem; color:#94a3b8; }
     .no-profile-photo i { font-size:3rem; display:block; margin-bottom:0.5rem; }
 
-    /* â”€â”€ Adoption Listings (premium CRM record design) â”€â”€ */
+    /* �"?�"? Adoption Listings (premium CRM record design) �"?�"? */
     .adopt-wrap { box-sizing:border-box; }
     .adopt-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-bottom:24px; }
     .adopt-pills { display:flex; gap:12px; flex-wrap:wrap; }
@@ -397,11 +494,11 @@ $alq->close();
     .adopt-card { display:flex; flex-direction:column; background:#fff; border:1px solid #E5E7EB; border-radius:18px; padding:20px; box-shadow:0 1px 2px rgba(16,24,40,0.04),0 4px 12px rgba(16,24,40,0.03); box-sizing:border-box; }
     .adopt-badges { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
     .adopt-ref-badge { display:inline-flex; align-items:center; gap:6px; background:#F3F4F6; color:#4B5563; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px; }
-    .adopt-status-badge { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:700; padding:5px 11px; border-radius:999px; letter-spacing:.02em; }
-    .adopt-status-badge.pending { background:#FFF7ED; color:#C2540B; }
-    .adopt-status-badge.available { background:#ECFDF5; color:#0E8131; }
-    .adopt-status-badge.adopted { background:#F3F4F6; color:#6B7280; }
-    .adopt-status-badge.cancelled { background:#FEF2F2; color:#B91C1C; }
+    .adopt-status-badge { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:20px; font-family:'Inter','Segoe UI',sans-serif; white-space:nowrap; }
+    .adopt-status-badge.pending { background:#fffbeb; color:#b45309; }
+    .adopt-status-badge.available { background:var(--green-100); color:var(--green-700); }
+    .adopt-status-badge.adopted { background:#eff6ff; color:#1d4ed8; }
+    .adopt-status-badge.cancelled { background:#fef2f2; color:#b91c1c; }
     .adopt-split { display:flex; gap:20px; flex:1; min-height:0; }
     .adopt-media { flex:0 0 38%; }
     .adopt-media img { width:100%; aspect-ratio:320/260; object-fit:cover; border-radius:16px; display:block; }
@@ -455,7 +552,7 @@ $alq->close();
     .badge-category { font-size: 0.8rem; font-weight: 600; color: #475569; white-space: nowrap; }
     .view-all { font-size: 0.85rem; font-weight: 600; color: var(--green); text-decoration: none; transition: color 0.2s; }
     .view-all:hover { color: #084a1c; text-decoration: underline; }
-/* â”€â”€ Profile Settings (new layout) â”€â”€ */
+/* �"?�"? Profile Settings (new layout) �"?�"? */
 .profile-settings-wrapper * { box-sizing:border-box; }
 .profile-settings-wrapper { max-width:680px; margin:0 auto; }
 .profile-settings-wrapper .ps-card { background:#fff; border:1px solid #e6e8eb; border-radius:14px; padding:22px 24px; margin-bottom:20px; box-shadow:0 1px 2px rgba(0,0,0,0.02); }
@@ -464,17 +561,17 @@ $alq->close();
 .profile-settings-wrapper .ps-avatar { width:56px; height:56px; border-radius:50%; overflow:hidden; flex-shrink:0; background:#d9d9d9; cursor:pointer; }
 .profile-settings-wrapper .ps-avatar img { width:100%; height:100%; object-fit:cover; }
 .profile-settings-wrapper .ps-avatar-plain { width:56px; height:56px; border-radius:50%; background:#d9d9d9; display:flex; align-items:center; justify-content:center; font-size:1.3rem; color:#666; cursor:pointer; }
-.profile-settings-wrapper .ps-profile-name { font-size:15px; font-weight:700; }
-.profile-settings-wrapper .ps-profile-sub { font-size:13px; color:#6b7280; margin-top:2px; }
+.profile-settings-wrapper .ps-profile-name { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+.profile-settings-wrapper .ps-profile-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; margin-top:2px; }
 .profile-settings-wrapper .ps-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
-.profile-settings-wrapper .ps-card-header h2 { font-size:16px; font-weight:700; margin:0; }
-.profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; color:#1f2328; cursor:pointer; transition:background .15s,border-color .15s; }
+.profile-settings-wrapper .ps-card-header h2 { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; margin:0; }
+.profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; cursor:pointer; transition:background .15s,border-color .15s; }
 .profile-settings-wrapper .ps-edit-btn:hover { background:#f5f6f8; border-color:#c3c8d0; }
 .profile-settings-wrapper .ps-edit-btn.active { background:#f0f0f0; border-color:#000; color:#000; }
 .profile-settings-wrapper .ps-edit-btn svg { width:13px; height:13px; }
 .profile-settings-wrapper .ps-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
 .profile-settings-wrapper .ps-form-row.ps-single { grid-template-columns:1fr; }
-.profile-settings-wrapper .ps-field label { display:block; font-size:13px; color:#4b5563; margin-bottom:6px; }
+.profile-settings-wrapper .ps-field label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
 .profile-settings-wrapper .ps-field input,
 .profile-settings-wrapper .ps-field select,
 .profile-settings-wrapper .ps-field textarea { width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #e2e5ea; background:#f9fafb; color:#1f2328; outline:none; transition:background .15s,border-color .15s,box-shadow .15s; box-sizing:border-box; font-family:inherit; }
@@ -488,7 +585,7 @@ $alq->close();
 .profile-settings-wrapper .ps-field select:not(:disabled):focus,
 .profile-settings-wrapper .ps-field textarea:not(:disabled):focus { border-color:#000; box-shadow:0 0 0 3px rgba(0,0,0,0.08); }
 .profile-settings-wrapper .ps-actions-row { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
-.profile-settings-wrapper .ps-btn { padding:9px 18px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+.profile-settings-wrapper .ps-btn { padding:9px 18px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; border-radius:8px; cursor:pointer; border:1px solid transparent; }
 .profile-settings-wrapper .ps-btn-primary { background:#000; color:#fff; border-color:#000; }
 .profile-settings-wrapper .ps-btn-primary:hover { background:#1a1a1a; }
 .profile-settings-wrapper .ps-btn-primary:disabled { background:#c7c9d9; border-color:#c7c9d9; cursor:not-allowed; }
@@ -497,8 +594,9 @@ $alq->close();
 .profile-settings-wrapper .ps-footer-actions { display:flex; justify-content:flex-start; gap:10px; margin-top:4px; }
 .profile-settings-wrapper .ps-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:#1f2328; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:9999; }
 .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#account-settings { background:#fff; }
 
-/* â”€â”€ Dashboard Layout (corrected) â”€â”€ */
+/* �"?�"? Dashboard Layout (corrected) �"?�"? */
 :root{--card-bg:#ffffff;--text:#0f172a;--text-2:#475569;--text-3:#94a3b8;--border:#eef2f6;--border-2:#e2e8f0;--green:#045e1f;--shadow:0 1px 3px rgba(0,0,0,0.04);--text-main:var(--text);--text-secondary:var(--text-2);--text-muted:var(--text-3);--accent-blue:var(--green);--shadow-md:0 4px 6px rgba(0,0,0,0.05);}
 .section-title{font-size:0.95rem;font-weight:700;color:var(--text);margin-bottom:0.85rem;display:flex;align-items:center;gap:0.5rem;font-family:'Montserrat',sans-serif;}
 .title-wrapper{margin-bottom:1rem;}
@@ -551,13 +649,13 @@ $alq->close();
 .calendar-tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#1f2937 transparent transparent transparent;}
 .calendar-date:hover .calendar-tooltip{opacity:1;visibility:visible;}
 /* Dedicated page container */
-.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;}
+.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;font-family:'Inter','Segoe UI',sans-serif;}
 .bk-card2{background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);padding:28px 32px;font-family:'Inter','Segoe UI',sans-serif;}
 @media (max-width:640px){ .bk-page{padding:16px 20px;} .bk-card2{padding:20px 18px;} }
 /* Two-column body: LEFT = calendar, RIGHT = pet/service/time */
 .bk-heading{font-family:'Inter','Segoe UI',sans-serif;}
-.bk-heading-title{font-family:'Inter','Segoe UI',sans-serif;font-size:28px;font-weight:700;color:#18181b;letter-spacing:-0.02em;margin:0;}
-.bk-heading-sub{font-size:15px;color:#71717a;margin:8px 0 0;}
+.bk-heading-title{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1;margin:0;}
+.bk-heading-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;line-height:1.5;margin:6px 0 0;}
 /* Two-column body: LEFT ~45% (calendar), RIGHT ~55% (fields) */
 .bk-body{display:grid;grid-template-columns:minmax(0,45%) minmax(0,55%);gap:40px;align-items:start;margin-top:28px;}
 .bk-col{min-width:0;}
@@ -596,7 +694,7 @@ $alq->close();
 .bk-select-chevron{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#71717a;pointer-events:none;}
 /* Calendar */
 .bk-cal-area{padding:0;}
-/* Booking primary (teal) — defined globally because the white card wrapper was removed */
+/* Booking primary (teal) - defined globally because the white card wrapper was removed */
 :root{--bk-primary:#0d9488;--bk-primary-hover:#0f766e;--bk-primary-soft:#ccfbf1;--bk-fg:#18181b;--bk-muted:#71717a;--bk-border:#e4e4e7;}
 .bk-cal{border:1px solid var(--bk-border);border-radius:12px;padding:14px;background:#fff;}
 .bk-cal-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;}
@@ -607,7 +705,7 @@ $alq->close();
 .bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin-bottom:6px;}
 .bk-weekdays span{text-align:center;font-size:13px;font-weight:600;color:var(--bk-muted);height:34px;line-height:34px;text-transform:capitalize;}
 .bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;}
-/* Available date: readable dark text, clearly clickable — box shape */
+/* Available date: readable dark text, clearly clickable - box shape */
 .bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;max-width:42px;aspect-ratio:1/1;margin:0 auto;border-radius:8px;border:2px solid transparent;font-size:15px;font-weight:500;color:var(--bk-fg);background:transparent;cursor:pointer;transition:background 0.15s,color 0.15s,border-color 0.15s;}
 .bk-day:hover:not(:disabled){background:#f4f4f5;color:#18181b;}
 /* Today: black box outline */
@@ -757,11 +855,11 @@ $alq->close();
 .summary-value{font-size:0.78rem;font-weight:600;color:var(--text);}
 
 
-/* â”€â”€ Overflow guard: prevent horizontal scroll on any screen size â”€â”€ */
+/* �"?�"? Overflow guard: prevent horizontal scroll on any screen size �"?�"? */
 .main-content,#mainContent,.dashboard-grid,.dash-main,.dash-sidebar{max-width:100%;overflow-x:hidden;box-sizing:border-box;}
 .dashboard-grid>*,.dash-main>*,.dash-sidebar>*,.top-row>*{min-width:0;}
 
-/* â”€â”€ Responsive breakpoints â”€â”€ */
+/* �"?�"? Responsive breakpoints �"?�"? */
 @media (max-width:1100px){
   .dashboard-grid{grid-template-columns:1fr}
   .top-row{grid-template-columns:1fr}
@@ -846,15 +944,44 @@ $alq->close();
   .welcome-banner .date-year{font-size:0.55rem}
 }
 </style>
+<link rel="stylesheet" href="assets/css/resident-overview.css" />
+<style>
+  html, body.dashboard, body.dashboard .main-content { background: #ffffff !important; }
+</style>
 </head>
 <body class="dashboard" data-realtime-page="resident">
 
 <?php include 'includes/resident-sidebar.php'; ?>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
      MAIN CONTENT
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+�.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.� -->
 <main class="main-content" id="mainContent">
+
+<?php if ($petSuccess): ?>
+  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
+    <i class="fas fa-check-circle"></i>
+    <span><?php echo htmlspecialchars($petSuccess); ?></span>
+  </div>
+<?php endif; ?>
+<?php if ($reportSuccess): ?>
+  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
+    <i class="fas fa-check-circle"></i>
+    <span><?php echo htmlspecialchars($reportSuccess); ?></span>
+  </div>
+<?php endif; ?>
+<?php if ($appointmentSuccess): ?>
+  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
+    <i class="fas fa-check-circle"></i>
+    <span><?php echo htmlspecialchars($appointmentSuccess); ?></span>
+  </div>
+<?php endif; ?>
+<?php if ($profileSuccess): ?>
+  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
+    <i class="fas fa-check-circle"></i>
+    <span><?php echo htmlspecialchars($profileSuccess); ?></span>
+  </div>
+<?php endif; ?>
 
 <?php if ($passwordError): ?>
   <div class="auth-alert auth-alert-error" style="margin: 1rem 0;">
@@ -891,7 +1018,7 @@ $alq->close();
   </div>
 <?php endif; ?>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ OVERVIEW / DASHBOARD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? OVERVIEW / DASHBOARD �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
   <section id="overview" class="content-section active">
 
     <?php if (isset($_SESSION['login_notice'])): ?>
@@ -902,7 +1029,61 @@ $alq->close();
       </div>
     <?php endif; ?>
 
-    <!-- Welcome Banner -->
+     <div class="resident-overview">
+         <div class="ro-head">
+         <div class="ro-head-right">
+           <button class="ro-primary" type="button" onclick="openBookApptModal()"><i class="far fa-calendar-alt"></i> New Appointment <i class="fas fa-chevron-down" style="font-size:9px"></i></button>
+         </div>
+       </div>
+
+       <div class="ro-kpis">
+         <?php $kpis = [
+           ['fa-calendar-alt', 'Upcoming Appointments', $upcomingApptCount, 'Today'],
+           ['fa-paw', 'My Pets', count($pets), 'View all pets &rarr;'],
+           ['fa-file-medical', 'Active Treatments', $activeTreatments, 'Ongoing care'],
+           ['fa-file-alt', 'Reports Submitted', $reportsThisMonth, 'This month'],
+           ['fa-wallet', 'Balance Due', '?0.00', 'All clear']
+         ]; foreach ($kpis as $kpi): ?>
+           <div class="ro-kpi"><span class="ro-kpi-icon"><i class="fas <?php echo $kpi[0]; ?>"></i></span><div><p class="ro-kpi-label"><?php echo $kpi[1]; ?></p><p class="ro-kpi-value"><?php echo $kpi[2]; ?></p><p class="ro-kpi-sub <?php echo strpos($kpi[3], 'View') === 0 || $kpi[3] === 'All clear' ? 'ro-link' : ''; ?>"><?php echo $kpi[3]; ?></p></div></div>
+         <?php endforeach; ?>
+       </div>
+
+       <div class="ro-grid">
+         <div class="ro-card ro-schedule">
+           <div class="ro-card-head"><div><h2>Today's Schedule</h2><small><?php echo date('l, F j, Y'); ?></small></div><button class="ro-outline" type="button" onclick="switchSection('appointments')"><i class="far fa-calendar-alt"></i> View Calendar</button></div>
+           <div class="ro-card-body">
+             <?php if (empty($todayAppts)): ?><div class="ro-empty" style="padding:30px 0;text-align:center;color:#667085;font-size:12px">No upcoming appointments.</div><?php else: ?><div class="ro-timeline">
+               <?php foreach ($todayAppts as $apt): $isPending = strtolower($apt['status']) === 'pending'; $isFutureDate = $apt['preferred_date'] !== $todayDate; ?>
+                 <div class="ro-appt"><span class="ro-time"><?php echo $isFutureDate ? date('M j', strtotime($apt['preferred_date'])) : date('g:i A', strtotime($apt['preferred_time'])); ?></span><span class="ro-dot<?php echo $isPending ? ' pending' : ''; ?>"></span><div class="ro-appt-card">
+                   <?php if (!empty($apt['pet_photo'])): ?><img class="ro-pet-img" src="<?php echo htmlspecialchars($apt['pet_photo']); ?>" alt="<?php echo htmlspecialchars($apt['pet_name']); ?>"><?php else: ?><span class="ro-pet-img"><?php echo strtoupper(substr($apt['pet_name'],0,1)); ?></span><?php endif; ?>
+                   <div class="ro-appt-info"><strong><?php echo htmlspecialchars($apt['pet_name']); ?></strong><span><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?></span><span><?php echo $isPending ? 'Awaiting confirmation' : 'Veterinary Services'; ?></span></div><span class="ro-status<?php echo $isPending ? ' pending' : ''; ?>"><?php echo ucfirst($apt['status']); ?></span>
+                 </div></div>
+               <?php endforeach; ?></div><?php endif; ?>
+             <button class="ro-full-btn" type="button" onclick="switchSection('appointments')">View All Appointments <span>&rarr;</span></button>
+           </div>
+         </div>
+
+         <div class="ro-stack">
+           <div class="ro-card"><div class="ro-card-head"><h2>My Pets Overview</h2><a class="ro-view" href="#my-pets" onclick="switchSection('my-pets');return false;">View All</a></div><div class="ro-pets">
+             <?php if (empty($pets)): ?><div style="width:100%;text-align:center;color:#667085;font-size:12px;padding:10px">No pets registered yet. <a class="ro-link" href="#" onclick="openModal('addPetModal');return false;">Register one</a></div><?php else: foreach (array_slice($pets,0,3) as $pet): ?><div class="ro-pet"><?php if (!empty($pet['photo_url'])): ?><img class="ro-pet-img" src="<?php echo htmlspecialchars($pet['photo_url']); ?>" alt="<?php echo htmlspecialchars($pet['pet_name']); ?>"><?php else: ?><span class="ro-pet-img"><?php echo strtoupper(substr($pet['pet_name'],0,1)); ?></span><?php endif; ?><strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong><span><?php echo htmlspecialchars($pet['breed'] ?: ucfirst($pet['pet_type'])); ?></span><span class="ro-pet-meta"><?php echo htmlspecialchars($pet['age'] ?: '-'); ?> yrs &bull; <?php echo htmlspecialchars(ucfirst($pet['gender'] ?: '-')); ?></span></div><?php endforeach; ?><a class="ro-pet ro-add-pet" href="#" onclick="openModal('addPetModal');return false;"><span class="ro-plus">+</span><span>Add New Pet</span></a><?php endif; ?>
+           </div></div>
+           <div class="ro-card"><div class="ro-card-head"><h2>My Tasks</h2></div><div class="ro-tasks">
+             <?php $taskAppointments = array_values(array_filter($upcomingAppts, fn($a) => strtolower($a['status']) === 'pending')); if (empty($taskAppointments)): ?><div style="padding:20px 0;text-align:center;color:#667085;font-size:12px">You're all caught up.</div><?php else: foreach (array_slice($taskAppointments,0,3) as $task): ?><div class="ro-task"><input type="checkbox" aria-label="Task"><span class="ro-task-text">Confirm <?php echo htmlspecialchars($task['pet_name']); ?>'s appointment</span><span class="ro-task-date"><i class="far fa-calendar-alt"></i><?php echo date('M j, Y', strtotime($task['preferred_date'])); ?></span></div><?php endforeach; endif; ?><button class="ro-full-btn" type="button" onclick="switchSection('appointments')">View All Tasks <span>&rarr;</span></button>
+           </div></div>
+         </div>
+
+         <div class="ro-stack"><div class="ro-card"><div class="ro-card-head"><h2>Clinic Status</h2><span class="ro-live">Live Updates</span></div><div class="ro-row"><i class="far fa-clock"></i><span class="ro-row-label">Clinic Operating Hours</span><strong>8:00 AM - 5:00 PM</strong></div><div class="ro-row"><i class="fas fa-users"></i><span class="ro-row-label">Today's Queue</span><span class="ro-moderate">Moderate</span></div><div class="ro-row"><i class="fas fa-user-md"></i><span class="ro-row-label">On-Duty Veterinarians</span><strong>3</strong></div><div class="ro-row"><i class="fas fa-ambulance"></i><span class="ro-row-label">Active Emergency Cases</span><strong>0</strong></div></div>
+           <div class="ro-card"><div class="ro-card-head"><h2>Announcements</h2><a class="ro-view" href="#">View All</a></div><?php if (empty($announcements)): ?><div style="padding:25px;text-align:center;color:#667085;font-size:12px">No announcements at this time.</div><?php else: foreach (array_slice($announcements,0,2) as $announcement): ?><div class="ro-announcement"><span class="ro-icon"><i class="fas <?php $annCat = strtolower($announcement['category'] ?? 'announcement'); echo in_array($annCat, ['advisory','schedule','update']) ? 'fa-envelope' : (in_array($annCat, ['event','activity']) ? 'fa-calendar-alt' : 'fa-bullhorn'); ?>"></i></span><div><strong><?php echo htmlspecialchars($announcement['title']); ?></strong><p><?php echo htmlspecialchars(mb_substr($announcement['content'],0,105)) . (mb_strlen($announcement['content']) > 105 ? '...' : ''); ?></p><time><?php echo date('M j, Y', strtotime($announcement['created_at'])); ?></time></div></div><?php endforeach; endif; ?></div>
+         </div>
+       </div>
+
+       <div class="ro-bottom"><div class="ro-card"><div class="ro-card-head"><h2>Recent Activity</h2><a class="ro-view" href="#">View All</a></div><div class="ro-table-wrap" style="padding:16px 10px"><table class="ro-table"><thead><tr><th>Activity</th><th>Date &amp; Time</th><th>Status</th></tr></thead><tbody><?php if (empty($recentActivities)): ?><tr><td colspan="3" style="text-align:center">No recent activity.</td></tr><?php else: foreach ($recentActivities as $activity): ?><tr><td><?php echo htmlspecialchars($activity['action']); ?><br><span style="font-size:10px;color:#98a2b3"><?php echo htmlspecialchars($activity['details'] ?? ''); ?></span></td><td><?php echo date('M j, Y . g:i A', strtotime($activity['created_at'])); ?></td><td><span class="ro-badge">Completed</span></td></tr><?php endforeach; endif; ?></tbody></table></div></div>
+         <div class="ro-card"><div class="ro-card-head"><h2>Need Help?</h2><a class="ro-view" href="#">Contact DCVS</a></div><div class="ro-help"><span class="ro-icon"><i class="fas fa-hospital"></i></span><div class="ro-help-copy"><strong>DCVS Veterinary Services</strong><p>We're here for you and your pets.</p><div class="ro-contact"><i class="fas fa-phone"></i> (046) 123 4567<br><i class="fas fa-envelope"></i> dcvs.dasma@gmail.com<br><i class="fas fa-map-marker-alt"></i> Brgy. Paliparan I, Dasmari�as City</div></div><div class="ro-actions"><button type="button"><i class="fas fa-phone"></i>Call Now</button><button type="button"><i class="fas fa-envelope"></i>Send Email</button><button type="button"><i class="fas fa-location-dot"></i>Directions</button></div></div></div>
+       </div>
+     </div>
+
+     <div style="display:none" aria-hidden="true">
+     <!-- Legacy overview retained for existing dashboard-only controls. -->
     <div class="welcome-banner">
       <div class="welcome-text">
         <p class="welcome-label">Good day,</p>
@@ -1030,7 +1211,7 @@ $alq->close();
               $d = (int)date('j',$ts);
               $apptDates[] = $d;
               if (!isset($apptData[$d])) $apptData[$d] = [];
-              $apptData[$d][] = ['pet' => htmlspecialchars($apt['pet_name'] ?? '—'), 'service' => ucfirst($apt['appointment_type']), 'time' => $apt['preferred_time'], 'status' => $apt['status']];
+              $apptData[$d][] = ['pet' => htmlspecialchars($apt['pet_name'] ?? '-'), 'service' => ucfirst($apt['appointment_type']), 'time' => $apt['preferred_time'], 'status' => $apt['status']];
             }
           }
           ?>
@@ -1119,7 +1300,7 @@ $alq->close();
                           <div class="appointment-avatar" style="background:#f0fdf4;color:var(--green);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.9rem;"><?php echo strtoupper(substr(htmlspecialchars($apt['pet_name'] ?? 'P'), 0, 1)); ?></div>
                         <?php endif; ?>
                         <div class="appointment-info">
-                          <h4><?php echo htmlspecialchars($apt['pet_name'] ?? '—'); ?> (<?php echo ucfirst($petTypeIcon); ?>)</h4>
+                          <h4><?php echo htmlspecialchars($apt['pet_name'] ?? '-'); ?> (<?php echo ucfirst($petTypeIcon); ?>)</h4>
                           <p><?php echo ucfirst($apt['appointment_type']); ?></p>
                         </div>
                       </div>
@@ -1128,13 +1309,14 @@ $alq->close();
                         $apptStatusStr = $apt['status'];
                         $statusPillColor = '#0E8131';
                         $statusPillBg = '#ECFDF5';
-                        if ($apptStatusStr === 'pending') { $statusPillColor = '#C2540B'; $statusPillBg = '#FFF7ED'; }
-                        elseif ($apptStatusStr === 'scheduled') { $statusPillColor = '#0E8131'; $statusPillBg = '#ECFDF5'; }
-                        elseif (in_array($apptStatusStr, ['completed','resolved'])) { $statusPillColor = '#10B981'; $statusPillBg = '#ECFDF5'; }
-                        elseif (in_array($apptStatusStr, ['cancelled','rejected'])) { $statusPillColor = '#B91C1C'; $statusPillBg = '#FEF2F2'; }
+                        $statusPillBorder = '#bbf7d0';
+                        if ($apptStatusStr === 'pending') { $statusPillColor = '#C2540B'; $statusPillBg = '#FFF7ED'; $statusPillBorder = '#fed7aa'; }
+                        elseif ($apptStatusStr === 'scheduled') { $statusPillColor = '#0E8131'; $statusPillBg = '#ECFDF5'; $statusPillBorder = '#bbf7d0'; }
+                        elseif (in_array($apptStatusStr, ['completed','resolved'])) { $statusPillColor = '#10B981'; $statusPillBg = '#ECFDF5'; $statusPillBorder = '#a7f3d0'; }
+                        elseif (in_array($apptStatusStr, ['cancelled','rejected'])) { $statusPillColor = '#B91C1C'; $statusPillBg = '#FEF2F2'; $statusPillBorder = '#fecaca'; }
                         $statusPillText = ucfirst(str_replace('_',' ',$apptStatusStr));
                         ?>
-                          <span class="appt-status-pill" style="color:<?php echo $statusPillColor; ?>;background:<?php echo $statusPillBg; ?>;"><?php echo $statusPillText; ?></span>
+                          <span class="appt-status-pill" style="color:<?php echo $statusPillColor; ?>;background:<?php echo $statusPillBg; ?>;border-color:<?php echo $statusPillBorder; ?>;"><?php echo $statusPillText; ?></span>
                         <?php if (!in_array($apptStatusStr, ['completed','resolved','cancelled','rejected'])): ?>
                           <span class="status-time">
                             <?php echo date('M d', strtotime($apt['preferred_date'])); ?>
@@ -1171,7 +1353,7 @@ $alq->close();
             $activities[] = ['title' => ucfirst($report['report_type']), 'subtitle' => htmlspecialchars(mb_substr($report['description'] ?? '', 0, 40)) . (mb_strlen($report['description'] ?? '') > 40 ? '...' : ''), 'date' => $report['created_at'], 'category' => 'Reports', 'status' => ucfirst($report['status'])];
           }
           foreach ($appointments as $appt) {
-            $activities[] = ['title' => htmlspecialchars($appt['pet_name'] ?? '—') . ' — ' . ucfirst($appt['appointment_type']), 'subtitle' => 'Scheduled appointment', 'date' => $appt['created_at'], 'category' => 'Appointments', 'status' => ucfirst($appt['status'])];
+            $activities[] = ['title' => htmlspecialchars($appt['pet_name'] ?? '-') . ' - ' . ucfirst($appt['appointment_type']), 'subtitle' => 'Scheduled appointment', 'date' => $appt['created_at'], 'category' => 'Appointments', 'status' => ucfirst($appt['status'])];
           }
           usort($activities, fn($a,$b) => strtotime($b['date']) - strtotime($a['date']));
           ?>
@@ -1228,7 +1410,7 @@ $alq->close();
   function renderTable() {
     var start = (currentPage - 1) * PER_PAGE;
     var end = Math.min(start + PER_PAGE, allRows.length);
-    // Hide ALL rows first, then show current page — prevents visual overlap during reflow
+    // Hide ALL rows first, then show current page - prevents visual overlap during reflow
     allRows.forEach(function(r) { r.style.display = 'none'; });
     for (var i = start; i < end; i++) { allRows[i].style.display = ''; }
     if (noResults) noResults.style.display = allRows.length === 0 ? '' : 'none';
@@ -1275,7 +1457,7 @@ $alq->close();
               <?php
                 $senderAvatar = $n['sender_avatar'] ?? '';
                 $senderName = $n['sender_name'] ?? 'Staff';
-                $subject = preg_replace('/^Message from Staff\s*[—–-]\s*/', '', $n['title'] ?? '');
+                $subject = preg_replace('/^Message from Staff\s*[---]\s*/', '', $n['title'] ?? '');
                 $msgTypeLabel = $n['message_type_label'] ?? '';
                 $initials = '';
                 foreach (explode(' ', trim($senderName)) as $part) {
@@ -1386,7 +1568,7 @@ $alq->close();
                 $p1 = $pts[$i];
                 $pPrev = $pts[max(0, $i-2)];
                 $pNext = $pts[min($n-1, $i+1)];
-                // Control points — tension 0.25 for a gentle curve
+                // Control points - tension 0.25 for a gentle curve
                 $cp1x = $p0['x'] + ($p1['x'] - $pPrev['x']) * 0.25;
                 $cp1y = $p0['y'] + ($p1['y'] - $pPrev['y']) * 0.25;
                 $cp2x = $p1['x'] - ($pNext['x'] - $p0['x']) * 0.25;
@@ -1489,9 +1671,9 @@ $alq->close();
             </div>
           </div>
         </div>
-        </div>
+           </div>
 
-      </div>
+         </div>
     </div>
 
     <script>
@@ -1618,10 +1800,10 @@ $alq->close();
         renderCalendar();
       })();
     </script>
-
+     </div>
   </section>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MY PETS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? MY PETS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
   <section id="my-pets" class="content-section">
     <!-- Overview KPIs -->
     <div class="pet-kpis">
@@ -1684,17 +1866,17 @@ $alq->close();
         </thead>
         <tbody>
           <?php
-          $pVaxColors = [
-              'Fully vaccinated' => ['bg' => '#dcebe0', 'color' => '#045e1f'],
-              'Partially vaccinated' => ['bg' => '#fef3c7', 'color' => '#92400e'],
-              'Not vaccinated' => ['bg' => '#fee2e2', 'color' => '#991b1b'],
-          ];
+                          $pVaxColors = [
+                            'Fully vaccinated' => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
+                            'Partially vaccinated' => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+                            'Not vaccinated' => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+                          ];
           foreach ($pets as $pet):
             $pRef = $pet['reference_id'] ?? '#PET-'.str_pad($pet['pet_id'], 4, '0', STR_PAD_LEFT);
             $pCat = $pet['from_adoption'] ? 'adopted' : 'owned';
             $pCatLabel = $pet['from_adoption'] ? 'Adopted' : 'Owned';
             $pVaxText = !empty($pet['vaccination_status']) ? $pet['vaccination_status'] : 'Not vaccinated';
-            $pVaxColor = $pVaxColors[$pVaxText] ?? ['bg' => '#f1f5f9', 'color' => '#64748b'];
+                          $pVaxColor = $pVaxColors[$pVaxText] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
             $pPhoto = $pet['photo_url'] ?? '';
             $pInitial = strtoupper(substr($pet['pet_name'], 0, 1));
             $pAdoptedDate = '';
@@ -1703,7 +1885,7 @@ $alq->close();
                 $pAdoptedDate = date('M d, Y', strtotime($pet['adopted_date']));
                 $pAdoptedRaw = $pet['adopted_date'];
             }
-            $pRegisteredDate = !empty($pet['created_at']) ? date('M d, Y', strtotime($pet['created_at'])) : '—';
+            $pRegisteredDate = !empty($pet['created_at']) ? date('M d, Y', strtotime($pet['created_at'])) : '-';
             $pRegisteredRaw = $pet['created_at'] ?? '';
           ?>
           <tr class="sd-tr" data-id="<?php echo (int)$pet['pet_id']; ?>" data-cat="<?php echo $pCat; ?>" data-species="<?php echo htmlspecialchars(strtolower($pet['pet_type'])); ?>" data-breed="<?php echo htmlspecialchars(strtolower($pet['breed'] ?? '')); ?>" data-vaccination="<?php echo htmlspecialchars(strtolower($pVaxText)); ?>" data-adopted="<?php echo htmlspecialchars($pAdoptedRaw); ?>" data-registered="<?php echo htmlspecialchars($pRegisteredRaw); ?>" onclick="PET.view(<?php echo (int)$pet['pet_id']; ?>)">
@@ -1722,16 +1904,16 @@ $alq->close();
               <div class="contact-main contact-normal"><?php echo ucfirst($pet['pet_type']); ?></div>
             </td>
             <td class="sd-td">
-              <div class="contact-main contact-normal"><?php echo htmlspecialchars($pet['breed'] ?: '—'); ?></div>
+              <div class="contact-main contact-normal"><?php echo htmlspecialchars($pet['breed'] ?: '-'); ?></div>
             </td>
             <td class="sd-td">
-              <span class="appt-status-pill" style="background:<?php echo $pVaxColor['bg']; ?>;color:<?php echo $pVaxColor['color']; ?>;"><?php echo htmlspecialchars($pVaxText); ?></span>
+              <span class="appt-status-pill" style="background:<?php echo $pVaxColor['bg']; ?>;color:<?php echo $pVaxColor['color']; ?>;border-color:<?php echo $pVaxColor['border']; ?>;"><?php echo htmlspecialchars($pVaxText); ?></span>
             </td>
             <td class="sd-td">
               <span class="pet-cat-tag <?php echo $pCat; ?>"><?php echo $pCatLabel; ?></span>
             </td>
             <td class="sd-td">
-              <div class="contact-main contact-normal"><?php echo $pAdoptedDate ?: '—'; ?></div>
+              <div class="contact-main contact-normal"><?php echo $pAdoptedDate ?: '-'; ?></div>
             </td>
             <td class="sd-td">
               <div class="contact-main contact-normal"><?php echo $pRegisteredDate; ?></div>
@@ -1764,15 +1946,15 @@ $alq->close();
   </section>
 
   <style>
-        /* ── My Pets (HubSpot CRM style) ── */
+        /* ?? My Pets (HubSpot CRM style) ?? */
     #my-pets{font-family:'Inter','Segoe UI',sans-serif;}
     /* White page background for Pet List / Reports / Appointments */
     body.page-white{background:#ffffff;}
-    #my-pets .pet-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;}
-    #my-pets .pet-kpi-card{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;text-align:left;padding:16px 20px;background:#fafafa;border:1px solid #e4e4e7;border-radius:8px;box-shadow:none;font-family:'Inter','Segoe UI',sans-serif;}
-    #my-pets .pet-kpi-label{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:600;color:#71717a;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.04em;}
-    #my-pets .pet-kpi-value{font-family:'Inter','Segoe UI',sans-serif;font-size:28px;font-weight:700;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 4px;}
-    #my-pets .pet-kpi-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;color:#71717a;margin:0;}
+    #my-pets .pet-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;}
+    #my-pets .pet-kpi-card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px 20px;background:none;border:none;border-radius:0;box-shadow:none;font-family:'Inter','Segoe UI',sans-serif;}
+    #my-pets .pet-kpi-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;}
+    #my-pets .pet-kpi-value{font-family:'Inter','Segoe UI',sans-serif;font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;}
+    #my-pets .pet-kpi-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;margin:0;}
     @media(max-width:1180px){#my-pets .pet-kpis{grid-template-columns:repeat(2,1fr);}}
     @media(max-width:620px){#my-pets .pet-kpis{grid-template-columns:1fr 1fr;}}
 
@@ -1782,6 +1964,7 @@ $alq->close();
     .sd-btn-default:hover { background:#27272a; }
     .sd-btn-outline { background:#ffffff; border-color:#e4e4e7; color:#18181b; }
     .sd-btn-outline:hover { background:#f4f4f5; }
+    .sd-btn:disabled, .sd-btn[disabled] { opacity:0.5; cursor:not-allowed; pointer-events:none; }
     .sd-btn i { font-size:12px; }
 
     /* shadcn dialog (Register / Edit Pet) */
@@ -1820,7 +2003,7 @@ $alq->close();
     #editPetModal .sd-photo-upload .upload-placeholder i { margin:0; }
     @media (max-width:560px){ #addPetModal .sd-form-grid, #editPetModal .sd-form-grid { grid-template-columns:1fr; } }
 
-    /* ── HubSpot-style toolbar ── */
+    /* ?? HubSpot-style toolbar ?? */
     .appt-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
     .appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
     .appt-search-wrap{position:relative;}
@@ -1831,7 +2014,7 @@ $alq->close();
     .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
     .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 
-    /* ── HubSpot-style table ── */
+    /* ?? HubSpot-style table ?? */
     .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
     .appt-table{width:100%;border-collapse:collapse;color:#18181b;font-size:14px;}
     .appt-table thead th{background:#fafafa;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;color:#71717a;height:40px;padding:0 12px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:middle;white-space:nowrap;user-select:none;}
@@ -1843,14 +2026,14 @@ $alq->close();
     .appt-table tbody td{padding:10px 12px;font-size:14px;color:#18181b;vertical-align:middle;}
     .appt-table tbody td.sd-td-action{text-align:right;}
 
-    /* ── Sortable column headers ── */
+    /* ?? Sortable column headers ?? */
     .th-sort{display:inline-flex;align-items:center;gap:4px;height:28px;margin-left:-8px;padding:0 8px;border-radius:4px;background:transparent;border:none;font-size:12px;font-weight:600;color:#71717a;cursor:pointer;white-space:nowrap;font-family:inherit;letter-spacing:0.02em;text-transform:uppercase;transition:background .1s,color .1s;}
     .th-sort:hover{background:#e4e4e7;color:#18181b;}
     .th-sort.th-sorted{color:#18181b;}
     .th-sort-icon{width:14px;height:14px;color:#a1a1aa;flex-shrink:0;}
     .th-sorted .th-sort-icon{color:#18181b;}
 
-    /* ── Pet cell: avatar + underlined name ── */
+    /* ?? Pet cell: avatar + underlined name ?? */
     .client-cell{display:flex;align-items:center;gap:10px;min-width:0;}
     .avatar{width:36px;height:36px;border-radius:50%;background:#f4f4f5;color:#71717a;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;overflow:hidden;flex-shrink:0;border:1px solid #e4e4e7;}
     .avatar img{width:100%;height:100%;object-fit:cover;}
@@ -1859,9 +2042,9 @@ $alq->close();
     .client-id{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin-top:2px;}
     .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
     .contact-main.contact-normal{font-weight:500;}
-    .appt-status-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600;white-space:nowrap;}
+    .appt-status-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;}
 
-    /* ── Pet table cells ── */
+    /* ?? Pet table cells ?? */
     .pet-avatar-box{width:40px;height:40px;border-radius:50%;background:#f4f4f5;color:#71717a;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;overflow:hidden;flex-shrink:0;border:1px solid #e4e4e7;}
     .pet-avatar-box img{width:100%;height:100%;object-fit:cover;}
     .pet-cell-main{display:flex;flex-direction:column;min-width:0;}
@@ -1872,7 +2055,7 @@ $alq->close();
     .pet-cat-tag.adopted{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
     .pet-adopted-date{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;color:#71717a;white-space:nowrap;}
 
-    /* ── Row action buttons ── */
+    /* ?? Row action buttons ?? */
     .pet-action-btns{display:inline-flex;align-items:center;gap:2px;}
     .pet-action-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:transparent;border:none;color:#a1a1aa;cursor:pointer;text-decoration:none;transition:background .15s,color .15s;}
     .pet-action-btn:hover{background:#f4f4f5;color:#18181b;}
@@ -1888,7 +2071,7 @@ $alq->close();
     .appt-dropdown-item:hover{background:#f4f4f5;}
     .appt-dropdown-item svg{flex-shrink:0;color:#71717a;}
 
-    /* ── Pagination ── */
+    /* ?? Pagination ?? */
     .appt-pagination{display:flex;align-items:center;justify-content:flex-end;padding:12px 16px;border-top:1px solid #e4e4e7;}
     .dt-pagination-right{display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
     .dt-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}
@@ -1923,7 +2106,7 @@ $alq->close();
     .sd-photo-upload .upload-placeholder span { font-size:0.82rem; color:#a1a1aa; }
     .sd-photo-upload input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-    /* â”€â”€ Pet Profile Drawer (shadcn right drawer) â”€â”€ */
+    /* �"?�"? Pet Profile Drawer (shadcn right drawer) �"?�"? */
     .pet-drawer-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:998; display:none; }
     .pet-drawer-overlay.open { display:block; }
     .pet-drawer { position:fixed; top:0; right:0; bottom:0; width:min(480px,92vw); background:#fff; z-index:999; box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform 0.32s cubic-bezier(.32,.72,.25,1); display:flex; flex-direction:column; overflow:hidden; }
@@ -1959,7 +2142,7 @@ $alq->close();
     }
   </style>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ MY REPORTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? MY REPORTS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
   <section id="my-reports" class="content-section">
     <!-- Overview KPIs -->
     <div class="rpt-kpis">
@@ -2005,12 +2188,12 @@ $alq->close();
         }
     }
     $rptStatusColors = [
-        'pending'   => ['bg' => '#fef3c7', 'color' => '#92400e'],
-        'validated' => ['bg' => '#dbeafe', 'color' => '#1d4ed8'],
-        'confirmed' => ['bg' => '#dbeafe', 'color' => '#1d4ed8'],
-        'scheduled' => ['bg' => '#dbeafe', 'color' => '#1d4ed8'],
-        'resolved'  => ['bg' => '#dcebe0', 'color' => '#045e1f'],
-        'rejected'  => ['bg' => '#fee2e2', 'color' => '#991b1b'],
+        'pending'   => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+        'validated' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
+        'confirmed' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
+        'scheduled' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
+        'resolved'  => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
+        'rejected'  => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
     ];
     ?>
     <?php if (empty($reports)): ?>
@@ -2062,9 +2245,9 @@ $alq->close();
             $rStatus = $report['status'];
             $rStatusLabel = rptStatusLabel($rStatus);
             $rStatusClass = rptStatusClass($rStatus);
-            $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b'];
+            $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
             $rDate = date('M d, Y', strtotime($report['created_at']));
-            $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '—';
+            $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
             $rResolvedRaw = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? $report['updated_at'] : '';
           ?>
           <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['location_address'])); ?>" data-date="<?php echo (int)strtotime($report['created_at']); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
@@ -2072,7 +2255,7 @@ $alq->close();
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($rTypeLabel); ?> Report</div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rDate; ?></div></td>
-            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;"><?php echo $rStatusLabel; ?></span></td>
+            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;border-color:<?php echo $rsc['border']; ?>;"><?php echo $rStatusLabel; ?></span></td>
             <td class="sd-td"><span class="pet-cat-tag"><?php echo htmlspecialchars($rTypeLabel); ?></span></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rResolvedDate; ?></div></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
@@ -2094,9 +2277,9 @@ $alq->close();
     <?php endif; ?>
   </section>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ SUBMIT A REPORT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? SUBMIT A REPORT �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
   <style>
-    /* â”€â”€ My Reports (My Pets design) â”€â”€ */
+    /* �"?�"? My Reports (My Pets design) �"?�"? */
     #my-reports { font-family:'Inter','Segoe UI',sans-serif; }
     #my-reports .rpt-kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
     #my-reports .rpt-kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:18px 20px; background:none; border:none; border-radius:0; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
@@ -2110,7 +2293,7 @@ $alq->close();
     .rpt-empty p { font-size:0.85rem; margin:0 0 1.25rem; }
     .rpt-empty .sd-btn { margin:0 auto; }
 
-    /* â”€â”€ Report Details Drawer (shadcn right drawer) â”€â”€ */
+    /* �"?�"? Report Details Drawer (shadcn right drawer) �"?�"? */
     .rpt-drawer-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:998; display:none; }
     .rpt-drawer-overlay.open { display:block; }
     .rpt-drawer { position:fixed; top:0; right:0; bottom:0; width:min(480px,92vw); background:#fff; z-index:999; box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform 0.32s cubic-bezier(.32,.72,.25,1); display:flex; flex-direction:column; overflow:hidden; }
@@ -2167,7 +2350,7 @@ $alq->close();
     .rpt-more-item.danger { color:#dc2626; } .rpt-more-item.danger:hover { background:#fef2f2; }
     .rpt-more-item i { width:16px; text-align:center; }
 
-    /* â”€â”€ Submit Report wizard â”€â”€ */
+    /* �"?�"? Submit Report wizard �"?�"? */
     .rpt-step-indicator { display:flex; align-items:center; gap:8px; margin-bottom:1.5rem; }
     .rpt-step { display:flex; align-items:center; gap:6px; }
     .rpt-step-num { width:26px; height:26px; border-radius:50%; background:#e2e8f0; color:#64748b; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; transition:all 0.2s; }
@@ -2228,7 +2411,7 @@ $alq->close();
       .appt-search-input { width:100%; }
     }
 
-    /* â”€â”€ Appointments (My Reports design) â”€â”€ */
+    /* �"?�"? Appointments (My Reports design) �"?�"? */
     #appointments { font-family:'Inter','Segoe UI',sans-serif; }
     #appointments .appt-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
     #appointments .appt-kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:18px 20px; background:none; border:none; border-radius:0; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
@@ -2259,7 +2442,10 @@ $alq->close();
     @media (max-width:560px){ #editAppointmentModal .sd-form-grid { grid-template-columns:1fr; } }
   </style>
 
-<!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ APPOINTMENTS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+<!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? APPOINTMENTS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <section id="calendar-booking" class="content-section">
+    <?php include 'calendar-booking.php'; ?>
+  </section>
   <section id="appointments" class="content-section">
     <!-- Overview KPIs -->
     <div class="appt-kpis">
@@ -2287,12 +2473,12 @@ $alq->close();
 
     <?php
     $apptStatusColors = [
-        'pending'     => ['bg' => '#fef3c7', 'color' => '#92400e'],
-        'scheduled'   => ['bg' => '#dcebe0', 'color' => '#045e1f'],
-        'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9'],
-        'completed'   => ['bg' => '#e2e8f0', 'color' => '#475569'],
-        'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b'],
-        'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e'],
+        'pending'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+        'scheduled'   => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
+        'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
+        'completed'   => ['bg' => '#e2e8f0', 'color' => '#475569', 'border' => '#cbd5e1'],
+        'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+        'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     ];
     ?>
     <?php if (empty($appointments)): ?>
@@ -2342,7 +2528,7 @@ $alq->close();
           <?php foreach ($appointments as $appt):
             $aptRef = $appt['reference_id'] ?? fallbackRefId('#APT-', $appt['appointment_id']);
             $ast = $appt['status'];
-            $asc = $apptStatusColors[$ast] ?? ['bg' => '#f1f5f9', 'color' => '#64748b'];
+            $asc = $apptStatusColors[$ast] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
             $astLabel = ucfirst(str_replace('_', ' ', $ast));
             $aDate = date('M d, Y', strtotime($appt['preferred_date']));
             $aTime = date('g:i A', strtotime($appt['preferred_time']));
@@ -2357,7 +2543,7 @@ $alq->close();
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aTime; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedDate; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedTime; ?></div></td>
-            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;"><?php echo $astLabel; ?></span></td>
+            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
               <div class="pet-action-btns">
                 <?php if ($appt['status'] === 'pending'): ?>
@@ -2385,7 +2571,7 @@ $alq->close();
     <?php endif; ?>
   </section>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ BOOK AN APPOINTMENT (page) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? BOOK AN APPOINTMENT (page) �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
   <section id="book-appt" class="content-section">
     <div class="bk-page">
         <div class="bk-heading">
@@ -2466,13 +2652,13 @@ $alq->close();
 
         <!-- Bottom actions -->
         <div class="bk-actions">
-          <button type="button" class="bk-btn-ghost" onclick="switchSection('appointments')">Cancel</button>
-          <button type="button" class="bk-btn-primary" id="bkNextStep" disabled>Next <span class="bk-next-arrow">&rarr;</span></button>
+          <button type="button" class="sd-btn sd-btn-outline" onclick="switchSection('appointments')">Cancel</button>
+          <button type="button" class="sd-btn sd-btn-default" id="bkNextStep" disabled>Next <span class="bk-next-arrow">&rarr;</span></button>
         </div>
     </div>
   </section>
 
-  <!-- ────────── CONFIRM BOOKING (dialog) ────────── -->
+  <!-- ?????????? CONFIRM BOOKING (dialog) ?????????? -->
   <div class="modal" id="confirmBookingModal">
     <form class="modal-form sd-dialog" id="appointmentForm" action="request-appointment.php" method="POST">
       <input type="hidden" name="return_section" value="appointments">
@@ -2504,13 +2690,13 @@ $alq->close();
           <div class="bk-confirm-section">
             <p class="sd-label">Appointment Details</p>
             <div class="bk-confirm-details">
-              <div class="bk-detail-row"><span>Date</span><strong id="bkDetailDate">—</strong></div>
-              <div class="bk-detail-row"><span>Time</span><strong id="bkDetailTime">—</strong></div>
-              <div class="bk-detail-row"><span>Service Type</span><strong id="bkDetailType">—</strong></div>
-              <div class="bk-detail-row"><span>Available For</span><strong id="bkDetailAvailableFor">—</strong></div>
+              <div class="bk-detail-row"><span>Date</span><strong id="bkDetailDate">-</strong></div>
+              <div class="bk-detail-row"><span>Time</span><strong id="bkDetailTime">-</strong></div>
+              <div class="bk-detail-row"><span>Service Type</span><strong id="bkDetailType">-</strong></div>
+              <div class="bk-detail-row"><span>Available For</span><strong id="bkDetailAvailableFor">-</strong></div>
               <div class="bk-detail-row"><span>Service Fee</span><strong>Free / No Fee</strong></div>
-              <div class="bk-detail-row"><span>Estimated Duration</span><strong>30–60 minutes</strong></div>
-              <div class="bk-detail-row"><span>Service Location</span><strong>Dasmariñas City Veterinary Services</strong></div>
+              <div class="bk-detail-row"><span>Estimated Duration</span><strong>30-60 minutes</strong></div>
+              <div class="bk-detail-row"><span>Service Location</span><strong>Dasmari�as City Veterinary Services</strong></div>
               <div class="bk-detail-row"><span>Appointment Required</span><strong>Yes</strong></div>
             </div>
           </div>
@@ -2528,12 +2714,12 @@ $alq->close();
     </form>
   </div>
 
-<!-- ────────── ARCHIVE ────────── -->
+<!-- ?????????? ARCHIVE ?????????? -->
   <section id="archive" class="content-section">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title">Archive</h1>
-        <p class="page-subtitle">View all your archived items</p>
+<!-- Archived Pets -->
+    <div class="archive-header">
+      <div class="archive-heading">
+        <h2 class="archive-title" id="archiveSectionTitle">Archived Pets (<?php echo count($archivedPets); ?>)</h2>
       </div>
       <div class="filter-bar">
         <div class="search-box">
@@ -2548,245 +2734,789 @@ $alq->close();
         </select>
       </div>
     </div>
-
-    <!-- Archived Pets -->
-    <div class="archive-section" data-type="pet">
-      <h2>Archived Pets (<?php echo count($archivedPets); ?>)</h2>
+    <div class="archive-section" data-type="pet" data-count="<?php echo count($archivedPets); ?>">
       <?php if (empty($archivedPets)): ?>
-        <p style="text-align:center;color:#8bb89a;padding:2rem;">No archived pets.</p>
+        <div class="archive-empty">
+          <i class="fas fa-archive"></i>
+          <p>No archived pets.</p>
+        </div>
       <?php else: ?>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Species</th>
-              <th>Breed</th>
-              <th>Gender</th>
-              <th>Age</th>
-              <th>Photo</th>
-              <th>Archived Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($archivedPets as $pet): ?>
-              <tr>
-                <td style="font-family:monospace; color:#475569; font-weight:700;"><?php echo htmlspecialchars($pet['reference_id'] ?? fallbackRefId('#PET-', $pet['pet_id'])); ?></td>
-                <td><strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong></td>
-                <td><?php echo ucfirst($pet['pet_type']); ?></td>
-                <td><?php echo htmlspecialchars($pet['breed'] ?? '-'); ?></td>
-                <td><?php echo ucfirst($pet['gender']); ?></td>
-                <td><?php echo $pet['age']; ?> yrs</td>
-                <td>
-                  <?php if (!empty($pet['photo_url'])): ?>
-                    <button class="btn-sm btn-secondary" onclick="viewPetImage('<?php echo htmlspecialchars($pet['photo_url']); ?>')">
-                      <i class="fas fa-image"></i> View
-                    </button>
-                  <?php else: ?>
-                    <span style="color:#999;font-size:0.85rem;">No photo</span>
-                  <?php endif; ?>
-                </td>
-                <td><?php echo date('M d, Y', strtotime($pet['archived_at'])); ?></td>
+        <div class="appt-db-table-area dt-container">
+          <table class="appt-table">
+            <thead>
+              <tr class="sd-tr">
+                <th class="sd-th">ID</th>
+                <th class="sd-th">Name</th>
+                <th class="sd-th">Species</th>
+                <th class="sd-th">Breed</th>
+                <th class="sd-th">Gender</th>
+                <th class="sd-th">Age</th>
+                <th class="sd-th">Photo</th>
+                <th class="sd-th">Registered</th>
+                <th class="sd-th">Archived</th>
               </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <?php foreach ($archivedPets as $pet): ?>
+                <tr class="sd-tr">
+                  <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($pet['reference_id'] ?? '#'); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($pet['pet_name']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo ucfirst($pet['pet_type']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($pet['breed'] ?? '-'); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo ucfirst($pet['gender']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo $pet['age']; ?> yrs</div></td>
+                  <td class="sd-td">
+                    <?php if (!empty($pet['photo_url'])): ?>
+                      <button type="button" class="sd-btn sd-btn-outline" onclick="viewPetImage('<?php echo htmlspecialchars($pet['photo_url']); ?>')"><i class="fas fa-image"></i> View</button>
+                    <?php else: ?>
+                      <span style="color:#9ca3af;font-size:0.85rem;">No photo</span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($pet['created_at'])); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($pet['archived_at'])); ?></div></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
 
     <!-- Archived Reports -->
-    <div class="archive-section" data-type="report">
-      <h2>Archived Reports (<?php echo count($archivedReports); ?>)</h2>
+    <div class="archive-section" data-type="report" data-count="<?php echo count($archivedReports); ?>">
       <?php if (empty($archivedReports)): ?>
-        <p style="text-align:center;color:#8bb89a;padding:2rem;">No archived reports.</p>
+        <div class="archive-empty">
+          <i class="fas fa-archive"></i>
+          <p>No archived reports.</p>
+        </div>
       <?php else: ?>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Type</th>
-              <th>Location</th>
-              <th>Date</th>
-              <th>Status</th>
-              <th>Photo</th>
-              <th>Archived Date</th>
-            </tr>
-          </thead>
-          <tbody>
-            <?php foreach ($archivedReports as $report): ?>
-              <tr>
-                <td style="font-family:monospace; color:#475569; font-weight:700;"><?php echo htmlspecialchars($report['reference_id'] ?? fallbackRefId('#RPT-', $report['report_id'])); ?></td>
-                <td><?php echo ucfirst($report['report_type']); ?></td>
-                <td><?php echo htmlspecialchars($report['location_address']); ?></td>
-                <td><?php echo date('M d, Y', strtotime($report['created_at'])); ?></td>
-                <td><strong style="font-size:0.82rem;"><?php echo ucfirst($report['status']); ?></strong></td>
-                <td>
-                  <?php if (!empty($report['photo_url'])): ?>
-                    <button class="btn-sm btn-secondary" onclick="viewReportImage('<?php echo htmlspecialchars($report['photo_url']); ?>')">
-                      <i class="fas fa-image"></i> View
-                    </button>
-                  <?php else: ?>
-                    <span style="color:#999;font-size:0.85rem;">No photo</span>
-                  <?php endif; ?>
-                </td>
-                <td><?php echo date('M d, Y', strtotime($report['archived_at'])); ?></td>
+        <div class="appt-db-table-area dt-container">
+          <table class="appt-table">
+            <thead>
+              <tr class="sd-tr">
+                <th class="sd-th">ID</th>
+                <th class="sd-th">Type</th>
+                <th class="sd-th">Location</th>
+                <th class="sd-th">Submitted</th>
+                <th class="sd-th">Status</th>
+                <th class="sd-th">Photo</th>
+                <th class="sd-th">Archived</th>
               </tr>
-            <?php endforeach; ?>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              <?php foreach ($archivedReports as $report): ?>
+                <tr class="sd-tr">
+                  <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($report['reference_id'] ?? '#'); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($report['report_type']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($report['created_at'])); ?></div></td>
+                  <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo ($rptStatusColors[strtolower($report['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['bg']; ?>;color:<?php echo ($rptStatusColors[strtolower($report['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['color']; ?>;border-color:<?php echo ($rptStatusColors[strtolower($report['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['border']; ?>;"><?php echo ucfirst($report['status']); ?></span></td>
+                  <td class="sd-td">
+                    <?php if (!empty($report['photo_url'])): ?>
+                      <button type="button" class="sd-btn sd-btn-outline" onclick="viewReportImage('<?php echo htmlspecialchars($report['photo_url']); ?>')"><i class="fas fa-image"></i> View</button>
+                    <?php else: ?>
+                      <span style="color:#9ca3af;font-size:0.85rem;">No photo</span>
+                    <?php endif; ?>
+                  </td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($report['archived_at'])); ?></div></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
+        </div>
       <?php endif; ?>
     </div>
 
     <!-- Archived Appointments -->
-    <div class="archive-section" data-type="appointment">
-      <h2>Archived Appointments (<?php echo count($archivedAppointments); ?>)</h2>
+    <div class="archive-section" data-type="appointment" data-count="<?php echo count($archivedAppointments); ?>">
       <?php if (empty($archivedAppointments)): ?>
-        <p style="text-align:center;color:#8bb89a;padding:2rem;">No archived appointments.</p>
+        <div class="archive-empty">
+          <i class="fas fa-archive"></i>
+          <p>No archived appointments.</p>
+        </div>
       <?php else: ?>
-        <div class="appointments-list">
-          <?php foreach ($archivedAppointments as $appt): ?>
-            <div class="appointment-card">
-              <div class="appt-icon">
-                <i class="fas fa-<?php echo $appt['appointment_type'] === 'adoption' ? 'heart' : 'cut'; ?>"></i>
-              </div>
-              <div class="appt-info">
-                <h4 class="appt-type"><?php echo ucfirst($appt['appointment_type']); ?></h4>
-                <p class="appt-datetime">
-                  <i class="fas fa-calendar"></i> <?php echo date('M d, Y', strtotime($appt['preferred_date'])); ?>
-                  <i class="fas fa-clock"></i> <?php echo date('h:i A', strtotime($appt['preferred_time'])); ?>
-                </p>
-                <p class="appt-datetime">
-                  <i class="fas fa-archive"></i> Archived: <?php echo date('M d, Y', strtotime($appt['archived_at'])); ?>
-                </p>
-                <strong style="font-size:0.82rem;"><?php echo ucfirst($appt['status']); ?></strong>
-              </div>
-            </div>
-          <?php endforeach; ?>
+        <div class="appt-db-table-area dt-container">
+          <table class="appt-table">
+            <thead>
+              <tr class="sd-tr">
+                <th class="sd-th">ID</th>
+                <th class="sd-th">Type</th>
+                <th class="sd-th">Appointment Date</th>
+                <th class="sd-th">Time</th>
+                <th class="sd-th">Status</th>
+                <th class="sd-th">Archived</th>
+              </tr>
+            </thead>
+            <tbody>
+              <?php foreach ($archivedAppointments as $appt): ?>
+                <tr class="sd-tr">
+                  <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($appt['reference_id'] ?? '#'); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($appt['preferred_date'])); ?></div></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('h:i A', strtotime($appt['preferred_time'])); ?></div></td>
+                  <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo ($apptStatusColors[strtolower($appt['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['bg']; ?>;color:<?php echo ($apptStatusColors[strtolower($appt['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['color']; ?>;border-color:<?php echo ($apptStatusColors[strtolower($appt['status'])] ?? ['bg'=>'#f4f4f5','color'=>'#52525b','border'=>'#e4e4e7'])['border']; ?>;"><?php echo ucfirst($appt['status']); ?></span></td>
+                  <td class="sd-td"><div class="contact-main contact-normal"><?php echo date('M d, Y', strtotime($appt['archived_at'])); ?></div></td>
+                </tr>
+              <?php endforeach; ?>
+            </tbody>
+          </table>
         </div>
       <?php endif; ?>
     </div>
   </section>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ADOPTION LISTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
-  <section id="adoption" class="content-section">
-    <?php
-      $catCounts = ['active'=>0,'pending'=>0,'completed'=>0,'cancelled'=>0];
-      foreach ($adoptionListings as $l) {
-        $ha = isset($l['appt_status']) && in_array($l['appt_status'], ['pending','scheduled','rescheduled']);
-        $isAd = ($l['appt_status'] === 'completed') || ($l['status'] === 'adopted');
-        $isCa = ($l['appt_status'] === 'cancelled');
-        $c = $isAd ? 'completed' : ($ha ? 'pending' : ($isCa ? 'cancelled' : 'active'));
-        $catCounts[$c]++;
-      }
-      $totalAdopt = count($adoptionListings);
-    ?>
-    <div class="adopt-wrap">
-      <div class="page-header">
-        <div>
-          <h1 class="page-title">My Adoption Listings</h1>
-          <p class="page-subtitle">Pets you registered for adoption — schedule an appointment to finalize.</p>
+  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? ADOPTION LISTINGS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  
+
+<?php
+// Adoption & Scheduling workspace data (actual database records)
+$vetPets = array();
+if (!empty($adoptionListings)) {
+    $pids = array_unique(array_filter(array_map(function ($l) { return (int)$l['pet_id']; }, $adoptionListings)));
+    $vaxMap = array();
+    if (!empty($pids) && $conn) {
+        $in = implode(',', $pids);
+        $vq = $conn->prepare("SELECT pet_id, vaccination_status, microchip_id FROM pets WHERE pet_id IN ($in)");
+        if ($vq) {
+            $vq->execute();
+            $vr = $vq->get_result();
+            while ($row = $vr->fetch_assoc()) $vaxMap[(int)$row['pet_id']] = $row;
+            $vq->close();
+        }
+    }
+    $apptsByPet = array();
+    foreach ($appointments as $a) $apptsByPet[(int)$a['pet_id']][] = $a;
+    $apptTypeLabels = array('adoption' => 'Adoption', 'kapon' => 'Kapon', 'vaccination' => 'Vaccination', 'checkup' => 'Checkup');
+    $ownerName = isset($fullName) && $fullName !== '' ? $fullName : 'Resident';
+    $animalNames = array('horse', 'cat', 'dog', 'rabbit', 'bird');
+    $dash = "\u{2014}";
+    foreach ($adoptionListings as $l) {
+        $pid = (int)$l['pet_id'];
+        $pname = isset($l['pet_name']) && $l['pet_name'] !== '' ? $l['pet_name'] : 'Pet';
+        $pTypeRaw = strtolower(trim((string)($l['pet_type'] ?? 'dog')));
+        $species = ucfirst($pTypeRaw);
+        $breedVal = trim((string)($l['breed'] ?? ''));
+        if ($breedVal !== '' && in_array(strtolower($breedVal), $animalNames)) {
+            $species = ucfirst(strtolower($breedVal));
+            $breedVal = '';
+        }
+        $breed = $breedVal !== '' ? $breedVal : $dash;
+        $gender = isset($l['gender']) && $l['gender'] !== '' ? ucfirst($l['gender']) : $dash;
+        $ageN = (int)($l['age'] ?? 0);
+        $age = $ageN > 0 ? ($ageN . ' year' . ($ageN > 1 ? 's' : '')) : $dash;
+        $lStatus = strtolower(trim((string)($l['status'] ?? '')));
+        $apptStatus = strtolower(trim((string)($l['appt_status'] ?? '')));
+        $st = 'adopted';
+
+
+
+        $ref = isset($l['pet_ref_id']) && $l['pet_ref_id'] !== '' ? $l['pet_ref_id'] : ('#PET-' . str_pad((string)$pid, 4, '0', STR_PAD_LEFT));
+        $id = preg_replace('/^#/', '', $ref);
+        $regOn = isset($l['created_at']) && $l['created_at'] !== '' ? date('M j, Y', strtotime($l['created_at'])) : $dash;
+        $about = trim((string)($l['description'] ?? ''));
+        if ($about === '') {
+            $sd = trim((string)($l['source_description'] ?? ''));
+            if ($sd !== '') $about = $sd;
+        }
+        if ($about === '') {
+            $aboutParts = array();
+            $aboutParts[] = $pname . ' is a ' . strtolower($species) . ($breedVal !== '' ? ' (' . strtolower($breedVal) . ')' : '') . ' available for adoption';
+            if ($gender !== $dash) $aboutParts[0] .= ' in Dasmari&ntilde;as City';
+            $aboutParts[0] .= '.';
+            if ($ageN > 0) $aboutParts[] = 'At ' . strtolower($age) . ' old, ' . $pname . ' is looking for a loving forever home.';
+            else $aboutParts[] = $pname . ' is looking for a loving forever home.';
+            $about = implode(' ', $aboutParts);
+        }
+        $reqs = array();
+        $reqTxt = trim((string)($l['requirements'] ?? ''));
+        if ($reqTxt !== '') {
+            $reqs = preg_split('/[\r\n;]+/', $reqTxt);
+            $reqs = array_values(array_filter(array_map('trim', $reqs)));
+        }
+        $appElem = array();
+        $appQ = $conn ? $conn->query("SELECT aa.application_date, aa.status, u.full_name FROM adoption_applications aa JOIN users u ON aa.applicant_id = u.user_id WHERE aa.listing_id = " . (int)$l['listing_id'] . " ORDER BY aa.application_date DESC") : null;
+        if ($appQ) {
+            while ($ar = $appQ->fetch_assoc()) {
+                $albl = ucfirst(strtolower(trim((string)$ar['status'])));
+                $appElem[] = array($ar['full_name'] ?: 'Resident', $albl, date('M j', strtotime($ar['application_date'])));
+            }
+        }
+        $apptElem = array();
+        foreach (($apptsByPet[$pid] ?? array()) as $a) {
+            $tLbl = isset($apptTypeLabels[strtolower($a['appointment_type'] ?? '')]) ? $apptTypeLabels[strtolower($a['appointment_type'])] : ucfirst(strtolower($a['appointment_type'] ?? 'Appointment'));
+            $sLbl = strtolower(trim((string)($a['status'] ?? 'scheduled')));
+            if ($sLbl === 'no_show') $sLbl = 'no_show';
+            $apptElem[] = array(
+                $tLbl,
+                $ownerName,
+                $a['preferred_date'] ? date('M j, Y', strtotime($a['preferred_date'])) : $dash,
+                $a['preferred_time'] ? date('g:i A', strtotime($a['preferred_time'])) : $dash,
+                $sLbl
+            );
+        }
+        $tl = array(array('Pet listing added', $regOn, $ownerName, ''));
+        foreach (($apptsByPet[$pid] ?? array()) as $a) {
+            $tLbl = isset($apptTypeLabels[strtolower($a['appointment_type'] ?? '')]) ? $apptTypeLabels[strtolower($a['appointment_type'])] : 'Appointment';
+            if ($a['created_at'] !== '') $tl[] = array(($tLbl . ' appointment scheduled'), date('M j, Y', strtotime($a['created_at'])), $ownerName, '');
+        }
+        $vaxNote = isset($vaxMap[$pid]['vaccination_status']) && $vaxMap[$pid]['vaccination_status'] !== '' ? $vaxMap[$pid]['vaccination_status'] : '';
+        $photo = isset($l['photo_url']) ? (string)$l['photo_url'] : '';
+        $weight = isset($l['weight']) && $l['weight'] !== null && $l['weight'] !== '' ? ((float)$l['weight'] > 0 ? rtrim(rtrim(number_format((float)$l['weight'], 1, '.', ''), '0'), '.') . ' kg' : $dash) : $dash;
+        $fee = (isset($l['adoption_fee']) && $l['adoption_fee'] !== null && $l['adoption_fee'] !== '') ? ('PHP ' . number_format((float)$l['adoption_fee'], 2)) : $dash;
+        $vetPets[] = array(
+            'id' => $id,
+            'name' => $pname,
+            'species' => $species,
+            'gender' => $gender,
+            'age' => $age,
+            'ageNum' => $ageN,
+            'breed' => $breed,
+            'weight' => $weight,
+            'color' => isset($l['color']) && $l['color'] !== '' ? $l['color'] : $dash,
+            'photo' => $photo,
+            'status' => $st,
+            'registered' => $regOn,
+            'availableSince' => $dash,
+            'added' => $regOn,
+            'fee' => $fee,
+            "location" => "Dasmari\xC3\xB1as City Veterinary Services",
+            'about' => $about,
+            'tags' => array(),
+            'requirements' => $reqs,
+            'temperament' => array(),
+            'behaviorNotes' => '',
+            'staffNotes' => '',
+            'healthStatus' => $dash,
+            'vaxNote' => $vaxNote !== '' ? $vaxNote : '',
+            'lastExam' => $dash,
+            'vet' => $dash,
+            'nextCheckup' => $dash,
+            'vaccines' => array(),
+            'conditions' => $dash,
+            'medications' => $dash,
+            'applications' => $appElem,
+            'appointments' => $apptElem,
+            'documents' => array(),
+            'timeline' => $tl
+        );
+    }
+}
+?>
+<style>
+.cv-scope{--cv-green:#0E8131;--cv-green-dark:#0a6a28;--cv-green-soft:#eaf7ef;--cv-navy:#0f172a;--cv-slate:#475569;--cv-muted:#64748b;--cv-border:#e5e9f0;--cv-bg:#f4f6f9;--cv-card:#ffffff;--cv-ring:rgba(14,129,49,.14);--green-50:#eef6f0;--green-100:#dcebe0;--green-200:#b8d1c0;--green-500:#057b2d;--green-600:#046b25;--green-700:#045e1f;--ink-900:#0f1720;--ink-700:#334155;--ink-500:#64748b;--ink-400:#94a3b8;--ink-300:#cbd5e1;--ink-200:#e2e8f0;--ink-100:#f1f5f9;--ink-50:#f8fafc;font-family:'Inter','Segoe UI',sans-serif;color:#18181b;font-size:14px;line-height:1.5;max-width:1400px;margin:0 auto;}
+.cv-scope *{box-sizing:border-box;margin:0;padding:0;}
+.cv-scope svg{vertical-align:middle;}
+#adoption.content-section{background:#ffffff;}
+.cv-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;font-size:14px;font-weight:500;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;font-family:'Inter','Segoe UI',sans-serif;white-space:nowrap;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-btn svg{width:15px;height:15px;}
+.cv-btn-primary{background:#0E8131;color:#fff;}
+.cv-btn-primary:hover{background:#0a6a28;}
+.cv-btn-outline{background:#ffffff;border-color:#e4e4e7;color:#18181b;}
+.cv-btn-outline:hover{background:#f4f4f5;}
+.cv-btn-ghost{background:transparent;color:#475569;box-shadow:none;}
+.cv-btn-ghost:hover{background:#f1f5f9;}
+.cv-btn-sm{height:32px;padding:0 14px;font-size:13px;font-weight:500;}
+/* toolbar */
+.cv-toolbar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;}
+.cv-search{width:280px;flex:none;position:relative;display:flex;align-items:center;background:#fff;border:1px solid #e4e4e7;border-radius:6px;height:36px;padding:0 12px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-search svg{width:15px;height:15px;color:#71717a;flex-shrink:0;}
+.cv-search input{flex:1;border:none;outline:none;font-size:14px;color:#18181b;background:transparent;padding-left:10px;font-family:'Inter','Segoe UI',sans-serif;}
+.cv-search input::placeholder{color:#a1a1aa;}
+.cv-toolbar-actions{margin-left:auto;display:flex;gap:10px;align-items:center;}
+'Inter','Segoe UI'.cv-field{display:flex;flex-direction:column;gap:6px;}
+.cv-field.full{grid-column:1/-1;}
+.cv-label{font-size:14px;font-weight:500;color:#18181b;}
+.cv-input,.cv-select{width:100%;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;background:#fff;outline:none;font-family:'Inter','Segoe UI',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s ease,box-shadow .15s ease;}
+.cv-input:focus,.cv-select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+.cv-select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:32px;}
+.cv-textarea{width:100%;min-height:86px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;resize:vertical;outline:none;font-family:'Inter','Segoe UI',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-textarea:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+/* workspace */
+.cv-workspace{display:grid;grid-template-columns:520px minmax(0,1fr);gap:18px;align-items:stretch;}
+.cv-list-col{display:flex;flex-direction:column;}
+.cv-list-col .cv-list-panel{flex:1;display:flex;flex-direction:column;}
+.cv-list-col .cv-list{flex:1;}
+.cv-list-foot{margin-top:auto;}
+/* list panel */
+.cv-list-panel{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;}
+.cv-list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 16px 14px;border-bottom:1px solid #e4e4e7;}
+.cv-list-title{font-size:14px;font-weight:600;color:#18181b;}
+.cv-list-title span{color:#71717a;font-weight:500;}
+.cv-list-tools{display:flex;align-items:center;gap:8px;}
+.cv-sort{font-size:14px;color:#18181b;border:1px solid #e4e4e7;border-radius:6px;height:36px;padding:0 8px 0 10px;background:#fff;outline:none;font-family:'Inter','Segoe UI',sans-serif;cursor:pointer;display:inline-flex;align-items:center;font-weight:500;appearance:none;-webkit-appearance:none;}
+.cv-list{flex:1;overflow-y:auto;max-height:760px;}
+.cv-row{display:flex;gap:0;align-items:stretch;padding:0;border-radius:0 8px 8px 0;cursor:pointer;border:1.5px solid transparent;transition:background .12s,border-color .12s;position:relative;overflow:hidden;height:80px;}
+.cv-row:hover{background:#f8fafc;}
+.cv-row.selected{background:#f8fafc;border-color:#e4e4e7;}
+.cv-row-thumb{width:80px;height:100%;object-fit:cover;background:#eef2f6;flex-shrink:0;display:block;}
+.cv-row-thumb-c{width:80px;height:100%;background:#eef2f6;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#71717a;font-weight:600;font-size:22px;}
+.cv-row-main{flex:1;min-width:0;padding:14px 16px;display:flex;flex-direction:column;justify-content:center;}
+.cv-row-right{padding:14px 16px;display:flex;flex-direction:column;justify-content:center;}
+.cv-row-main{flex:1;min-width:0;}
+.cv-row-name{font-size:14px;font-weight:600;color:#18181b;}
+.cv-row-meta{font-size:12px;color:#71717a;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cv-row-right{text-align:right;flex-shrink:0;}
+.cv-row-ref{font-size:14px;font-weight:500;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;}
+.cv-row-added{font-size:12px;color:#a1a1aa;margin-top:4px;}
+.cv-row-tags{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;}
+/* status pill — reuse pet list .status-pill styling */
+.cv-scope .status-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:700;white-space:nowrap;background:var(--green-100);color:var(--green-700);}
+.cv-scope .status-pill.ls-available{background:var(--green-100);color:var(--green-700);}
+.cv-scope .status-pill.ls-pending{background:#fffbeb;color:#b45309;}
+.cv-scope .status-pill.ls-review{background:#dbeafe;color:#1d4ed8;}
+.cv-scope .status-pill.ls-adopted{background:#eff6ff;color:#1d4ed8;}
+.cv-scope .status-pill.ls-withdrawn{background:var(--ink-100);color:var(--ink-500);}
+.cv-scope .status-pill.ls-unavailable{background:#fef2f2;color:#b91c1c;}
+/* pagination */
+.cv-list-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;padding:12px 4px;margin-top:8px;}.cv-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}.cv-rows select{height:32px;padding:0 8px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-size:14px;font-family:inherit;cursor:pointer;outline:none;}
+.cv-pagination{display:flex;align-items:center;gap:4px;}
+.cv-page-btn{height:32px;width:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid #e4e4e7;background:#fff;color:#18181b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}.cv-page-btn svg{width:14px;height:14px;}
+.cv-page-btn:hover:not(:disabled){background:#f4f4f5;}
+.cv-page-btn:disabled{opacity:.5;cursor:not-allowed;}
+.cv-page-label{width:110px;text-align:center;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
+/* empty */
+.cv-empty{text-align:center;color:#71717a;padding:48px 20px;font-size:14px;}
+.cv-empty svg{width:34px;height:34px;margin:0 auto 10px;display:block;color:#cbd5e1;}
+/* detail panel */
+.cv-detail-panel{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:22px;min-width:0;font-family:'Inter','Segoe UI',sans-serif;}
+.cv-detail-top{display:grid;grid-template-columns:300px minmax(0,1fr);gap:24px;}
+.cv-detail-img{width:100%;height:220px;object-fit:cover;border-radius:8px;background:#eef2f6;}
+.cv-detail-img-c{width:100%;height:220px;border-radius:8px;background:#eef2f6;display:flex;align-items:center;justify-content:center;color:#71717a;font-weight:600;font-size:44px;}
+.cv-detail-main{display:flex;flex-direction:column;}
+.cv-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
+.cv-detail-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-0.025em;color:#18181b;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
+.cv-detail-sub{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;line-height:1.5;}
+.cv-detail-idrow{display:flex;align-items:center;gap:8px;margin-top:10px;}
+.cv-detail-id{font-size:14px;font-weight:500;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;}
+.cv-copy-btn{background:none;border:none;color:#71717a;cursor:pointer;padding:2px;}
+.cv-copy-btn:hover{color:#0E8131;}
+.cv-copy-btn svg{width:14px;height:14px;}
+.cv-detail-actions{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+/* metadata */
+.cv-detail-meta{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;margin-top:22px;padding-top:20px;border-top:1px solid #e4e4e7;border-bottom:1px solid #e4e4e7;padding-bottom:20px;}
+.cv-meta-col{display:flex;flex-direction:column;gap:14px;}
+.cv-meta-item{display:flex;gap:11px;align-items:flex-start;}
+.cv-meta-icon{width:30px;height:30px;color:#18181b;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.cv-meta-icon svg{width:14px;height:14px;}
+.cv-meta-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;}
+.cv-meta-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;margin-top:1px;}
+.cv-meta-value-r{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;margin-top:1px;text-align:right;}
+/* tabs */
+.cv-tabs{display:flex;gap:6px;margin-top:22px;overflow-x:auto;border-bottom:1px solid #e4e4e7;}
+.cv-tab{position:relative;padding:12px 4px;font-size:13px;font-weight:600;color:#18181b;background:none;border:none;cursor:pointer;margin-right:14px;white-space:nowrap;font-family:'Inter','Segoe UI',sans-serif;transition:color .15s;padding-bottom:12px;}
+.cv-tab:hover{color:#18181b;}
+.cv-tab.active{color:#0E8131;font-weight:600;}
+.cv-tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:#0E8131;border-radius:2px;}
+.cv-tab-badge{background:#f4f4f5;color:#475569;font-size:11px;font-weight:600;padding:1px 7px;border-radius:6px;margin-left:5px;vertical-align:1px;}
+.cv-tab.active .cv-tab-badge{background:#eaf7ef;color:#0E8131;}
+/* panels */
+.cv-panel{display:none;padding-top:20px;animation:cvfade .18s ease;}
+.cv-panel.active{display:block;}
+@keyframes cvfade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+.cv-grid2{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;align-items:start;}
+.cv-grid2-col{display:flex;flex-direction:column;gap:18px;}
+.cv-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:18px;font-family:'Inter','Segoe UI',sans-serif;}
+.cv-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
+.cv-card-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;line-height:1;letter-spacing:0.02em;text-transform:uppercase;color:#71717a;}
+.cv-about-text{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#71717a;line-height:1.5;}
+.cv-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+.cv-chip{font-size:12px;font-weight:500;color:#475569;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:5px 12px;}
+.cv-req{display:flex;flex-direction:column;gap:12px;}
+.cv-req-item{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:#475569;}
+.cv-req-check{width:20px;height:20px;border-radius:50%;background:#eaf7ef;color:#0E8131;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+.cv-req-check svg{width:11px;height:11px;}
+/* schedule */
+.cv-sched-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.cv-appt-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f4f4f5;}
+.cv-appt-icon{width:40px;height:40px;border-radius:8px;background:#fff;border:1px solid #e4e4e7;color:#0E8131;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.cv-appt-icon svg{width:17px;height:17px;}
+.cv-appt-main{flex:1;min-width:0;}
+.cv-appt-name{font-size:14px;font-weight:600;color:#18181b;}
+.cv-appt-client{font-size:12px;color:#71717a;margin-top:1px;}
+.cv-appt-dt{text-align:right;}
+.cv-appt-date{font-size:12.5px;font-weight:500;color:#18181b;}
+.cv-appt-time{font-size:12px;color:#71717a;margin-top:1px;}
+.cv-viewall{display:inline-flex;align-items:center;gap:5px;color:#0E8131;font-size:12.5px;font-weight:500;text-decoration:none;margin-top:12px;background:none;border:none;cursor:pointer;font-family:'Inter','Segoe UI',sans-serif;padding:0;}
+.cv-viewall:hover{color:#0a6a28;}
+.cv-viewall svg{width:13px;height:13px;}
+/* timeline */
+.cv-tl{display:flex;flex-direction:column;}
+.cv-tl-item{position:relative;padding-left:26px;padding-bottom:18px;}
+.cv-tl-item:last-child{padding-bottom:0;}
+.cv-tl-item::before{content:'';position:absolute;left:7px;top:16px;bottom:-2px;width:2px;background:#eef2f6;}
+.cv-tl-item:last-child::before{display:none;}
+.cv-tl-dot{position:absolute;left:0;top:5px;width:10px;height:10px;border-radius:50%;background:#0E8131;box-shadow:0 0 0 3px #eaf7ef;}
+.cv-tl-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
+.cv-tl-text{font-size:13px;font-weight:500;color:#18181b;}
+.cv-tl-date{font-size:12.5px;color:#71717a;white-space:nowrap;}
+.cv-tl-sub{font-size:12px;color:#71717a;margin-top:2px;}
+/* medical */
+.cv-med-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;}
+.cv-med-field{display:flex;flex-direction:column;gap:5px;}
+.cv-med-label{font-size:14px;font-weight:500;color:#18181b;}
+.cv-med-value{font-size:14px;font-weight:400;color:#18181b;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
+.cv-health{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;background:#eaf7ef;color:#0E8131;width:fit-content;}
+.cv-health svg{width:11px;height:11px;}
+.cv-health.neutral{background:#f4f4f5;color:#475569;}
+.cv-health.neutral svg{display:none;}
+/* table */
+.cv-table{width:100%;border-collapse:collapse;}
+.cv-table th{text-align:left;font-size:12px;font-weight:500;color:#71717a;padding:8px 10px;border-bottom:1px solid #e4e4e7;}
+.cv-table td{padding:11px 10px;font-size:14px;color:#18181b;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
+.cv-table tr:last-child td{border-bottom:none;}
+.cv-vax-done{display:inline-flex;align-items:center;gap:5px;color:#0E8131;font-size:12.5px;font-weight:500;}
+.cv-vax-done svg{width:12px;height:12px;}
+.cv-vax-pending{display:inline-flex;align-items:center;gap:5px;color:#b45309;font-size:12.5px;font-weight:500;}
+.cv-vax-pending svg{width:12px;height:12px;}
+.cv-appt-status{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-family:'Inter','Segoe UI',sans-serif;font-size:11.5px;font-weight:700;white-space:nowrap;}
+/* docs */
+.cv-doc{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;transition:background .12s;cursor:pointer;}
+.cv-doc:hover{background:#f8fafc;}
+.cv-doc-icon{width:42px;height:42px;border-radius:8px;background:#f4f4f5;color:#475569;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.cv-doc-icon svg{width:18px;height:18px;}
+.cv-doc-main{flex:1;min-width:0;}
+.cv-doc-name{font-size:14px;font-weight:500;color:#18181b;}
+.cv-doc-meta{font-size:12px;color:#71717a;margin-top:2px;}
+/* modal */
+.cv-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
+.cv-overlay.open{display:flex;}
+.cv-modal{background:#fff;border-radius:8px;width:100%;max-width:640px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);animation:cvpop .18s ease;}
+.cv-modal.lg{max-width:760px;}
+@keyframes cvpop{from{opacity:0;transform:translateY(8px) scale(0.98)}to{opacity:1;transform:none}}
+.cv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 22px;border-bottom:1px solid #e4e4e7;}
+.cv-modal-head h3{font-size:18px;font-weight:600;letter-spacing:-.025em;color:#18181b;}
+.cv-modal-x{width:32px;height:32px;border-radius:6px;border:none;background:#f4f4f5;color:#475569;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.cv-modal-x:hover{background:#e5e9ef;}
+.cv-modal-body{padding:20px 22px;overflow-y:auto;font-size:14px;}
+.cv-modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid #e4e4e7;}
+.cv-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cv-section{margin-bottom:22px;}
+.cv-section:last-child{margin-bottom:0;}
+.cv-section-title{font-size:14px;font-weight:600;color:#18181b;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #f1f5f9;}
+.cv-section-title span{color:#0E8131;}
+.cv-upload{min-height:96px;border:1.5px dashed #cbd5e1;border-radius:8px;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:#71717a;cursor:pointer;font-size:14px;font-weight:500;}
+.cv-upload svg{width:22px;height:22px;color:#71717a;}
+.cv-upload:hover{border-color:#0E8131;color:#0E8131;}
+.cv-upload:hover svg{color:#0E8131;}
+/* toast */
+.cv-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#18181b;color:#fff;font-size:14px;font-weight:500;padding:11px 18px;border-radius:8px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.3);z-index:400;opacity:0;transition:all .2s;pointer-events:none;display:flex;align-items:center;gap:9px;}
+.cv-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.cv-toast svg{width:15px;height:15px;color:#6ee7b7;}
+/* responsive */
+@media (max-width:1280px){.cv-workspace{grid-template-columns:minmax(340px,42%) minmax(0,1fr);}.cv-list{max-height:380px;}}
+@media (max-width:1024px){.cv-detail-top{grid-template-columns:1fr;}.cv-detail-img,.cv-detail-img-c{height:280px;}.cv-grid2{grid-template-columns:1fr;}.cv-fgrid{grid-template-columns:1fr;}}
+@media (max-width:760px){.cv-detail-meta{grid-template-columns:1fr;}.cv-form-grid{grid-template-columns:1fr;}.cv-list-panel{max-height:none;}.cv-workspace{grid-template-columns:1fr;}}
+</style>
+
+<!-- cv-build: 2026-09-04T16:20Z --><section id="adoption" class="content-section">
+<div class="cv-scope">
+
+  <div class="cv-toolbar">
+    <label class="cv-search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="cvSearch" placeholder="Search pet name, ID, species...">
+    </label>  </div>
+
+  <div class="cv-workspace">
+    <div class="cv-list-col">
+      <div class="cv-list-panel">
+        <div class="cv-list-head">
+          <div class="cv-list-title">Pet Listings <span id="cvCount"></span></div>
+          <div class="cv-list-tools">
+            <select class="cv-sort" id="cvSort">
+              <option value="recent">Sort by: Recently Added</option>
+              <option value="az">Name A&ndash;Z</option>
+              <option value="za">Name Z&ndash;A</option>
+              <option value="age">Age</option>
+              <option value="status">Status</option>
+            </select>
+          </div>
         </div>
-        <a href="petlist.php" target="_blank" class="btn-primary" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.6rem 1.25rem;font-size:0.85rem;text-decoration:none;white-space:nowrap;"><i class="fas fa-eye"></i> View Available Pets</a>
+        <div class="cv-list" id="cvList"></div>
       </div>
-
-      <div class="adopt-toolbar">
-        <div class="adopt-pills" id="adoptPills">
-          <button class="adopt-pill active" data-filter="all" onclick="setAdoptFilter('all',this)">All (<?php echo $totalAdopt; ?>)</button>
-          <button class="adopt-pill" data-filter="active" onclick="setAdoptFilter('active',this)">Active (<?php echo $catCounts['active']; ?>)</button>
-          <button class="adopt-pill" data-filter="pending" onclick="setAdoptFilter('pending',this)">Pending (<?php echo $catCounts['pending']; ?>)</button>
-          <button class="adopt-pill" data-filter="completed" onclick="setAdoptFilter('completed',this)">Completed (<?php echo $catCounts['completed']; ?>)</button>
-          <button class="adopt-pill" data-filter="cancelled" onclick="setAdoptFilter('cancelled',this)">Cancelled (<?php echo $catCounts['cancelled']; ?>)</button>
-        </div>
-        <div class="adopt-tools">
-          <div class="adopt-search"><i class="fas fa-search"></i><input type="text" id="adoptSearch" placeholder="Search by ID, type..." oninput="filterAdopt()" /></div>
-        </div>
-      </div>
-
-      <?php if (empty($adoptionListings)): ?>
-        <div class="adopt-empty">You haven't registered any pets for adoption yet. Click "New Adoption Listing" to get started.</div>
-      <?php else: ?>
-        <div class="adopt-grid" id="adoptGrid">
-          <?php foreach ($adoptionListings as $listing):
-            $isAdopted = ($listing['appt_status'] === 'completed') || ($listing['status'] === 'adopted');
-            $apptPending = in_array($listing['appt_status'] ?? '', ['pending','scheduled','rescheduled']);
-            $isCancelled = $listing['appt_status'] === 'cancelled';
-            $isPending = $listing['status'] === 'pending' || $apptPending;
-            if ($isAdopted)      { $filterCat='completed'; $statusCls='adopted';  $statusTxt='Adopted';            $stageTxt='Completed'; }
-            elseif ($isPending)  { $filterCat='pending';    $statusCls='pending';   $statusTxt='Pending Intake';    $stageTxt='Intake'; }
-            elseif ($isCancelled){ $filterCat='cancelled';  $statusCls='cancelled'; $statusTxt='Cancelled';         $stageTxt='Cancelled'; }
-            else                 { $filterCat='active';     $statusCls='available'; $statusTxt='Ready for Adoption'; $stageTxt='Ready for Adoption'; }
-            $petRef = $listing['pet_ref_id'] ?? fallbackRefId('#PET-', $listing['pet_id']);
-            $species = htmlspecialchars(ucfirst($listing['pet_type'] ?? 'Dog'));
-            $gender = htmlspecialchars(ucfirst($listing['gender'] ?? '-'));
-            $ageN = (int)($listing['age'] ?? 0);
-            $ageVal = $ageN > 0 ? ($ageN . ' Year' . ($ageN > 1 ? 's' : '')) : '-';
-            $regOn = date('M j, Y', strtotime($listing['created_at']));
-            $breedUp = htmlspecialchars(($listing['breed'] ?? '') ?: strtoupper($listing['pet_type'] ?? 'PET'));
-            $desc = htmlspecialchars(($listing['description'] ?: $listing['source_description']) ?: ($listing['pet_name'] . "'s adoption listing. Looking for a loving forever home."));
-            $reqRef = $listing['appt_ref'] ?: (!empty($listing['appt_id']) ? fallbackRefId('#APT-', $listing['appt_id']) : $petRef);
-          ?>
-          <article class="adopt-card" data-cat="<?php echo $filterCat; ?>" data-name="<?php echo htmlspecialchars(strtolower($listing['pet_name'] ?? '')); ?>" data-type="<?php echo htmlspecialchars(strtolower($listing['pet_type'] ?? '')); ?>" data-date="<?php echo strtotime($listing['created_at']); ?>">
-            <div class="adopt-badges">
-              <span class="adopt-ref-badge"><i class="fas fa-tag"></i> <?php echo htmlspecialchars($petRef); ?></span>
-            </div>
-            <div class="adopt-split">
-              <div class="adopt-media">
-                <?php if (!empty($listing['photo_url'])): ?>
-                  <img src="<?php echo htmlspecialchars($listing['photo_url']); ?>" alt="<?php echo htmlspecialchars($listing['pet_name']); ?>" />
-                <?php else: ?>
-                  <div class="adopt-media-plain">No Photo</div>
-                <?php endif; ?>
-              </div>
-              <div class="adopt-info">
-                <h2 class="adopt-name"><?php echo htmlspecialchars($listing['pet_name']); ?></h2>
-                <div class="adopt-breed"><?php echo $breedUp; ?></div>
-                <p class="adopt-desc"><?php echo $desc; ?></p>
-                <hr class="adopt-divider" />
-                <div class="adopt-info-grid">
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-calendar-alt"></i></span><div><div class="ic-label">Registered</div><div class="ic-value"><?php echo htmlspecialchars($regOn); ?></div></div></div>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-tag"></i></span><div><div class="ic-label">Request ID</div><div class="ic-value"><?php echo htmlspecialchars($reqRef); ?></div></div></div>
-                  <?php if (!empty($listing['appt_id']) && !empty($listing['appt_date'])): ?>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-clock"></i></span><div><div class="ic-label">Scheduled</div><div class="ic-value"><?php echo date('M j, Y', strtotime($listing['appt_date'])); ?></div></div></div>
-                  <?php endif; ?>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-map-marker-alt"></i></span><div><div class="ic-label">Location</div><div class="ic-value">Dasmariñas City, Cavite</div></div></div>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-birthday-cake"></i></span><div><div class="ic-label">Age</div><div class="ic-value"><?php echo $ageVal; ?></div></div></div>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-venus-mars"></i></span><div><div class="ic-label">Gender</div><div class="ic-value"><?php echo $gender; ?></div></div></div>
-                  <div class="adopt-info-item"><span class="icon"><i class="fas fa-paw"></i></span><div><div class="ic-label">Species</div><div class="ic-value"><?php echo $species; ?></div></div></div>
-                </div>
-                <div class="adopt-actions">
-                  <?php if ($isAdopted): ?>
-                    <span class="adopt-status-btn adopted"><i class="fas fa-check-circle"></i> Home Confirmed</span>
-                  <?php elseif (in_array($listing['appt_status'] ?? '', ['scheduled','rescheduled'])): ?>
-                    <!-- scheduled: date already shown in the info grid -->
-                  <?php elseif ($listing['status'] === 'pending' || (($listing['appt_status'] ?? '') === 'pending')): ?>
-                    <span class="adopt-status-btn pending"><i class="fas fa-hourglass-half"></i> Awaiting Staff Confirmation</span>
-                  <?php else: ?>
-                    <button type="button" class="adopt-status-btn available" onclick="openAdoptionAppt(<?php echo (int)$listing['pet_id']; ?>, '<?php echo htmlspecialchars($listing['pet_name'], ENT_QUOTES); ?>')"><i class="fas fa-calendar-plus"></i> Schedule Appointment</button>
-                  <?php endif; ?>
-                </div>
-              </div>
-            </div>
-          </article>
-          <?php endforeach; ?>
-        </div>
-      <?php endif; ?>
-
-      <div class="adopt-footer">
-        <div class="adopt-footer-icon"><i class="fas fa-paw"></i></div>
-        <h3>Thank you for giving a pet a chance!</h3>
-        <p>Your compassion makes a difference.</p>
+      <div class="cv-list-foot">
+        <div class="cv-rows"><span>Rows per page</span><select id="cvPerPage"><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="40">40</option><option value="50">50</option></select></div>
+        <div class="cv-page-label" id="cvPageLabel">Page 1 of 1</div>
+        <div class="cv-pagination" id="cvPagination"></div>
       </div>
     </div>
-  </section>
+    <div class="cv-detail-panel" id="cvDetail"></div>
+  </div>
 
-  <!-- â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ ACCOUNT SETTINGS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
-  <section id="account-settings" class="content-section">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title" style="font-size:22px;font-weight:800;margin:0;">My Profile</h1>
-        <p class="page-subtitle">Manage your profile and account settings</p>
-      </div>
+</div>
+</section>
+
+<div class="cv-overlay" id="cvOverlay">
+  <div class="cv-modal" id="cvModal">
+    <div class="cv-modal-head">
+      <h3 id="cvModalTitle">Title</h3>
+      <button type="button" class="cv-modal-x" id="cvModalClose">&times;</button>
     </div>
+    <div class="cv-modal-body" id="cvModalBody"></div>
+    <div class="cv-modal-foot" id="cvModalFoot"></div>
+  </div>
+</div>
+
+<div class="cv-toast" id="cvToast"></div>
+
+<script>
+(function(){
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  var PETS=<?php echo json_encode($vetPets, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
+
+  var STATUS_META={available:{label:'Available',icon:'check'},pending:{label:'Pending',icon:'hourglass'},review:{label:'Under Review',icon:'clipboard'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
+  var ICONS={edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',paw:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 20.999 6 19a4 4 0 0 1-2-2.5"/><circle cx="4" cy="12" r="2"/></svg>',clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',weight:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L3 21h18L12 3z"/><path d="M12 3v6"/></svg>',cake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M12 3v2"/><path d="M7 3v2"/><path d="M17 3v2"/></svg>',species:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 20.999 6 19a4 4 0 0 1-2-2.5"/><circle cx="4" cy="12" r="2"/></svg>',breed:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="8" x2="20" y2="8"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="8" y1="16" x2="16" y2="16"/></svg>',gender:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="16" cy="11" r="3"/></svg>',download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',img:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'};
+
+  var state={selected:(PETS[0]&&PETS[0].id)||'',status:'all',search:'',sort:'recent',species:'',gender:'',age:'',breed:'',elig:'',page:1,perPage:10,grid:false,activeTab:'overview'};
+  var els={};
+
+  function filtered(){
+    var q=state.search.toLowerCase();
+    return PETS.filter(function(p){
+      if(state.status!=='all' && p.status!==state.status) return false;
+      if(state.species && p.species!==state.species) return false;
+      if(state.gender && p.gender!==state.gender) return false;
+      if(state.age){ var n=p.ageNum; if(state.age==='1'){ if(!(n>0 && n<1)) return false;} else if(state.age==='3'){ if(!(n>=1 && n<=3)) return false;} else if(state.age==='6'){ if(!(n>=4)) return false;} }
+      if(state.breed && p.breed!==state.breed) return false;
+      if(state.elig){ var elig=(p.status==='available'); if(state.elig==='eligible' && !elig) return false; if(state.elig==='not' && elig) return false; }
+      if(q){ var hay=(p.name+' '+p.id+' '+p.species+' '+p.breed).toLowerCase(); if(!hay.includes(q)) return false; }
+      return true;
+    });
+  }
+
+  function sorted(arr){
+    var a=arr.slice();
+    if(state.sort==='az') a.sort(function(x,y){return x.name.localeCompare(y.name);});
+    else if(state.sort==='za') a.sort(function(x,y){return y.name.localeCompare(x.name);});
+    else if(state.sort==='age') a.sort(function(x,y){return x.ageNum-y.ageNum;});
+    else if(state.sort==='status') a.sort(function(x,y){return STATUS_META[x.status].label.localeCompare(STATUS_META[y.status].label);});
+    return a;
+  }
+
+  function statusPill(p){
+    var m=STATUS_META[p.status];
+    var cls='ls-'+p.status;
+    if(p.status==='review') cls='ls-review';
+    if(p.status==='unavailable') cls='ls-unavailable';
+    if(p.status==='pending') cls='ls-pending';
+    return '<span class="status-pill '+cls+'">'+esc(m.label)+'</span>';
+  }
+  function thumb(p){
+    return p.photo? '<img class="cv-row-thumb" src="'+esc(p.photo)+'" alt="">' : '<span class="cv-row-thumb-c">'+esc((p.name||'P').charAt(0).toUpperCase())+'</span>';
+  }
+
+  function renderList(){
+    var list=filtered(); var total=list.length;
+    var sortable=sorted(list);
+    var pages=Math.max(1,Math.ceil(total/state.perPage));
+    if(state.page>pages) state.page=pages;
+    var start=(state.page-1)*state.perPage; var rows=sortable.slice(start,start+state.perPage);
+    els.count.textContent='('+total+')';
+    if(!rows.length){ els.list.innerHTML='<div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div>'; renderPagination(total,pages);  return; }
+    els.list.innerHTML=rows.map(function(p){
+      return '<div class="cv-row'+(p.id===state.selected?' selected':'')+'" data-id="'+esc(p.id)+'">'+thumb(p)+'<div class="cv-row-main"><div class="cv-row-name">'+esc(p.name)+'</div><div class="cv-row-meta">'+esc(p.species)+' &middot; '+esc(p.gender)+' &middot; '+esc(p.age)+'</div><div class="cv-row-tags">'+statusPill(p)+'</div></div><div class="cv-row-right"><div class="cv-row-ref">ID: '+esc(p.id)+'</div><div class="cv-row-added">Added: '+esc(p.added)+'</div></div></div>';
+    }).join('');
+    els.list.querySelectorAll('.cv-row').forEach(function(r){
+      r.addEventListener('click',function(){ state.selected=r.getAttribute('data-id'); state.activeTab='overview'; renderList(); renderDetail(); });
+    });
+    renderPagination(total,pages);
+  }
+  function renderPagination(total,pages){
+    if(els.pageLabel) els.pageLabel.textContent='Page '+state.page+' of '+pages;
+    var h='<button type="button" class="cv-page-btn" data-p="first" '+(state.page<=1?'disabled':'')+' title="Go to first page">'+ICONS.dblChevL+'</button>';
+    h+='<button type="button" class="cv-page-btn" data-p="prev" '+(state.page<=1?'disabled':'')+' title="Go to previous page">'+ICONS.chevL+'</button>';
+    h+='<button type="button" class="cv-page-btn" data-p="next" '+(state.page>=pages?'disabled':'')+' title="Go to next page">'+ICONS.chevR+'</button>';
+    h+='<button type="button" class="cv-page-btn" data-p="last" '+(state.page>=pages?'disabled':'')+' title="Go to last page">'+ICONS.dblChevR+'</button>';
+    els.pagination.innerHTML=h;
+    els.pagination.querySelectorAll('.cv-page-btn:not([disabled])').forEach(function(b){
+      var p=b.getAttribute('data-p');
+      b.addEventListener('click',function(){
+        if(p==='first') state.page=1;
+        else if(p==='prev') state.page=Math.max(1,state.page-1);
+        else if(p==='next') state.page=Math.min(pages,state.page+1);
+        else state.page=pages;
+        renderList();
+      });
+    });
+  }
+
+  function detailPhoto(p){
+    return p.photo? '<img class="cv-detail-img" src="'+esc(p.photo)+'" alt="">':'<div class="cv-detail-img-c">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
+  }
+
+  function renderDetail(){
+    var p=PETS.find(function(x){return x.id===state.selected;});
+    if(!p){ els.detail.innerHTML='<div class="cv-empty">'+ICONS.search+'<div>Select a pet to see its profile.</div></div>'; return; }
+    var m=STATUS_META[p.status];
+    els.detail.innerHTML=
+      '<div class="cv-detail-top">'+detailPhoto(p)+
+        '<div class="cv-detail-main">'+
+          '<div class="cv-detail-head">'+
+            '<div><div class="cv-detail-title">'+esc(p.name)+' '+statusPill(p)+'</div>'+
+            '<div class="cv-detail-sub">'+esc(p.species)+' &middot; '+esc(p.gender)+' &middot; '+esc(p.age)+'</div>'+
+            '<div class="cv-detail-idrow"><span class="cv-detail-id">ID: '+esc(p.id)+'</span><button type="button" class="cv-copy-btn" id="cvCopy" title="Copy ID"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>'+
+            '</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="cv-detail-meta">'+
+        '<div class="cv-meta-col">'+metaItem(ICONS.cal,'Registered',p.registered)+metaItem(ICONS.clock,'Available Since',p.availableSince)+metaItem(ICONS.weight,'Weight',p.weight)+'</div>'+
+        '<div class="cv-meta-col">'+metaItem(ICONS.pin,'Location',p.location,true)+metaItem(ICONS.species,'Species',p.species)+metaItem(ICONS.breed,'Breed',p.breed)+'</div>'+
+      '</div>'+
+      '<div class="cv-tabs" id="cvTabs">'+tabsHtml(p)+'</div>'+
+      '<div class="cv-panels">'+panelsHtml(p)+'</div>';
+
+    var cop=document.getElementById('cvCopy'); if(cop) cop.addEventListener('click',function(){ if(navigator.clipboard){navigator.clipboard.writeText(p.id);} toast('Pet ID copied to clipboard'); });
+    document.getElementById('cvTabs').querySelectorAll('.cv-tab').forEach(function(t){ t.addEventListener('click',function(){ state.activeTab=t.getAttribute('data-tab'); renderDetail(); }); });
+    bindPanelActions(p);
+  }
+  function metaItem(icon,label,val,html){
+    return '<div class="cv-meta-item"><div class="cv-meta-icon">'+icon+'</div><div><div class="cv-meta-label">'+esc(label)+'</div><div class="cv-meta-value'+(html?' cv-meta-value-r':'')+'">'+(html?val:esc(val))+'</div></div></div>';
+  }
+  var TABS=[['overview','Overview'],['medical','Medical &amp; Vaccines'],['behavior','Behavior &amp; Notes'],['applications','Applications'],['documents','Documents']];
+  function tabsHtml(p){
+    var counts={applications:p.applications.length,appointments:p.appointments.length};
+    return TABS.map(function(t){var badge=counts[t[0]]?'<span class="cv-tab-badge">'+counts[t[0]]+'</span>':''; return '<button type="button" class="cv-tab'+(state.activeTab===t[0]?' active':'')+'" data-tab="'+t[0]+'">'+t[1]+badge+'</button>';}).join('');
+  }
+  function panelsHtml(p){
+    var html='<div class="cv-panel'+(state.activeTab==='overview'?' active':'')+'">'+overviewPanel(p)+'</div>';
+    html+='<div class="cv-panel'+(state.activeTab==='medical'?' active':'')+'">'+medicalPanel(p)+'</div>';
+    html+='<div class="cv-panel'+(state.activeTab==='behavior'?' active':'')+'">'+behaviorPanel(p)+'</div>';
+    html+='<div class="cv-panel'+(state.activeTab==='applications'?' active':'')+'">'+applicationsPanel(p)+'</div>';
+    html+='<div class="cv-panel'+(state.activeTab==='documents'?' active':'')+'">'+documentsPanel(p)+'</div>';
+    return html;
+  }
+  function overviewPanel(p){
+    var reqs=p.requirements.length? p.requirements.map(function(r){return '<div class="cv-req-item"><span>'+esc(r)+'</span></div>';}).join('') : '<div class="cv-req-item"><span>No special requirements noted.</span></div>';
+    var appts=p.appointments.length? p.appointments.map(function(a){return '<div class="cv-appt-item"><div class="cv-appt-main"><div class="cv-appt-name">'+esc(a[0])+'</div><div class="cv-appt-client">with '+esc(a[1])+'</div></div><div class="cv-appt-dt"><div class="cv-appt-date">'+esc(a[2])+'</div><div class="cv-appt-time">'+esc(a[3])+'</div></div></div>';}).join('') : '<div class="cv-about-text" style="margin-bottom:10px">No upcoming appointments.</div>';
+    var tl=p.timeline.length? p.timeline.map(function(x){return '<div class="cv-tl-item"><span class="cv-tl-dot"></span><div class="cv-tl-head"><span class="cv-tl-text">'+esc(x[0])+'</span><span class="cv-tl-date">'+esc(x[1])+'</span></div><div class="cv-tl-sub">by '+esc(x[2])+(x[3]?' &middot; '+esc(x[3]):'')+'</div></div>';}).join('') : '<div class="cv-about-text">No activity recorded.</div>';
+    var chips=p.tags.length? p.tags.map(function(t){return '<span class="cv-chip">'+esc(t)+'</span>';}).join('') : '';
+    return '<div class="cv-grid2">'+
+      '<div class="cv-grid2-col">'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">About '+esc(p.name)+'</div></div><p class="cv-about-text">'+esc(p.about||'No description available.')+'</p>'+ (chips?'<div class="cv-chips">'+chips+'</div>':'') +'</div>'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Adoption Requirements</div></div><div class="cv-req">'+reqs+'</div></div>'+
+      '</div>'+
+      '<div class="cv-grid2-col">'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Schedule &amp; Appointments</div></div>'+appts+(p.appointments.length?'<button type="button" class="cv-viewall" data-tab="appointments">View all appointments '+ICONS.chev+'</button>':'')+'</div>'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Activity Timeline</div></div><div class="cv-tl">'+tl+'</div></div>'+
+      '</div>'+
+    '</div>';
+  }
+  function medicalPanel(p){
+    var vax=p.vaccines.length? '<table class="cv-table"><thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead><tbody>'+p.vaccines.map(function(v){var st=v[2]==='done'?'done':'pending';var ic=v[2]==='done'?ICONS.check:ICONS.clock;return '<tr><td>'+esc(v[0])+'</td><td>'+esc(v[1])+'</td><td><span class="cv-vax-'+st+'">'+ic+' '+(st==='done'?'Complete':'Pending')+'</span></td></tr>';}).join('')+'</tbody></table>' : '<div class="cv-about-text">No vaccination records on file.'+(p.vaxNote?'<br><br>On record: '+esc(p.vaxNote)+'.':'')+'</div>';
+    var health=(p.healthStatus && p.healthStatus!=='\u2014')? '<span class="cv-health">'+ICONS.check+' '+esc(p.healthStatus)+'</span>' : '<span class="cv-health neutral">'+esc(p.healthStatus||'\u2014')+'</span>';
+    return '<div class="cv-grid2">'+
+      '<div class="cv-grid2-col">'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medical Summary</div></div><div class="cv-med-grid">'+
+          medField('Health Status',health)+medField('Age',p.age)+medField('Weight',p.weight)+medField('Vaccination Status',p.vaxNote?esc(p.vaxNote):'\u2014')+medField('Microchip / ID',p.id)+medField('Adoption Fee',p.fee)+'</div></div>'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medical Conditions</div></div><div class="cv-about-text">'+esc(p.conditions)+'</div></div>'+
+      '</div>'+
+      '<div class="cv-grid2-col">'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Vaccination Records</div></div>'+vax+'</div>'+
+        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medications</div></div><div class="cv-about-text">'+esc(p.medications)+'</div></div>'+
+      '</div>'+
+    '</div>';
+  }
+  function medField(label,val){ return '<div class="cv-med-field"><span class="cv-med-label">'+esc(label)+'</span><div class="cv-med-value">'+val+'</div></div>'; }
+  function behaviorPanel(p){
+    var chips=p.temperament.length? p.temperament.map(function(t){return '<span class="cv-chip">'+esc(t)+'</span>';}).join('') : '';
+    return '<div class="cv-grid2"><div class="cv-grid2-col">'+
+      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Temperament</div></div>'+ (chips? '<div class="cv-chips" style="margin-top:0">'+chips+'</div>':'<div class="cv-about-text">No temperament tags recorded.</div>') +'</div>'+
+      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Behavior Notes</div></div><p class="cv-about-text">'+esc(p.behaviorNotes||'No behavior notes.')+'</p></div>'+
+      '</div><div class="cv-grid2-col">'+
+      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Staff Notes</div><button type="button" class="cv-btn cv-btn-outline cv-btn-sm" data-note>'+ICONS.plus+' Add Note</button></div><div class="cv-about-text">'+esc(p.staffNotes||'No staff notes yet.')+'</div></div>'+
+      '</div></div>';
+  }
+  function appClsFor(status){
+    if(status==='Approved') return 'available';
+    if(status==='Under Review'||status==='Review') return 'review';
+    if(status==='Rejected') return 'unavailable';
+    return 'pending';
+  }
+  function applicationsPanel(p){
+    if(!p.applications.length) return '<div class="cv-about-text">No adoption applications yet.</div>';
+    return '<div class="cv-card" style="padding:4px 0"><table class="cv-table"><thead><tr><th>Applicant</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>'+p.applications.map(function(a){var ac='ls-'+appClsFor(a[1]);return '<tr><td>'+esc(a[0])+'</td><td><span class="status-pill '+ac+'">'+esc(a[1])+'</span></td><td>'+esc(a[2])+'</td><td style="text-align:right"><button type="button" class="cv-viewall" style="margin-top:0">View Application '+ICONS.chev+'</button></td></tr>';}).join('')+'</tbody></table></div>';
+  }
+
+  function documentsPanel(p){
+    var docs=p.documents.length? p.documents.map(function(d){return '<div class="cv-doc"><div class="cv-doc-icon">'+ICONS.doc+'</div><div class="cv-doc-main"><div class="cv-doc-name">'+esc(d[0])+'</div><div class="cv-doc-meta">'+esc(d[1])+' &middot; '+esc(d[2])+'</div></div>'+ICONS.download+'</div>';}).join('') : '<div class="cv-about-text">No documents uploaded.</div>';
+    return '<div class="cv-grid2-col">'+docs+'</div>';
+  }
+
+  function bindPanelActions(p){
+    document.querySelectorAll('[data-book]').forEach(function(b){ b.addEventListener('click',function(){openBook(p);}); });
+    document.querySelectorAll('[data-note]').forEach(function(b){ b.addEventListener('click',function(){toast('Note composer opened');}); });
+  }
+
+  function previewMedFile(input){}
+
+  function openTab(p,tab){ state.selected=p.id; state.activeTab=tab; renderList(); renderDetail(); }
+
+  function setStatus(p,status){ p.status=status; renderList(); renderDetail(); toast('Marked as '+STATUS_META[status].label); }
+
+  function openBook(p){
+    var types=['Meet & Greet','Adoption Consultation','Home Visit','Medical Check','Vaccination','Follow-up','Adoption Finalization'];
+    openModal('Book Appointment',
+      '<div class="cv-form-grid">'+
+      '<div class="cv-field"><label class="cv-label">Pet</label><input class="cv-input" value="'+esc(p.name)+'" disabled></div>'+
+      '<div class="cv-field"><label class="cv-label">Appointment Type</label><select class="cv-select">'+types.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></div>'+
+      '<div class="cv-field"><label class="cv-label">Client</label><select class="cv-select"><option>Select Client</option><option>'+esc(p.name)+' &ndash; Owner</option></select></div>'+
+      '<div class="cv-field"><label class="cv-label">Date</label><input class="cv-input" type="date" value="2026-09-08"></div>'+
+      '<div class="cv-field"><label class="cv-label">Time</label><select class="cv-select"><option>10:00 AM</option><option>11:00 AM</option><option>02:00 PM</option><option>04:00 PM</option></select></div>'+
+      '<div class="cv-field"><label class="cv-label">Veterinarian / Staff</label><select class="cv-select"><option>Select Staff</option><option>Dr. Santos</option><option>Dr. Cruz</option><option>Clinic Staff</option></select></div>'+
+      '<div class="cv-field full"><label class="cv-label">Notes</label><textarea class="cv-textarea" placeholder="Add any notes..."></textarea></div>'+
+      '</div>',
+      [{label:'Cancel',cls:'cv-btn-outline',fn:closeModal},{label:'Schedule Appointment',cls:'cv-btn-primary',fn:function(){ closeModal(); toast('Appointment scheduled for '+p.name); }}]);
+  }
+  function openEdit(p){
+    openModal('Edit Pet',
+      '<div class="cv-form-grid">'+
+      '<div class="cv-field"><label class="cv-label">Pet Name</label><input class="cv-input" id="ep_name" value="'+esc(p.name)+'"></div>'+
+      '<div class="cv-field"><label class="cv-label">Species</label><input class="cv-input" id="ep_species" value="'+esc(p.species)+'"></div>'+
+      '<div class="cv-field"><label class="cv-label">Gender</label><select class="cv-select" id="ep_gender">'+['Male','Female'].map(function(g){return '<option'+(p.gender===g?' selected':'')+'>'+g+'</option>';}).join('')+'</select></div>'+
+      '<div class="cv-field"><label class="cv-label">Status</label><select class="cv-select" id="ep_status">'+Object.keys(STATUS_META).map(function(s){return '<option value="'+s+'"'+(p.status===s?' selected':'')+'>'+esc(STATUS_META[s].label)+'</option>';}).join('')+'</select></div>'+
+      '<div class="cv-field full"><label class="cv-label">About</label><textarea class="cv-textarea" id="ep_about">'+esc(p.about)+'</textarea></div>'+
+      '</div>',
+      [{label:'Cancel',cls:'cv-btn-outline',fn:closeModal},{label:'Save Changes',cls:'cv-btn-primary',fn:function(){ saveEdit(p); }}]);
+  }
+  function saveEdit(p){
+    var on=document.getElementById('ep_name'), oc=document.getElementById('ep_about');
+    if(on) p.name=on.value; if(oc) p.about=oc.value;
+    var os=document.getElementById('ep_status'); if(os) p.status=os.value;
+    closeModal(); renderList(); renderDetail(); toast('Pet profile updated');
+  }
+
+  function openModal(title,body,footButtons){
+    els.overlay.classList.add('open'); els.modal.className='cv-modal'+(title==='Add New Pet'?' lg':'');
+    els.modalHead.textContent=title; els.modalBody.innerHTML=body;
+    els.modalFoot.innerHTML=footButtons.map(function(b){return '<button type="button" class="cv-btn '+b.cls+'" data-foot="'+b.label+'">'+b.label+'</button>';}).join('');
+    els.modalFoot.querySelectorAll('[data-foot]').forEach(function(b){ b.addEventListener('click',function(){ var l=b.getAttribute('data-foot'); var f=footButtons.find(function(x){return x.label===l;}); if(f&&f.fn) f.fn(); }); });
+  }
+  function closeModal(){ els.overlay.classList.remove('open'); }
+
+  function toast(msg){ els.toast.innerHTML=ICONS.check+' '+esc(msg); els.toast.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(function(){els.toast.classList.remove('show');},2200); }
+
+
+  function init(){
+    els.count=document.getElementById('cvCount'); els.list=document.getElementById('cvList');
+    els.pagination=document.getElementById('cvPagination'); els.pageLabel=document.getElementById('cvPageLabel'); els.perPage=document.getElementById('cvPerPage'); els.detail=document.getElementById('cvDetail');
+    els.search=document.getElementById('cvSearch'); els.sort=document.getElementById('cvSort'); els.overlay=document.getElementById('cvOverlay');
+    els.modal=document.getElementById('cvModal'); els.modalHead=document.getElementById('cvModalTitle'); els.modalBody=document.getElementById('cvModalBody'); els.modalFoot=document.getElementById('cvModalFoot');
+    els.toast=document.getElementById('cvToast');
+    els.modalClose=document.getElementById('cvModalClose');
+    els.modalClose.addEventListener('click',closeModal);
+    els.overlay.addEventListener('click',function(e){ if(e.target===els.overlay) closeModal(); });
+    els.search.addEventListener('input',function(){ state.search=els.search.value; state.page=1; renderList(); });
+    els.sort.addEventListener('change',function(){ state.sort=els.sort.value; renderList(); });
+    els.perPage.addEventListener('change',function(){ state.perPage=parseInt(els.perPage.value,10)||10; state.page=1; renderList(); });
+    renderList(); renderDetail();
+  }
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
+})();
+</script>
+
+<section id="account-settings" class="content-section">
 
     <?php if (!empty($profileError)): ?>
       <div id="profileError" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#991b1b;"><?php echo htmlspecialchars($profileError); ?></div>
@@ -2901,8 +3631,8 @@ $alq->close();
 
         <!-- Footer actions -->
         <div class="ps-footer-actions">
-          <button type="button" class="ps-btn ps-btn-secondary" onclick="openModal('changePasswordModal')">Change Password</button>
-          <button type="submit" class="ps-btn ps-btn-primary">Save Changes</button>
+        <button type="button" class="sd-btn sd-btn-outline" onclick="openModal('changePasswordModal')">Change Password</button>
+        <button type="submit" class="sd-btn sd-btn-default">Save Changes</button>
         </div>
       </form>
     </div>
@@ -2910,9 +3640,9 @@ $alq->close();
 
 </main>
 
-<!-- â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+<!-- �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
      MODALS
-â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• -->
+�.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.� -->
 
 <!-- Register Pet Modal -->
 <div class="modal" id="addPetModal">
@@ -3026,15 +3756,13 @@ $alq->close();
       <?php else: ?>
       <div class="sd-field sd-field-full">
         <label class="sd-label">Pet Photo (optional)</label>
-        <div class="sd-photo-upload" onclick="document.getElementById('addPetPhoto').click()">
+        <div class="sd-photo-upload" id="addPetPhotoBox" onclick="document.getElementById('addPetPhoto').click()">
           <div class="upload-placeholder">
             <i class="fas fa-cloud-upload-alt"></i>
             <span>Upload a photo of your pet</span>
           </div>
-          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onchange="previewPetImage(this, 'addPetPhotoPreview')" />
-        </div>
-        <div id="addPetPhotoPreview" style="margin-top:10px;display:none;">
-          <img src="" alt="Pet Photo Preview" style="max-width:200px;max-height:200px;border-radius:8px;" />
+          <img id="addPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
+          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
         </div>
       </div>
       <?php endif; ?>
@@ -3068,17 +3796,14 @@ $alq->close();
           <div id="editPetCurrentPhoto" class="sd-photo-current" style="display:none;">
             <img id="editPetCurrentPhotoImg" src="" alt="Current Pet Photo" />
           </div>
-          <div class="sd-photo-upload" onclick="document.getElementById('editPetPhoto').click()">
+          <div class="sd-photo-upload" id="editPetPhotoBox" onclick="document.getElementById('editPetPhoto').click()">
             <div class="upload-placeholder">
               <i class="fas fa-cloud-upload-alt"></i>
               <span>Upload a new photo</span>
             </div>
-            <input type="file" name="photo" accept="image/*" id="editPetPhoto" onchange="previewPetImage(this, 'editPetPhotoPreview')" />
+            <img id="editPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
+            <input type="file" name="photo" accept="image/*" id="editPetPhoto" onchange="previewPetImage(this, 'editPetPhotoBox', 'editPetPhotoImg')" />
           </div>
-        </div>
-        <div id="editPetPhotoPreview" style="margin-top:10px;display:none;">
-          <p style="font-size:0.85rem;color:#71717a;margin-bottom:5px;">New Photo Preview:</p>
-          <img src="" alt="Pet Photo Preview" style="max-width:200px;max-height:200px;border-radius:8px;" />
         </div>
       </div>
       <div class="sd-form-grid">
@@ -3210,13 +3935,13 @@ window.__petList = <?php
           'breed' => $pet['breed'] ?? '',
           'category' => $pet['from_adoption'] ? 'Adopted' : 'Owned',
           'catKey' => $pet['from_adoption'] ? 'adopted' : 'owned',
-          'sex' => $pet['gender'] ? ucfirst($pet['gender']) : '—',
+          'sex' => $pet['gender'] ? ucfirst($pet['gender']) : '-',
           'genderRaw' => $pet['gender'] ?? 'male',
-          'age' => $pet['age'] !== null ? (int)$pet['age'] . ' yr' . ((int)$pet['age'] != 1 ? 's' : '') : '—',
+          'age' => $pet['age'] !== null ? (int)$pet['age'] . ' yr' . ((int)$pet['age'] != 1 ? 's' : '') : '-',
           'ageNum' => $pet['age'] ?? 0,
-          'weight' => ($pet['weight'] !== null && $pet['weight'] !== '') ? number_format((float)$pet['weight'], 1) . ' kg' : '—',
+          'weight' => ($pet['weight'] !== null && $pet['weight'] !== '') ? number_format((float)$pet['weight'], 1) . ' kg' : '-',
           'weightNum' => $pet['weight'] ?? '',
-          'color' => $pet['color'] ?? '—',
+          'color' => $pet['color'] ?? '-',
           'registered' => date('M d, Y', strtotime($pet['created_at'])),
           'vaccination' => !empty($pet['vaccination_status']) ? $pet['vaccination_status'] : 'Not vaccinated',
           'vaccinated' => $pVaccCode,
@@ -3276,7 +4001,7 @@ window.__petList = <?php
     document.getElementById('editPetGender').value = p.genderRaw || 'male';
     document.getElementById('editPetAge').value = p.ageNum || '';
     document.getElementById('editPetWeight').value = p.weightNum || '';
-    document.getElementById('editPetColor').value = (p.color && p.color !== '—') ? p.color : '';
+    document.getElementById('editPetColor').value = (p.color && p.color !== '-') ? p.color : '';
     document.getElementById('editPetVaccinated').value = p.vaccinated || 'no';
     var photoDiv = document.getElementById('editPetCurrentPhoto');
     if (p.photo) {
@@ -3469,7 +4194,7 @@ window.__petList = <?php
     document.getElementById('editPetGender').value = p.genderRaw || 'male';
     document.getElementById('editPetAge').value = p.ageNum || '';
     document.getElementById('editPetWeight').value = p.weightNum || '';
-    document.getElementById('editPetColor').value = (p.color && p.color !== '—') ? p.color : '';
+    document.getElementById('editPetColor').value = (p.color && p.color !== '-') ? p.color : '';
     document.getElementById('editPetVaccinated').value = p.vaccinated || 'no';
     var photoDiv = document.getElementById('editPetCurrentPhoto');
     if (p.photo) {
@@ -3550,7 +4275,7 @@ window.__reportList = <?php
           'typeKey' => $rt,
           'urgency' => $report['urgency_level'] ?? 'medium',
           'createdRaw' => date('Y-m-d\TH:i', strtotime($report['created_at'])),
-          'location' => $report['location_address'] ?? '—',
+          'location' => $report['location_address'] ?? '-',
           'date' => date('F d, Y', strtotime($report['created_at'])),
           'description' => $report['description'] ?? '',
           'photo' => $report['photo_url'] ?? '',
@@ -3802,7 +4527,7 @@ window.__reportList = <?php
       var urg = form.querySelector('select[name="urgency"]');
       if (urg) urg.value = r.urgency || 'medium';
       var loc = form.querySelector('input[name="location"]');
-      if (loc) loc.value = (r.location && r.location !== '—') ? r.location : '';
+      if (loc) loc.value = (r.location && r.location !== '-') ? r.location : '';
       var dt = form.querySelector('input[name="report_datetime"]');
       if (dt) dt.value = r.createdRaw || '';
       var rdesc = r.description || '';
@@ -3878,7 +4603,7 @@ window.__reportList = <?php
 </script>
 
 <script>
-// â”€â”€ Submit Report wizard â”€â”€
+// �"?�"? Submit Report wizard �"?�"?
 var __rptCurrentStep = 1;
 function rptShowStep(n) {
   var form = document.getElementById('submitReportForm');
@@ -3936,16 +4661,61 @@ function rptStep(dir) {
   }
   rptShowStep(next);
 }
-function previewReportPhoto(input, previewId) {
-  var preview = document.getElementById(previewId || 'reportPhotoPreview');
-  if (!preview) return;
+function previewPetImage(input, boxId, imgId) {
+  var box = document.getElementById(boxId);
+  var img = document.getElementById(imgId);
+  if (!img) return;
   if (input.files && input.files[0]) {
     var reader = new FileReader();
     reader.onload = function(e) {
-      preview.style.display = 'block';
-      preview.querySelector('img').src = e.target.result;
+      img.src = e.target.result;
+      img.style.display = 'block';
+      if (box) {
+        box.classList.add('has-image');
+        var ph = box.querySelector('.upload-placeholder');
+        if (ph) ph.style.display = 'none';
+      }
+      input.style.display = 'none';
     };
     reader.readAsDataURL(input.files[0]);
+  } else {
+    img.style.display = 'none';
+    if (box) {
+      box.classList.remove('has-image');
+      var ph = box.querySelector('.upload-placeholder');
+      if (ph) ph.style.display = '';
+    }
+    input.style.display = '';
+  }
+}
+function previewReportPhoto(input, previewId, imgId) {
+  var area = input.closest('.rpt-upload-area') || document.getElementById(previewId);
+  var img = document.getElementById(imgId || (previewId || 'reportPhotoPreview'));
+  if (!img) return;
+  if (input.files && input.files[0]) {
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      img.src = e.target.result;
+      img.style.display = 'block';
+      if (area) {
+        var ph = area.querySelectorAll('i, span');
+        ph.forEach(function(el) { if (el !== img) el.style.display = 'none'; });
+        area.style.border = 'none';
+        area.style.background = 'transparent';
+        area.style.padding = '0';
+      }
+      input.style.display = 'none';
+    };
+    reader.readAsDataURL(input.files[0]);
+  } else {
+    img.style.display = 'none';
+    if (area) {
+      var ph = area.querySelectorAll('i, span');
+      ph.forEach(function(el) { if (el !== img) el.style.display = ''; });
+      area.style.border = '';
+      area.style.background = '';
+      input.style.display = '';
+    }
   }
 }
 document.addEventListener('DOMContentLoaded', function() {
@@ -3960,7 +4730,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 
 <script>
-// â”€â”€ Appointments table (search/filter/sort/paginate) â”€â”€
+// �"?�"? Appointments table (search/filter/sort/paginate) �"?�"?
 window.APPT = window.APPT || {};
 
 (function() {
@@ -4096,10 +4866,10 @@ window.APPT = window.APPT || {};
     set('adPet', a.pet);
     set('adDate', a.date);
     set('adTime', a.time);
-    set('adCreated', a.created + ' • ' + a.createdTime);
-    set('adNotes', a.notes === '—' ? '—' : a.notes);
-    var c = apptColors[a.status] || ['#f1f5f9', '#64748b'];
-    var pill = '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';">' + a.statusLabel + '</span>';
+    set('adCreated', a.created + ' . ' + a.createdTime);
+    set('adNotes', a.notes === '-' ? '-' : a.notes);
+    var c = apptColors[a.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+    var pill = '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';border-color:' + (c[2] || '#e4e4e7') + ';">' + a.statusLabel + '</span>';
     var stEl = document.getElementById('adStatus');
     if (stEl) stEl.innerHTML = pill;
     var nextEl = document.getElementById('adNextList');
@@ -4147,7 +4917,7 @@ window.APPT = window.APPT || {};
     document.getElementById('editAppointmentPet').value = a.petId || '';
     document.getElementById('editAppointmentDate').value = a.dateRaw || '';
     document.getElementById('editAppointmentTime').value = a.timeRaw || '';
-    document.getElementById('editAppointmentNotes').value = (a.notes && a.notes !== '—') ? a.notes : '';
+    document.getElementById('editAppointmentNotes').value = (a.notes && a.notes !== '-') ? a.notes : '';
     closeApptDrawer();
     openModal('editAppointmentModal');
   };
@@ -4287,15 +5057,14 @@ window.APPT = window.APPT || {};
         <!-- Step 4: Photos -->
         <div class="rpt-form-step" data-step="4" style="display:none;">
           <p class="rpt-step-heading">Attach photo evidence (optional)</p>
-          <div class="rpt-upload-area">
+          <div class="rpt-upload-area" onclick="document.getElementById('reportPhotoInput').click()">
             <i class="fas fa-cloud-upload-alt"></i>
             <span class="rpt-upload-title">Upload photos</span>
-            <span class="rpt-upload-sub">PNG / JPG supported Â· max 5MB</span>
-            <input type="file" name="photo" accept="image/*" onchange="previewReportPhoto(this)" />
+            <span class="rpt-upload-sub">PNG / JPG supported &#8212; max 5MB</span>
+            <input type="file" id="reportPhotoInput" name="photo" accept="image/*" onchange="previewReportPhoto(this)" style="display:none;" />
+            <img id="reportPhotoPreview" src="" alt="Photo preview &#8212; click to change photo" onclick="event.stopPropagation();document.getElementById('reportPhotoInput').click()" style="display:none;max-width:200px;max-height:200px;border-radius:8px;cursor:pointer;margin-top:8px;" title="Click to change photo" />
           </div>
-          <div id="reportPhotoPreview" style="margin-top:10px;display:none;">
-            <img src="" alt="Photo preview" style="max-width:200px;max-height:200px;border-radius:8px;display:block;" />
-          </div>
+   
         </div>
 
         <div class="modal-notice" style="margin-top:1rem;">
@@ -4401,8 +5170,8 @@ window.APPT = window.APPT || {};
       </div>
       </div>
       <div class="modal-actions">
-        <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Update Report</button>
-        <button type="button" class="btn-secondary" onclick="closeModal('editReportModal')">Cancel</button>
+        <button type="submit" class="sd-btn sd-btn-default"><i class="fas fa-save"></i> Update Report</button>
+        <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('editReportModal')">Cancel</button>
       </div>
     </form>
   </div>
@@ -4454,7 +5223,7 @@ window.__apptList = <?php
           'id' => (int)$appt['appointment_id'],
           'ref' => $appt['reference_id'] ?? '#APT-' . str_pad($appt['appointment_id'], 4, '0', STR_PAD_LEFT),
           'service' => ucfirst($appt['appointment_type']),
-          'pet' => $appt['pet_name'] ?? '—',
+          'pet' => $appt['pet_name'] ?? '-',
           'petId' => $appt['pet_id'] ?? '',
           'date' => date('M d, Y', strtotime($appt['preferred_date'])),
           'time' => date('g:i A', strtotime($appt['preferred_time'])),
@@ -4464,7 +5233,7 @@ window.__apptList = <?php
           'createdTime' => date('g:i A', strtotime($appt['created_at'])),
           'status' => $appt['status'],
           'statusLabel' => ucfirst(str_replace('_', ' ', $appt['status'])),
-          'notes' => $appt['notes'] ?? '—',
+          'notes' => $appt['notes'] ?? '-',
       ];
   }
   echo json_encode($jsonAppts);
@@ -4567,8 +5336,8 @@ window.__apptList = <?php
       </div>
       </div>
       <div class="modal-actions">
-        <button type="submit" class="btn-primary"><i class="fas fa-paper-plane"></i> Submit Application</button>
-        <button type="button" class="btn-secondary" onclick="closeModal('adoptionModal')">Cancel</button>
+        <button type="submit" class="sd-btn sd-btn-default"><i class="fas fa-paper-plane"></i> Submit Application</button>
+        <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('adoptionModal')">Cancel</button>
       </div>
     </form>
   </div>
@@ -4588,8 +5357,8 @@ window.__apptList = <?php
       <div class="form-group"><label>Confirm New Password <span class="req">*</span></label><input type="password" name="confirm_password" required /></div>
       </div>
       <div class="modal-actions">
-        <button type="submit" class="btn-primary"><i class="fas fa-save"></i> Change Password</button>
-        <button type="button" class="btn-secondary" onclick="closeModal('changePasswordModal')">Cancel</button>
+        <button type="submit" class="sd-btn sd-btn-default"><i class="fas fa-save"></i> Change Password</button>
+        <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('changePasswordModal')">Cancel</button>
       </div>
     </form>
   </div>
@@ -4776,15 +5545,49 @@ function toggleCustomSpecies(selectId, inputId) {
 }
 
 function filterArchive() {
-    const q = (document.getElementById('archiveSearch')?.value || '').toLowerCase();
-    const t = document.getElementById('archiveTypeFilter')?.value || '';
-    document.querySelectorAll('#archive .data-table tbody tr').forEach(r => {
-        const type = (r.cells[1]?.textContent || '').toLowerCase();
-        const name = (r.cells[2]?.textContent || '').toLowerCase();
-        const matchQ = !q || name.includes(q) || (r.cells[0]?.textContent || '').toLowerCase().includes(q);
-        const matchT = !t || type === t.toLowerCase();
-        r.style.display = matchQ && matchT ? '' : 'none';
-    });
+  var q = (document.getElementById('archiveSearch')?.value || '').toLowerCase();
+  var t = document.getElementById('archiveTypeFilter')?.value || '';
+  var counts = {
+    pet: (document.querySelector('#archive .archive-section[data-type="pet"]')?.getAttribute('data-count')) || 0,
+    report: (document.querySelector('#archive .archive-section[data-type="report"]')?.getAttribute('data-count')) || 0,
+    appointment: (document.querySelector('#archive .archive-section[data-type="appointment"]')?.getAttribute('data-count')) || 0
+  };
+  var titles = { pet: 'Archived Pets', report: 'Archived Reports', appointment: 'Archived Appointments' };
+  var title = document.getElementById('archiveSectionTitle');
+  document.querySelectorAll('#archive .archive-section').forEach(function(s) {
+    var st = s.getAttribute('data-type');
+    s.style.display = (!t || st === t) ? '' : 'none';
+  });
+  if (title) {
+    if (t && titles[t]) { title.textContent = titles[t] + ' (' + counts[t] + ')'; }
+    else { title.textContent = 'Archived Items'; }
+  }
+  document.querySelectorAll('#archive .appt-table tbody tr').forEach(function(r) {
+    var hay = (r.textContent || '').toLowerCase();
+    r.style.display = (!q || hay.includes(q)) ? '' : 'none';
+  });
+}
+
+function setArchiveType(type) {
+  var sel = document.getElementById('archiveTypeFilter');
+  if (sel) sel.value = type || '';
+  var q = document.getElementById('archiveSearch');
+  if (q) q.value = '';
+  var counts = {
+    pet: (document.querySelector('#archive .archive-section[data-type="pet"]')?.getAttribute('data-count')) || 0,
+    report: (document.querySelector('#archive .archive-section[data-type="report"]')?.getAttribute('data-count')) || 0,
+    appointment: (document.querySelector('#archive .archive-section[data-type="appointment"]')?.getAttribute('data-count')) || 0
+  };
+  var titles = { pet: 'Archived Pets', report: 'Archived Reports', appointment: 'Archived Appointments' };
+  var title = document.getElementById('archiveSectionTitle');
+  if (title) {
+    title.textContent = (type && titles[type]) ? titles[type] + ' (' + counts[type] + ')' : 'Archived Items';
+  }
+  document.querySelectorAll('#archive .archive-section').forEach(function(s) {
+    var match = !type || s.getAttribute('data-type') === type;
+    s.style.display = match ? '' : 'none';
+  });
+  if (typeof filterArchive === 'function') filterArchive();
 }
 
 function checkSlot() {
@@ -4857,7 +5660,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// â”€â”€ Booking card (Coach Scheduling Card style) inside Request Appointment modal â”€â”€
+// �"?�"? Booking card (Coach Scheduling Card style) inside Request Appointment modal �"?�"?
 (function() {
     var BK_SLOTS = ['09:00', '10:00', '11:00', '14:00', '15:00'];
     var bkMonthLabel = document.getElementById('bkMonthLabel');
@@ -4971,7 +5774,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (breed) parts.push(breed.charAt(0).toUpperCase() + breed.slice(1));
         if (gender) parts.push(gender.charAt(0).toUpperCase() + gender.slice(1));
         if (type) parts.push(type.charAt(0).toUpperCase() + type.slice(1));
-        document.getElementById('bkPetMeta').textContent = parts.join(' • ');
+        document.getElementById('bkPetMeta').textContent = parts.join(' . ');
     }
 
     function renderCalendar() {
@@ -5096,7 +5899,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('bkDetailTime').textContent = fmtTime(selectedTime);
         var typeSel = document.getElementById('apptTypeSelect');
         var typeVal = typeSel ? typeSel.value : '';
-        document.getElementById('bkDetailType').textContent = typeVal === 'adoption' ? 'Pet Adoption' : (typeVal === 'kapon' ? 'Pet Neutering / Castration' : '—');
+        document.getElementById('bkDetailType').textContent = typeVal === 'adoption' ? 'Pet Adoption' : (typeVal === 'kapon' ? 'Pet Neutering / Castration' : '-');
         var petSel = document.getElementById('petSelect');
         var opt = petSel && petSel.selectedIndex > -1 ? petSel.options[petSel.selectedIndex] : null;
         var petName = 'Your Pet';
@@ -5204,7 +6007,7 @@ function openAdoptionModal(listingId, petName) {
     openModal('adoptionModal');
 }
 
-// â”€â”€ Adoption listings: filter / search / sort / more-menu â”€â”€
+// �"?�"? Adoption listings: filter / search / sort / more-menu �"?�"?
 var _adoptCurrentFilter = 'all';
 function setAdoptFilter(cat, btn) {
     _adoptCurrentFilter = cat;
@@ -5224,7 +6027,7 @@ function filterAdopt() {
     });
 }
 
-// â”€â”€ Profile Settings Edit Toggle â”€â”€
+// �"?�"? Profile Settings Edit Toggle �"?�"?
 function toggleEdit(group) {
     var wrapper = document.querySelector('.profile-settings-wrapper');
     if (!wrapper) return;
@@ -5319,7 +6122,7 @@ function switchSection(sectionId) {
   };
   var bc = document.getElementById('breadcrumbCurrent');
   if (bc) bc.textContent = labels[sectionId] || sectionId;
-  document.body.classList.toggle('page-white', sectionId === 'my-pets' || sectionId === 'my-reports' || sectionId === 'appointments' || sectionId === 'book-appt');
+  document.body.classList.toggle('page-white', sectionId === 'my-pets' || sectionId === 'my-reports' || sectionId === 'appointments' || sectionId === 'book-appt' || sectionId === 'archive' || sectionId === 'account-settings');
   localStorage.setItem('activeSection', sectionId);
   window.location.hash = sectionId;
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -5378,10 +6181,10 @@ document.addEventListener('dcvs:realtime', function(e) {
                 var ds = dt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
                 var ts = dt.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
                 var st = appt.status.replace(/_/g, ' '); st = st.charAt(0).toUpperCase() + st.slice(1);
-                var ac = aColors[appt.status] || ['#f1f5f9', '#64748b'];
+                var ac = aColors[appt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
                 var cdt = appt.created_at ? new Date(appt.created_at.replace(' ', 'T')) : null;
-                var cds = cdt ? cdt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '—';
-                var cts = cdt ? cdt.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}) : '—';
+                var cds = cdt ? cdt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '-';
+                var cts = cdt ? cdt.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}) : '-';
                 var atr = document.createElement('tr');
                 atr.className = 'sd-tr';
                 atr.setAttribute('data-id', appt.appointment_id);
@@ -5400,7 +6203,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                     '<td class="sd-td"><div class="contact-main contact-normal">' + ts + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + cds + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + cts + '</div></td>' +
-                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + ac[0] + ';color:' + ac[1] + ';">' + st + '</span></td>' +
+                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + ac[0] + ';color:' + ac[1] + ';border-color:' + (ac[2] || '#e4e4e7') + ';">' + st + '</span></td>' +
                     '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
                     (appt.status === 'pending' ? '<button type="button" class="pet-action-btn" title="Edit Appointment"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>' : '') +
                     '<button type="button" class="pet-action-btn" title="Archive Appointment" onclick="APPT.archive(' + appt.appointment_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>' +
@@ -5431,13 +6234,13 @@ document.addEventListener('dcvs:realtime', function(e) {
             data.reports.forEach(function(rpt) {
                 if (rtable.querySelector('tr[data-id="' + rpt.report_id + '"]')) return;
                 var ref = rpt.reference_id || '#RPT-' + String(rpt.report_id).padStart(4, '0');
-                var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b'];
+                var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
                 var rlab = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
                 var typeLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report') + ' Report';
                 var catLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report');
                 var dt = new Date((rpt.created_at || '').replace(' ', 'T'));
                 var ds = dt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
-                var resolvedDate = '—';
+                var resolvedDate = '-';
                 var resolvedRaw = '';
                 if (rpt.status === 'resolved' && rpt.updated_at) {
                     resolvedRaw = rpt.updated_at;
@@ -5457,7 +6260,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                     '<td class="sd-td"><div class="contact-main contact-normal">' + typeLabel + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + (rpt.location_address || '-') + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + ds + '</div></td>' +
-                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + rc[0] + ';color:' + rc[1] + ';">' + rlab + '</span></td>' +
+                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + rc[0] + ';color:' + rc[1] + ';border-color:' + (rc[2] || '#e4e4e7') + ';">' + rlab + '</span></td>' +
                     '<td class="sd-td"><span class="pet-cat-tag">' + catLabel + '</span></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + resolvedDate + '</div></td>' +
                     '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
@@ -5484,12 +6287,12 @@ document.addEventListener('dcvs:realtime', function(e) {
                 var cat = pet.from_adoption ? 'adopted' : 'owned';
                 var catLabel = pet.from_adoption ? 'Adopted' : 'Owned';
                 var vaxText = pet.vaccination_status || 'Not vaccinated';
-                var vc = vaxColors[vaxText] || ['#f1f5f9', '#64748b'];
+                var vc = vaxColors[vaxText] || ['#f1f5f9', '#64748b', '#e4e4e7'];
                 var photo = pet.photo_url || '';
                 var initial = (pet.pet_name || 'P').charAt(0).toUpperCase();
                 var ref = pet.reference_id || '#PET-' + String(pet.pet_id).padStart(4, '0');
                 var sp = (pet.pet_type || '').charAt(0).toUpperCase() + (pet.pet_type || '').slice(1);
-                var br = pet.breed || '—';
+                var br = pet.breed || '-';
                 var adoptedDate = '';
                 var adoptedRaw = '';
                 if (cat === 'adopted' && pet.adopted_date) {
@@ -5507,7 +6310,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                 tr.setAttribute('data-adopted', adoptedRaw);
                 tr.setAttribute('data-registered', pet.created_at || '');
                 tr.setAttribute('onclick', 'PET.view(' + pet.pet_id + ')');
-                var registeredDate = pet.created_at ? new Date(pet.created_at.replace(' ', 'T')).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '—';
+                var registeredDate = pet.created_at ? new Date(pet.created_at.replace(' ', 'T')).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) : '-';
                 tr.innerHTML =
                     '<td class="sd-td"><div class="client-cell"><div class="pet-avatar-box">' +
                     (photo ? '<img src="' + photo + '" alt="">' : initial) +
@@ -5515,9 +6318,9 @@ document.addEventListener('dcvs:realtime', function(e) {
                     '<td class="sd-td"><div class="pet-id-label">' + ref + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + sp + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + br + '</div></td>' +
-                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + vc[0] + ';color:' + vc[1] + ';">' + vaxText + '</span></td>' +
+                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + vc[0] + ';color:' + vc[1] + ';border-color:' + (vc[2] || '#e4e4e7') + ';">' + vaxText + '</span></td>' +
                     '<td class="sd-td"><span class="pet-cat-tag ' + cat + '">' + catLabel + '</span></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + (adoptedDate || '—') + '</div></td>' +
+                    '<td class="sd-td"><div class="contact-main contact-normal">' + (adoptedDate || '-') + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + registeredDate + '</div></td>' +
                     '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
                     '<a href="pet-profile.php?id=' + pet.pet_id + '&ref=resident" class="pet-action-btn" title="Pet Resume"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></a>' +

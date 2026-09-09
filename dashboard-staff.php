@@ -723,17 +723,17 @@ $activePage = 'overview';
     .profile-settings-wrapper .ps-profile-left { display:flex; align-items:center; gap:16px; }
     .profile-settings-wrapper .ps-avatar { width:56px; height:56px; border-radius:50%; object-fit:cover; background:#d9d9d9; cursor:pointer; }
     .profile-settings-wrapper .ps-avatar-plain { width:56px; height:56px; border-radius:50%; background:#d9d9d9; display:flex; align-items:center; justify-content:center; font-size:1.3rem; color:#666; cursor:pointer; }
-    .profile-settings-wrapper .ps-profile-name { font-size:15px; font-weight:700; }
-    .profile-settings-wrapper .ps-profile-sub { font-size:13px; color:#6b7280; margin-top:2px; }
+    .profile-settings-wrapper .ps-profile-name { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    .profile-settings-wrapper .ps-profile-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; margin-top:2px; }
     .profile-settings-wrapper .ps-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
-    .profile-settings-wrapper .ps-card-header h2 { font-size:16px; font-weight:700; margin:0; }
-    .profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-size:13px; font-weight:600; color:#1f2328; cursor:pointer; transition:background .15s,border-color .15s; }
+    .profile-settings-wrapper .ps-card-header h2 { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; margin:0; }
+    .profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; cursor:pointer; transition:background .15s,border-color .15s; }
     .profile-settings-wrapper .ps-edit-btn:hover { background:#f5f6f8; border-color:#c3c8d0; }
     .profile-settings-wrapper .ps-edit-btn.active { background:#f0f0f0; border-color:#000; color:#000; }
     .profile-settings-wrapper .ps-edit-btn svg { width:13px; height:13px; }
     .profile-settings-wrapper .ps-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
     .profile-settings-wrapper .ps-form-row.ps-single { grid-template-columns:1fr; }
-    .profile-settings-wrapper .ps-field label { display:block; font-size:13px; color:#4b5563; margin-bottom:6px; }
+    .profile-settings-wrapper .ps-field label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
     .profile-settings-wrapper .ps-field input,
     .profile-settings-wrapper .ps-field select,
     .profile-settings-wrapper .ps-field textarea { width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #e2e5ea; background:#f9fafb; color:#1f2328; outline:none; transition:background .15s,border-color .15s,box-shadow .15s; box-sizing:border-box; font-family:inherit; }
@@ -747,7 +747,7 @@ $activePage = 'overview';
     .profile-settings-wrapper .ps-field select:not(:disabled):focus,
     .profile-settings-wrapper .ps-field textarea:not(:disabled):focus { border-color:#000; box-shadow:0 0 0 3px rgba(0,0,0,0.08); }
     .profile-settings-wrapper .ps-field textarea { height:42px; min-height:42px; max-height:42px; resize:none; overflow:hidden; line-height:1.5; }
-    .profile-settings-wrapper .ps-btn { padding:9px 18px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+    .profile-settings-wrapper .ps-btn { padding:9px 18px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; border-radius:8px; cursor:pointer; border:1px solid transparent; }
     .profile-settings-wrapper .ps-btn-primary { background:#000; color:#fff; border-color:#000; }
     .profile-settings-wrapper .ps-btn-primary:hover { background:#1a1a1a; }
     .profile-settings-wrapper .ps-btn-primary:disabled { background:#c7c9d9; border-color:#c7c9d9; cursor:not-allowed; }
@@ -756,6 +756,7 @@ $activePage = 'overview';
     .profile-settings-wrapper .ps-footer-actions { display:flex; justify-content:flex-start; gap:10px; margin-top:4px; }
     .profile-settings-wrapper .ps-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:#1f2328; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:9999; }
     .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+    #account-settings { background:#fff; }
 
     /* �"?�"? Client & Pet Database (CPD) �"?�"? */
     .cpd{ --green-50:#eef6f0; --green-100:#dcebe0; --green-200:#b8d1c0;
@@ -805,8 +806,8 @@ $activePage = 'overview';
     .cpd .panel{ background:var(--white); border:1px solid var(--border); }
 
     /* Full-page database (no container look) */
-    #reports-all, #client-pets, #reports-pending, #reports-active, #reports-resolved{ margin:-1.75rem -2rem; width:calc(100% + 4rem); max-width:none; }
-    #reports-all thead th, #reports-pending thead th, #reports-active thead th, #reports-resolved thead th, #client-pets thead th{ background:transparent; border-bottom:1px solid var(--border); }
+    #client-pets, #reports-pending, #reports-active, #reports-resolved{ margin:-1.75rem -2rem; width:calc(100% + 4rem); max-width:none; }
+    #reports-all thead th, #reports-pending thead th, #reports-active thead th, #reports-resolved thead th, #client-pets thead th{ background:#fafafa; border-bottom:1px solid var(--border); }
     .reports-fullpage{ background:var(--white); min-height:calc(100vh - var(--topbar-h, 64px)); }
     .reports-fullpage .cpd-app{ padding:0; }
     .reports-fullpage .layout{ min-height:calc(100vh - var(--topbar-h, 64px)); grid-template-rows:1fr; }
@@ -920,7 +921,7 @@ $activePage = 'overview';
     #client-pets table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
     #client-pets thead{ }
     #client-pets thead tr{ border-bottom:1px solid #e4e4e7; }
-    #client-pets thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:transparent; border-bottom:none; }
+    #client-pets thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:#fafafa; border-bottom:none; }
     #client-pets thead th.sd-th-action{ text-align:right; }
     #client-pets tbody tr{ border-bottom:1px solid #e4e4e7; transition:background .15s; cursor:pointer; }
     #client-pets tbody tr:last-child{ border-bottom:none; }
@@ -1036,6 +1037,12 @@ $activePage = 'overview';
     .cpd .profile-panel{ padding:18px; border-left:none; display:flex; flex-direction:column; overflow-y:auto; }
     .cpd .profile-panel #profileContent{ flex:1; min-height:0; display:flex; flex-direction:column; }
     .cpd .profile-panel #rptDetailContent, .cpd .profile-panel #penDetailContent, .cpd .profile-panel #actDetailContent, .cpd .profile-panel #resDetailContent{ flex:1; min-height:0; display:flex; flex-direction:column; }
+    .cd-drawer #rptDetailContent, .cd-drawer #penDetailContent, .cd-drawer #actDetailContent, .cd-drawer #resDetailContent{ font-family:'Inter','Segoe UI',sans-serif; }
+    .cd-drawer .rpt-detail-ref{ font-family:'Inter','Segoe UI',sans-serif; }
+    .cd-drawer .rpt-detail-body h2, .cd-drawer .rpt-detail-body h3, .cd-drawer .rpt-detail-body h4,
+    .cd-drawer .rpt-detail-body .rpt-section-title, .cd-drawer .rpt-detail-body .info-row-label,
+    .cd-drawer .rpt-detail-body .info-row-value, .cd-drawer .rpt-detail-body .rpt-desc-box,
+    .cd-drawer .rpt-detail-body .rpt-notes-box, .cd-drawer .rpt-detail-body .rpt-history li{ font-family:'Inter','Segoe UI',sans-serif; }
     .cpd .rpt-detail-body[data-tab="details"]{ display:flex; flex-direction:column; flex:1; }
     .cpd .profile-header{ display:flex; align-items:center; gap:16px; margin-bottom:18px; }
     .cpd .profile-avatar{ width:96px;height:96px; border-radius:14px; background:var(--green-100); color:var(--green-700); font-weight:700; font-size:32px; display:flex;align-items:center;justify-content:center; flex-shrink:0; overflow:hidden; }
@@ -1133,7 +1140,7 @@ $activePage = 'overview';
     .cpd .rpt-detail-grid .info-rows{ gap:12px; margin-bottom:0; }
     .cpd .rpt-full-col{ grid-column:1 / -1; }
     .cpd .rpt-detail-grid + .rpt-full-col, .cpd .rpt-detail-grid ~ .rpt-full-col{ margin-top:6px; }
-    .cpd .rpt-detail-ref{ font-size:20px; font-weight:700; color:var(--ink-900); word-break:break-all; font-family:'Montserrat',sans-serif; }
+    .cpd .rpt-detail-ref{ font-size:18px; font-weight:600; letter-spacing:-0.025em; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; word-break:break-all; }
     .cpd .rpt-detail-type{ font-size:14px; color:var(--ink-500); margin-top:4px; }
     .cpd .rpt-section-title{ font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-400); margin:18px 0 10px; }
     .cpd .rpt-desc-box{ background:none; border:none; border-radius:0; padding:0; font-size:13px; color:var(--ink-700); line-height:1.55; }
@@ -1844,7 +1851,21 @@ $activePage = 'overview';
 
     /* Appointment Records Table - Enhanced UI */
     #appointments.content-section {
-      background: #ffffff;
+      margin:-1.75rem -2rem;
+      width:calc(100% + 4rem);
+      max-width:none;
+      background:#ffffff;
+      min-height:calc(100vh - var(--topbar-h, 64px));
+      padding:1.5rem 2rem;
+    }
+    /* Calendar schedule: full-page white, attached to the page (no gray gutter / no centering) */
+    #calendar-schedule.content-section {
+      margin:-1.75rem -2rem;
+      width:calc(100% + 4rem);
+      max-width:none;
+      background:#ffffff;
+      min-height:calc(100vh - var(--topbar-h, 64px));
+      padding:1.5rem 2rem;
     }
     .appt-white-card {
       background: #fff;
@@ -2463,7 +2484,7 @@ $activePage = 'overview';
     #appointments .appt-card-header { justify-content:flex-start; }
     #appointments .appt-header-right { flex-wrap:wrap; }
     #appointments .appt-db-table-area { overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; padding:0; }
-    #appointments .appt-table thead th { background:transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; letter-spacing:0; text-transform:none; color:#71717a; height:40px; padding:0 8px; border-bottom:1px solid #e4e4e7; }
+    #appointments .appt-table thead th { background:#fafafa; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; letter-spacing:0; text-transform:none; color:#71717a; height:40px; padding:0 8px; border-bottom:1px solid #e4e4e7; }
     #appointments .appt-table tbody tr { border-bottom:1px solid #e4e4e7; }
     #appointments .appt-table tbody tr:hover { background:#f4f4f5; }
     #appointments .appt-table tbody tr.selected { background:#f4f4f5; }
@@ -2501,7 +2522,7 @@ $activePage = 'overview';
     /* Dialog font + button style (shadcn) - Pending / Active / Resolved cases */
     #reports-pending .dt-container, #reports-active .dt-container, #reports-resolved .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
     #reports-pending table, #reports-active table, #reports-resolved table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
-    #reports-pending thead th, #reports-active thead th, #reports-resolved thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:transparent; text-transform:none; letter-spacing:0; border-bottom:1px solid #e4e4e7; }
+    #reports-pending thead th, #reports-active thead th, #reports-resolved thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:#fafafa; text-transform:none; letter-spacing:0; border-bottom:1px solid #e4e4e7; }
     #reports-pending thead th.sd-th-action, #reports-active thead th.sd-th-action, #reports-resolved thead th.sd-th-action{ text-align:right; }
     #reports-pending tbody tr, #reports-active tbody tr, #reports-resolved tbody tr{ border-bottom:1px solid #e4e4e7; }
     #reports-pending tbody tr:hover, #reports-active tbody tr:hover, #reports-resolved tbody tr:hover{ background:#f4f4f5; }
@@ -2628,31 +2649,35 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       #reports-all .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
       #reports-all table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
       #reports-all thead tr{ border-bottom:1px solid #e4e4e7; }
-      #reports-all thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:transparent; border-bottom:none; }
+      #reports-all thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:#fafafa; border-bottom:none; }
       #reports-all thead th.sd-th-action{ text-align:right; }
       #reports-all tbody tr{ border-bottom:1px solid #e4e4e7; transition:background .15s; cursor:pointer; }
       #reports-all tbody tr:last-child{ border-bottom:none; }
-      #reports-all tbody tr:hover{ background:#f4f4f5; }
-      #reports-all tbody td{ padding:10px 8px; vertical-align:middle; font-size:14px; color:#18181b; }
+      #reports-all tbody tr:hover{ background:#fafafa; }
+      #reports-all tbody tr.selected, #reports-all tbody tr.selected:hover{ background:#f4f4f5; }
+      #reports-all tbody td{ padding:8px; vertical-align:middle; font-size:14px; color:#18181b; }
       #reports-all tbody td.sd-td-action{ text-align:right; }
       #reports-all .client-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; }
-      #reports-all .client-id{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; }
+      #reports-all .client-id{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
       #reports-all .contact-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
-      #reports-all .contact-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; }
+      #reports-all .contact-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
       #reports-all .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
       #reports-all .th-sort:hover{ background:#f4f4f5; color:#18181b; }
       #reports-all .th-sort.th-sorted{ color:#18181b; }
       #reports-all .th-sort-icon{ width:16px; height:16px; color:#71717a; flex-shrink:0; }
       #reports-all .th-sorted .th-sort-icon{ color:#18181b; }
+      #reports-all .sd-row-actions{ width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:transparent; border:none; color:#71717a; cursor:pointer; }
+      #reports-all .sd-row-actions:hover{ background:#f4f4f5; color:#18181b; }
       #reports-all .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; }
       #reports-all .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
       #reports-all .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
       #reports-all .db-toolbar{ justify-content:flex-start; }
+      #reports-all .db-toolbar-actions{ margin-left:auto; display:flex; align-items:center; gap:8px; }
       #reports-all .search-grow-wrap input{ height:36px; width:100%; padding:0 12px 0 36px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; font-size:14px; color:#18181b; outline:none; font-family:inherit; }
       #reports-all .search-grow-wrap input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-      #reports-all .search-grow-wrap input::placeholder{ color:#a1a1aa; }
+      #reports-all .search-grow-wrap input::placeholder{ color:#71717a; }
       #reports-all .search-grow-wrap svg{ color:#71717a; }
-      #reports-all .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background-color:#fff; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
+      #reports-all .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
       #reports-all .tf-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
       #reports-all .dt-pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; }
       #reports-all .dt-pagination-right{ display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
@@ -2664,6 +2689,11 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       #reports-all .dt-page-btn{ height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
       #reports-all .dt-page-btn:hover:not(:disabled){ background:#f4f4f5; }
       #reports-all .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
+      #reports-all{ font-family:'Inter','Segoe UI',sans-serif; }
+      #reports-all .kpi-card{ font-family:'Inter','Segoe UI',sans-serif; }
+      #reports-all .search-grow-wrap input{ font-family:'Inter','Segoe UI',sans-serif; }
+      #reports-all .search-grow-wrap input::placeholder{ color:#a1a1aa; }
+      #reports-all tbody td{ font-family:'Inter','Segoe UI',sans-serif; }
     </style>
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
@@ -2703,31 +2733,34 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input type="text" id="rptMainSearch" placeholder="Search reports by ref, reporter, description..." oninput="rptSetSearch(this.value)">
               </div>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <div class="toolbar-filters">
-                  <select class="select-input tf-select" id="rptType" onchange="rptSetType(this.value)">
-                    <option value="">All Types</option>
-                    <option value="stray">Stray Animal</option>
-                    <option value="rabies">Rabies</option>
-                    <option value="injured">Injured Animal</option>
-                    <option value="dead">Dead Animal</option>
-                    <option value="rescue">Rescue</option>
-                  </select>
-                  <select class="select-input tf-select" id="rptBrgy" onchange="rptSetBrgy(this.value)">
-                    <option value="">All Barangays</option>
-                    <?php foreach ($cpdBarangays as $b): ?>
-                      <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
-                    <?php endforeach; ?>
-                  </select>
-                  <select class="select-input tf-select" id="rptStatus" onchange="rptSetStatus(this.value)">
-                    <option value="">All Statuses</option>
-                    <option value="pending">Pending</option>
-                    <option value="validated">Validated</option>
-                    <option value="active">Active</option>
-                    <option value="resolved">Resolved</option>
-                    <option value="rejected">Rejected</option>
-                  </select>
-                </div>
+              <div class="toolbar-filters">
+                <select class="select-input tf-select" id="rptType" onchange="rptSetType(this.value)">
+                  <option value="">All Types</option>
+                  <option value="stray">Stray Animal</option>
+                  <option value="rabies">Rabies</option>
+                  <option value="injured">Injured Animal</option>
+                  <option value="dead">Dead Animal</option>
+                  <option value="rescue">Rescue</option>
+                </select>
+                <select class="select-input tf-select" id="rptBrgy" onchange="rptSetBrgy(this.value)">
+                  <option value="">All Barangays</option>
+                  <?php foreach ($cpdBarangays as $b): ?>
+                    <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
+                  <?php endforeach; ?>
+                </select>
+                <select class="select-input tf-select" id="rptStatus" onchange="rptSetStatus(this.value)">
+                  <option value="">All Statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="validated">Validated</option>
+                  <option value="active">Active</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+              <div class="db-toolbar-actions">
+                <button type="button" class="sd-btn sd-btn-outline" onclick="rptExportCSV()" title="Export Reports">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
               </div>
             </div>
 
@@ -3572,12 +3605,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </section>
 
   <section id="account-settings" class="content-section">
-    <div class="page-header">
-      <div>
-        <h1 class="page-title" style="font-size:22px;font-weight:800;margin:0;">My Profile</h1>
-        <p class="page-subtitle">Manage your staff profile and account information</p>
-      </div>
-    </div>
 
     <?php if (isset($_SESSION['profile_error'])): ?>
       <div id="profileError" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#991b1b;"><?php echo htmlspecialchars($_SESSION['profile_error']); unset($_SESSION['profile_error']); ?></div>
@@ -4408,6 +4435,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const targetId = link.getAttribute('data-section');
             document.getElementById(targetId).classList.add('active');
             breadcrumb.textContent = link.querySelector('.nav-link-text').textContent;
+            document.body.classList.toggle('white-page', targetId === 'appointments' || targetId === 'account-settings');
             
             // Keep parent dropdown group open + highlighted when a sub-item is active
             const group = link.closest('.nav-group');
@@ -4449,6 +4477,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize Charts
     initCharts();
+});
+
+// Keep page background in sync when navigating via URL hash
+window.addEventListener('hashchange', function() {
+    var targetId = window.location.hash.replace('#', '');
+    if (targetId && document.getElementById(targetId)) {
+        document.body.classList.toggle('white-page', targetId === 'appointments' || targetId === 'account-settings');
+    } else {
+        document.body.classList.remove('white-page');
+    }
 });
 
 function initCharts() {

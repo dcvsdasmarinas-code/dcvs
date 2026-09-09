@@ -73,12 +73,17 @@ function handleSave($conn, $userId) {
     $rescuedDate = trim($_POST['rescued_date'] ?? '');
     $description = trim($_POST['description'] ?? '');
     $status = $_POST['status'] ?? 'available';
+    $saveMode = $_POST['save_mode'] ?? '';
+
+    if ($saveMode === 'draft') {
+        $status = 'draft';
+    }
 
     if (empty($name) || empty($breed) || empty($age) || empty($weight) || empty($color) || empty($rescuedDate) || empty($description)) {
         return ['success' => false, 'message' => 'All required fields must be filled'];
     }
 
-    if (!in_array($status, ['available', 'adopted', 'withdrawn'])) {
+    if ($saveMode !== 'draft' && !in_array($status, ['available', 'adopted', 'withdrawn'])) {
         $status = 'available';
     }
 

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Calendar — Create Event</title>
+<style>
+  :root{
+    --primary:#5B4FE9;
+    --primary-soft:#EFEDFD;
+    --ink:#1B1B25;
+    --muted:#8A8A9E;
+    --line:#ECECF2;
+    --bg:#F5F5F8;
+    --card:#FFFFFF;
+    --radius:14px;
+    --shadow:0 10px 40px rgba(27,27,37,.08);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{
+    display:flex;min-height:100vh;background:var(--card);
+  }
+
+  /* ============ LEFT: CALENDAR ============ */
+  .calendar-pane{flex:1;padding:0 0 40px;border-right:1px solid var(--line);min-width:0}
+
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:18px 28px;gap:16px;
+  }
+  .search{
+    display:flex;align-items:center;gap:10px;flex:0 1 320px;
+    border:1px solid var(--line);border-radius:10px;padding:9px 14px;
+    color:var(--muted);font-size:13px;background:#fff;
+  }
+  .search input{border:none;outline:none;flex:1;font-size:13px;color:var(--ink);background:transparent}
+  .kbd{
+    font-size:11px;color:var(--muted);background:#F4F4F8;border:1px solid var(--line);
+    border-radius:5px;padding:2px 6px;white-space:nowrap;
+  }
+  .topbar-right{display:flex;align-items:center;gap:14px}
+  .icon-btn{
+    width:36px;height:36px;border-radius:10px;border:1px solid var(--line);
+    background:#fff;display:grid;place-items:center;cursor:pointer;color:var(--muted);
+    transition:background .15s;
+  }
+  .icon-btn:hover{background:#F7F7FA}
+  .user-chip{display:flex;align-items:center;gap:10px}
+  .avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#D8D8E4}
+  .user-chip .name{font-size:13px;font-weight:600}
+  .user-chip .mail{font-size:11px;color:var(--muted)}
+
+  .cal-header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 28px;flex-wrap:wrap;gap:12px;
+  }
+  .month-nav{display:flex;align-items:center;gap:12px}
+  .month-nav h1{font-size:26px;font-weight:700;letter-spacing:-.02em}
+  .nav-arrow{
+    width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    cursor:pointer;color:var(--ink);font-size:14px;display:grid;place-items:center;
+  }
+  .nav-arrow:hover{background:#F7F7FA}
+  .cal-actions{display:flex;align-items:center;gap:10px}
+  .btn-primary{
+    background:var(--primary);color:#fff;border:none;border-radius:9px;
+    padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer;
+    display:inline-flex;align-items:center;gap:8px;
+    box-shadow:0 6px 16px rgba(91,79,233,.3);transition:background .15s;
+  }
+  .btn-primary:hover{background:#4B40D6}
+
+  .grid-wrap{padding:0 28px;overflow-x:auto}
+  .cal-grid{
+    display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));
+    border-left:1px solid var(--line);border-top:1px solid var(--line);
+    min-width:880px;
+  }
+  .dow{
+    padding:10px 12px;font-size:12px;font-weight:600;color:var(--ink);
+    border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+    background:#FBFBFD;
+  }
+  .day{
+    min-height:110px;padding:8px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);
+    position:relative;cursor:pointer;transition:background .12s;
+  }
+  .day:hover{background:#FAFAFE}
+  .day.dim{color:#C3C3D2;background:#FCFCFE}
+  .day.selected{background:var(--primary-soft);outline:2px solid var(--primary);outline-offset:-2px}
+  .day-num{font-size:13px;font-weight:600;margin-bottom:6px}
+  .day.dim .day-num{font-weight:500}
+  .chip{
+    display:flex;align-items:center;gap:6px;font-size:10.5px;line-height:1.25;
+    border-radius:5px;padding:3px 6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;background:#F4F4F8;color:#55566B;
+  }
+  .chip .dot{width:3px;align-self:stretch;border-radius:2px;flex:none}
+  .chip.blue .dot{background:#4F8CFF}
+  .chip.green .dot{background:#35C36D}
+  .chip.purple .dot{background:#8B5CF6}
+  .chip.orange .dot{background:#FF9F43}
+  .chip.pink .dot{background:#F15BB5}
+
+  /* ============ RIGHT: CREATE EVENT PANEL ============ */
+  .event-pane{width:460px;flex:none;display:flex;flex-direction:column;background:#fff}
+  .panel-head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:20px 26px;border-bottom:1px solid var(--line);
+  }
+  .panel-head .left{display:flex;align-items:center;gap:12px}
+  .close-x{
+    width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:#fff;
+    cursor:pointer;display:grid;place-items:center;color:var(--muted);font-size:14px;
+  }
+  .panel-head h2{font-size:17px;font-weight:700}
+  .panel-body{padding:22px 26px;overflow-y:auto;flex:1}
+  .section{margin-bottom:22px}
+
+  .title-input{
+    width:100%;border:none;outline:none;font-size:24px;font-weight:700;letter-spacing:-.01em;
+    color:var(--ink);padding:4px 0;background:transparent;
+  }
+  .title-input::placeholder{color:#C3C3D2}
+
+  .link-row{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+  .meet-link{display:flex;align-items:center;gap:8px;font-size:13px;color:#3D8BFD;text-decoration:none}
+  .meet-link:hover{text-decoration:underline}
+  .g-icon{width:18px;height:18px;border-radius:4px;display:grid;place-items:center;color:#fff;font-size:11px;font-weight:700;background:linear-gradient(135deg,#35C36D,#4F8CFF)}
+  .copy-btn{border:none;background:transparent;cursor:pointer;color:var(--muted);padding:4px;border-radius:6px}
+  .copy-btn:hover{background:#F4F4F8}
+
+  .duration-row{display:flex;gap:6px;margin-top:18px;flex-wrap:wrap}
+  .dur{
+    border:none;background:transparent;color:var(--muted);font-size:12.5px;font-weight:500;
+    padding:8px 14px;border-radius:999px;cursor:pointer;transition:all .15s;
+  }
+  .dur:hover{background:#F4F4F8}
+  .dur.active{background:var(--primary);color:#fff;box-shadow:0 4px 12px rgba(91,79,233,.35)}
+
+  .time-row{display:flex;align-items:center;gap:22px;margin-top:20px}
+  .time-block .t{font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .time-block .d{font-size:12px;color:var(--muted);margin-top:4px}
+  .time-arrow{font-size:22px;color:var(--ink)}
+
+  .row-between{display:flex;align-items:center;justify-content:space-between;margin-top:18px}
+  .tz{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);border:none;background:transparent;cursor:pointer}
+  .tz:hover{color:var(--primary)}
+
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;margin-top:20px}
+  .toggle-row span{font-size:14px;font-weight:500}
+  .switch{position:relative;width:44px;height:24px;appearance:none;background:#D9D9E4;border-radius:999px;cursor:pointer;transition:background .2s;outline:none}
+  .switch:checked{background:var(--primary)}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+  .switch:checked::after{transform:translateX(20px)}
+
+  .people{margin-top:22px;border-top:1px solid var(--line);padding-top:18px}
+  .person{display:flex;align-items:center;gap:12px;padding:9px 0}
+  .person .avatar{width:38px;height:38px}
+  .person .p-name{font-size:13.5px;font-weight:600}
+  .person .p-mail{font-size:11.5px;color:var(--muted)}
+  .person .role{margin-left:auto;font-size:12px;color:var(--muted)}
+  .person .role.master{color:var(--primary);font-weight:600}
+  .add-people{
+    display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;padding:8px 0;
+    border:none;background:transparent;cursor:pointer;color:var(--muted);font-size:13px;font-weight:500;
+  }
+  .add-people:hover{color:var(--primary)}
+  .add-people .plus-ic{width:30px;height:30px;border-radius:50%;background:#F0F0F6;display:grid;place-items:center;font-size:14px}
+
+  .note-head{display:flex;align-items:center;justify-content:space-between;margin-top:20px}
+  .note-head span{font-size:14px;font-weight:600}
+  .note-area{
+    width:100%;min-height:90px;margin-top:12px;border:1px solid var(--line);border-radius:12px;
+    padding:14px;font-size:13px;font-family:inherit;resize:vertical;outline:none;color:var(--ink);
+  }
+  .note-area:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(91,79,233,.12)}
+  .note-area::placeholder{color:#B9B9CA}
+
+  @media (max-width:1020px){
+    .app{flex-direction:column}
+    .event-pane{width:100%;border-top:1px solid var(--line)}
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= CALENDAR ================= -->
+  <section class="calendar-pane">
+    <div class="topbar">
+      <label class="search">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" placeholder="Search for anything" />
+        <span class="kbd">⌘ + K</span>
+      </label>
+      <div class="topbar-right">
+        <button class="icon-btn" title="Help">?</button>
+        <button class="icon-btn" title="Notifications">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        </button>
+        <div class="user-chip">
+          <img class="avatar" src="https://i.pravatar.cc/68?img=12" alt="Mugiwara Column" />
+          <div>
+            <div class="name">Mugiwara Column</div>
+            <div class="mail">mugiwara.col@gmail.com</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cal-header">
+      <div class="month-nav">
+        <h1 id="monthLabel">August 2023</h1>
+        <button class="nav-arrow" id="prevMonth" aria-label="Previous month">‹</button>
+        <button class="nav-arrow" id="nextMonth" aria-label="Next month">›</button>
+      </div>
+      <div class="cal-actions">
+        <button class="btn-primary">＋ Create booking type</button>
+        <button class="icon-btn" title="Filter">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+        </button>
+        <button class="icon-btn" title="View">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="grid-wrap">
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+  </section>
+
+  <!-- ================= CREATE EVENT ================= -->
+  <aside class="event-pane">
+    <div class="panel-head">
+      <div class="left">
+        <button class="close-x" title="Close">✕</button>
+        <h2>Create event</h2>
+      </div>
+      <button class="btn-primary" id="saveBtn">Save event</button>
+    </div>
+
+    <div class="panel-body">
+      <div class="section">
+        <input class="title-input" type="text" value="Gathering Frontend Developer Indonesia" placeholder="Add title" />
+        <div class="link-row">
+          <a class="meet-link" href="#" onclick="return false">
+            <span class="g-icon">G</span> https://meet.google.com/y4x72A
+          </a>
+          <button class="copy-btn" id="copyBtn" title="Copy link">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+        </div>
+        <div class="duration-row" id="durationRow">
+          <button class="dur active" data-min="15">15 min</button>
+          <button class="dur" data-min="30">30 min</button>
+          <button class="dur" data-min="45">45 min</button>
+          <button class="dur" data-min="60">1 hour</button>
+          <button class="dur" data-min="120">2 hour</button>
+        </div>
+        <div class="time-row">
+          <div class="time-block">
+            <div class="t" id="startTime">12:00 AM</div>
+            <div class="d" id="dateLabel">Sunday, August 16, 2023</div>
+          </div>
+          <div class="time-arrow">→</div>
+          <div class="time-block">
+            <div class="t" id="endTime">12:15 AM</div>
+            <div class="d">
+              <button class="tz" id="tzBtn">🌐 GMT +7 Jakarta ▾</button>
+            </div>
+          </div>
+        </div>
+        <div class="toggle-row">
+          <span>All day event</span>
+          <input type="checkbox" class="switch" id="allDay" />
+        </div>
+      </div>
+
+      <div class="people" id="peopleList">
+        <div class="person">
+          <img class="avatar" src="https://i.pravatar.cc/76?img=12" alt="" />
+          <div><div class="p-name">Mugiwara Column</div><div class="p-mail">mugiwara.col@gmail.com</div></div>
+          <span class="role master">Room master</span>
+        </div>
+        <div class="person">
+          <img class="avatar" src="https://i.pravatar.cc/76?img=47" alt="" />
+          <div><div class="p-name">Phom Pheng Arsive</div><div class="p-mail">phom.pheng@gmail.com</div></div>
+          <span class="role">Guest</span>
+        </div>
+        <div class="person">
+          <img class="avatar" src="https://i.pravatar.cc/76?img=33" alt="" />
+          <div><div class="p-name">Daniel Wyndaski</div><div class="p-mail">daniel.wyn@gmail.com</div></div>
+          <span class="role">Guest</span>
+        </div>
+        <div class="person">
+          <img class="avatar" src="https://i.pravatar.cc/76?img=45" alt="" />
+          <div><div class="p-name">Alita Patricia</div><div class="p-mail">alita.pat@gmail.com</div></div>
+          <span class="role">Guest</span>
+        </div>
+        <button class="add-people" id="addPeopleBtn">
+          <span class="plus-ic">👤+</span> Add people <span style="margin-left:auto">▾</span>
+        </button>
+      </div>
+
+      <div class="section">
+        <div class="note-head">
+          <span>Add note</span>
+          <input type="checkbox" class="switch" id="noteToggle" checked />
+        </div>
+        <textarea class="note-area" id="noteArea" placeholder="Note meeting..."></textarea>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  /* ---------- Calendar ---------- */
+  var grid = document.getElementById('calGrid');
+  var monthLabel = document.getElementById('monthLabel');
+  var current = new Date(2023, 7, 1); // August 2023
+  var selectedKey = '2023-7-16';
+
+  var sampleEvents = {
+    '2023-7-2':[['purple','20:00 PM','30 min']],
+    '2023-7-4':[['blue','09:00 AM','Daily standup'],['green','18:30 PM','Mentoring']],
+    '2023-7-5':[['blue','09:00 AM','Daily standup'],['orange','18:30 PM','Mentoring']],
+    '2023-7-6':[['blue','09:00 AM','Daily standup'],['green','18:30 PM','Mentoring']],
+    '2023-7-7':[['blue','09:00 AM','Daily standup']],
+    '2023-7-8':[['purple','20:00 PM','Meeting']],
+    '2023-7-9':[['blue','09:00 AM','Daily standup'],['pink','18:00 PM','Meeting']],
+    '2023-7-11':[['blue','09:00 AM','Daily standup']],
+    '2023-7-12':[['blue','09:00 AM','Daily standup']],
+    '2023-7-13':[['blue','09:00 AM','Daily standup']],
+    '2023-7-19':[['purple','16:00 PM','Meeting']],
+    '2023-7-21':[['green','20:15 PM','Mentoring']]
+  };
+
+  var dows = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  function render(){
+    grid.innerHTML = '';
+    dows.forEach(function(d){
+      var el = document.createElement('div');
+      el.className = 'dow'; el.textContent = d;
+      grid.appendChild(el);
+    });
+    monthLabel.textContent = monthNames[current.getMonth()] + ' ' + current.getFullYear();
+
+    var first = new Date(current.getFullYear(), current.getMonth(), 1);
+    var startOffset = (first.getDay() + 6) % 7; // Monday-first
+    var start = new Date(first); start.setDate(first.getDate() - startOffset);
+
+    for (var i = 0; i < 42; i++){
+      var day = new Date(start); day.setDate(start.getDate() + i);
+      var key = day.getFullYear() + '-' + day.getMonth() + '-' + day.getDate();
+      var cell = document.createElement('div');
+      cell.className = 'day' + (day.getMonth() !== current.getMonth() ? ' dim' : '');
+      if (key === selectedKey) cell.classList.add('selected');
+
+      var num = document.createElement('div');
+      num.className = 'day-num'; num.textContent = day.getDate();
+      cell.appendChild(num);
+
+      (sampleEvents[key] || []).forEach(function(ev){
+        var chip = document.createElement('div');
+        chip.className = 'chip ' + ev[0];
+        chip.innerHTML = '<span class="dot"></span><span><b>' + ev[1] + '</b> · ' + ev[2] + '</span>';
+        cell.appendChild(chip);
+      });
+
+      cell.addEventListener('click', function(k, dt){
+        return function(){
+          selectedKey = k;
+          var prev = grid.querySelector('.day.selected');
+          if (prev) prev.classList.remove('selected');
+          this.classList.add('selected');
+          setDate(dt);
+        };
+      }(key, new Date(day)));
+
+      grid.appendChild(cell);
+    }
+  }
+
+  document.getElementById('prevMonth').addEventListener('click', function(){
+    current.setMonth(current.getMonth() - 1); render();
+  });
+  document.getElementById('nextMonth').addEventListener('click', function(){
+    current.setMonth(current.getMonth() + 1); render();
+  });
+
+  /* ---------- Event panel state ---------- */
+  var duration = 15;
+  var allDay = false;
+  var dateLabel = document.getElementById('dateLabel');
+
+  function setDate(d){
+    dateLabel.textContent = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
+  }
+
+  function fmtTime(minutesFromMidnight){
+    var h = Math.floor(minutesFromMidnight / 60) % 24, m = minutesFromMidnight % 60;
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    var hh = h % 12; if (hh === 0) hh = 12;
+    return hh + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+  }
+
+  function updateTimes(){
+    var end = document.getElementById('endTime');
+    if (allDay){ end.textContent = '—'; return; }
+    end.textContent = fmtTime(0 + duration); // 12:00 AM start
+  }
+
+  document.getElementById('durationRow').addEventListener('click', function(e){
+    var btn = e.target.closest('.dur'); if (!btn) return;
+    this.querySelectorAll('.dur').forEach(function(b){ b.classList.remove('active'); });
+    btn.classList.add('active');
+    duration = parseInt(btn.dataset.min, 10);
+    updateTimes();
+  });
+
+  document.getElementById('allDay').addEventListener('change', function(){
+    allDay = this.checked; updateTimes();
+  });
+
+  document.getElementById('noteToggle').addEventListener('change', function(){
+    document.getElementById('noteArea').style.display = this.checked ? '' : 'none';
+  });
+
+  document.getElementById('copyBtn').addEventListener('click', function(){
+    var link = 'https://meet.google.com/y4x72A';
+    if (navigator.clipboard) navigator.clipboard.writeText(link);
+    this.style.color = 'var(--primary)';
+    var self = this; setTimeout(function(){ self.style.color = ''; }, 800);
+  });
+
+  var guestNames = [['Siti Rahma','siti.rahma@gmail.com'],['Rio Fernandez','rio.fern@gmail.com'],['Keiko Tanaka','keiko.t@gmail.com']];
+  var guestIdx = 0;
+  document.getElementById('addPeopleBtn').addEventListener('click', function(){
+    var g = guestNames[guestIdx % guestNames.length]; guestIdx++;
+    var row = document.createElement('div');
+    row.className = 'person';
+    row.innerHTML = '<img class="avatar" src="https://i.pravatar.cc/76?img=' + (20 + guestIdx) + '" alt="" />' +
+      '<div><div class="p-name">' + g[0] + '</div><div class="p-mail">' + g[1] + '</div></div>' +
+      '<span class="role">Guest</span>';
+    this.parentNode.insertBefore(row, this);
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', function(){
+    var title = document.querySelector('.title-input').value || 'Untitled event';
+    this.textContent = 'Saved ✓';
+    var btn = this; setTimeout(function(){ btn.textContent = 'Save event'; }, 1500);
+    console.log('Event saved:', { title: title, duration: duration, allDay: allDay, date: dateLabel.textContent });
+  });
+
+  document.getElementById('tzBtn').addEventListener('click', function(){
+    var zones = ['🌐 GMT +7 Jakarta ▾','🌐 GMT +8 Manila ▾','🌐 GMT +9 Tokyo ▾','🌐 GMT +0 London ▾'];
+    var i = (zones.indexOf(this.textContent) + 1) % zones.length;
+    this.textContent = zones[i];
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>

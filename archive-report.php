@@ -50,7 +50,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET
 
     if ($stmt->execute()) {
         $_SESSION['report_success'] = "Report archived successfully!";
-        header('Location: dashboard-resident.php');
+        header('Location: dashboard-resident.php#archive');
         exit;
     } else {
         $_SESSION['report_error'] = "Failed to archive report. Please try again.";

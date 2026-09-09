@@ -480,7 +480,7 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .pets-cms .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
     .pets-cms table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
     .pets-cms thead tr{ border-bottom:1px solid #e4e4e7; }
-    .pets-cms thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:transparent; border-bottom:none; }
+    .pets-cms thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:#fafafa; border-bottom:none; }
     .pets-cms thead th.sd-th-action{ text-align:right; }
     .pets-cms tbody tr{ border-bottom:1px solid #e4e4e7; transition:background .15s; cursor:pointer; }
     .pets-cms tbody tr:last-child{ border-bottom:none; }
@@ -504,7 +504,10 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .pets-cms .vacc-ok{ background:var(--green-100); color:var(--green-700); }
     .pets-cms .vacc-no{ background:#fef2f2; color:#b91c1c; }
     .pets-cms .vacc-unknown{ background:var(--ink-100); color:var(--ink-500); }
-    .pets-cms .status-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
+    .pets-cms .status-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:4px; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
+    .pets-cms .ls-available{ background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
+    .pets-cms .ls-adopted{ background:#eff6ff; color:#1e40af; border-color:#bfdbfe; }
+    .pets-cms .ls-withdrawn{ background:#f4f4f5; color:#52525b; border-color:#e4e4e7; }
     /* Pet listings: full-width table + right drawer detail panel */
     .pets-reports .layout{ grid-template-columns:minmax(0,1fr); min-height:calc(100vh - var(--topbar-h)); }
     .pets-reports .db-panel{ border-right:none; }
@@ -682,7 +685,7 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
       #petModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
       #petModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
       #petModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
-      #petModal .sd-field-group{ display:flex; flex-direction:column; gap:16px; }
+      #petModal .sd-field-group{ display:flex; flex-direction:column; gap:12px; }
       #petModal .sd-form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
       #petModal .sd-field-full{ grid-column:1 / -1; }
       #petModal .sd-field{ display:flex; flex-direction:column; gap:6px; }
@@ -714,12 +717,6 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
       #petModal .sd-photo-upload .upload-placeholder i{ font-size:1.7rem; color:#a1a1aa; display:block; margin-bottom:0.35rem; }
       #petModal .sd-photo-upload .upload-placeholder span{ font-size:0.8rem; color:#a1a1aa; }
       #petModal .sd-photo-upload input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
-      #petModal .sd-photo-avatar{ position:relative; width:140px; height:140px; border-radius:20px; overflow:hidden; background:#f1f5f9; border:2px dashed #e4e4e7; display:flex; align-items:center; justify-content:center; cursor:pointer; color:#94a3b8; }
-      #petModal .sd-photo-avatar.has-image{ border:none; }
-      #petModal .sd-photo-avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-      #petModal .sd-photo-avatar .upload-placeholder{ display:flex; flex-direction:column; align-items:center; gap:4px; font-size:12px; color:#94a3b8; text-align:center; }
-      #petModal .sd-photo-avatar .upload-placeholder i{ font-size:2rem; }
-      #petModal .sd-photo-avatar input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
       #petModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
       @media (min-width:640px){ #petModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
       #petModal .sd-btn{
@@ -735,6 +732,11 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
       #petModal .sd-btn-outline{ background:#ffffff; border-color:#e4e4e7; color:#18181b; }
       #petModal .sd-btn-outline:hover{ background:#f4f4f5; }
       #petModal .sd-btn i{ font-size:12px; }
+      #petModal .sd-dialog-content{max-height:80vh;overflow-y:auto;}
+      #petModal .sd-section{margin-bottom:16px;}
+      #petModal .sd-section:last-child{margin-bottom:0;}
+      #petModal .sd-section-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#18181b;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #f4f4f5;}
+      #petModal .sd-section-title span{color:#71717a;font-size:12px;font-weight:600;}
       @media (max-width:560px){ #petModal .sd-form-grid{ grid-template-columns:1fr; } }
     </style>
     <div id="petModal" class="modal">
@@ -750,74 +752,155 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
             <h2 class="sd-dialog-title" id="modalTitle">Add New Pet</h2>
             <p class="sd-dialog-description" id="modalDescription">Fill in the pet's details. Click save when you're done.</p>
           </div>
-          <div class="sd-field-group">
-            <div class="sd-field sd-field-full">
-              <label class="sd-label">Photo</label>
-              <div class="sd-photo-avatar" id="photoArea">
-                <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
-                <div class="upload-placeholder" id="photoPlaceholder">
-                  <i class="fas fa-paw"></i>
-                  <span>Upload<br>photo</span>
+                              <div class="sd-field-group">
+            <div class="sd-section">
+              <div class="sd-section-title"><span>01</span> Pet Information</div>
+              <div class="sd-form-grid">
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formName">Pet Name <span class="req">*</span></label>
+                  <input type="text" name="name" id="formName" class="sd-input" required placeholder="e.g. Horsey">
                 </div>
-                <img id="photoPreview" style="display:none;" />
+                <div class="sd-field">
+                  <label class="sd-label" for="formSpecies">Species <span class="req">*</span></label>
+                  <select name="species" id="formSpecies" class="sd-input">
+                    <option value="Dog">Dog</option>
+                    <option value="Cat">Cat</option>
+                  </select>
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formBreed">Breed <span class="req">*</span></label>
+                  <input type="text" name="breed" id="formBreed" class="sd-input" required placeholder="e.g. Domestic Shorthair">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formGender">Gender <span class="req">*</span></label>
+                  <select name="gender" id="formGender" class="sd-input">
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formAge">Date of Birth / Age <span class="req">*</span></label>
+                  <input type="text" name="age" id="formAge" class="sd-input" required placeholder="e.g. 2 years old">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formColor">Color <span class="req">*</span></label>
+                  <input type="text" name="color" id="formColor" class="sd-input" required placeholder="e.g. Golden">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formWeight">Weight <span class="req">*</span></label>
+                  <input type="text" name="weight" id="formWeight" class="sd-input" required placeholder="e.g. 5.5 kg">
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formDesc">Description <span class="req">*</span></label>
+                  <textarea name="description" id="formDesc" class="sd-input" required placeholder="Describe the pet's personality, history, and ideal home..."></textarea>
+                </div>
+                </div>
               </div>
             </div>
-            <div class="sd-form-grid">
-              <div class="sd-field sd-field-full">
-                <label class="sd-label" for="formName">Pet Name <span class="req">*</span></label>
-                <input type="text" name="name" id="formName" class="sd-input" required placeholder="Pet name">
+            <div class="sd-section">
+              <div class="sd-section-title"><span>02</span> Adoption Information</div>
+              <div class="sd-form-grid">
+                <div class="sd-field">
+                  <label class="sd-label" for="formStatus">Adoption Status</label>
+                  <select name="status" id="formStatus" class="sd-input">
+                    <option value="available">Available</option>
+                    <option value="adopted">Adopted</option>
+                    <option value="withdrawn">Withdrawn</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formRescued">Availability Date <span class="req">*</span></label>
+                  <input type="text" name="rescued_date" id="formRescued" class="sd-input" required placeholder="mm/dd/yyyy">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formFee">Adoption Fee</label>
+                  <input type="text" name="fee" id="formFee" class="sd-input" placeholder="PHP">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formLocation">Location</label>
+                  <input type="text" name="location" id="formLocation" class="sd-input" value="Dasmariñas City Veterinary Services">
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formReq">Adoption Requirements</label>
+                  <textarea name="requirements" id="formReq" class="sd-input" placeholder="Home visit required..."></textarea>
+                </div>
               </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formSpecies">Species <span class="req">*</span></label>
-                <select name="species" id="formSpecies" class="sd-input">
-                  <option value="Cat">Cat</option>
-                  <option value="Dog">Dog</option>
-                </select>
+            </div>
+            <div class="sd-section">
+              <div class="sd-section-title"><span>03</span> Medical Information</div>
+              <div class="sd-form-grid">
+                <div class="sd-field">
+                  <label class="sd-label" for="formHealth">Health Status</label>
+                  <select name="health" id="formHealth" class="sd-input">
+                    <option value="Healthy">Healthy</option>
+                    <option value="Under Treatment">Under Treatment</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formExam">Last Examination</label>
+                  <input type="text" name="exam" id="formExam" class="sd-input" placeholder="mm/dd/yyyy">
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formVax">Vaccinations</label>
+                  <textarea name="vaccinations" id="formVax" class="sd-input" placeholder="Rabies, Tetanus..."></textarea>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formConditions">Medical Conditions</label>
+                  <input type="text" name="conditions" id="formConditions" class="sd-input">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formMeds">Medications</label>
+                  <input type="text" name="medications" id="formMeds" class="sd-input">
+                </div>
               </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formStatus">Status</label>
-                <select name="status" id="formStatus" class="sd-input">
-                  <option value="available">Available</option>
-                  <option value="adopted">Adopted</option>
-                  <option value="withdrawn">Withdrawn</option>
-                </select>
+            </div>
+            <div class="sd-section">
+              <div class="sd-section-title"><span>04</span> Behavior</div>
+              <div class="sd-form-grid">
+                <div class="sd-field">
+                  <label class="sd-label" for="formTemperament">Temperament</label>
+                  <input type="text" name="temperament" id="formTemperament" class="sd-input" placeholder="Gentle, Calm...">
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formSpecial">Special Requirements</label>
+                  <input type="text" name="special" id="formSpecial" class="sd-input">
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formBehNotes">Behavior Notes</label>
+                  <textarea name="behavior_notes" id="formBehNotes" class="sd-input"></textarea>
+                </div>
               </div>
-              <div class="sd-field sd-field-full">
-                <label class="sd-label" for="formBreed">Breed <span class="req">*</span></label>
-                <input type="text" name="breed" id="formBreed" class="sd-input" required placeholder="e.g. Domestic Shorthair">
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formAge">Age <span class="req">*</span></label>
-                <input type="text" name="age" id="formAge" class="sd-input" required placeholder="e.g. 2 years old">
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formGender">Gender <span class="req">*</span></label>
-                <select name="gender" id="formGender" class="sd-input">
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                </select>
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formWeight">Weight <span class="req">*</span></label>
-                <input type="text" name="weight" id="formWeight" class="sd-input" required placeholder="e.g. 5.5 kg">
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formColor">Color <span class="req">*</span></label>
-                <input type="text" name="color" id="formColor" class="sd-input" required placeholder="e.g. Orange">
-              </div>
-              <div class="sd-field">
-                <label class="sd-label" for="formRescued">Rescued Date <span class="req">*</span></label>
-                <input type="text" name="rescued_date" id="formRescued" class="sd-input" required placeholder="e.g. March 10, 2025">
-              </div>
-              <div class="sd-field sd-field-full">
-                <label class="sd-label" for="formDesc">Description <span class="req">*</span></label>
-                <textarea name="description" id="formDesc" class="sd-input" required placeholder="Describe the pet's personality, history, and ideal home..."></textarea>
+            </div>
+            <div class="sd-section">
+              <div class="sd-section-title"><span>05</span> Photos &amp; Documents</div>
+              <div class="sd-form-grid">
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label">Pet Photos</label>
+                  <div class="sd-photo-upload" id="photoArea">
+                    <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
+                    <div class="upload-placeholder" id="photoPlaceholder">
+                      <i class="fas fa-paw"></i>
+                      <span>Upload Pet Photos</span>
+                    </div>
+                    <img id="photoPreview" style="display:none;" />
+                  </div>
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label">Medical Documents</label>
+                  <div class="sd-photo-upload">
+                    <input type="file" name="doc" id="docInput" class="sd-photo-upload-input">
+                    <div class="upload-placeholder">
+                      <i class="fas fa-file-medical"></i>
+                      <span>Upload Medical Documents</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
-          <div class="sd-dialog-footer">
+<div class="sd-dialog-footer">
             <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('petModal')">Cancel</button>
-            <button type="submit" class="sd-btn sd-btn-default"><span id="submitBtnText">Add Pet</span></button>
+            <button type="submit" name="save_mode" value="draft" class="sd-btn sd-btn-outline">Save Draft</button>
+            <button type="submit" class="sd-btn sd-btn-default"><span id="submitBtnText">Publish Pet Listing</span></button>
           </div>
         </div>
       </form>
@@ -1284,7 +1367,7 @@ function listingTabHtml(p){
   return '<div class="listing-tab">' +
     '<div class="info-card-head"><h3>Public Listing</h3></div>' +
     '<div class="info-rows">' +
-      infoRow('check', 'Listing Status', lm.label, true) +
+      infoRow('check', 'Listing Status', '<span class="status-pill ' + lm.cls + '">' + esc(lm.label) + '</span>', true) +
       infoRow('cal', 'Published', fmtDate(p.created_at)) +
       infoRow('tag', 'Listing Title', title) +
       infoRow('users', 'Public Visibility', p.status === 'withdrawn' ? 'Hidden — not shown on the adoption page' : 'Public — visible on the adoption page') +
@@ -1419,7 +1502,7 @@ function previewImage(input, previewId, areaId){
 function openCreate(){
   document.getElementById('modalTitle').textContent = 'Add New Pet';
   document.getElementById('modalDescription').textContent = 'Fill in the pet\'s details. Click save when you\'re done.';
-  document.getElementById('submitBtnText').textContent = 'Add Pet';
+  document.getElementById('submitBtnText').textContent = 'Publish Pet Listing';
   document.getElementById('formId').value = '0';
   document.getElementById('formCurrentPhoto').value = '';
   document.getElementById('petForm').reset();
@@ -1471,7 +1554,7 @@ function openEdit(id){
 document.getElementById('petForm').addEventListener('submit', function(e){
   e.preventDefault();
   const formData = new FormData(this);
-  const btn = this.querySelector('button[type="submit"]');
+  const btn = e.submitter && e.submitter.matches('button[type="submit"]') ? e.submitter : this.querySelector('button[type="submit"]');
   const orig = btn.innerHTML;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
   btn.disabled = true;

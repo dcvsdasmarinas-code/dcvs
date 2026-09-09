@@ -92,6 +92,7 @@ function sbAttrs($item) {
     if (!empty($item['fn']))        $a .= ' data-fn="' . htmlspecialchars($item['fn']) . '"';
     if (!empty($item['arg']))       $a .= ' data-arg="' . htmlspecialchars($item['arg']) . '"';
     if (!empty($item['logout']))    $a .= ' data-logout="1"';
+    if (!empty($item['conditional'])) $a .= ' data-conditional="' . htmlspecialchars($item['conditional']) . '"';
     return $a;
 }
 
@@ -114,7 +115,13 @@ $sbModules = [
                 'items' => [
                     sbItem('Pet List', 'fa-list', ['section' => 'my-pets', 'href' => 'dashboard-resident.php#my-pets', 'initialActive' => $activePage === 'my-pets']),
                     sbItem('Reports', 'fa-file-medical-alt', ['section' => 'my-reports', 'href' => 'dashboard-resident.php#my-reports', 'initialActive' => $activePage === 'my-reports']),
+                ],
+            ],
+            [
+                'title' => 'Appointments', 'icon' => 'fa-calendar-alt',
+                'items' => [
                     sbItem('Appointments', 'fa-calendar-alt', ['section' => 'appointments', 'href' => 'dashboard-resident.php#appointments', 'initialActive' => $activePage === 'appointments']),
+                    sbItem('Schedule Appointment', 'fa-calendar-plus', ['section' => 'book-appt', 'href' => 'dashboard-resident.php#book-appt', 'initialActive' => $activePage === 'book-appt', 'conditional' => 'book-appt']),                    sbItem('Calendar Booking', 'fa-calendar-check', ['section' => 'calendar-booking', 'href' => 'dashboard-resident.php#calendar-booking', 'initialActive' => $activePage === 'calendar-booking']),
                 ],
             ],
             [
@@ -126,7 +133,9 @@ $sbModules = [
             [
                 'title' => 'Archive', 'icon' => 'fa-archive',
                 'items' => [
-                    sbItem('Archive', 'fa-archive', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'initialActive' => $activePage === 'archive']),
+                    sbItem('Archived Pets', 'fa-dog', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'pet', 'initialActive' => $activePage === 'archive']),
+                    sbItem('Archived Reports', 'fa-file-medical-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'report']),
+                    sbItem('Archived Appointments', 'fa-calendar-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'appointment']),
                 ],
             ],
         ],
@@ -151,6 +160,10 @@ $sbModules = [
 ];
 ?>
 <link rel="stylesheet" href="assets/css/sb2.css" />
+<style>
+  .sb2-menu-item.sb2-conditional { display:none; }
+  .sb2-menu-item.sb2-conditional.visible { display:block; }
+</style>
 <script>
 window.SB2_CONFIG = {
   activeModule: <?php echo json_encode($sbActiveModule); ?>,
@@ -210,7 +223,7 @@ window.SB2_CONFIG = {
                   </button>
                   <ul class="sb2-menu-sub">
                     <?php foreach ($sec['items'] as $item): ?>
-                      <li class="sb2-menu-item">
+                      <li class="sb2-menu-item<?php echo !empty($item['conditional']) ? ' sb2-conditional' : ''; ?>"<?php echo !empty($item['conditional']) ? ' data-conditional="' . htmlspecialchars($item['conditional']) . '"' : ''; ?>>
                         <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
                            class="sb2-menu-sub-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
                            title="<?php echo htmlspecialchars($item['label']); ?>"
@@ -427,7 +440,7 @@ window.SB2_CONFIG = {
   // Maps dashboard-resident.php hash sections to sidebar modules
   var sectionToModule = {
     'overview': 'main', 'my-pets': 'main', 'my-reports': 'main', 'appointments': 'main',
-    'adoption': 'main', 'archive': 'main', 'account-settings': 'system'
+    'book-appt': 'main', 'adoption': 'main', 'archive': 'main', 'account-settings': 'system'
   };
 
   // ── Sidebar state persistence (keeps open collapsibles / active item across pages) ──
@@ -458,6 +471,14 @@ window.SB2_CONFIG = {
     });
   }
 
+  // Show/hide conditional sidebar items (e.g. "Schedule Appointment" only when booking)
+  function updateConditionalItems(sectionId) {
+    document.querySelectorAll('.sb2-menu-item.sb2-conditional').forEach(function(li) {
+      var cond = li.getAttribute('data-conditional') || '';
+      li.classList.toggle('visible', !!cond && cond === sectionId);
+    });
+  }
+
   // Open the collapsible group that contains a sub-item
   function openAncestor(item) {
     var inner = item.closest('.sb2-menu-item');
@@ -485,6 +506,7 @@ window.SB2_CONFIG = {
       openAncestor(match);
     }
     saveSidebarState();
+    updateConditionalItems(sectionId);
   }
 
   // Highlight a specific sidebar item (and open its ancestor collapsible)
@@ -509,6 +531,7 @@ window.SB2_CONFIG = {
     // Dashboard is the default landing page
     var def = document.querySelector('.sb2-menu-button[data-section="overview"]');
     if (def) def.classList.add('active');
+    updateConditionalItems('');
     // Restore previously open collapsibles + active item after a cross-page navigation
     if (saved && saved.open && saved.open.length) {
       document.querySelectorAll('.sb2-collapsible').forEach(function(b) {

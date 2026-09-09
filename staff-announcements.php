@@ -386,7 +386,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     .announcements-cms .toolbar-filters select.select-input{ width:auto; height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
     .announcements-cms .toolbar-filters select.select-input:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     /* table data (dialog palette) */
-    .announcements-cms .sd-th{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; text-transform:none; letter-spacing:0; }
+    .announcements-cms .sd-th{ background:#fafafa; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; text-transform:none; letter-spacing:0; }
     .announcements-cms .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
     .announcements-cms .th-sort:hover{ background:#f4f4f5; color:#18181b; }
     .announcements-cms .th-sort.th-sorted{ color:#18181b; }

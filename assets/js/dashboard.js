@@ -5,13 +5,13 @@ function switchSection(sectionId) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   var target = document.getElementById(sectionId);
   if (target) target.style.display = 'block';
-  document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments');
+  document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments' || sectionId === 'account-settings');
   document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
   var nav = document.querySelector('.nav-link[data-section="' + sectionId + '"]');
   if (nav) nav.classList.add('active');
   var labels = {
     'analytics':'Citywide Analytics','overview':'Analytics','account-settings':'Account Settings','my-pets':'My Pets','my-reports':'My Reports',
-    'appointments':'Appointments','calendar-schedule':'Calendar Schedule','archive':'Archive','adoption':'Adoption Listings',
+    'appointments':'Appointments','book-appt':'Schedule Appointment','calendar-schedule':'Calendar Schedule','archive':'Archive','adoption':'Adoption Listings',
     'users':'Users','activity':'Activity Logs',
     'settings':'Settings','client-pets':'Client & Pet DB',
     'barangay':'Barangay Validation','geomapping':'Geo-Mapping','pet-listings':'Pet Listings',
@@ -91,13 +91,52 @@ function filterReports() {
 function filterArchive() {
   var q = (document.getElementById('archiveSearch')?.value || '').toLowerCase();
   var t = document.getElementById('archiveTypeFilter')?.value || '';
-  document.querySelectorAll('#archive .data-table tbody tr').forEach(function(r) {
-    var type = (r.cells[1]?.textContent || '').toLowerCase();
-    var name = (r.cells[2]?.textContent || '').toLowerCase();
-    var matchQ = !q || name.includes(q) || (r.cells[0]?.textContent || '').toLowerCase().includes(q);
-    var matchT = !t || type === t.toLowerCase();
-    r.style.display = matchQ && matchT ? '' : 'none';
+  var counts = {
+    pet: (document.querySelector('#archive .archive-section[data-type="pet"]')?.getAttribute('data-count')) || 0,
+    report: (document.querySelector('#archive .archive-section[data-type="report"]')?.getAttribute('data-count')) || 0,
+    appointment: (document.querySelector('#archive .archive-section[data-type="appointment"]')?.getAttribute('data-count')) || 0
+  };
+  var titles = { pet: 'Archived Pets', report: 'Archived Reports', appointment: 'Archived Appointments' };
+  var title = document.getElementById('archiveSectionTitle');
+  // Show/hide the section blocks based on the selected type
+  document.querySelectorAll('#archive .archive-section').forEach(function(s) {
+    var st = s.getAttribute('data-type');
+    s.style.display = (!t || st === t) ? '' : 'none';
   });
+  // Update the heading title to reflect the active type (or all)
+  if (title) {
+    if (t && titles[t]) {
+      title.textContent = titles[t] + ' (' + counts[t] + ')';
+    } else {
+      title.textContent = 'Archived Items';
+    }
+  }
+  document.querySelectorAll('#archive .appt-table tbody tr').forEach(function(r) {
+    var hay = (r.textContent || '').toLowerCase();
+    r.style.display = (!q || hay.includes(q)) ? '' : 'none';
+  });
+}
+
+function setArchiveType(type) {
+  var sel = document.getElementById('archiveTypeFilter');
+  if (sel) sel.value = type || '';
+  var q = document.getElementById('archiveSearch');
+  if (q) q.value = '';
+  var counts = {
+    pet: (document.querySelector('#archive .archive-section[data-type="pet"]')?.getAttribute('data-count')) || 0,
+    report: (document.querySelector('#archive .archive-section[data-type="report"]')?.getAttribute('data-count')) || 0,
+    appointment: (document.querySelector('#archive .archive-section[data-type="appointment"]')?.getAttribute('data-count')) || 0
+  };
+  var titles = { pet: 'Archived Pets', report: 'Archived Reports', appointment: 'Archived Appointments' };
+  var title = document.getElementById('archiveSectionTitle');
+  if (title) {
+    title.textContent = (type && titles[type]) ? titles[type] + ' (' + counts[type] + ')' : 'Archived Items';
+  }
+  document.querySelectorAll('#archive .archive-section').forEach(function(s) {
+    var match = !type || s.getAttribute('data-type') === type;
+    s.style.display = match ? '' : 'none';
+  });
+  if (typeof filterArchive === 'function') filterArchive();
 }
 
 // ── Pet Functions ──
