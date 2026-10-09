@@ -55,3 +55,12 @@ RewriteRule ^restore-report\.php$ api/shared/restore-report.php [END]
 # Availability compatibility routes.
 RewriteRule ^availability\.php$ pages/staff/availability.php [END]
 RewriteRule ^availability-save\.php$ api/staff/availability-save.php [END]
+
+# Dashboard compatibility routes.
+RewriteRule ^dashboard-barangay\.php$ pages/barangay/dashboard-barangay.php [END,E=DCVS_DASHBOARD_ROUTE:1]
+RewriteRule ^dashboard-barangay-geo\.php$ pages/barangay/dashboard-barangay-geo.php [END,E=DCVS_DASHBOARD_ROUTE:1]
+RewriteRule ^dashboard-resident\.php$ pages/resident/dashboard-resident.php [END,E=DCVS_DASHBOARD_ROUTE:1]
+RewriteRule ^dashboard-staff\.php$ pages/staff/dashboard-staff.php [END,E=DCVS_DASHBOARD_ROUTE:1]
+RewriteRule ^dashboard-staff-geo\.php$ pages/staff/dashboard-staff-geo.php [END,E=DCVS_DASHBOARD_ROUTE:1]
+Header always set X-DCVS-Dashboard-Route "rewritten" env=DCVS_DASHBOARD_ROUTE
+Header always set X-DCVS-Dashboard-Route "rewritten" env=REDIRECT_DCVS_DASHBOARD_ROUTE
