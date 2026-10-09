@@ -1,6 +1,7 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
+session_name('DCVS_BARANGAY_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -14,36 +15,31 @@ session_start();
 
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
-if ($autoUser) {
-    header('Location: dashboard-resident.php');
+if ($autoUser && ($autoUser['role'] ?? '') === 'barangay') {
+    header('Location: dashboard-barangay.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrf($_POST['csrf_token'] ?? '')) {
         $_SESSION['login_error'] = 'Invalid form submission. Please try again.';
-        header('Location: login.php');
+        header('Location: login-barangay.php');
         exit;
     }
-
-    // Check lockout BEFORE anything else
     if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout_until']) {
         $remaining = ceil(($_SESSION['login_lockout_until'] - time()) / 60);
         $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in $remaining minute(s).";
-        header('Location: login.php');
+        header('Location: login-barangay.php');
         exit;
     }
     if (isset($_SESSION['login_lockout_until']) && time() >= $_SESSION['login_lockout_until']) {
         unset($_SESSION['login_lockout_until'], $_SESSION['login_failures']);
     }
-
     session_regenerate_id(true);
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    // Server-side validation
     $errors = [];
-
     if (empty($email)) {
         $errors[] = "Email address is required.";
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -55,17 +51,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($errors)) {
         $_SESSION['login_error'] = implode('<br>', $errors);
-        header('Location: login.php');
+        header('Location: login-barangay.php');
         exit;
     }
 
-    // Check user in database
+    $recordFailedLogin = function() use ($email) {
+        $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
+        if ($_SESSION['login_failures'] >= 5) {
+            $_SESSION['login_lockout_until'] = time() + (10 * 60);
+            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+        } else {
+            $_SESSION['login_error'] = "Invalid email or password.";
+        }
+        $_SESSION['login_last_email'] = $email;
+    };
+
     $stmt = $conn->prepare("SELECT user_id, username, password, email, full_name, role, barangay_id, phone, address, status, avatar_url, reference_id, deleted_at, password_updated_at FROM users WHERE email = ?");
-    if (!$stmt) {
-        $_SESSION['login_error'] = "An error occurred. Please try again.";
-        header('Location: login.php');
-        exit;
-    }
     $stmt->bind_param("s", $email);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -73,23 +74,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
 
-        // Verify password
         if (password_verify($password, $user['password'])) {
-
             if (!empty($user['deleted_at'])) {
-                $_SESSION['login_error'] = 'Your account has been deleted by the administrator. Contact us for clarification.';
-                header('Location: login.php');
+                $_SESSION['login_error'] = "Your account has been deleted by the administrator. Contact us for clarification.";
+                header('Location: login-barangay.php');
                 exit;
             }
-
-            // Check if account is active
             if ($user['status'] !== 'active') {
                 $_SESSION['login_error'] = "Your account has been deactivated. Please contact the administrator.";
-                header('Location: login.php');
+                header('Location: login-barangay.php');
                 exit;
             }
 
-            // Set session variables
+            if ($user['role'] !== 'barangay') {
+                $_SESSION['login_error'] = "Unauthorized access. Barangay credentials required.";
+                header('Location: login-barangay.php');
+                exit;
+            }
+
             $_SESSION['user_id'] = $user['user_id'];
             $_SESSION['username'] = $user['username'];
             $_SESSION['email'] = $user['email'];
@@ -102,15 +104,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['reference_id'] = $user['reference_id'] ?? '';
             $_SESSION['logged_in'] = true;
 
-            // Log activity
-            $roleLabel = ucfirst($user['role']);
-            $actAction = $roleLabel . " Login";
-            $actDetails = $roleLabel . " logged into the system.";
-            $actIp = $_SERVER['REMOTE_ADDR'] ?? '';
-            $actLog = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
-            $actLog->bind_param("isss", $user['user_id'], $actAction, $actDetails, $actIp);
-            $actLog->execute();
-            $actLog->close();
+            $action = "Barangay Login";
+            $details = "Barangay officer logged into portal.";
+            $ip = $_SERVER['REMOTE_ADDR'];
+            $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
+            $logStmt->bind_param("isss", $user['user_id'], $action, $details, $ip);
+            $logStmt->execute();
+            $logStmt->close();
 
             unset($_SESSION['login_failures'], $_SESSION['login_lockout_until']);
 
@@ -119,45 +119,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            // Redirect based on role
-            switch ($user['role']) {
-                case 'admin':
-                    header('Location: role-management.php');
-                    break;
-                case 'staff':
-                    header('Location: dashboard-staff.php');
-                    break;
-                case 'barangay':
-                    header('Location: dashboard-barangay.php');
-                    break;
-                case 'resident':
-                default:
-                    header('Location: dashboard-resident.php');
-                    break;
-            }
+            header('Location: dashboard-barangay.php');
             exit;
         } else {
-            $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-            if ($_SESSION['login_failures'] >= 5) {
-                $_SESSION['login_lockout_until'] = time() + (10 * 60);
-                $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
-            } else {
-                $_SESSION['login_error'] = "Invalid email or password.";
-            }
-            $_SESSION['login_last_email'] = $email;
-            header('Location: login.php');
+            $recordFailedLogin();
+            header('Location: login-barangay.php');
             exit;
         }
     } else {
-        $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-        if ($_SESSION['login_failures'] >= 5) {
-            $_SESSION['login_lockout_until'] = time() + (10 * 60);
-            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
-        } else {
-            $_SESSION['login_error'] = "Invalid email or password.";
-        }
-        $_SESSION['login_last_email'] = $email;
-        header('Location: login.php');
+        $recordFailedLogin();
+        header('Location: login-barangay.php');
         exit;
     }
 
@@ -166,7 +137,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $conn->close();
 
-// Re-show lockout alert on page refresh if still locked out
 if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout_until']) {
     $remaining = ceil(($_SESSION['login_lockout_until'] - time()) / 60);
     $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in $remaining minute(s).";
@@ -177,8 +147,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Login to the Dasmariñas City Veterinary Services animal welfare reporting and record management system." />
-  <title>Login — Dasmariñas City Veterinary Services</title>
+  <title>Barangay Login — Dasmariñas City Veterinary Services</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -203,7 +172,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
 
     body {
-      font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
@@ -347,11 +316,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       padding: 2.5rem 2.5rem 2rem;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
     /* ── Login Logo ── */
     .login-logo {
       display: flex;
@@ -448,7 +412,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       padding: 0.7rem 0.875rem 0.7rem 2.6rem;
       border: 1.5px solid var(--border-color);
       border-radius: 6px;
-      font-family: 'Open Sans', sans-serif;
+      font-family: 'Inter', sans-serif;
       font-size: 0.9rem;
       color: var(--text-main);
       background: var(--surface);
@@ -655,8 +619,8 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         </div>
 
         <div class="login-header">
-          <h2>Welcome Back</h2>
-          <p>Sign in to your DCVS account to continue</p>
+          <h2>Barangay Portal</h2>
+          <p>Sign in with your barangay officer credentials</p>
         </div>
 
         <?php if (isset($_SESSION['login_error'])): ?>
@@ -678,22 +642,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
           </div>
         <?php endif; ?>
 
-        <?php if (isset($_SESSION['register_success'])): ?>
-          <?php
-            $portalToasts = [$_SESSION['register_success']];
-            unset($_SESSION['register_success']);
-            include 'includes/portal-toast.php';
-          ?>
-        <?php endif; ?>
-
-        <form id="loginForm" class="login-form" action="login.php" method="POST" novalidate>
+        <form id="loginForm" class="login-form" action="login-barangay.php" method="POST" novalidate>
           <?php echo csrfField(); ?>
 
           <div class="form-group" id="emailGroup">
             <label for="email">Email Address</label>
             <div class="input-wrapper">
               <i class="fas fa-envelope input-icon"></i>
-              <input type="email" id="email" name="email" placeholder="e.g. juan@email.com" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? ''); unset($_SESSION['login_last_email']); ?>" />
+              <input type="email" id="email" name="email" placeholder="e.g. captain@barangay.gov.ph" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? '', ENT_QUOTES, 'UTF-8'); unset($_SESSION['login_last_email']); ?>" />
             </div>
             <span class="field-error" id="emailError"></span>
           </div>
@@ -728,8 +684,8 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         <div class="login-divider"><span>or</span></div>
 
         <p class="login-switch">
-          Don't have an account?
-          <a href="register.php">Create one now <i class="fas fa-arrow-right"></i></a>
+          Don't have a barangay account?
+          <a href="register-barangay.php">Register here <i class="fas fa-arrow-right"></i></a>
         </p>
 
         <div class="back-home">

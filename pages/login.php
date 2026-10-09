@@ -1,7 +1,6 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
-session_name('DCVS_ADMIN_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -15,31 +14,36 @@ session_start();
 
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
-if ($autoUser && ($autoUser['role'] ?? '') === 'admin') {
-    header('Location: role-management.php');
+if ($autoUser) {
+    header('Location: dashboard-resident.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrf($_POST['csrf_token'] ?? '')) {
         $_SESSION['login_error'] = 'Invalid form submission. Please try again.';
-        header('Location: login-admin.php');
+        header('Location: login.php');
         exit;
     }
+
+    // Check lockout BEFORE anything else
     if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout_until']) {
         $remaining = ceil(($_SESSION['login_lockout_until'] - time()) / 60);
         $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in $remaining minute(s).";
-        header('Location: login-admin.php');
+        header('Location: login.php');
         exit;
     }
     if (isset($_SESSION['login_lockout_until']) && time() >= $_SESSION['login_lockout_until']) {
         unset($_SESSION['login_lockout_until'], $_SESSION['login_failures']);
     }
+
     session_regenerate_id(true);
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
 
+    // Server-side validation
     $errors = [];
+
     if (empty($email)) {
         $errors[] = "Email address is required.";
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -51,25 +55,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($errors)) {
         $_SESSION['login_error'] = implode('<br>', $errors);
-        header('Location: login-admin.php');
+        header('Location: login.php');
         exit;
     }
 
-    $recordFailedLogin = function() use ($email) {
-        $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-        if ($_SESSION['login_failures'] >= 5) {
-            $_SESSION['login_lockout_until'] = time() + (10 * 60);
-            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
-        } else {
-            $_SESSION['login_error'] = "Invalid email or password.";
-        }
-        $_SESSION['login_last_email'] = $email;
-    };
-
+    // Check user in database
     $stmt = $conn->prepare("SELECT user_id, username, password, email, full_name, role, barangay_id, phone, address, status, avatar_url, reference_id, deleted_at, password_updated_at FROM users WHERE email = ?");
     if (!$stmt) {
-        $_SESSION['login_error'] = "Database error.";
-        header('Location: login-admin.php');
+        $_SESSION['login_error'] = "An error occurred. Please try again.";
+        header('Location: login.php');
         exit;
     }
     $stmt->bind_param("s", $email);
@@ -79,18 +73,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($result->num_rows === 1) {
         $user = $result->fetch_assoc();
 
+        // Verify password
         if (password_verify($password, $user['password'])) {
+
             if (!empty($user['deleted_at'])) {
-                $_SESSION['login_error'] = "Your account has been deleted by the administrator. Contact us for clarification.";
-                header('Location: login-admin.php');
-                exit;
-            }
-            if ($user['status'] !== 'active') {
-                $_SESSION['login_error'] = "Your account has been deactivated. Please contact the administrator.";
-                header('Location: login-admin.php');
+                $_SESSION['login_error'] = 'Your account has been deleted by the administrator. Contact us for clarification.';
+                header('Location: login.php');
                 exit;
             }
 
+            // Check if account is active
+            if ($user['status'] !== 'active') {
+                $_SESSION['login_error'] = "Your account has been deactivated. Please contact the administrator.";
+                header('Location: login.php');
+                exit;
+            }
+
+            // Set session variables
             $_SESSION['user_id'] = $user['user_id'];
             $_SESSION['username'] = $user['username'];
             $_SESSION['email'] = $user['email'];
@@ -103,19 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['reference_id'] = $user['reference_id'] ?? '';
             $_SESSION['logged_in'] = true;
 
-            if ($user['role'] !== 'admin') {
-                $_SESSION['login_error'] = "Unauthorized access. Admin credentials required.";
-                header('Location: login-admin.php');
-                exit;
-            }
-
-            $action = "Admin Login";
-            $details = "Administrator logged into the system.";
-            $ip = $_SERVER['REMOTE_ADDR'];
-            $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
-            $logStmt->bind_param("isss", $user['user_id'], $action, $details, $ip);
-            $logStmt->execute();
-            $logStmt->close();
+            // Log activity
+            $roleLabel = ucfirst($user['role']);
+            $actAction = $roleLabel . " Login";
+            $actDetails = $roleLabel . " logged into the system.";
+            $actIp = $_SERVER['REMOTE_ADDR'] ?? '';
+            $actLog = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
+            $actLog->bind_param("isss", $user['user_id'], $actAction, $actDetails, $actIp);
+            $actLog->execute();
+            $actLog->close();
 
             unset($_SESSION['login_failures'], $_SESSION['login_lockout_until']);
 
@@ -124,23 +119,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            header('Location: role-management.php');
+            // Redirect based on role
+            switch ($user['role']) {
+                case 'admin':
+                    header('Location: role-management.php');
+                    break;
+                case 'staff':
+                    header('Location: dashboard-staff.php');
+                    break;
+                case 'barangay':
+                    header('Location: dashboard-barangay.php');
+                    break;
+                case 'resident':
+                default:
+                    header('Location: dashboard-resident.php');
+                    break;
+            }
             exit;
         } else {
-            $recordFailedLogin();
-            header('Location: login-admin.php');
+            $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
+            if ($_SESSION['login_failures'] >= 5) {
+                $_SESSION['login_lockout_until'] = time() + (10 * 60);
+                $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+            } else {
+                $_SESSION['login_error'] = "Invalid email or password.";
+            }
+            $_SESSION['login_last_email'] = $email;
+            header('Location: login.php');
             exit;
         }
     } else {
-        $recordFailedLogin();
-        header('Location: login-admin.php');
+        $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
+        if ($_SESSION['login_failures'] >= 5) {
+            $_SESSION['login_lockout_until'] = time() + (10 * 60);
+            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+        } else {
+            $_SESSION['login_error'] = "Invalid email or password.";
+        }
+        $_SESSION['login_last_email'] = $email;
+        header('Location: login.php');
         exit;
     }
+
     $stmt->close();
 }
 
 $conn->close();
 
+// Re-show lockout alert on page refresh if still locked out
 if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout_until']) {
     $remaining = ceil(($_SESSION['login_lockout_until'] - time()) / 60);
     $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in $remaining minute(s).";
@@ -151,13 +177,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Admin login for Dasmariñas City Veterinary Services management system." />
-  <title>Admin Login — Dasmariñas City Veterinary Services</title>
+  <meta name="description" content="Login to the Dasmariñas City Veterinary Services animal welfare reporting and record management system." />
+  <title>Login — Dasmariñas City Veterinary Services</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -176,13 +203,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
 
     body {
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: var(--bg);
       min-height: 100vh;
       -webkit-font-smoothing: antialiased;
       line-height: 1.6;
     }
 
+    /* ── Split Layout ── */
     .auth-wrapper {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -190,6 +218,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       width: 100%;
     }
 
+    /* ── Left Brand Panel ── */
     .auth-brand-panel {
       display: flex;
       flex-direction: column;
@@ -297,6 +326,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       filter: brightness(0) invert(1) drop-shadow(0 1px 3px rgba(0,0,0,0.2));
     }
 
+    /* ── Right Form Panel ── */
     .auth-form-panel {
       display: flex;
       align-items: center;
@@ -317,6 +347,12 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       padding: 2.5rem 2.5rem 2rem;
     }
 
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Login Logo ── */
     .login-logo {
       display: flex;
       justify-content: center;
@@ -330,6 +366,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       object-fit: contain;
     }
 
+    /* ── Header ── */
     .login-header {
       text-align: center;
       margin-bottom: 1.75rem;
@@ -349,6 +386,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       color: var(--text-muted);
     }
 
+    /* ── Alert ── */
     .auth-alert {
       display: flex;
       align-items: center;
@@ -370,6 +408,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       border: 1px solid rgba(29,78,216,0.15);
     }
 
+    /* ── Form ── */
     .login-form {
       display: flex;
       flex-direction: column;
@@ -409,7 +448,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       padding: 0.7rem 0.875rem 0.7rem 2.6rem;
       border: 1.5px solid var(--border-color);
       border-radius: 6px;
-      font-family: 'Inter', sans-serif;
+      font-family: 'Open Sans', sans-serif;
       font-size: 0.9rem;
       color: var(--text-main);
       background: var(--surface);
@@ -447,6 +486,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
     .form-group.has-error .input-icon { color: var(--error); }
 
+    /* ── Form Options ── */
     .form-options {
       display: flex;
       align-items: center;
@@ -479,6 +519,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
     .forgot-link:hover { color: var(--green-dark); text-decoration: underline; }
 
+    /* ── Button (shadcn) ── */
     .btn-signin {
       display: inline-flex;
       align-items: center;
@@ -505,6 +546,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .btn-signin:active { background: #18181b; box-shadow: none; }
     .btn-signin:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
+    /* ── Divider ── */
     .login-divider {
       display: flex;
       align-items: center;
@@ -514,13 +556,15 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       font-size: 0.8rem;
       font-weight: 500;
     }
-    .login-divider::before, .login-divider::after {
+    .login-divider::before,
+    .login-divider::after {
       content: '';
       flex: 1;
       height: 1px;
       background: var(--border-color);
     }
 
+    /* ── Switch ── */
     .login-switch {
       text-align: center;
       font-size: 0.875rem;
@@ -540,6 +584,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .login-switch a i { font-size: 0.7rem; transition: transform 0.2s; text-decoration: none; }
     .login-switch a:hover i { transform: translateX(3px); }
 
+    /* ── Back to Home ── */
     .back-home {
       text-align: center;
       margin-top: 1.5rem;
@@ -558,6 +603,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .back-home a i { transition: transform 0.2s; text-decoration: none; }
     .back-home a:hover i { transform: translateX(-3px); }
 
+    /* ── Responsive ── */
     @media (max-width: 900px) {
       .auth-wrapper { grid-template-columns: 1fr; }
       .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
@@ -577,11 +623,12 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
   <div class="auth-wrapper">
 
+    <!-- Left Panel: Branding -->
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
         <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
-        <p class="brand-tagline">Managing citywide animal welfare operations with secure oversight and control.</p>
+        <p class="brand-tagline">Serving the community through better animal welfare and veterinary services.</p>
       </div>
 
       <div class="brand-trust">
@@ -599,6 +646,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       </div>
     </div>
 
+    <!-- Right Panel: Login Form -->
     <div class="auth-form-panel">
       <div class="auth-form-card">
 
@@ -607,8 +655,8 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         </div>
 
         <div class="login-header">
-          <h2>Admin Portal</h2>
-          <p>Sign in with your administrator credentials</p>
+          <h2>Welcome Back</h2>
+          <p>Sign in to your DCVS account to continue</p>
         </div>
 
         <?php if (isset($_SESSION['login_error'])): ?>
@@ -630,14 +678,22 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
           </div>
         <?php endif; ?>
 
-        <form id="loginForm" class="login-form" action="login-admin.php" method="POST" novalidate>
+        <?php if (isset($_SESSION['register_success'])): ?>
+          <?php
+            $portalToasts = [$_SESSION['register_success']];
+            unset($_SESSION['register_success']);
+            include __DIR__ . '/../includes/portal-toast.php';
+          ?>
+        <?php endif; ?>
+
+        <form id="loginForm" class="login-form" action="login.php" method="POST" novalidate>
           <?php echo csrfField(); ?>
 
           <div class="form-group" id="emailGroup">
             <label for="email">Email Address</label>
             <div class="input-wrapper">
               <i class="fas fa-envelope input-icon"></i>
-              <input type="email" id="email" name="email" placeholder="e.g. admin@dcvs.gov.ph" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? '', ENT_QUOTES, 'UTF-8'); unset($_SESSION['login_last_email']); ?>" />
+              <input type="email" id="email" name="email" placeholder="e.g. juan@email.com" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? ''); unset($_SESSION['login_last_email']); ?>" />
             </div>
             <span class="field-error" id="emailError"></span>
           </div>
@@ -672,7 +728,8 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         <div class="login-divider"><span>or</span></div>
 
         <p class="login-switch">
-          <i class="fas fa-lock"></i> Admin accounts managed by system administrator
+          Don't have an account?
+          <a href="register.php">Create one now <i class="fas fa-arrow-right"></i></a>
         </p>
 
         <div class="back-home">

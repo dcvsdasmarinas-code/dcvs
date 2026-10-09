@@ -9,8 +9,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once __DIR__ . '/includes/reports/location.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/reports/location.php';
 
 $officialBarangays = dcvsLoadApprovedBarangays($conn);
 $officialBarangaysByCode = [];
@@ -853,7 +853,7 @@ $conn->close();
       <?php
         $portalToasts = [$_SESSION['register_success']];
         unset($_SESSION['register_success']);
-        include 'includes/portal-toast.php';
+        include __DIR__ . '/../includes/portal-toast.php';
       ?>
     <?php endif; ?>
 

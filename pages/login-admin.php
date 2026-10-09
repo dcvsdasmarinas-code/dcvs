@@ -1,7 +1,7 @@
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
-session_name('DCVS_BARANGAY_SESSION');
+session_name('DCVS_ADMIN_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -15,21 +15,21 @@ session_start();
 
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
-if ($autoUser && ($autoUser['role'] ?? '') === 'barangay') {
-    header('Location: dashboard-barangay.php');
+if ($autoUser && ($autoUser['role'] ?? '') === 'admin') {
+    header('Location: role-management.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrf($_POST['csrf_token'] ?? '')) {
         $_SESSION['login_error'] = 'Invalid form submission. Please try again.';
-        header('Location: login-barangay.php');
+        header('Location: login-admin.php');
         exit;
     }
     if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout_until']) {
         $remaining = ceil(($_SESSION['login_lockout_until'] - time()) / 60);
         $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in $remaining minute(s).";
-        header('Location: login-barangay.php');
+        header('Location: login-admin.php');
         exit;
     }
     if (isset($_SESSION['login_lockout_until']) && time() >= $_SESSION['login_lockout_until']) {
@@ -51,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($errors)) {
         $_SESSION['login_error'] = implode('<br>', $errors);
-        header('Location: login-barangay.php');
+        header('Location: login-admin.php');
         exit;
     }
 
@@ -67,6 +67,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     };
 
     $stmt = $conn->prepare("SELECT user_id, username, password, email, full_name, role, barangay_id, phone, address, status, avatar_url, reference_id, deleted_at, password_updated_at FROM users WHERE email = ?");
+    if (!$stmt) {
+        $_SESSION['login_error'] = "Database error.";
+        header('Location: login-admin.php');
+        exit;
+    }
     $stmt->bind_param("s", $email);
     $stmt->execute();
     $result = $stmt->get_result();
@@ -77,18 +82,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (password_verify($password, $user['password'])) {
             if (!empty($user['deleted_at'])) {
                 $_SESSION['login_error'] = "Your account has been deleted by the administrator. Contact us for clarification.";
-                header('Location: login-barangay.php');
+                header('Location: login-admin.php');
                 exit;
             }
             if ($user['status'] !== 'active') {
                 $_SESSION['login_error'] = "Your account has been deactivated. Please contact the administrator.";
-                header('Location: login-barangay.php');
-                exit;
-            }
-
-            if ($user['role'] !== 'barangay') {
-                $_SESSION['login_error'] = "Unauthorized access. Barangay credentials required.";
-                header('Location: login-barangay.php');
+                header('Location: login-admin.php');
                 exit;
             }
 
@@ -104,8 +103,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['reference_id'] = $user['reference_id'] ?? '';
             $_SESSION['logged_in'] = true;
 
-            $action = "Barangay Login";
-            $details = "Barangay officer logged into portal.";
+            if ($user['role'] !== 'admin') {
+                $_SESSION['login_error'] = "Unauthorized access. Admin credentials required.";
+                header('Location: login-admin.php');
+                exit;
+            }
+
+            $action = "Admin Login";
+            $details = "Administrator logged into the system.";
             $ip = $_SERVER['REMOTE_ADDR'];
             $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
             $logStmt->bind_param("isss", $user['user_id'], $action, $details, $ip);
@@ -119,19 +124,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            header('Location: dashboard-barangay.php');
+            header('Location: role-management.php');
             exit;
         } else {
             $recordFailedLogin();
-            header('Location: login-barangay.php');
+            header('Location: login-admin.php');
             exit;
         }
     } else {
         $recordFailedLogin();
-        header('Location: login-barangay.php');
+        header('Location: login-admin.php');
         exit;
     }
-
     $stmt->close();
 }
 
@@ -147,13 +151,13 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Barangay Login — Dasmariñas City Veterinary Services</title>
+  <meta name="description" content="Admin login for Dasmariñas City Veterinary Services management system." />
+  <title>Admin Login — Dasmariñas City Veterinary Services</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -179,7 +183,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       line-height: 1.6;
     }
 
-    /* ── Split Layout ── */
     .auth-wrapper {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -187,7 +190,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       width: 100%;
     }
 
-    /* ── Left Brand Panel ── */
     .auth-brand-panel {
       display: flex;
       flex-direction: column;
@@ -295,7 +297,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       filter: brightness(0) invert(1) drop-shadow(0 1px 3px rgba(0,0,0,0.2));
     }
 
-    /* ── Right Form Panel ── */
     .auth-form-panel {
       display: flex;
       align-items: center;
@@ -316,7 +317,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       padding: 2.5rem 2.5rem 2rem;
     }
 
-    /* ── Login Logo ── */
     .login-logo {
       display: flex;
       justify-content: center;
@@ -330,7 +330,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       object-fit: contain;
     }
 
-    /* ── Header ── */
     .login-header {
       text-align: center;
       margin-bottom: 1.75rem;
@@ -350,7 +349,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       color: var(--text-muted);
     }
 
-    /* ── Alert ── */
     .auth-alert {
       display: flex;
       align-items: center;
@@ -372,7 +370,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       border: 1px solid rgba(29,78,216,0.15);
     }
 
-    /* ── Form ── */
     .login-form {
       display: flex;
       flex-direction: column;
@@ -450,7 +447,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
     .form-group.has-error .input-icon { color: var(--error); }
 
-    /* ── Form Options ── */
     .form-options {
       display: flex;
       align-items: center;
@@ -483,7 +479,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     }
     .forgot-link:hover { color: var(--green-dark); text-decoration: underline; }
 
-    /* ── Button (shadcn) ── */
     .btn-signin {
       display: inline-flex;
       align-items: center;
@@ -510,7 +505,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .btn-signin:active { background: #18181b; box-shadow: none; }
     .btn-signin:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
-    /* ── Divider ── */
     .login-divider {
       display: flex;
       align-items: center;
@@ -520,15 +514,13 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       font-size: 0.8rem;
       font-weight: 500;
     }
-    .login-divider::before,
-    .login-divider::after {
+    .login-divider::before, .login-divider::after {
       content: '';
       flex: 1;
       height: 1px;
       background: var(--border-color);
     }
 
-    /* ── Switch ── */
     .login-switch {
       text-align: center;
       font-size: 0.875rem;
@@ -548,7 +540,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .login-switch a i { font-size: 0.7rem; transition: transform 0.2s; text-decoration: none; }
     .login-switch a:hover i { transform: translateX(3px); }
 
-    /* ── Back to Home ── */
     .back-home {
       text-align: center;
       margin-top: 1.5rem;
@@ -567,7 +558,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .back-home a i { transition: transform 0.2s; text-decoration: none; }
     .back-home a:hover i { transform: translateX(-3px); }
 
-    /* ── Responsive ── */
     @media (max-width: 900px) {
       .auth-wrapper { grid-template-columns: 1fr; }
       .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
@@ -587,12 +577,11 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
   <div class="auth-wrapper">
 
-    <!-- Left Panel: Branding -->
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
         <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
-        <p class="brand-tagline">Serving the community through better animal welfare and veterinary services.</p>
+        <p class="brand-tagline">Managing citywide animal welfare operations with secure oversight and control.</p>
       </div>
 
       <div class="brand-trust">
@@ -610,7 +599,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       </div>
     </div>
 
-    <!-- Right Panel: Login Form -->
     <div class="auth-form-panel">
       <div class="auth-form-card">
 
@@ -619,8 +607,8 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         </div>
 
         <div class="login-header">
-          <h2>Barangay Portal</h2>
-          <p>Sign in with your barangay officer credentials</p>
+          <h2>Admin Portal</h2>
+          <p>Sign in with your administrator credentials</p>
         </div>
 
         <?php if (isset($_SESSION['login_error'])): ?>
@@ -642,14 +630,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
           </div>
         <?php endif; ?>
 
-        <form id="loginForm" class="login-form" action="login-barangay.php" method="POST" novalidate>
+        <form id="loginForm" class="login-form" action="login-admin.php" method="POST" novalidate>
           <?php echo csrfField(); ?>
 
           <div class="form-group" id="emailGroup">
             <label for="email">Email Address</label>
             <div class="input-wrapper">
               <i class="fas fa-envelope input-icon"></i>
-              <input type="email" id="email" name="email" placeholder="e.g. captain@barangay.gov.ph" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? '', ENT_QUOTES, 'UTF-8'); unset($_SESSION['login_last_email']); ?>" />
+              <input type="email" id="email" name="email" placeholder="e.g. admin@dcvs.gov.ph" autocomplete="email" required value="<?php echo htmlspecialchars($_SESSION['login_last_email'] ?? '', ENT_QUOTES, 'UTF-8'); unset($_SESSION['login_last_email']); ?>" />
             </div>
             <span class="field-error" id="emailError"></span>
           </div>
@@ -684,8 +672,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
         <div class="login-divider"><span>or</span></div>
 
         <p class="login-switch">
-          Don't have a barangay account?
-          <a href="register-barangay.php">Register here <i class="fas fa-arrow-right"></i></a>
+          <i class="fas fa-lock"></i> Admin accounts managed by system administrator
         </p>
 
         <div class="back-home">

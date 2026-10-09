@@ -14,8 +14,8 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
     header('Location: login-admin.php');
     exit;
 }
-require_once 'db.php';
-require_once __DIR__ . '/includes/reports/location.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/reports/location.php';
 
 $officialBarangays = dcvsLoadApprovedBarangays($conn);
 $officialBarangaysByCode = [];
