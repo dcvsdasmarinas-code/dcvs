@@ -3,15 +3,13 @@
     Require all denied
 </FilesMatch>
 
-# Admin compatibility routes; remove these only after verifying each legacy URL.
+# Admin compatibility routes.
 RewriteEngine On
-RewriteRule ^admin-archive\.php$ pages/admin/admin-archive.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^dashboard-admin\.php$ pages/admin/dashboard-admin.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^login-admin\.php$ pages/admin/login-admin.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^role-management\.php$ pages/admin/role-management.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^analytics-export\.php$ api/admin/analytics-export.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^logout-admin\.php$ api/admin/logout-admin.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^update-admin-password\.php$ api/admin/update-admin-password.php [END,E=DCVS_ADMIN_ROUTE:1]
-RewriteRule ^update-admin-profile\.php$ api/admin/update-admin-profile.php [END,E=DCVS_ADMIN_ROUTE:1]
-Header always set X-DCVS-Admin-Route "rewritten" env=DCVS_ADMIN_ROUTE
-Header always set X-DCVS-Admin-Route "rewritten" env=REDIRECT_DCVS_ADMIN_ROUTE
+RewriteRule ^admin-archive\.php$ pages/admin/admin-archive.php [END]
+RewriteRule ^dashboard-admin\.php$ pages/admin/dashboard-admin.php [END]
+RewriteRule ^login-admin\.php$ pages/admin/login-admin.php [END]
+RewriteRule ^role-management\.php$ pages/admin/role-management.php [END]
+RewriteRule ^analytics-export\.php$ api/admin/analytics-export.php [END]
+RewriteRule ^logout-admin\.php$ api/admin/logout-admin.php [END]
+RewriteRule ^update-admin-password\.php$ api/admin/update-admin-password.php [END]
+RewriteRule ^update-admin-profile\.php$ api/admin/update-admin-profile.php [END]
