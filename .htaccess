@@ -62,3 +62,13 @@ RewriteRule ^dashboard-barangay-geo\.php$ pages/barangay/dashboard-barangay-geo.
 RewriteRule ^dashboard-resident\.php$ pages/resident/dashboard-resident.php [END]
 RewriteRule ^dashboard-staff\.php$ pages/staff/dashboard-staff.php [END]
 RewriteRule ^dashboard-staff-geo\.php$ pages/staff/dashboard-staff-geo.php [END]
+
+# Login and logout compatibility routes.
+RewriteRule ^login\.php$ pages/shared/login.php [END,E=DCVS_AUTH_ROUTE:1]
+RewriteRule ^login-barangay\.php$ pages/barangay/login-barangay.php [END,E=DCVS_AUTH_ROUTE:1]
+RewriteRule ^login-staff\.php$ pages/staff/login-staff.php [END,E=DCVS_AUTH_ROUTE:1]
+RewriteRule ^logout\.php$ api/shared/logout.php [END,E=DCVS_AUTH_ROUTE:1]
+RewriteRule ^logout-barangay\.php$ api/barangay/logout-barangay.php [END,E=DCVS_AUTH_ROUTE:1]
+RewriteRule ^logout-staff\.php$ api/staff/logout-staff.php [END,E=DCVS_AUTH_ROUTE:1]
+Header always set X-DCVS-Auth-Route "rewritten" env=DCVS_AUTH_ROUTE
+Header always set X-DCVS-Auth-Route "rewritten" env=REDIRECT_DCVS_AUTH_ROUTE
