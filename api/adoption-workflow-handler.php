@@ -12,8 +12,8 @@ if (($_POST['staff_action'] ?? '') !== '') {
     session_name('DCVS_STAFF_SESSION');
 }
 session_start();
-require_once 'db.php';
-require_once 'includes/adoption-workflow.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/adoption-workflow.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');

@@ -11,9 +11,9 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
-require_once 'mailer.php';
-require_once 'includes/adoption-workflow.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../mailer.php';
+require_once __DIR__ . '/../includes/adoption-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     http_response_code(403);
@@ -61,7 +61,7 @@ function uploadPhoto($file, $prefix) {
     $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     if (!in_array($ext, $allowed)) return null;
     $filename = $prefix . '_' . uniqid() . '.' . $ext;
-    $dest = __DIR__ . '/uploads/pets/' . $filename;
+    $dest = __DIR__ . '/../uploads/pets/' . $filename;
     if (move_uploaded_file($file['tmp_name'], $dest)) {
         return 'uploads/pets/' . $filename;
     }
@@ -76,7 +76,7 @@ function storePoolPhoto($image) {
     if ($binary === false) return '';
 
     $extension = $matches[1] === 'jpeg' ? 'jpg' : strtolower($matches[1]);
-    $directory = __DIR__ . '/uploads/pets/';
+    $directory = __DIR__ . '/../uploads/pets/';
     if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) return '';
 
     $filename = 'pet_pool_' . uniqid('', true) . '.' . $extension;
@@ -133,8 +133,8 @@ function handleSave($conn, $userId) {
     if (isset($_FILES['photo']) && $_FILES['photo']['error'] !== UPLOAD_ERR_NO_FILE) {
         $uploaded = uploadPhoto($_FILES['photo'], 'pet_photo');
         if ($uploaded) {
-            if ($photoUrl && strpos($photoUrl, 'uploads/pets/') === 0 && file_exists(__DIR__ . '/' . $photoUrl)) {
-                unlink(__DIR__ . '/' . $photoUrl);
+            if ($photoUrl && strpos($photoUrl, 'uploads/pets/') === 0 && file_exists(__DIR__ . '/../' . $photoUrl)) {
+                unlink(__DIR__ . '/../' . $photoUrl);
             }
             $photoUrl = $uploaded;
         }
@@ -183,8 +183,8 @@ function handleDelete($conn) {
     $stmt = $conn->prepare("DELETE FROM pet_listings WHERE listing_id = ?");
     $stmt->bind_param("i", $id);
     if ($stmt->execute()) {
-        if ($row && $row['photo_url'] && strpos($row['photo_url'], 'uploads/pets/') === 0 && file_exists(__DIR__ . '/' . $row['photo_url'])) {
-            unlink(__DIR__ . '/' . $row['photo_url']);
+        if ($row && $row['photo_url'] && strpos($row['photo_url'], 'uploads/pets/') === 0 && file_exists(__DIR__ . '/../' . $row['photo_url'])) {
+            unlink(__DIR__ . '/../' . $row['photo_url']);
         }
         $stmt->close();
         return ['success' => true, 'message' => 'Deleted successfully'];

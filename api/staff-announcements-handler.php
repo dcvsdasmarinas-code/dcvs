@@ -11,7 +11,7 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     http_response_code(403);
@@ -53,7 +53,7 @@ function uploadPhoto($file, $prefix) {
     $allowed = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
     if (!in_array($ext, $allowed)) return null;
     $filename = $prefix . '_' . uniqid() . '.' . $ext;
-    $dest = __DIR__ . '/uploads/announcements/' . $filename;
+    $dest = __DIR__ . '/../uploads/announcements/' . $filename;
     if (move_uploaded_file($file['tmp_name'], $dest)) {
         return 'uploads/announcements/' . $filename;
     }
@@ -165,8 +165,8 @@ function handleSave($conn, $userId) {
     }
 
     if ($stmt->execute()) {
-        if ($photoUrl !== $oldPhotoUrl && $oldPhotoUrl && file_exists(__DIR__ . '/' . $oldPhotoUrl)) unlink(__DIR__ . '/' . $oldPhotoUrl);
-        if ($photoHoverUrl !== $oldPhotoHoverUrl && $oldPhotoHoverUrl && file_exists(__DIR__ . '/' . $oldPhotoHoverUrl)) unlink(__DIR__ . '/' . $oldPhotoHoverUrl);
+        if ($photoUrl !== $oldPhotoUrl && $oldPhotoUrl && file_exists(__DIR__ . '/../' . $oldPhotoUrl)) unlink(__DIR__ . '/../' . $oldPhotoUrl);
+        if ($photoHoverUrl !== $oldPhotoHoverUrl && $oldPhotoHoverUrl && file_exists(__DIR__ . '/../' . $oldPhotoHoverUrl)) unlink(__DIR__ . '/../' . $oldPhotoHoverUrl);
         $savedId = $id > 0 ? $id : $stmt->insert_id;
         $stmt->close();
         $label = $category === 'advisory' ? 'Advisory' : 'Announcement';
@@ -190,8 +190,8 @@ function handleDelete($conn) {
     $stmt->bind_param("i", $id);
     if ($stmt->execute()) {
         if ($row) {
-            if ($row['photo_url'] && file_exists(__DIR__ . '/' . $row['photo_url'])) unlink(__DIR__ . '/' . $row['photo_url']);
-            if ($row['photo_hover_url'] && file_exists(__DIR__ . '/' . $row['photo_hover_url'])) unlink(__DIR__ . '/' . $row['photo_hover_url']);
+            if ($row['photo_url'] && file_exists(__DIR__ . '/../' . $row['photo_url'])) unlink(__DIR__ . '/../' . $row['photo_url']);
+            if ($row['photo_hover_url'] && file_exists(__DIR__ . '/../' . $row['photo_hover_url'])) unlink(__DIR__ . '/../' . $row['photo_hover_url']);
         }
         $stmt->close();
         return ['success' => true, 'message' => 'Deleted successfully'];
