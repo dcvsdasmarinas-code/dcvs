@@ -1,4 +1,4 @@
-<?php $pageTitle = 'FAQ'; $activePage = 'faq'; include 'includes/header.php'; ?>
+<?php $pageTitle = 'FAQ'; $activePage = 'faq'; include __DIR__ . '/../includes/header.php'; ?>
 
 <style>
 .faq-page{background:#f5f5f7;min-height:100vh;padding-top:100px;}
@@ -167,6 +167,6 @@ function toggleFaq(btn){
 }
 </script>
 
-<?php include 'includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>
 </html>

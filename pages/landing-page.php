@@ -143,7 +143,7 @@ $apptUrl = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) ? 
 }
 </style>
 </head><body data-barba="wrapper" data-navigation-status="is-close" data-about-status="is-closed" data-theme-nav="dark" data-scroll-time="0" class="body">
-<?php $currentPage='home'; $homePage='landing-page.php'; include 'includes/landing-navbar.php'; ?>
+<?php $currentPage='home'; $homePage='landing-page.php'; include __DIR__ . '/../includes/landing-navbar.php'; ?>
 <div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span></div><div class="cursor_css w-embed"><style>
   @media (hover: hover) and (pointer: fine) {
 

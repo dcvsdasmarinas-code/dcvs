@@ -1,7 +1,7 @@
 <?php
-require_once 'db.php';
-require_once 'email_config.php';
-require_once 'mailer.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../email_config.php';
+require_once __DIR__ . '/../mailer.php';
 
 define('CONTACT_TO_EMAIL', 'dcvsdasmarinas@gmail.com');
 
@@ -90,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
 
 $pageTitle = 'Contact Us';
 $activePage = 'contact';
-include 'includes/header.php';
+include __DIR__ . '/../includes/header.php';
 ?>
 
 <style>
@@ -331,6 +331,6 @@ document.getElementById('privacyModal').addEventListener('click', function(e) {
 toggleOtherField();
 </script>
 
-<?php include 'includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>
 </html>

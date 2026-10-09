@@ -1,6 +1,6 @@
 ﻿<!DOCTYPE html>
 <?php
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
 $conn->query("UPDATE announcements SET status='published', updated_at=NOW() WHERE status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND is_active=1");
@@ -164,7 +164,7 @@ $ann_ct = count($announcements);
   .dropdown-toggle { padding:5px 10px !important; font-size:0.8rem !important; }
 }
 </style>
-</head><!--/$--><body data-barba="wrapper" data-navigation-status="is-closed" data-about-status="is-closed" data-theme-nav="light" data-scroll-time="0"><?php include 'includes/landing-navbar.php'; ?><div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><!--$--><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span><!--/$--></div><div class="cursor_css w-embed"><style>
+</head><!--/$--><body data-barba="wrapper" data-navigation-status="is-closed" data-about-status="is-closed" data-theme-nav="light" data-scroll-time="0"><?php include __DIR__ . '/../includes/landing-navbar.php'; ?><div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><!--$--><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span><!--/$--></div><div class="cursor_css w-embed"><style>
   @media (hover: hover) and (pointer: fine) {
 
 
