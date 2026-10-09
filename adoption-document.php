@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/pages/adoption-document.php';
+require_once __DIR__ . '/pages/staff/adoption-document.php';

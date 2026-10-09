@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/pages/staff-archive.php';
+require_once __DIR__ . '/pages/staff/staff-archive.php';

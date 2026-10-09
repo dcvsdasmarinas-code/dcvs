@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/approve-appointment.php';
+require_once __DIR__ . '/api/staff/approve-appointment.php';

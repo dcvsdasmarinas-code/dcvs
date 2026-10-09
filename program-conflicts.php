@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/program-conflicts.php';
+require_once __DIR__ . '/api/staff/program-conflicts.php';

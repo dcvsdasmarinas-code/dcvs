@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/pages/dashboard-staff.php';
+require_once __DIR__ . '/pages/staff/dashboard-staff.php';
