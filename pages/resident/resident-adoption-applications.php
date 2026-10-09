@@ -9,8 +9,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/adoption-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'resident') {
     header('Location: login.php');
@@ -114,7 +114,7 @@ $pageTitle = 'Adoption Application';
   </style>
 </head>
 <body class="resident-portal">
-<?php include __DIR__ . '/../includes/resident-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 <div class="modal active" id="adoptionApplicationDialog">
   <div class="sd-dialog">
   <section class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="application-title" aria-describedby="application-description">

@@ -9,9 +9,9 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../includes/waitlist.php';
-require_once __DIR__ . '/../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/waitlist.php';
+require_once __DIR__ . '/../../includes/adoption-workflow.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -426,7 +426,7 @@ $annResult = $annStmt->get_result();
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/responsive.css'); ?>&resident-dialog=2" />
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=2" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -1211,7 +1211,7 @@ $annResult = $annStmt->get_result();
 </head>
 <body class="dashboard resident-portal" data-realtime-page="resident">
 
-<?php include __DIR__ . '/../includes/resident-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 
 <!-- ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½
      MAIN CONTENT
@@ -1220,7 +1220,7 @@ $annResult = $annStmt->get_result();
 
 <?php
 $portalToasts = array_filter([$petSuccess, $reportSuccess, $appointmentSuccess, $profileSuccess, $passwordSuccess]);
-include __DIR__ . '/../includes/portal-toast.php';
+include __DIR__ . '/../../includes/portal-toast.php';
 ?>
 
 <?php if ($passwordError): ?>
@@ -3249,7 +3249,7 @@ include __DIR__ . '/../includes/portal-toast.php';
 
 <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? APPOINTMENTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="calendar-booking" class="content-section">
-    <?php include __DIR__ . '/../calendar-booking.php'; ?>
+    <?php include __DIR__ . '/../../calendar-booking.php'; ?>
   </section>
   <section id="my-waitlist" class="content-section">
     <section class="resident-waitlist-kpis" aria-label="My waitlist summary">
