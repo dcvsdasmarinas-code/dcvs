@@ -5,8 +5,8 @@ if (in_array($sessParam, $sessionWhitelist, true)) {
     session_name($sessParam);
 }
 session_start();
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/includes/availability.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/availability.php';
 
 header('Content-Type: application/json');
 

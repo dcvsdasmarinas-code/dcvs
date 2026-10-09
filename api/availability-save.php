@@ -11,8 +11,8 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
-require_once 'includes/availability.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/availability.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     http_response_code(403);

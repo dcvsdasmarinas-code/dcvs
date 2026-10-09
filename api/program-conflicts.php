@@ -10,8 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/includes/programs/conflicts.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/programs/conflicts.php';
 
 header('Content-Type: application/json');
 
