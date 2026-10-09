@@ -11,9 +11,9 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
-require_once 'mailer.php';
-require_once 'sms-sender.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../mailer.php';
+require_once __DIR__ . '/../sms-sender.php';
 
 function rejectValidatedRespond($success, $message) {
     if (($_POST['ajax'] ?? '') === '1') {

@@ -16,10 +16,10 @@ session_set_cookie_params([
 ]);
 session_start();
 ini_set('display_errors', '0');
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/includes/reports/validation.php';
-require_once __DIR__ . '/mailer.php';
-require_once __DIR__ . '/sms-sender.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/reports/validation.php';
+require_once __DIR__ . '/../mailer.php';
+require_once __DIR__ . '/../sms-sender.php';
 
 header('Content-Type: application/json');
 
@@ -187,7 +187,7 @@ if ($action === 'validate') {
     }
     if ($finfo !== false) finfo_close($finfo);
 
-    $uploadDirectory = __DIR__ . '/uploads/reports/';
+    $uploadDirectory = __DIR__ . '/../uploads/reports/';
     if ($validatedFiles && !is_dir($uploadDirectory)
         && !mkdir($uploadDirectory, 0755, true) && !is_dir($uploadDirectory)) {
         error_log('Could not create report validation evidence directory.');
@@ -202,7 +202,7 @@ if ($action === 'validate') {
         $fileUrl = 'uploads/reports/' . $fileName;
         if (!move_uploaded_file($file['tmp_name'], $uploadDirectory . $fileName)) {
             foreach ($storedFiles as $storedFile) {
-                $path = __DIR__ . '/' . $storedFile['file_url'];
+                $path = __DIR__ . '/../' . $storedFile['file_url'];
                 if (is_file($path) && !unlink($path)) error_log('Could not remove an incomplete validation evidence upload.');
             }
             error_log('Could not store barangay validation evidence.');
@@ -220,7 +220,7 @@ if ($action === 'validate') {
 
     if (!$conn->begin_transaction()) {
         foreach ($storedFiles as $storedFile) {
-            $path = __DIR__ . '/' . $storedFile['file_url'];
+            $path = __DIR__ . '/../' . $storedFile['file_url'];
             if (is_file($path) && !unlink($path)) error_log('Could not remove validation evidence after transaction failure.');
         }
         error_log('Could not begin barangay report validation transaction: ' . $conn->error);
@@ -284,7 +284,7 @@ if ($action === 'validate') {
     if (!$updated || !$attachmentsSaved) {
         $conn->rollback();
         foreach ($storedFiles as $storedFile) {
-            $path = __DIR__ . '/' . $storedFile['file_url'];
+            $path = __DIR__ . '/../' . $storedFile['file_url'];
             if (is_file($path) && !unlink($path)) error_log('Could not remove validation evidence after database failure.');
         }
         http_response_code($databaseError ? 500 : 409);
@@ -407,7 +407,7 @@ if ($action === 'validate') {
         error_log('Could not commit barangay report validation: ' . $conn->error);
         $conn->rollback();
         foreach ($storedFiles as $storedFile) {
-            $path = __DIR__ . '/' . $storedFile['file_url'];
+            $path = __DIR__ . '/../' . $storedFile['file_url'];
             if (is_file($path) && !unlink($path)) error_log('Could not remove validation evidence after transaction commit failure.');
         }
         http_response_code(500);
