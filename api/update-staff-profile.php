@@ -1,5 +1,5 @@
 <?php
-session_name('DCVS_BARANGAY_SESSION');
+session_name('DCVS_STAFF_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -11,10 +11,10 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'barangay') {
-    header('Location: login-barangay.php');
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
+    header('Location: login-staff.php');
     exit;
 }
 
@@ -32,13 +32,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $_SESSION['profile_error'] = 'Invalid email format.'; $error = true; }
 
     if ($error) {
-        header('Location: dashboard-barangay.php#account-settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
     $avatarUrl = handleAvatarUpload($conn, $userId, $_SESSION);
     if ($avatarUrl === false) {
-        header('Location: dashboard-barangay.php#account-settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
@@ -59,9 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $stmt->close();
-    header('Location: dashboard-barangay.php#account-settings');
+    header('Location: dashboard-staff.php#account-settings');
     exit;
 }
 
-header('Location: dashboard-barangay.php');
+header('Location: dashboard-staff.php');
 exit;

@@ -1,5 +1,5 @@
 <?php
-session_name('DCVS_ADMIN_SESSION');
+session_name('DCVS_STAFF_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -11,10 +11,10 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'admin') {
-    header('Location: login-admin.php');
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
+    header('Location: login-staff.php');
     exit;
 }
 
@@ -27,22 +27,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($currentPassword) || empty($newPassword) || empty($confirmPassword)) {
         $_SESSION['profile_error'] = 'All password fields are required.';
-        header('Location: dashboard-admin.php#settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
     if ($newPassword !== $confirmPassword) {
         $_SESSION['profile_error'] = 'New passwords do not match.';
-        header('Location: dashboard-admin.php#settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
     if (strlen($newPassword) < 8) {
         $_SESSION['profile_error'] = 'New password must be at least 8 characters.';
-        header('Location: dashboard-admin.php#settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
+    // Verify current password
     $stmt = $conn->prepare("SELECT password FROM users WHERE user_id = ?");
     $stmt->bind_param("i", $userId);
     $stmt->execute();
@@ -52,7 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$user || !password_verify($currentPassword, $user['password'])) {
         $_SESSION['profile_error'] = 'Current password is incorrect.';
-        header('Location: dashboard-admin.php#settings');
+        header('Location: dashboard-staff.php#account-settings');
         exit;
     }
 
@@ -67,9 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $update->close();
-    header('Location: dashboard-admin.php#settings');
+    header('Location: dashboard-staff.php#account-settings');
     exit;
 }
 
-header('Location: dashboard-admin.php');
+header('Location: dashboard-staff.php');
 exit;
