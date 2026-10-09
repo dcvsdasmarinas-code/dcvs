@@ -1,3 +1,3 @@
 <?php
 // DCVS public entry point -> landing page
-include __DIR__ . '/landing-page.php';
+require_once __DIR__ . '/pages/landing-page.php';
