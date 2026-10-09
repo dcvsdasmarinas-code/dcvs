@@ -24,7 +24,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
     exit;
 }
 
-require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/../db.php';
 
 $userId = (int)$_SESSION['user_id'];
 $limit  = min(max((int)($_GET['limit'] ?? 20), 1), 50);
