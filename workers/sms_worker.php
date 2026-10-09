@@ -7,8 +7,8 @@ if (PHP_SAPI !== 'cli') {
 ignore_user_abort(true);
 set_time_limit(120);
 
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/sms-sender.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../sms-sender.php';
 
 function processSmsQueueBatch($conn, $batchSize = 10) {
     $workerToken = bin2hex(random_bytes(16));

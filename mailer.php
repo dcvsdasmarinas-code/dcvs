@@ -40,7 +40,7 @@ function spawnEmailWorker() {
     }
     if (!$php) return false;
 
-    $worker = __DIR__ . '\\email_worker.php';
+    $worker = __DIR__ . '\\workers\\email_worker.php';
     if (!file_exists($worker)) return false;
     $cmd = 'start /B "" "' . $php . '" "' . $worker . '" > NUL 2>&1';
     $h = @popen($cmd, 'r');

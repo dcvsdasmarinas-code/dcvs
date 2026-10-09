@@ -192,7 +192,7 @@ function spawnSmsWorker() {
     }
     if (!$php) return false;
 
-    $worker = __DIR__ . DIRECTORY_SEPARATOR . 'sms_worker.php';
+    $worker = __DIR__ . DIRECTORY_SEPARATOR . 'workers' . DIRECTORY_SEPARATOR . 'sms_worker.php';
     if (!file_exists($worker)) return false;
     $command = 'start /B "" "' . $php . '" "' . $worker . '" > NUL 2>&1';
     $handle = @popen($command, 'r');
@@ -210,7 +210,7 @@ function queueSms($conn, $recipient, $recipientName, $message, $sentBy = null, $
     if (!$queued) return false;
 
     if (!spawnSmsWorker()) {
-        error_log('DCVS SMS: Queued message but could not start sms_worker.php.');
+        error_log('DCVS SMS: Queued message but could not start workers/sms_worker.php.');
     }
     return true;
 }
