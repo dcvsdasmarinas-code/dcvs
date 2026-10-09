@@ -121,7 +121,5 @@ RewriteRule ^reports-barangay\.php$ pages/barangay/reports-barangay.php [END]
 RewriteRule ^validate-report\.php$ api/shared/validate-report.php [END]
 
 # Report editing and client database compatibility routes.
-RewriteRule ^edit-report\.php$ api/shared/edit-report.php [END,E=DCVS_DATA_ROUTE:1]
-RewriteRule ^client-database-handler\.php$ api/staff/client-database-handler.php [END,E=DCVS_DATA_ROUTE:1]
-Header always set X-DCVS-Data-Route "rewritten" env=DCVS_DATA_ROUTE
-Header always set X-DCVS-Data-Route "rewritten" env=REDIRECT_DCVS_DATA_ROUTE
+RewriteRule ^edit-report\.php$ api/shared/edit-report.php [END]
+RewriteRule ^client-database-handler\.php$ api/staff/client-database-handler.php [END]
