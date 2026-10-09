@@ -8,8 +8,8 @@ if ($preferStaffSession && isset($_COOKIE['DCVS_STAFF_SESSION'])) {
     session_name('DCVS_STAFF_SESSION');
 }
 session_start();
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/includes/waitlist.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/waitlist.php';
 
 header('Content-Type: application/json');
 
