@@ -12,8 +12,8 @@ session_set_cookie_params([
 session_start();
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
-require_once 'db.php';
-require_once 'includes/adoption-workflow.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/adoption-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
