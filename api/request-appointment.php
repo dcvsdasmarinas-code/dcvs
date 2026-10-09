@@ -14,9 +14,9 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once 'includes/availability.php';
-require_once 'includes/waitlist.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/availability.php';
+require_once __DIR__ . '/../includes/waitlist.php';
 
 function requestAppointmentRespond($success, $message, $section = '', $data = []) {
     if (($_POST['ajax'] ?? '') === '1') {
