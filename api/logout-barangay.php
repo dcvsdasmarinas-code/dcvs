@@ -10,7 +10,7 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 clearRememberMe($conn);
 if (isset($_SESSION['user_id'])) {
     $uid = $_SESSION['user_id'];
