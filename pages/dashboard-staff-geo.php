@@ -10,8 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once __DIR__ . '/includes/reports/location.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/reports/location.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -38,8 +38,8 @@ $reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
-        __DIR__ . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
-        __DIR__ . '/geo-map/barangays-boundary.json'
+        __DIR__ . '/../DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
+        __DIR__ . '/../geo-map/barangays-boundary.json'
     );
     $reportPinsEnabled = dcvsReportPinFeatureEnabled($conn, $reportPinFeatures);
 }
@@ -69,8 +69,8 @@ $activePage = 'geo';
 
   <!-- MapCN bundle -->
   <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/geo-map/map.css'); ?>">
-  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/geo-drawer.css'); ?>">
+  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../geo-map/map.css'); ?>">
+  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/geo-drawer.css'); ?>">
   <script src="dist/mapcn.umd.cjs"></script>
 
   <style>
@@ -458,9 +458,9 @@ document.addEventListener('DOMContentLoaded', function() {
 })();
 </script>
 <?php if ($reportPinsEnabled): ?>
-<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/report-map-pins.js'); ?>"></script>
+<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/report-map-pins.js'); ?>"></script>
 <?php endif; ?>
-<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-landmarks.js'); ?>"></script>
-<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/map-landmarks.js'); ?>"></script>
+<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/map-basemap-toggle.js'); ?>"></script>
 </body>
 </html>
