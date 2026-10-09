@@ -7,8 +7,8 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['barangay_id']) || ($_SESSI
     exit;
 }
 
-require_once __DIR__ . '/db.php';
-require_once __DIR__ . '/env.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../env.php';
 loadDcvsEnv();
 $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 $responseTargetHours = max(1, (int)env('DCVS_RESPONSE_TARGET_HOURS', '24'));
@@ -2012,9 +2012,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
 });
 </script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/notification.css'); ?>">
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/notification-panel.js'); ?>" defer></script>
-<script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/response-workflow.js'); ?>"></script>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/notification.css'); ?>">
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'); ?>" defer></script>
+<script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/response-workflow.js'); ?>"></script>
 
 </body>
 </html>
