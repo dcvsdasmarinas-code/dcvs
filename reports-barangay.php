@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/pages/reports-barangay.php';
+require_once __DIR__ . '/pages/barangay/reports-barangay.php';

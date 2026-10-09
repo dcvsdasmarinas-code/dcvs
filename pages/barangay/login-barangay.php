@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../../db.php';
 
 session_name('DCVS_BARANGAY_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);

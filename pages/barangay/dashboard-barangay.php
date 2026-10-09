@@ -10,8 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../env.php';
+require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../env.php';
 loadDcvsEnv();
 $dashboardResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 
@@ -2425,11 +2425,11 @@ $dashboardConfig = [
 
 
   </style>
-  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/notification.css'); ?>" />
+  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
 </head>
 <body>
 
-<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
 <div class="app-wrapper">
 
@@ -4246,6 +4246,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script>
 // Notifications are managed by assets/js/notification-panel.js.
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'); ?>" defer></script>
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
 </body>
 </html>

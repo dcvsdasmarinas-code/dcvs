@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/update-barangay-password.php';
+require_once __DIR__ . '/api/barangay/update-barangay-password.php';

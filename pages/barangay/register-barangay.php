@@ -10,8 +10,8 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../includes/reports/location.php';
+require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/reports/location.php';
 
 // Fetch barangay list for the dropdown
 $barangays = dcvsLoadApprovedBarangays($conn);

@@ -10,7 +10,7 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../../db.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'barangay') {
     header('Location: login-barangay.php');
@@ -198,7 +198,7 @@ $pageTitle = 'Account Settings';
 </head>
 <body class="sb2-active">
 
-<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
   <header class="topbar">
     <div class="topbar-left">
@@ -483,7 +483,7 @@ if (toggle && sidebar) {
 }
 
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'); ?>" defer></script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/notification.css'); ?>">
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
 </body>
 </html>

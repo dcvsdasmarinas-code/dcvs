@@ -7,7 +7,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['barangay_id']) || ($_SESSI
     exit;
 }
 
-require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../../db.php';
 
 $userId     = (int)$_SESSION['user_id'];
 $barangayId = (int)$_SESSION['barangay_id'];
@@ -231,7 +231,7 @@ $activePage = 'archive';
 </head>
 <body>
 
-<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
 <div class="app-wrapper">
   <header class="topbar">
@@ -483,8 +483,8 @@ document.getElementById('categoryFilter').addEventListener('change', getFiltered
 render();
 
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'); ?>" defer></script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/notification.css'); ?>">
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
 
 </body>
 </html>

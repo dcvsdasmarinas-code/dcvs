@@ -10,8 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once __DIR__ . '/../db.php';
-require_once __DIR__ . '/../includes/reports/location.php';
+require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/reports/location.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'barangay') {
     header('Location: login-barangay.php');
@@ -50,8 +50,8 @@ $reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
 $reportPinsEnabled = false;
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
-        __DIR__ . '/../DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
-        __DIR__ . '/../geo-map/barangays-boundary.json'
+        __DIR__ . '/../../DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
+        __DIR__ . '/../../geo-map/barangays-boundary.json'
     );
     $reportPinsEnabled = dcvsReportPinFeatureEnabled($conn, $reportPinFeatures);
 }
@@ -70,8 +70,8 @@ $activePage = 'geo';
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="dist/mapcn.css">
-  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../geo-map/map.css'); ?>">
-  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../assets/css/geo-drawer.css'); ?>">
+  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../../geo-map/map.css'); ?>">
+  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'); ?>">
   <script src="dist/mapcn.umd.cjs"></script>
   <style>
     * { box-sizing: border-box; }
@@ -103,7 +103,7 @@ $activePage = 'geo';
   </style>
 </head>
 <body>
-<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 <main class="geo-page">
   <header class="geo-topbar">
     <div class="geo-topbar-left">
@@ -140,7 +140,7 @@ $activePage = 'geo';
     </div>
   </section>
 </main>
-<?php include __DIR__ . '/../includes/geo-drawer.php'; ?>
+<?php include __DIR__ . '/../../includes/geo-drawer.php'; ?>
 <script>
 (function() {
   var mapElement = document.getElementById('geoMap');
@@ -191,11 +191,11 @@ $activePage = 'geo';
   }, { once: true });
 })();
 </script>
-<script src="assets/js/barangay-geo-drawer.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/barangay-geo-drawer.js'); ?>"></script>
+<script src="assets/js/barangay-geo-drawer.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/barangay-geo-drawer.js'); ?>"></script>
 <?php if ($reportPinsEnabled): ?>
-<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/report-map-pins.js'); ?>"></script>
+<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'); ?>"></script>
 <?php endif; ?>
-<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/map-landmarks.js'); ?>"></script>
-<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'); ?>"></script>
+<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'); ?>"></script>
 </body>
 </html>
