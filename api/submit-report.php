@@ -14,8 +14,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once __DIR__ . '/includes/reports/location.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/reports/location.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -38,8 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     loadDcvsEnv();
     if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
         $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
-            __DIR__ . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
-            __DIR__ . '/geo-map/barangays-boundary.json'
+            __DIR__ . '/../DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
+            __DIR__ . '/../geo-map/barangays-boundary.json'
         );
         $reportPinEnabled = dcvsReportPinFeatureEnabled($conn, $reportPinFeatures);
     }
@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    $uploadDirectory = __DIR__ . '/uploads/reports/';
+    $uploadDirectory = __DIR__ . '/../uploads/reports/';
     if ($validatedAttachments && !is_dir($uploadDirectory)
         && !mkdir($uploadDirectory, 0755, true) && !is_dir($uploadDirectory)) {
         error_log('Could not create report attachment directory: ' . $uploadDirectory);
@@ -295,7 +295,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $storedPath = 'uploads/reports/' . $fileName;
         if (!move_uploaded_file($attachment['tmp_name'], $uploadDirectory . $fileName)) {
             foreach ($storedAttachments as $storedAttachment) {
-                $storedFile = __DIR__ . '/' . $storedAttachment['file_url'];
+                $storedFile = __DIR__ . '/../' . $storedAttachment['file_url'];
                 if (is_file($storedFile) && !unlink($storedFile)) {
                     error_log('Could not remove a partially stored report attachment: ' . $storedFile);
                 }
@@ -334,7 +334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $refId = 'RPT-' . time() . '-' . $_SESSION['user_id'];
     $removeStoredAttachments = static function () use (&$storedAttachments) {
         foreach ($storedAttachments as $attachment) {
-            $storedFile = __DIR__ . '/' . $attachment['file_url'];
+            $storedFile = __DIR__ . '/../' . $attachment['file_url'];
             if (is_file($storedFile) && !unlink($storedFile)) {
                 error_log('Could not remove an uncommitted report attachment: ' . $storedFile);
             }
