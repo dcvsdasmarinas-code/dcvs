@@ -579,7 +579,7 @@ if ($createFromProgram && $programId !== false) {
 </head>
 <body class="staff-theme" data-portal="staff">
 
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 
 <main class="main-content announcements-cms">
 
@@ -1046,7 +1046,7 @@ if ($createFromProgram && $programId !== false) {
       </div>
     </div>
 
-    <?php include 'includes/portal-toast.php'; ?>
+    <?php include __DIR__ . '/../includes/portal-toast.php'; ?>
   </div>
 </main>
 

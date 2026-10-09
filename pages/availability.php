@@ -589,7 +589,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     }
   </style>
 </head>
-<body><?php include 'includes/staff-sidebar.php'; ?>
+<body><?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 <main class="main-content">
   <div class="av-page">
 

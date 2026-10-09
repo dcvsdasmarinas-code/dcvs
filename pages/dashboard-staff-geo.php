@@ -114,7 +114,7 @@ $activePage = 'geo';
 </head>
 <body class="staff-theme">
 
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 
 <div class="staff-main">
   <div class="geo-full-page">
@@ -151,7 +151,7 @@ $activePage = 'geo';
             <div class="geo-panel-stat"><span class="geo-panel-stat-label">Updated</span><span class="geo-panel-stat-value" id="geoPanelUpdated">--</span></div>
           </div>
         </div>
-        <?php include 'includes/geo-drawer.php'; ?>
+        <?php include __DIR__ . '/../includes/geo-drawer.php'; ?>
         <!-- Legend -->
         <div class="geo-legend">
           <span style="font-weight:600;color:#18181b;font-size:12px;">Risk Level:</span>

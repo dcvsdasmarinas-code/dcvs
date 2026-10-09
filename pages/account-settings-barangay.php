@@ -198,7 +198,7 @@ $pageTitle = 'Account Settings';
 </head>
 <body class="sb2-active">
 
-<?php include 'includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
 
   <header class="topbar">
     <div class="topbar-left">

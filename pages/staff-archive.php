@@ -321,7 +321,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 </style>
 </head>
 <body class="staff-theme" data-portal="staff">
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 
 <main class="main-content">
 

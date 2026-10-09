@@ -231,7 +231,7 @@ $activePage = 'archive';
 </head>
 <body>
 
-<?php include 'includes/barangay-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/barangay-sidebar.php'; ?>
 
 <div class="app-wrapper">
   <header class="topbar">

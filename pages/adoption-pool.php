@@ -2709,7 +2709,7 @@ $activePage = 'adoption-pool';
   </style>
 </head>
 <body>
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 <main class="main-content">
 <div class="main-wrapper">
     <!-- Operational Body: Adoption Pool Contents Only -->

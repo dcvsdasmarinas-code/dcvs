@@ -114,7 +114,7 @@ $pageTitle = 'Adoption Application';
   </style>
 </head>
 <body class="resident-portal">
-<?php include 'includes/resident-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/resident-sidebar.php'; ?>
 <div class="modal active" id="adoptionApplicationDialog">
   <div class="sd-dialog">
   <section class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="application-title" aria-describedby="application-description">

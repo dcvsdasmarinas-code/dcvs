@@ -108,7 +108,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'restore_user') {
             $accessText = $u['status'] === 'active' ? 'Your account access remains active.' : 'Your account remains deactivated until an administrator activates it.';
             $subject = 'Account Unarchived — Dasmariñas City Veterinary Services';
             $htmlBody = dcvsEmailTemplate('Account Unarchived', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your account has been removed from the administrator’s archive. ' . $accessText . '</p>');
-            require_once 'mailer.php';
+            require_once __DIR__ . '/../mailer.php';
             sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
         }
         $_SESSION['flash_msg'] = "User '{$u['full_name']}' unarchived successfully.";
@@ -220,7 +220,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 </style>
 </head>
 <body>
-<?php include 'includes/admin-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/admin-sidebar.php'; ?>
 
 <main class="main-content">
 <?php if (isset($_SESSION['flash_msg'])): ?>

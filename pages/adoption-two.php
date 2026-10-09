@@ -1,4 +1,4 @@
-<?php $pageTitle = 'Adopt a Pet'; $activePage = 'adoption'; include 'includes/header.php'; ?>
+<?php $pageTitle = 'Adopt a Pet'; $activePage = 'adoption'; include __DIR__ . '/../includes/header.php'; ?>
 
 <style>
 .adoption-two-page{background:#f7f6f4;min-height:100vh;padding-top:100px;}
@@ -90,6 +90,6 @@ h1{font-weight:800;font-size:52px;line-height:1.05;letter-spacing:-0.025em;margi
 
 </div>
 
-<?php include 'includes/footer.php'; ?>
+<?php include __DIR__ . '/../includes/footer.php'; ?>
 </body>
 </html>

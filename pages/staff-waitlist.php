@@ -184,7 +184,7 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
   </style>
 </head>
 <body class="staff-theme" data-portal="staff">
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 <main class="main-content">
   <div class="waitlist-page">
     <section class="waitlist-kpis" aria-label="Waitlist summary">

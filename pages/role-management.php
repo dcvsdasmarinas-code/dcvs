@@ -827,7 +827,7 @@ body { background:#ffffff; }
 </head>
 <body>
 
-<?php include 'includes/admin-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/admin-sidebar.php'; ?>
 
 <main class="main-content">
 

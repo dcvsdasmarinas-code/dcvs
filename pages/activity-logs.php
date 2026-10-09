@@ -307,7 +307,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
   </style>
 </head>
 <body>
-  <?php include 'includes/staff-sidebar.php'; ?>
+  <?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
   <main class="main-content activity-cms">
     <div class="al-wrap">
       <div class="al-filters">
