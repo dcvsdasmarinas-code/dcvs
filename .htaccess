@@ -45,11 +45,9 @@ RewriteRule ^staff-get-appointment-request\.php$ api/staff/staff-get-appointment
 RewriteRule ^update-appointment-status\.php$ api/staff/update-appointment-status.php [END]
 
 # Archive compatibility routes.
-RewriteRule ^archive\.php$ pages/shared/archive.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-RewriteRule ^barangay-archive\.php$ pages/barangay/barangay-archive.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-RewriteRule ^staff-archive\.php$ pages/staff/staff-archive.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-RewriteRule ^archive-pet\.php$ api/shared/archive-pet.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-RewriteRule ^archive-report\.php$ api/shared/archive-report.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-RewriteRule ^restore-report\.php$ api/shared/restore-report.php [END,E=DCVS_ARCHIVE_ROUTE:1]
-Header always set X-DCVS-Archive-Route "rewritten" env=DCVS_ARCHIVE_ROUTE
-Header always set X-DCVS-Archive-Route "rewritten" env=REDIRECT_DCVS_ARCHIVE_ROUTE
+RewriteRule ^archive\.php$ pages/shared/archive.php [END]
+RewriteRule ^barangay-archive\.php$ pages/barangay/barangay-archive.php [END]
+RewriteRule ^staff-archive\.php$ pages/staff/staff-archive.php [END]
+RewriteRule ^archive-pet\.php$ api/shared/archive-pet.php [END]
+RewriteRule ^archive-report\.php$ api/shared/archive-report.php [END]
+RewriteRule ^restore-report\.php$ api/shared/restore-report.php [END]
