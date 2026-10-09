@@ -13,3 +13,19 @@ RewriteRule ^analytics-export\.php$ api/admin/analytics-export.php [END]
 RewriteRule ^logout-admin\.php$ api/admin/logout-admin.php [END]
 RewriteRule ^update-admin-password\.php$ api/admin/update-admin-password.php [END]
 RewriteRule ^update-admin-profile\.php$ api/admin/update-admin-profile.php [END]
+
+# Adoption compatibility routes.
+RewriteRule ^adoption\.php$ pages/shared/adoption.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^adoption-two\.php$ pages/shared/adoption-two.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^adoption-document\.php$ pages/staff/adoption-document.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^adoption-pool\.php$ pages/staff/adoption-pool.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^adoption-workflow-handler\.php$ api/shared/adoption-workflow-handler.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^adopt-process\.php$ api/shared/adopt-process.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^resident-adoption-applications\.php$ pages/resident/resident-adoption-applications.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^add-pet\.php$ api/resident/add-pet.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^resident-add-pet\.php$ api/resident/resident-add-pet.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^promote-pet-handler\.php$ api/staff/promote-pet-handler.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^petlist\.php$ pages/shared/petlist.php [END,E=DCVS_ADOPTION_ROUTE:1]
+RewriteRule ^pet-profile\.php$ pages/shared/pet-profile.php [END,E=DCVS_ADOPTION_ROUTE:1]
+Header always set X-DCVS-Adoption-Route "rewritten" env=DCVS_ADOPTION_ROUTE
+Header always set X-DCVS-Adoption-Route "rewritten" env=REDIRECT_DCVS_ADOPTION_ROUTE
