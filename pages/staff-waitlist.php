@@ -10,8 +10,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once 'includes/waitlist.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/waitlist.php';
 
 if (empty($_SESSION['logged_in']) || ($_SESSION['role'] ?? '') !== 'staff') {
     header('Location: login-staff.php');
