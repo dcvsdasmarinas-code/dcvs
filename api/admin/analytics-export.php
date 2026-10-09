@@ -1,7 +1,7 @@
 <?php
 session_name('DCVS_STAFF_SESSION');
 session_start();
-require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../../db.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'staff') {
     http_response_code(403);
