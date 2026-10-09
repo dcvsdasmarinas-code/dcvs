@@ -10,13 +10,13 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once 'sms-sender.php';
-require_once __DIR__ . '/includes/staff-formatters.php';
-require_once __DIR__ . '/includes/reports/staff-data.php';
-require_once __DIR__ . '/includes/programs/conflicts.php';
-require_once __DIR__ . '/includes/availability.php';
-require_once __DIR__ . '/includes/waitlist.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../sms-sender.php';
+require_once __DIR__ . '/../includes/staff-formatters.php';
+require_once __DIR__ . '/../includes/reports/staff-data.php';
+require_once __DIR__ . '/../includes/programs/conflicts.php';
+require_once __DIR__ . '/../includes/availability.php';
+require_once __DIR__ . '/../includes/waitlist.php';
 
 // Fresh login â�?��?T force Analytics tab on first dashboard load
 $freshDashboard = !empty($_SESSION['fresh_dashboard']);
@@ -474,7 +474,7 @@ if ($apptsQuery) {
 }
 }
 // Grey out days where every standard slot is closed (weekly template + overrides)
-require_once __DIR__ . '/includes/availability.php';
+require_once __DIR__ . '/../includes/availability.php';
 $weeklyTemplate = dcvsWeeklyTemplate($conn);
 $blockedDays = [];
 $calStart = date('Y-m-d');
@@ -865,7 +865,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
             $_SESSION['program_success'] = "Program \"" . htmlspecialchars($progName) . "\" created successfully.";
             $_SESSION['program_created'] = true;
             if ($appointmentConflicts && $notifyAffected) {
-                require_once __DIR__ . '/includes/program-notifications.php';
+                require_once __DIR__ . '/../includes/program-notifications.php';
                 $notifiedCount = dcvsNotifyProgramAffectedAppointments($conn, $appointmentConflicts, $progName, $staffId);
                 $_SESSION['program_success'] .= ' ' . $notifiedCount . ' affected resident(s) notified.';
             }
@@ -963,7 +963,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
 
             $_SESSION['program_success'] = "Program \"" . htmlspecialchars($progName) . "\" updated successfully.";
             if ($appointmentConflicts && $notifyAffected) {
-                require_once __DIR__ . '/includes/program-notifications.php';
+                require_once __DIR__ . '/../includes/program-notifications.php';
                 $notifiedCount = dcvsNotifyProgramAffectedAppointments($conn, $appointmentConflicts, $progName, $_SESSION['user_id']);
                 $_SESSION['program_success'] .= ' ' . $notifiedCount . ' affected resident(s) notified.';
             }
@@ -2046,7 +2046,7 @@ if (!empty($_GET['waitlist_booking'])) {
 </head>
 <body class="staff-theme" data-realtime-page="staff">
 
-<?php include 'includes/staff-sidebar.php'; ?>
+<?php include __DIR__ . '/../includes/staff-sidebar.php'; ?>
 
 <!-- MAIN CONTENT -->
 <main class="main-content" id="mainContent">
@@ -2061,7 +2061,7 @@ if (!empty($_GET['waitlist_booking'])) {
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ OVERVIEW / ANALYTICS DASHBOARD �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
 <section id="analytics" class="content-section active aether-analytics">
-<?php include 'includes/aether-dashboard.php'; ?>
+<?php include __DIR__ . '/../includes/aether-dashboard.php'; ?>
 </section>
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ USERS TAB �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
@@ -2323,7 +2323,7 @@ if (!empty($_GET['waitlist_booking'])) {
 
   <!-- CALENDAR SCHEDULE -->
   <section id="calendar-schedule" class="content-section">
-    <?php include __DIR__ . '/calendar/events-calendar.php'; ?>
+    <?php include __DIR__ . '/../calendar/events-calendar.php'; ?>
   </section>
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ CLIENT & PET DATABASE TAB �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
@@ -3823,7 +3823,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </script>
   <?php $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1'; ?>
   <script>window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>; window.DCVS_RESPONSE_ROLE = 'staff'; window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>; window.DCVS_CURRENT_STAFF_ID = <?php echo (int)$_SESSION['user_id']; ?>; window.DCVS_RESPONSE_OFFICERS = <?php echo json_encode($responseDispatchOfficers, $jsonFlags); ?>;</script>
-  <script src="assets/js/reports-database.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/reports-database.js'); ?>"></script>
+  <script src="assets/js/reports-database.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/reports-database.js'); ?>"></script>
 
   <!-- �"?�"? REPORTS: PENDING CASES �"?�"? -->
   <section id="reports-pending" class="content-section">
@@ -4387,7 +4387,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   var RESOLVED_ITEMS = <?php echo json_encode($resolvedItems, $jsonFlags); ?>;
   </script>
   <script src="assets/js/case-database.js"></script>
-  <script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/response-workflow.js'); ?>"></script>
+  <script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/response-workflow.js'); ?>"></script>
   <script>
   initCaseDB({
     p: 'pen',
@@ -8500,7 +8500,7 @@ function executeArchiveAppt() {
 
 </script>
 
-<?php include 'includes/portal-toast.php'; ?>
+<?php include __DIR__ . '/../includes/portal-toast.php'; ?>
 <script>
 document.addEventListener('dcvs:realtime', function(event) {
   var data = event.detail || {};
