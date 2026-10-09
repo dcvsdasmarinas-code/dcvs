@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/archive-report.php';
+require_once __DIR__ . '/api/shared/archive-report.php';

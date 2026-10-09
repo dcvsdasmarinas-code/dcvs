@@ -53,7 +53,7 @@ Owns staff dashboard display formatters:
 
 ## Application Folder Layout
 
-Page implementations are organized under `pages/`, and request handlers are organized under `api/`. Root-level compatibility files continue to load the moved implementations so existing bookmarks, forms, AJAX requests, redirects, and email/SMS links retain their established URLs. Filesystem includes and upload paths were adjusted to the moved implementation locations; stored upload URL values remain unchanged.
+Page implementations are grouped by audience under `pages/admin/`, `pages/staff/`, `pages/resident/`, `pages/barangay/`, and `pages/shared/`. Request handlers use the matching `api/` role folders. Root-level compatibility files continue to load the moved implementations so existing bookmarks, forms, AJAX requests, redirects, and email/SMS links retain their established URLs. Filesystem includes and upload paths were adjusted to the moved implementation locations; stored upload URL values remain unchanged.
 
 ## Outside the Move-and-Relink Scope
 

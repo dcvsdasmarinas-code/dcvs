@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/appointment-waitlist-action.php';
+require_once __DIR__ . '/api/shared/appointment-waitlist-action.php';

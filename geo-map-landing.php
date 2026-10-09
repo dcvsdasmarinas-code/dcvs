@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/pages/geo-map-landing.php';
+require_once __DIR__ . '/pages/shared/geo-map-landing.php';

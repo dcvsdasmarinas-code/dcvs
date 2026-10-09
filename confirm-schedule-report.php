@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/confirm-schedule-report.php';
+require_once __DIR__ . '/api/shared/confirm-schedule-report.php';

@@ -1,2 +1,2 @@
 <?php
-require_once __DIR__ . '/api/adoption-workflow-handler.php';
+require_once __DIR__ . '/api/shared/adoption-workflow-handler.php';
