@@ -13,6 +13,7 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -29,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Fetch report details
-    $stmt = $conn->prepare("SELECT * FROM reports WHERE report_id = ? AND status = 'validated'");
+    $stmt = $conn->prepare("SELECT r.*, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON u.user_id = r.reporter_id WHERE r.report_id = ? AND r.status = 'validated'");
     $stmt->bind_param("i", $reportId);
     $stmt->execute();
     $report = $stmt->get_result()->fetch_assoc();
@@ -63,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'report', $reportId);
         $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
         sendReportEmail($conn, $reportId, 'confirmed', '', $staffName);
+        sendReportSms($conn, $reportId, 'confirmed', $staffName);
 
         // Notify barangay officers
         if ($report['barangay_id']) {
@@ -81,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Log activity
         $action = "Case Confirmed";
-        $details = "Report #$reportId confirmed as official case by DCVS.";
+        $details = "Confirmed the " . ucfirst($report['report_type']) . " report from " . ($report['reporter_name'] ?: 'a resident') . " as an official DCVS case.";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);

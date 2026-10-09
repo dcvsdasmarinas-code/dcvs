@@ -1,82 +1,12 @@
 <?php
-require_once 'db.php';
-
+// Redirect to new reset-password.php flow
 $token = $_GET['token'] ?? '';
-$error = null;
-$success = null;
-$resetEmail = '';
-
-// Look up the token
 if (!empty($token)) {
-    $stmt = $conn->prepare("SELECT email FROM password_resets WHERE token = ? AND used = 0 AND expires_at > NOW() LIMIT 1");
-    $stmt->bind_param("s", $token);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    $resetEmail = $row['email'] ?? '';
+    header('Location: reset-password.php?token=' . urlencode($token));
+} else {
+    header('Location: forgot-password.php');
 }
-
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $token = trim($_POST['token'] ?? '');
-    $code = trim($_POST['code'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $confirmPassword = $_POST['confirm_password'] ?? '';
-
-    if (empty($token)) {
-        $error = 'Invalid reset session. Please request a new verification code.';
-    } elseif (empty($code) || !preg_match('/^\d{6}$/', $code)) {
-        $error = 'Please enter a valid 6-digit verification code.';
-    } elseif (empty($password)) {
-        $error = 'Please enter a new password.';
-    } elseif (strlen($password) < 8) {
-        $error = 'Password must be at least 8 characters.';
-    } elseif ($password !== $confirmPassword) {
-        $error = 'Passwords do not match.';
-    } else {
-        // Verify the code for this token
-        $stmt = $conn->prepare("SELECT id, email FROM password_resets WHERE token = ? AND code = ? AND used = 0 AND expires_at > NOW() LIMIT 1");
-        $stmt->bind_param("ss", $token, $code);
-        $stmt->execute();
-        $row = $stmt->get_result()->fetch_assoc();
-        $stmt->close();
-
-        if ($row) {
-            $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $conn->prepare("UPDATE users SET password = ?, password_updated_at = NOW() WHERE email = ?");
-            $stmt->bind_param("ss", $hashedPassword, $row['email']);
-            $stmt->execute();
-            $stmt->close();
-
-            // Mark the code as used
-            $stmt = $conn->prepare("UPDATE password_resets SET used = 1 WHERE id = ?");
-            $stmt->bind_param("i", $row['id']);
-            $stmt->execute();
-            $stmt->close();
-
-            // Invalidate any other unused codes for this email
-            $stmt = $conn->prepare("UPDATE password_resets SET used = 1 WHERE email = ? AND used = 0");
-            $stmt->bind_param("s", $row['email']);
-            $stmt->execute();
-            $stmt->close();
-
-            $success = 'Your password has been reset successfully. You can now log in with your new password.';
-        } else {
-            $error = 'Invalid or expired verification code. Please request a new one.';
-        }
-    }
-}
-
-// After successful POST, if we still have token and email but no success, re-fetch email for display
-if (empty($resetEmail) && !empty($token) && empty($success)) {
-    $stmt = $conn->prepare("SELECT email FROM password_resets WHERE token = ? AND used = 0 AND expires_at > NOW() LIMIT 1");
-    $stmt->bind_param("s", $token);
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-    $resetEmail = $row['email'] ?? '';
-}
-
+exit;
 ?><!DOCTYPE html>
 <html lang="en">
 <head>
@@ -146,7 +76,7 @@ if (empty($resetEmail) && !empty($token) && empty($success)) {
     }
 
     .reset-header h2 {
-      font-family: 'Montserrat', sans-serif;
+      font-family: 'Inter', sans-serif;
       font-size: 1.35rem;
       font-weight: 700;
       color: var(--text);
@@ -259,7 +189,7 @@ if (empty($resetEmail) && !empty($token) && empty($success)) {
       color: #fff;
       border: none;
       border-radius: 10px;
-      font-family: 'Montserrat', sans-serif;
+      font-family: 'Inter', sans-serif;
       font-size: 0.925rem;
       font-weight: 600;
       cursor: pointer;

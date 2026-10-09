@@ -26,7 +26,8 @@ if (!isset($barangayName)) $barangayName = 'Barangay';
 
 $sbPageToModule = [
     'overview' => 'operations',
-    'geo'      => 'monitoring',
+    'geo'      => 'operations',
+    'archive'  => 'operations',
 ];
 $sbActiveModule = $sbPageToModule[$activePage] ?? 'operations';
 
@@ -54,6 +55,7 @@ $sbModules = [
                 'title' => 'Overview', 'icon' => 'fa-home',
                 'items' => [
                     sbItem('Overview', 'fa-chart-line', ['href' => 'dashboard-barangay.php', 'initialActive' => $activePage === 'overview']),
+                    sbItem('Geo-Mapping', 'fa-map-marked-alt', ['href' => 'dashboard-barangay-geo.php', 'initialActive' => $activePage === 'geo']),
                 ],
             ],
             [
@@ -62,6 +64,12 @@ $sbModules = [
                     sbItem('All Reports', 'fa-list', ['href' => 'reports-barangay.php']),
                     sbItem('Pending Validation', 'fa-hourglass-half', ['href' => 'reports-barangay.php?status=pending']),
                     sbItem('Resolved Cases', 'fa-check-circle', ['href' => 'reports-barangay.php?status=resolved']),
+                ],
+            ],
+            [
+                'title' => 'Archive', 'icon' => 'fa-archive',
+                'items' => [
+                    sbItem('Archived Reports', 'fa-archive', ['href' => 'barangay-archive.php', 'initialActive' => $activePage === 'archive']),
                 ],
             ],
         ],
@@ -186,6 +194,14 @@ $sbRail = [
   cursor: pointer;
 }
 #logoutModal .btn-secondary:hover { background: #f4f4f5; }
+  #logoutModal.modal{background:rgba(0,0,0,.5);padding:1rem;z-index:1100;}
+  #logoutModal .sd-logout-dialog{width:100%;max-width:400px;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:24px;box-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 10px 10px -5px rgba(0,0,0,.04);}
+  #logoutModal .sd-logout-title{margin:0 0 8px;color:#18181b;font:600 18px/1.25 Inter,'Segoe UI',sans-serif;}
+  #logoutModal .sd-logout-description{margin:0;color:#71717a;font:400 14px/1.5 Inter,'Segoe UI',sans-serif;}
+  #logoutModal .sd-logout-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px;}
+  #logoutModal .sd-logout-actions a,#logoutModal .sd-logout-actions button{height:36px;padding:0 16px;border-radius:6px;font:500 14px/1 Inter,'Segoe UI',sans-serif;display:inline-flex;align-items:center;gap:7px;cursor:pointer;text-decoration:none;}
+  #logoutModal .sd-logout-actions a{background:#18181b;color:#fafafa;border:1px solid #18181b;}
+  #logoutModal .sd-logout-actions button{background:#fff;color:#18181b;border:1px solid #e4e4e7;}
 </style>
 <script>
 window.SB2_CONFIG = {
@@ -201,7 +217,7 @@ window.SB2_CONFIG = {
     <div class="sb2-header">
       <div class="sb2-brand">
         <div class="sb2-brand-logo">
-          <img src="uploads/site/logo.png" alt="DCVS" />
+          <img src="uploads/site/DCVS LOGO.png" alt="DCVS" />
         </div>
         <div class="sb2-brand-text">
           <span class="sb2-brand-name">DCVS</span>
@@ -263,26 +279,6 @@ window.SB2_CONFIG = {
           </ul>
         </div>
       <?php endforeach; ?>
-    </div>
-
-    <!-- SidebarFooter: user row -->
-    <div class="sb2-footer">
-      <div class="sb2-user">
-        <div class="sb2-user-avatar" title="<?php echo htmlspecialchars($fullName); ?>">
-          <?php if (!empty($barangayAvatar)): ?>
-            <img src="<?php echo htmlspecialchars($barangayAvatar); ?>" alt="Avatar">
-          <?php else: ?>
-            <?php echo strtoupper(substr($fullName, 0, 1)); ?>
-          <?php endif; ?>
-        </div>
-        <div class="sb2-user-info">
-          <span class="sb2-user-name"><?php echo htmlspecialchars($fullName); ?></span>
-          <span class="sb2-user-role">Barangay Officer</span>
-        </div>
-        <button type="button" class="sb2-user-more" id="sb2Logout" aria-label="Logout" title="Logout">
-          <i class="fas fa-sign-out-alt"></i>
-        </button>
-      </div>
     </div>
   </div>
 
@@ -418,7 +414,15 @@ window.SB2_CONFIG = {
   }
   if (saved && saved.activeKey) {
     document.querySelectorAll('.sb2-menu-button:not(.sb2-collapsible), .sb2-menu-sub-button').forEach(function(item) {
-      if (getItemKey(item) === saved.activeKey) activateItem(item);
+      if (getItemKey(item) === saved.activeKey) {
+        activateItem(item);
+        // Update breadcrumb on load
+        var bc = document.getElementById('breadcrumbCurrent');
+        if (bc) {
+          var label = item.querySelector('span');
+          if (label) bc.textContent = label.textContent.trim();
+        }
+      }
     });
   }
 
@@ -457,6 +461,12 @@ window.SB2_CONFIG = {
           window.location.hash = hash;
         }
       }
+      // Update breadcrumb
+      var bc = document.getElementById('breadcrumbCurrent');
+      if (bc) {
+        var label = item.querySelector('span');
+        if (label) bc.textContent = label.textContent.trim();
+      }
     });
   });
 
@@ -488,18 +498,12 @@ document.addEventListener('keydown', function(e) {
 </script>
 
 <div class="modal" id="logoutModal">
-  <div class="modal-content">
-    <div class="modal-header">
-      <h3><i class="fas fa-sign-out-alt"></i> Confirm Logout</h3>
-      <button class="modal-close" onclick="closeLogoutModal()"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body">
-      <i class="fas fa-question-circle" style="font-size:3rem;color:#94a3b8;margin-bottom:1rem;"></i>
-      <p>Are you sure you want to logout of the Barangay Portal?</p>
-    </div>
-    <div class="modal-actions">
-      <a href="logout-barangay.php" class="btn-primary" style="padding:10px 28px;"><i class="fas fa-check"></i> Yes, Logout</a>
-      <button type="button" class="btn-secondary" onclick="closeLogoutModal()">Cancel</button>
+  <div class="sd-logout-dialog" role="alertdialog" aria-modal="true" aria-labelledby="logoutDialogTitle">
+    <h2 class="sd-logout-title" id="logoutDialogTitle">Confirm Logout</h2>
+    <p class="sd-logout-description">Are you sure you want to logout of the Barangay Portal?</p>
+    <div class="sd-logout-actions">
+      <button type="button" onclick="closeLogoutModal()">Cancel</button>
+      <a href="logout-barangay.php"><i class="fas fa-sign-out-alt"></i> Logout</a>
     </div>
   </div>
 </div>

@@ -10,6 +10,7 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/adoption-workflow.php';
 
 header('Content-Type: application/json');
 
@@ -19,6 +20,10 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (($_POST['from_adoption'] ?? '') === '1') {
+        echo json_encode(['success' => false, 'message' => 'Adopted pets can only be registered through an approved adoption application.']);
+        exit;
+    }
     $owner_id = $_SESSION['user_id'];
     $pet_name = $_POST['pet_name'] ?? '';
     $pet_type = $_POST['species'] ?? 'dog';
@@ -30,6 +35,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (empty($pet_name)) {
         echo json_encode(['success' => false, 'message' => 'Pet name is required.']);
+        exit;
+    }
+
+    try {
+        adoptionBeginResidentPetRegistration($conn, (int)$owner_id);
+    } catch (AdoptionWorkflowException $exception) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => $exception->getMessage()]);
         exit;
     }
 
@@ -58,10 +71,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ext = strtolower(pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION));
 
         if (!in_array($mime, $allowedTypes, true) || !in_array($ext, $allowedExts, true)) {
+            $conn->rollback();
             echo json_encode(['success' => false, 'message' => 'Invalid file type. Please upload JPG, PNG, GIF, or WebP.']);
             exit;
         }
         if ($_FILES['photo']['size'] > $maxSize) {
+            $conn->rollback();
             echo json_encode(['success' => false, 'message' => 'File size exceeds 5MB limit.']);
             exit;
         }
@@ -81,16 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if ($stmt->execute()) {
         $pet_id = $conn->insert_id;
-
-        // If from adoption flow, create adoption listing and clear session
-        $isAdoption = isset($_POST['from_adoption']) && $_POST['from_adoption'] === '1';
-        if ($isAdoption) {
-            $listingStmt = $conn->prepare("INSERT INTO adoption_listings (pet_id, listed_by, title, status) VALUES (?, ?, ?, 'available')");
-            $listingStmt->bind_param("iis", $pet_id, $owner_id, $pet_name);
-            $listingStmt->execute();
-            $listingStmt->close();
-            unset($_SESSION['adopt_data'], $_SESSION['show_adopt_modal']);
-        }
+        adoptionCommit($conn);
 
         // Log activity
         $action = "Pet Registered";
@@ -99,9 +105,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $logStmt->bind_param("iss", $owner_id, $action, $details);
         $logStmt->execute();
 
-        $msg = $isAdoption ? 'Pet registered for adoption successfully!' : 'Pet added successfully!';
-        echo json_encode(['success' => true, 'message' => $msg, 'pet_id' => $pet_id]);
+        echo json_encode(['success' => true, 'message' => 'Pet added successfully!', 'pet_id' => $pet_id]);
     } else {
+        $conn->rollback();
         echo json_encode(['success' => false, 'message' => 'Failed to add pet. Please try again.']);
     }
 } else {

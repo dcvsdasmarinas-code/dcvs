@@ -27,8 +27,8 @@
   function typeClass(t) {
     return 'type-' + String(t || 'stray');
   }
-  function statusPill(s) {
-    return '<span class="rpt-status ' + esc(s) + '">' + esc(s.charAt(0).toUpperCase() + s.slice(1)) + '</span>';
+  function statusPill(s, label) {
+    return '<span class="rpt-status ' + esc(s) + '">' + esc(label || (s.charAt(0).toUpperCase() + s.slice(1))) + '</span>';
   }
   function typeBadge(t, label) {
     return '<span class="type-badge ' + typeClass(t) + '"><span class="type-dot"></span>' + esc(label) + '</span>';
@@ -36,15 +36,65 @@
   function avatarHtml(r) {
     return r.avatar ? '<img src="' + esc(r.avatar) + '" alt="">' : esc(initials(r.reporter));
   }
-  function infoRow(icon, label, value) {
-    return '<div class="info-row"><div class="info-row-icon">' + svg(icon) + '</div><div><p class="info-row-label">' + esc(label) + '</p><p class="info-row-value">' + esc(value) + '</p></div></div>';
+  function infoRow(label, value) {
+    return '<div class="info-row"><div><p class="info-row-label">' + esc(label) + '</p><p class="info-row-value">' + esc(value) + '</p></div></div>';
   }
   function avatarInfoRow(label, value, avatarHtml) {
-    return '<div class="info-row"><div class="info-row-icon info-row-avatar">' + avatarHtml + '</div><div><p class="info-row-label">' + esc(label) + '</p><p class="info-row-value">' + esc(value) + '</p></div></div>';
+    return '<div class="info-row"><div class="info-row-avatar">' + avatarHtml + '</div><div><p class="info-row-label">' + esc(label) + '</p><p class="info-row-value">' + esc(value) + '</p></div></div>';
+  }
+  function priorityPill(priority) {
+    var p = String(priority || '').toLowerCase();
+    var bg = '#EFF6FF', color = '#1E40AF', border = '#BFDBFE';
+    if (p === 'high') { bg = '#FEF2F2'; color = '#991B1B'; border = '#FECACA'; }
+    else if (p === 'medium') { bg = '#FFF7ED'; color = '#9A3412'; border = '#FED7AA'; }
+    return '<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;border:1px solid ' + border + ';background:' + bg + ';color:' + color + ';font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:500;">' + esc(priority || '—') + '</span>';
   }
   function caseId(r) {
     if (r.caseId) return '#CASE-' + String(r.caseId);
     return '#CASE-' + String(r.id || 0);
+  }
+  function structuredDrawerHtml(r, prefix) {
+    var photoHtml = (r.photo || r.video)
+      ? '<div class="rpt-photo-box">' +
+        (r.photo ? '<div class="rpt-photo-thumb" onclick="' + prefix + 'ViewPhoto(\'' + esc(r.photo) + '\')"><img src="' + esc(r.photo) + '" alt="Report attachment"></div>' : '') +
+        (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + esc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
+        '</div>'
+      : '<p class="rpt-photo-none">No attachments.</p>';
+    var history = [
+      { t: (r.typeLabel || r.type || 'Report') + ' report submitted', a: r.reporter || 'Resident', d: r.date },
+      (r.validated ? { t: 'Verified by Barangay', a: 'Barangay', d: r.validated } : null),
+      (r.confirmed ? { t: 'Confirmed by DCVS Staff', a: 'DCVS Staff', d: r.confirmed } : null),
+      (r.scheduled ? { t: 'Scheduled for action', a: 'DCVS Staff', d: r.scheduled } : null),
+      { t: 'Current status: ' + (r.statusLabel || r.status || '-'), a: 'DCVS Staff', d: '' }
+    ].filter(Boolean);
+
+    return '<div class="rpt-tabs">' +
+      '<button class="rpt-tab" data-tab="details" onclick="' + prefix + 'DetailGo(\'details\')">Details</button>' +
+      '<button class="rpt-tab" data-tab="attachments" onclick="' + prefix + 'DetailGo(\'attachments\')">Attachments</button>' +
+      '<button class="rpt-tab" data-tab="history" onclick="' + prefix + 'DetailGo(\'history\')">History</button>' +
+      '</div>' +
+      '<div class="rpt-detail-body" data-tab="details">' +
+        '<div class="rpt-detail-grid">' +
+          '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows">' +
+            infoRow('Date Submitted', r.date || '-') +
+            infoRow('Location', r.location || '-') +
+            infoRow('Report Type', r.typeLabel || '-') +
+          '</div></div>' +
+          '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Animal Information</div><div class="info-rows">' +
+            infoRow('Animal Type', r.animalType || '-') +
+            infoRow('Breed / Appearance', r.animalBreed || '-') +
+            infoRow('Estimated Number of Animals', r.animalCount || '-') +
+            infoRow('Animal Behavior', r.animalBehavior || '-') +
+          '</div></div>' +
+          '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Incident Details</div>' +
+            '<div class="rpt-desc-box" style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">' + esc(r.desc || 'No description provided.') + '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="rpt-detail-body" data-tab="attachments" style="display:none;"><div class="rpt-section-title">Attached Photos</div>' + photoHtml + '</div>' +
+      '<div class="rpt-detail-body" data-tab="history" style="display:none;"><div class="rpt-section-title">Status</div><div class="rpt-history">' + history.map(function (item) {
+        return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + esc(item.t) + '</div><div class="rpt-h-meta">by ' + esc(item.a) + (item.d ? ' \u00b7 ' + esc(item.d) : '') + '</div></div></div>';
+      }).join('') + '</div></div>';
   }
 
   // Expose helpers globally (cas* prefix) for per-page config functions in the HTML
@@ -56,7 +106,16 @@
   window.casAvatar = avatarHtml;
   window.casInfoRow = infoRow;
   window.casAvatarInfoRow = avatarInfoRow;
+  window.casPriorityPill = priorityPill;
   window.casCaseId = caseId;
+  window.casStructuredDrawer = structuredDrawerHtml;
+  window.casParseDate = function (d) {
+    if (!d || d === '\u2014') return { day: '\u2014', month: '' };
+    var m = new Date(d);
+    if (isNaN(m.getTime())) return { day: '\u2014', month: '' };
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return { day: String(m.getDate()), month: months[m.getMonth()] };
+  };
 
   function init(cfg) {
     var p = cfg.p;                 // id prefix (pen / act / res)
@@ -176,8 +235,18 @@
       if (state.page > pages) state.page = pages;
       var prev = el(p + 'PagePrev');
       var next = el(p + 'PageNext');
+      var first = el(p + 'PageFirst');
+      var last = el(p + 'PageLast');
+      var label = el(p + 'PageLabel');
+      var perPageSelect = document.querySelector('#' + sectionId + ' .dt-rows select');
+      if (label) label.textContent = 'Page ' + state.page + ' of ' + pages;
+      if (perPageSelect && perPageSelect.value !== String(state.perPage)) {
+        perPageSelect.value = String(state.perPage);
+      }
       if (prev) prev.disabled = state.page <= 1;
       if (next) next.disabled = state.page >= pages;
+      if (first) first.disabled = state.page <= 1;
+      if (last) last.disabled = state.page >= pages;
     }
 
     function render() {
@@ -209,6 +278,30 @@
     }
 
     // Public per-instance API (used by inline handlers)
+    window[p + 'Refresh'] = function () { render(); };
+    window[p + 'RemoveItem'] = function (id) {
+      var index = ALL.findIndex(function (item) { return String(item.id) === String(id); });
+      if (index < 0) return null;
+      var removed = ALL.splice(index, 1)[0];
+      state.page = Math.min(state.page, Math.max(1, Math.ceil(filtered().length / state.perPage)));
+      render();
+      return removed;
+    };
+    window[p + 'AddItem'] = function (item) {
+      if (!item || item.id == null) return;
+      var index = ALL.findIndex(function (existing) { return String(existing.id) === String(item.id); });
+      if (index >= 0) ALL[index] = item;
+      else ALL.unshift(item);
+      state.page = 1;
+      render();
+    };
+    window[p + 'UpdateItem'] = function (id, changes) {
+      var item = ALL.find(function (entry) { return String(entry.id) === String(id); });
+      if (!item) return null;
+      Object.assign(item, changes || {});
+      render();
+      return item;
+    };
     window[p + 'SetGroup'] = function (v) { state.group = v; state.page = 1; toggleGroup(); render(); };    window[p + 'SetSearch'] = function (v) { state.search = v; state.page = 1; syncSearch(); render(); };
     window[p + 'SetDate'] = function () {
       state.dateFrom = el(p + 'DateFrom') ? el(p + 'DateFrom').value : '';
@@ -237,8 +330,19 @@
     window[p + 'GoPage'] = function (pg) {
       if (pg === 'prev') pg = state.page - 1;
       if (pg === 'next') pg = state.page + 1;
+      if (pg === 'first') pg = 1;
+      if (pg === 'last') pg = Math.max(1, Math.ceil(filtered().length / state.perPage));
+      pg = Number(pg);
+      if (!Number.isFinite(pg)) return;
       if (pg < 1) return;
       state.page = pg;
+      render();
+    };
+    window[p + 'SetPerPage'] = function (value) {
+      var perPage = parseInt(value, 10);
+      if (!Number.isFinite(perPage) || perPage < 1) return;
+      state.perPage = perPage;
+      state.page = 1;
       render();
     };
     window[p + 'Select'] = function (id) {
@@ -304,13 +408,16 @@
       setTimeout(function () { document.addEventListener('click', caseCloseActions); }, 0);
     };
     window[p + 'ViewPhoto'] = function (url) { window.open(url, '_blank'); };
-    window[p + 'ViewGeo'] = function (brgy) {
-      var q = encodeURIComponent(brgy || '');
-      window.location.href = 'dashboard-staff-geo.php' + (q ? '?brgy=' + q : '');
+    window[p + 'ViewGeo'] = function (brgy, reportId) {
+      var params = new URLSearchParams();
+      if (brgy) params.set('brgy', brgy);
+      if (Number.isSafeInteger(Number(reportId)) && Number(reportId) > 0) {
+        params.set('report_id', String(Number(reportId)));
+      }
+      window.location.href = 'dashboard-staff-geo.php' + (params.toString() ? '?' + params.toString() : '');
     };
-    window[p + 'ViewLocation'] = function (loc) {
-      var q = encodeURIComponent(loc || 'Dasmariñas, Cavite');
-      window.open('https://www.google.com/maps/search/?api=1&query=' + q, '_blank');
+    window[p + 'ViewLocation'] = function (brgy, reportId) {
+      window[p + 'ViewGeo'](brgy, reportId);
     };
 
     render();

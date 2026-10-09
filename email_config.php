@@ -25,5 +25,5 @@ define('MAIL_FROM', env('DCVS_MAIL_FROM', SMTP_USER));
 define('MAIL_FROM_NAME', env('DCVS_MAIL_FROM_NAME', 'DCVS Dasmariñas'));
 
 // ── DCVS Branding ──
-define('DCVS_LOGO_URL', env('DCVS_LOGO_URL', 'uploads/site/logo.png'));
+define('DCVS_LOGO_URL', env('DCVS_LOGO_URL', 'uploads/site/DCVS LOGO.png'));
 define('DCVS_PORTAL_URL', env('DCVS_PORTAL_URL', 'http://localhost/dcvs'));

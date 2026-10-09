@@ -3,10 +3,34 @@
 require_once 'db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
-$aq = $conn->query("SELECT * FROM announcements WHERE status='published' AND is_active=1 ORDER BY created_at DESC");
+$conn->query("UPDATE announcements SET status='published', updated_at=NOW() WHERE status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND is_active=1");
+$aq = $conn->query("SELECT * FROM announcements WHERE is_active=1 AND (status='published' OR (status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW())) ORDER BY created_at DESC");
 if ($aq) { while ($rr = $aq->fetch_assoc()) $announcements[] = $rr; }
+$publicBarangayNames = [];
+$publicBarangaysQuery = $conn->query("SELECT barangay_id, barangay_name FROM barangays");
+if ($publicBarangaysQuery) {
+    while ($barangay = $publicBarangaysQuery->fetch_assoc()) {
+        $publicBarangayNames[(int)$barangay['barangay_id']] = $barangay['barangay_name'];
+    }
+}
 function annf($c){ return $c === 'advisory' ? 'advisories' : 'announcements'; }
 function annlabel($c){ return $c === 'advisory' ? 'Advisory' : 'Announcement'; }
+function annAudience($announcement, $barangayNames) {
+    $type = $announcement['audience_type'] ?? 'all';
+    if ($type === 'barangay') {
+        $name = $barangayNames[(int)($announcement['barangay_id'] ?? 0)] ?? '';
+        return $name !== '' ? 'Visible to ' . $name : 'Visible to selected residents';
+    }
+    if ($type === 'selected') {
+        $ids = array_filter(array_map('intval', explode(',', (string)($announcement['audience_barangays'] ?? ''))));
+        $names = [];
+        foreach ($ids as $id) {
+            if (isset($barangayNames[$id])) $names[] = $barangayNames[$id];
+        }
+        return $names ? 'Visible to ' . implode(', ', $names) : 'Visible to selected residents';
+    }
+    return '';
+}
 $ann_ct = count($announcements);
 ?>
 <!-- Last Published: Sun Jul 26 2026 10:32:10 GMT+0000 (Coordinated Universal Time) --><!--$-->
@@ -80,32 +104,32 @@ $ann_ct = count($announcements);
 </style><style>
 :root { --primary: #045E1FD9; --ink: #045E1FD9; --muted: #4a5672; --transition: cubic-bezier(0.25,0.65,0.35,1); }
 .site-header { position:fixed; top:0; left:0; right:0; z-index:2147483000; padding:0.8rem 0; transform:none!important; }
-.navbar { display:flex; align-items:center; gap:2rem; font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; width:min(1200px,92vw); margin:0 auto; padding:0.85rem 1.5rem; border-radius:999px; background:rgba(255,255,255,0.82)!important; -webkit-backdrop-filter:blur(24px) saturate(1.8)!important; backdrop-filter:blur(24px) saturate(1.8)!important; border:1px solid rgba(255,255,255,0.65); box-shadow:0 24px 48px rgba(0,0,0,0.12); position:relative; transition:background 0.3s var(--transition),box-shadow 0.3s var(--transition),border 0.3s var(--transition),transform 0.3s var(--transition); }
+.navbar { display:flex; align-items:center; gap:2rem; font-family:"Inter","Segoe UI",sans-serif!important; width:min(1200px,92vw); margin:0 auto; padding:0.85rem 1.5rem; border-radius:999px; background:rgba(255,255,255,0.82)!important; -webkit-backdrop-filter:blur(24px) saturate(1.8)!important; backdrop-filter:blur(24px) saturate(1.8)!important; border:1px solid rgba(255,255,255,0.65); box-shadow:0 24px 48px rgba(0,0,0,0.12); position:relative; transition:background 0.3s var(--transition),box-shadow 0.3s var(--transition),border 0.3s var(--transition),transform 0.3s var(--transition); }
 .brand-logo { display:block; object-fit:contain; }
 .navbar::before, .navbar::after { display:none; }
 .navbar.nav-scrolled { background:rgba(255,255,255,0.88); border-color:rgba(0,0,0,0.12); box-shadow:0 26px 52px rgba(0,0,0,0.1); }
 .nav-links { display:flex; align-items:center; justify-content:center; gap:1.5rem; list-style:none; margin:0; padding:0; flex:1; }
-.nav-links a { font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; font-weight:500!important; font-size:16px!important; letter-spacing:normal!important; line-height:1.5!important; text-decoration:none!important; border-bottom:none!important; text-transform:none!important; padding:6px 16px; border-radius:8px; color:#1a2a3a!important; transition:color 0.25s var(--transition),background 0.25s var(--transition); }
+.nav-links a { font-family:"Inter","Segoe UI",sans-serif!important; font-weight:500!important; font-size:16px!important; letter-spacing:-0.01em!important; line-height:1.5!important; text-decoration:none!important; border-bottom:none!important; text-transform:none!important; padding:6px 16px; border-radius:8px; color:#1a2a3a!important; transition:color 0.25s var(--transition),background 0.25s var(--transition); }
 .nav-links a::after { display:none!important; content:none!important; }
 .nav-links a:hover, .nav-links a:focus-visible { background:rgba(4,94,31,0.06); color:#045e1f!important; }
 .nav-links a.active { background:rgba(4,94,31,0.1); color:#045e1f!important; }
 .nav-item { position:relative; margin:0!important; }
-.dropdown-toggle { cursor:pointer; display:flex; align-items:center; gap:4px; padding:6px 16px; border-radius:8px; color:#1a2a3a; background:none!important; border:none!important; font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; font-weight:500!important; font-size:16px!important; letter-spacing:normal!important; text-decoration:none!important; transition:background 0.2s,color 0.2s; }
+.dropdown-toggle { cursor:pointer; display:flex; align-items:center; gap:4px; padding:6px 16px; border-radius:8px; color:#1a2a3a; background:none!important; border:none!important; font-family:"Inter","Segoe UI",sans-serif!important; font-weight:500!important; font-size:16px!important; letter-spacing:-0.01em!important; text-decoration:none!important; transition:background 0.2s,color 0.2s; }
 .dropdown-toggle:hover { background:rgba(4,94,31,0.06); color:#045e1f; }
 .dropdown-toggle.active { background:rgba(4,94,31,0.1)!important; color:#045e1f!important; }
 .dropdown-toggle .arrow { font-size:10px; transition:transform 0.3s var(--transition); color:inherit!important; }
 .nav-item.open .dropdown-toggle .arrow { transform:rotate(180deg); }
 .dropdown-menu { position:absolute; top:calc(100% + 8px); left:0; background:#ffffff; border-radius:12px; padding:6px 0; min-width:190px; box-shadow:0 20px 48px rgba(0,0,0,0.12); opacity:0; visibility:hidden; transform:translateY(8px); transition:all 0.25s ease; z-index:2147483000; border:1px solid rgba(0,0,0,0.06); }
 .nav-item:hover .dropdown-menu, .nav-item.open .dropdown-menu { opacity:1; visibility:visible; transform:translateY(0); }
-.dropdown-menu a { display:block; padding:10px 20px; font-size:14px!important; font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; font-weight:500!important; letter-spacing:normal!important; text-decoration:none!important; color:#1a2a3a; white-space:nowrap; }
+.dropdown-menu a { display:block; padding:10px 20px; font-size:14px!important; font-family:"Inter","Segoe UI",sans-serif!important; font-weight:500!important; letter-spacing:-0.01em!important; text-decoration:none!important; color:#1a2a3a; white-space:nowrap; }
 .dropdown-menu a::after { display:none!important; content:none!important; }
 .dropdown-menu a:hover { background:rgba(4,94,31,0.06); color:#045e1f; }
 .nav-toggle { display:none; flex-direction:column; gap:5px; background:transparent; border:none; cursor:pointer; padding:0; }
 .nav-toggle span { width:22px; height:2px; background:#1a2a3a; border-radius:999px; transition:transform 0.3s var(--transition),opacity 0.3s var(--transition); }
-.nav-login-btn { font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; font-weight:600!important; font-size:0.88rem!important; letter-spacing:normal!important; padding:8px 22px; border-radius:8px; background:#045e1f!important; color:#fff!important; white-space:nowrap; transition:background 0.2s; flex-shrink:0; text-decoration:none!important; }
+.nav-login-btn { font-family:"Inter","Segoe UI",sans-serif!important; font-weight:600!important; font-size:0.88rem!important; letter-spacing:-0.01em!important; padding:8px 22px; border-radius:8px; background:#045e1f!important; color:#fff!important; white-space:nowrap; transition:background 0.2s; flex-shrink:0; text-decoration:none!important; }
 .nav-login-btn:hover { background:#043012!important; }
 .nav-login-btn::after { display:none!important; content:none!important; }
-@media (max-width:1100px) { .navbar { display:flex; align-items:center; gap:2rem; font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important; width:min(1200px,92vw); margin:0 auto; padding:0.85rem 1.5rem; border-radius:24px; background:rgba(255,255,255,0.82)!important; -webkit-backdrop-filter:blur(24px) saturate(1.8)!important; backdrop-filter:blur(24px) saturate(1.8)!important; border:1px solid rgba(255,255,255,0.65); box-shadow:0 24px 48px rgba(0,0,0,0.12); position:relative; transition:background 0.3s var(--transition),box-shadow 0.3s var(--transition),border 0.3s var(--transition),transform 0.3s var(--transition); } .nav-links { position:fixed; inset:90px 1.5rem auto 1.5rem; background:#ffffff; border-radius:24px; padding:1.8rem; flex-direction:column; align-items:flex-start; gap:1rem; box-shadow:0 24px 60px rgba(18,39,84,0.25); transform:translateY(-20px); opacity:0; pointer-events:none; transition:opacity 0.3s var(--transition),transform 0.3s var(--transition); max-height:calc(100vh - 110px); overflow-y:auto; } .nav-links.open { transform:translateY(0); opacity:1; pointer-events:auto; } .nav-toggle { display:flex; } .nav-login-btn { display:inline-block; } }
+@media (max-width:1100px) { .navbar { display:flex; align-items:center; gap:2rem; font-family:"Inter","Segoe UI",sans-serif!important; width:min(1200px,92vw); margin:0 auto; padding:0.85rem 1.5rem; border-radius:24px; background:rgba(255,255,255,0.82)!important; -webkit-backdrop-filter:blur(24px) saturate(1.8)!important; backdrop-filter:blur(24px) saturate(1.8)!important; border:1px solid rgba(255,255,255,0.65); box-shadow:0 24px 48px rgba(0,0,0,0.12); position:relative; transition:background 0.3s var(--transition),box-shadow 0.3s var(--transition),border 0.3s var(--transition),transform 0.3s var(--transition); } .nav-links { position:fixed; inset:90px 1.5rem auto 1.5rem; background:#ffffff; border-radius:24px; padding:1.8rem; flex-direction:column; align-items:flex-start; gap:1rem; box-shadow:0 24px 60px rgba(18,39,84,0.25); transform:translateY(-20px); opacity:0; pointer-events:none; transition:opacity 0.3s var(--transition),transform 0.3s var(--transition); max-height:calc(100vh - 110px); overflow-y:auto; } .nav-links.open { transform:translateY(0); opacity:1; pointer-events:auto; } .nav-toggle { display:flex; } .nav-login-btn { display:inline-block; } }
     .transition_screen { display:none!important; }
     body { overflow:auto!important; background:#ffffff!important; }
     html { background-color:#ffffff!important; }
@@ -863,7 +887,49 @@ label:has(input:focus-visible) [data-outline] {
     color: #080807;
     white-space: nowrap;
   }
-</style><h1 class="hero_work_heading u-text-style-h1">Announcements and Advisories</h1></div><div data-animate="" data-filter-group="" role="group" data-filter-target-match="multi" data-filter-name-match="multi" class="hero_work_content"><div class="hero_work_left"><div class="hero_work_filters"><!--$--><ul id="" class="filter-buttons"><li data-btn-default="" class="filter_button_list"><button data-filter-target="announcements" data-filter-status="active" aria-pressed="true" aria-controls="filter-list" class="filter-btn u-text-style-main">Announcements</button></li><li data-btn-default="" class="filter_button_list"><button data-filter-target="advisories" data-filter-status="not-active" aria-pressed="false" aria-controls="filter-list" class="filter-btn u-text-style-main">Advisories</button></li></ul><!--/$--></div></div><div class="hero_work_projects"><div data-layout-status="active" data-layout-type="grid" class="hero_work_collection w-dyn-list"><div data-count-group="work" aria-live="polite" role="list" class="hero_work_list u-grid-custom w-dyn-items"><?php if ($ann_ct > 0): foreach ($announcements as $an): ?><div data-count-item="" data-filter-status="active" data-filter-name="<?php echo annf($an['category']); ?>" role="listitem" class="hero_work_item w-dyn-item"><div class="works_work_link"><?php if (!empty($an['link_url'])): ?><div class="clickable_wrap"><a href="<?php echo htmlspecialchars($an['link_url']); ?>" class="clickable_link w-inline-block"<?php if (strpos($an['link_url'],'http')===0){echo ' target="_blank" rel="noopener"';} ?>><span class="clickable_text u-sr-only"></span></a><button type="" class="clickable_btn"><span class="clickable_text u-sr-only"></span></button></div><?php endif; ?><div class="works_work_cover u-ratio-1-1"><?php if (!empty($an['photo_url'])): ?><img src="<?php echo htmlspecialchars($an['photo_url']); ?>" loading="lazy" alt="<?php echo htmlspecialchars($an['title']); ?>" class="works_work_image"/><?php else: ?><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" loading="lazy" alt="" class="works_work_image"/><?php endif; ?><div class="works_work_overlay"></div></div><div class="works_work_content"><div class="works_work_title"><h2 class="works_home_inner_title u-text-style-h5"><?php echo htmlspecialchars($an['title']); ?></h2><p class="works_home_p u-text-style-h5"><?php echo htmlspecialchars($an['content']); ?></p><div class="services_work_collection w-dyn-list"><div role="list" class="services_work_list w-dyn-items"><div data-filter-name-collect="<?php echo annf($an['category']); ?>" role="listitem" class="services_work_item u-text-style-small w-dyn-item"><span class="services_work_span"><?php echo annlabel($an['category']); ?></span></div></div></div></div></div></div></div>
+
+  /* White background — but not the dark CTA section */
+  body, .page_wrap, .page_main {
+    background-color: #ffffff !important;
+  }
+  .cta_home_wrap {
+    background-color: inherit !important;
+  }
+
+  /* Inter font (shadcn dialog style) */
+  .hero_work_heading,
+  .works_home_inner_title,
+  .works_home_p,
+  .filter-btn,
+  .services_work_span,
+  .u-text-style-h1,
+  .u-text-style-h5,
+  .u-text-style-main,
+  .u-text-style-small {
+    font-family: 'Inter', sans-serif !important;
+  }
+
+  .hero_work_heading {
+    letter-spacing: -0.025em !important;
+    line-height: 1.2 !important;
+    font-weight: 600 !important;
+  }
+
+  .works_home_inner_title {
+    letter-spacing: -0.02em !important;
+    line-height: 1.3 !important;
+    font-weight: 600 !important;
+  }
+
+  .works_home_p {
+    letter-spacing: -0.01em !important;
+    line-height: 1.6 !important;
+  }
+
+  .works_work_title > .works_home_p.u-text-style-small:empty {
+    display: none;
+  }
+</style><h1 class="hero_work_heading u-text-style-h1">Announcements and Advisories</h1></div><div data-animate="" data-filter-group="" role="group" data-filter-target-match="multi" data-filter-name-match="multi" class="hero_work_content"><div class="hero_work_left"><div class="hero_work_filters"><!--$--><ul id="" class="filter-buttons"><li data-btn-default="" class="filter_button_list"><button data-filter-target="announcements" data-filter-status="active" aria-pressed="true" aria-controls="filter-list" class="filter-btn u-text-style-main">Announcements</button></li><li data-btn-default="" class="filter_button_list"><button data-filter-target="advisories" data-filter-status="not-active" aria-pressed="false" aria-controls="filter-list" class="filter-btn u-text-style-main">Advisories</button></li></ul><!--/$--></div></div><div class="hero_work_projects"><div data-layout-status="active" data-layout-type="grid" class="hero_work_collection w-dyn-list"><div data-count-group="work" aria-live="polite" role="list" class="hero_work_list u-grid-custom w-dyn-items"><?php if ($ann_ct > 0): foreach ($announcements as $an): ?><div data-count-item="" data-filter-status="active" data-filter-name="<?php echo annf($an['category']); ?>" role="listitem" class="hero_work_item w-dyn-item"><div class="works_work_link"><?php if (!empty($an['link_url'])): ?><div class="clickable_wrap"><a href="<?php echo htmlspecialchars($an['link_url']); ?>" class="clickable_link w-inline-block"<?php if (strpos($an['link_url'],'http')===0){echo ' target="_blank" rel="noopener"';} ?>><span class="clickable_text u-sr-only"></span></a><button type="" class="clickable_btn"><span class="clickable_text u-sr-only"></span></button></div><?php endif; ?><div class="works_work_cover u-ratio-1-1"><?php if (!empty($an['photo_url'])): ?><img src="<?php echo htmlspecialchars($an['photo_url']); ?>" loading="lazy" alt="<?php echo htmlspecialchars($an['title']); ?>" class="works_work_image"/><?php else: ?><img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBAAEAAAEAAAIBRA7" loading="lazy" alt="" class="works_work_image"/><?php endif; ?><div class="works_work_overlay"></div></div><div class="works_work_content"><div class="works_work_title"><h2 class="works_home_inner_title u-text-style-h5"><?php echo htmlspecialchars($an['title']); ?></h2><p class="works_home_p u-text-style-h5"><?php echo htmlspecialchars($an['content']); ?></p><?php if (!empty($an['location'])): ?><div class="services_work_collection w-dyn-list"><div role="list" class="services_work_list w-dyn-items"><div role="listitem" class="services_work_item u-text-style-small w-dyn-item"><span class="services_work_span">At <?php echo htmlspecialchars($an['location']); ?></span></div></div></div><?php endif; ?><p class="works_home_p u-text-style-small"><?php echo htmlspecialchars(annAudience($an, $publicBarangayNames)); ?></p></div></div></div></div>
 <?php endforeach; else: ?><div role="listitem" class="hero_work_item w-dyn-item" style="grid-column:1/-1"><div class="works_work_link"><div class="works_work_content"><div class="works_work_title" style="width:100%"><p class="works_home_p u-text-style-h5" style="text-align:center;margin:0">No published updates right now.</p></div></div></div></div><?php endif; ?></div></div></div></div></section><div class="cta_work_wrap"><button id="to-top" style="display:none"></button><section data-theme-section="dark" class="cta_home_wrap"><div class="cta_home_contain"><div class="cta_home_inner"><div class="cta_home_header"><h2 class="cta_home_heading u-text-style-display u-sr-only">Ready to build an experience that moves people?</h2><!--$--><div class="cta_home_heading_contain"><div class="cta_home_heading u-text-style-display">Let&#x27;s build</div><div class="cta_home_heading u-text-style-display is-2">A safer</div><div class="cta_home_heading u-text-style-display is-3">Community</div><!--$--><span class="cta_heading_inner"><div class="cta_home_heading u-text-style-display is-4 is-arrow"></div><div class="cta_home_heading u-text-style-display is-4">Together</div></span><!--/$--></div><!--/$--><a data-btn-default="" data-wf--global-button-main--variant="large" class="g_btn_main w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449 w-inline-block" href="login.php"><div class="g_btn_text_contain w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449"><div class="g_btn_text u-text-style-small u-text-trim-off w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449">Get Started</div></div><div class="g_btn_aside_wrap w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449"><div class="g_btn_aside_bg w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449"></div><!--$--><svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 12 12" fill="none" class="g_btn_svg w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449"><!--$--><path d="M8.90954 9.09046L9 3L2.90954 3.09046L2.90213 4.32367L6.86437 4.25391L2.55914 8.55914L3.44086 9.44086L7.74609 5.13563L7.68708 9.10862L8.90954 9.09046Z" fill="currentColor"></path><!--/$--></svg><!--/$--><!--$--><svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 12 12" fill="none" class="g_btn_svg w-variant-c2ee8580-9f06-5e9a-1461-dda4efd8c449 is-absolute"><!--$--><path d="M8.90954 9.09046L9 3L2.90954 3.09046L2.90213 4.32367L6.86437 4.25391L2.55914 8.55914L3.44086 9.44086L7.74609 5.13563L7.68708 9.10862L8.90954 9.09046Z" fill="currentColor"></path><!--/$--></svg><!--/$--></div></a></div></div><div class="cta_home_bottom"><div data-wf--spacer--section-space="main" class="u-section-spacer w-variant-60a7ad7d-02b0-6682-95a5-2218e6fd1490"></div><div class="cta_home_proof"><div class="cta_home_awards"><!--$--><img src="DCVS AWARDS.png" alt="DCVS AWARDS" loading="lazy" class="cta_home_svgs"><!--/$--><!--$--><img src="ANIMAL WELFARE AWARDS.png" alt="ANIMAL WELFARE AWARDS" loading="lazy" class="cta_home_svgs is-cssda"><!--/$--><!--$--><img src="PUBLIC SERVICE AWARDS.png" alt="PUBLIC SERVICE AWARDS" loading="lazy" class="cta_home_svgs"><!--/$--></div><blockquote class="cta_home_testimonial_message u-text-style-h5">A modern platform that makes animal welfare services more accessible, transparent, and connected for every community.</blockquote><div class="cta_home_testimonee u-text-mono">&#8212; Dasmari&#241;as City Veterinary Services</div></div></div></div><div data-start="top bottom" data-scroll-container="" data-target-translate="150" class="cta_home_cover"><div class="cta_home_overlay"></div><img data-translate-hero="true" loading="lazy" alt="Dasmarinas City Veterinary Services" src="footer image.jpg" class="cta_home_visual"/></div></section></div><!--$--><!--/$--></main></div><script src="https://d3e54v103j8qbb.cloudfront.net/js/jquery-3.5.1.min.dc5e7f18c8.js?site=68b652bbd6c64a44c8fe3e5e" type="text/javascript" integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0=" crossorigin="anonymous"></script><script src="https://cdn.prod.website-files.com/68b652bbd6c64a44c8fe3e5e/js/webflow.a0aa6ca1.b7683852b8a60d8e.js" type="text/javascript" integrity="sha384-BrZ5RLWViy0IN9p2miOlvxmv2gP1sT/YqoMSDJznd6k1tb7t0mPZus3psGWfkx5f" crossorigin="anonymous"></script><script src="https://cdn.prod.website-files.com/gsap/3.15.0/gsap.min.js" type="text/javascript"></script><script src="https://cdn.prod.website-files.com/gsap/3.15.0/ScrollTrigger.min.js" type="text/javascript"></script><script src="https://cdn.prod.website-files.com/gsap/3.15.0/SplitText.min.js" type="text/javascript"></script><script src="https://cdn.prod.website-files.com/gsap/3.15.0/CustomEase.min.js" type="text/javascript"></script><script src="https://cdn.prod.website-files.com/gsap/3.15.0/Flip.min.js" type="text/javascript"></script><script type="text/javascript">gsap.registerPlugin(ScrollTrigger,SplitText,CustomEase,Flip);</script><script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/lenis@1/dist/lenis.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/howler@2.2.4"></script>

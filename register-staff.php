@@ -15,6 +15,13 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
     exit;
 }
 require_once 'db.php';
+require_once __DIR__ . '/includes/reports/location.php';
+
+$officialBarangays = dcvsLoadApprovedBarangays($conn);
+$officialBarangaysByCode = [];
+foreach ($officialBarangays as $officialBarangay) {
+    $officialBarangaysByCode[$officialBarangay['psgc_code']] = $officialBarangay;
+}
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -25,7 +32,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $birthdate = $_POST['birthdate'] ?? '';
     $gender = $_POST['gender'] ?? '';
     $street = trim($_POST['street'] ?? '');
-    $barangay = $_POST['barangay'] ?? '';
+    $barangayCode = trim($_POST['barangay'] ?? '');
+    $barangay = $officialBarangaysByCode[$barangayCode]['barangay_name'] ?? '';
     $email = trim($_POST['email'] ?? '');
     $password = $_POST['password'] ?? '';
     $confirmPassword = $_POST['confirm_password'] ?? '';
@@ -134,16 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $fullAddress = $street . ', ' . $barangay . ', Dasmariñas, Cavite';
 
-    $barangayId = null;
-    $checkBarangay = $conn->prepare("SELECT barangay_id FROM barangays WHERE barangay_name = ?");
-    $checkBarangay->bind_param("s", $barangay);
-    $checkBarangay->execute();
-    $checkBarangay->store_result();
-    if ($checkBarangay->num_rows > 0) {
-        $checkBarangay->bind_result($barangayId);
-        $checkBarangay->fetch();
-    }
-    $checkBarangay->close();
+    $barangayId = (int)$officialBarangaysByCode[$barangayCode]['barangay_id'];
 
     $refId = generateReferenceId($conn, '#STF-', 'users');
     $fullName = $firstName . ' ' . $lastName;
@@ -198,7 +197,7 @@ $conn->close();
     <!-- Left Panel: Branding -->
     <div class="auth-brand-panel">
       <div class="brand-content">
-        <img src="uploads/site/logo.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
         <h1 class="brand-title">Join DCVS<br />Staff Management</h1>
         <p class="brand-subtitle">Create your staff account and help manage the city's animal welfare programs.</p>
 
@@ -355,69 +354,9 @@ $conn->close();
                 <i class="fas fa-map-pin input-icon"></i>
                 <select id="barangay" name="barangay" required>
                   <option value="">Select Barangay</option>
-                  <option value="Burol">Burol</option>
-                  <option value="Burol I">Burol I</option>
-                  <option value="Burol II">Burol II</option>
-                  <option value="Burol III">Burol III</option>
-                  <option value="Datu Esmael">Datu Esmael</option>
-                  <option value="Emmanuel Pelaez">Emmanuel Pelaez</option>
-                  <option value="Fatima I">Fatima I</option>
-                  <option value="Fatima II">Fatima II</option>
-                  <option value="Fatima III">Fatima III</option>
-                  <option value="H-95">H-95</option>
-                  <option value="Langkaan I">Langkaan I</option>
-                  <option value="Langkaan II">Langkaan II</option>
-                  <option value="Lumina I">Lumina I</option>
-                  <option value="Lumina II">Lumina II</option>
-                  <option value="Magdalo">Magdalo</option>
-                  <option value="Maliksi I">Maliksi I</option>
-                  <option value="Maliksi II">Maliksi II</option>
-                  <option value="Maliksi III">Maliksi III</option>
-                  <option value="Maunlad I">Maunlad I</option>
-                  <option value="Maunlad II">Maunlad II</option>
-                  <option value="Maunlad III">Maunlad III</option>
-                  <option value="Paliparan I">Paliparan I</option>
-                  <option value="Paliparan II">Paliparan II</option>
-                  <option value="Paliparan III">Paliparan III</option>
-                  <option value="Pasong Camachile I">Pasong Camachile I</option>
-                  <option value="Pasong Camachile II">Pasong Camachile II</option>
-                  <option value="Pasong Kawayan I">Pasong Kawayan I</option>
-                  <option value="Pasong Kawayan II">Pasong Kawayan II</option>
-                  <option value="Sabang">Sabang</option>
-                  <option value="Salawag">Salawag</option>
-                  <option value="Salitran I">Salitran I</option>
-                  <option value="Salitran II">Salitran II</option>
-                  <option value="Salitran III">Salitran III</option>
-                  <option value="Salitran IV">Salitran IV</option>
-                  <option value="Sampaloc I">Sampaloc I</option>
-                  <option value="Sampaloc II">Sampaloc II</option>
-                  <option value="Sampaloc III">Sampaloc III</option>
-                  <option value="Sampaloc IV">Sampaloc IV</option>
-                  <option value="San Agustin I">San Agustin I</option>
-                  <option value="San Agustin II">San Agustin II</option>
-                  <option value="San Agustin III">San Agustin III</option>
-                  <option value="San Andres I">San Andres I</option>
-                  <option value="San Andres II">San Andres II</option>
-                  <option value="San Isidro Labrador I">San Isidro Labrador I</option>
-                  <option value="San Isidro Labrador II">San Isidro Labrador II</option>
-                  <option value="San Jose">San Jose</option>
-                  <option value="San Juan I">San Juan I</option>
-                  <option value="San Juan II">San Juan II</option>
-                  <option value="San Lorenzo Ruiz I">San Lorenzo Ruiz I</option>
-                  <option value="San Lorenzo Ruiz II">San Lorenzo Ruiz II</option>
-                  <option value="San Miguel">San Miguel</option>
-                  <option value="San Simon">San Simon</option>
-                  <option value="Santa Cruz I">Santa Cruz I</option>
-                  <option value="Santa Cruz II">Santa Cruz II</option>
-                  <option value="Santa Fe I">Santa Fe I</option>
-                  <option value="Santa Fe II">Santa Fe II</option>
-                  <option value="Santo Cristo I">Santo Cristo I</option>
-                  <option value="Santo Cristo II">Santo Cristo II</option>
-                  <option value="Santo Niño I">Santo Niño I</option>
-                  <option value="Santo Niño II">Santo Niño II</option>
-                  <option value="Zone I (Pob.)">Zone I (Pob.)</option>
-                  <option value="Zone II (Pob.)">Zone II (Pob.)</option>
-                  <option value="Zone III (Pob.)">Zone III (Pob.)</option>
+                  <?php foreach ($officialBarangays as $officialBarangay): ?>
+                    <option value="<?php echo htmlspecialchars($officialBarangay['psgc_code'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($officialBarangay['barangay_name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                  <?php endforeach; ?>
                 </select>
               </div>
               <span class="field-error" id="barangayError"></span>

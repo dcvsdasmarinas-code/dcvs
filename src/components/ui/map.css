@@ -9,6 +9,11 @@
   height: 100%;
 }
 
+.mapcn-ready .mapcn-loading,
+.mapcn-container .mapcn-loading.hidden {
+  display: none !important;
+}
+
 .mapcn-loading {
   position: absolute;
   inset: 0;

@@ -41,6 +41,9 @@
     // ── Notification badge ──
     function updateNotifBadge(count) {
         var display = count > 9 ? '9+' : count;
+        if (typeof window.setNotifCount === 'function' && document.getElementById('notifPanel')) {
+            window.setNotifCount('unread', count);
+        }
         document.querySelectorAll('[data-realtime="notif-badge"]').forEach(function (el) {
             var cur = numVal(el);
             if (cur !== count) {
@@ -94,12 +97,150 @@
     }
 
     // ── Notification list ──
+    function formatNotifAge(value) {
+        var created = new Date(String(value || '').replace(' ', 'T'));
+        if (isNaN(created.getTime())) return String(value || '');
+        var seconds = Math.max(0, Math.floor((Date.now() - created.getTime()) / 1000));
+        if (seconds < 60) return 'Just now';
+        if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+        if (seconds < 86400) return Math.floor(seconds / 3600) + ' hr ago';
+        if (seconds < 604800) {
+            var days = Math.floor(seconds / 86400);
+            return days + ' day' + (days === 1 ? '' : 's') + ' ago';
+        }
+        return created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function notificationAppBaseUrl(panel) {
+        if (panel.dataset.appBaseUrl) return panel.dataset.appBaseUrl;
+        if (!panel.dataset.loadUrl) return '';
+        var endpointPath = new URL(panel.dataset.loadUrl, window.location.href).pathname;
+        return endpointPath.slice(0, endpointPath.lastIndexOf('/'));
+    }
+
+    function buildStaffNotif(n, panel) {
+        var type = String(n.type || '');
+        var row = document.createElement('article');
+        row.className = 'notif-item' + (n.is_read ? '' : ' unread');
+        row.setAttribute('data-notif-item', '');
+        row.setAttribute('data-nid', n.notification_id);
+        row.setAttribute('data-type', type);
+        row.setAttribute('data-unread', n.is_read ? '0' : '1');
+        row.setAttribute('data-archived', '0');
+
+        var avatar = document.createElement('div');
+        avatar.className = 'notif-avatar';
+        avatar.setAttribute('aria-hidden', 'true');
+        var activityName = String(n.activity_user_name || '').trim();
+        avatar.title = activityName;
+        avatar.textContent = activityName.split(/\s+/).filter(Boolean).map(function (part) {
+            return part.charAt(0).toUpperCase();
+        }).join('').slice(0, 2);
+        var avatarPath = String(n.activity_avatar_url || '').trim();
+        if (avatarPath) {
+            var appBase = notificationAppBaseUrl(panel);
+            var avatarSrc = /^https?:\/\//i.test(avatarPath)
+                ? avatarPath
+                : (avatarPath.charAt(0) === '/' ? avatarPath : appBase + '/' + avatarPath.replace(/^\/+/, ''));
+            var avatarImage = document.createElement('img');
+            avatarImage.src = avatarSrc;
+            avatarImage.alt = '';
+            avatarImage.loading = 'lazy';
+            avatarImage.onerror = function () { avatarImage.remove(); };
+            avatar.appendChild(avatarImage);
+        }
+
+        var content = document.createElement('div');
+        content.className = 'notif-content';
+        var heading = document.createElement('div');
+        heading.className = 'notif-row-heading';
+        var copy = document.createElement('div');
+        copy.className = 'notif-copy';
+        var title = document.createElement('div');
+        title.className = 'notif-title';
+        title.textContent = String(n.title || '');
+        copy.appendChild(title);
+        if (n.message) {
+            var message = document.createElement('div');
+            message.className = 'notif-msg';
+            message.textContent = String(n.message).replace(/\s+/g, ' ').trim();
+            copy.appendChild(message);
+        }
+        var more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'notif-more';
+        more.setAttribute('aria-label', 'Notification options');
+        more.setAttribute('aria-expanded', 'false');
+        var moreIcon = document.createElement('i');
+        moreIcon.className = 'fas fa-ellipsis-h';
+        moreIcon.setAttribute('aria-hidden', 'true');
+        more.appendChild(moreIcon);
+        var dot = document.createElement('span');
+        dot.className = 'notif-unread-dot';
+        dot.setAttribute('aria-label', 'Unread');
+        heading.appendChild(copy);
+        heading.appendChild(more);
+        heading.appendChild(dot);
+        content.appendChild(heading);
+
+        var meta = document.createElement('div');
+        meta.className = 'notif-meta';
+        var age = document.createElement('span');
+        age.textContent = formatNotifAge(n.created_at);
+        meta.appendChild(age);
+        var context = String(n.reference_type || '').trim();
+        if (context || n.reference_id) {
+            var separator = document.createElement('span');
+            separator.className = 'notif-meta-separator';
+            separator.textContent = '·';
+            var contextText = document.createElement('span');
+            contextText.className = 'notif-context';
+            contextText.textContent = (context ? context.charAt(0).toUpperCase() + context.slice(1) : '') +
+                (n.reference_id ? (context ? ' · ' : '') + '#' + n.reference_id : '');
+            meta.appendChild(separator);
+            meta.appendChild(contextText);
+        }
+        content.appendChild(meta);
+
+        var menu = document.createElement('div');
+        menu.className = 'notif-row-menu';
+        menu.setAttribute('role', 'menu');
+        [
+            ['read', 'Mark as read', 'fa-check'],
+            ['archive', 'Archive', 'fa-inbox']
+        ].forEach(function (item) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.setAttribute('role', 'menuitem');
+            button.setAttribute('data-notif-action', item[0]);
+            var icon = document.createElement('i');
+            icon.className = 'fas ' + item[2];
+            icon.setAttribute('aria-hidden', 'true');
+            button.appendChild(icon);
+            button.appendChild(document.createTextNode(item[1]));
+            menu.appendChild(button);
+        });
+
+        row.appendChild(avatar);
+        row.appendChild(content);
+        row.appendChild(menu);
+        return row;
+    }
+
     function appendNotifList(notifs) {
         var list = document.getElementById('notificationList');
         if (!list) return;
         var empty = list.querySelector('.notif-empty');
         notifs.forEach(function (n) {
             if (list.querySelector('[data-nid="' + n.notification_id + '"]')) return;
+            if (list.closest('[data-notification-panel]')) {
+                var panel = list.closest('[data-notification-panel]');
+                if (panel.dataset.portal === 'resident' && n.type !== 'staff_message') return;
+                var staffRow = buildStaffNotif(n, panel);
+                list.insertBefore(staffRow, list.firstChild);
+                if (empty) empty.hidden = true;
+                return;
+            }
             var div = document.createElement('div');
             div.setAttribute('data-nid', n.notification_id);
             div.className = 'notif-item' + (n.is_read ? '' : ' unread');
@@ -110,6 +251,9 @@
             list.insertBefore(div, list.firstChild);
             if (empty) empty.style.display = 'none';
         });
+        if (list.closest('[data-notification-panel]') && typeof window.refreshNotifView === 'function') {
+            window.refreshNotifView();
+        }
     }
 
     // ── Activity rows (resident) ──

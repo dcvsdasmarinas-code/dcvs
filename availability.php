@@ -52,16 +52,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* Header */
     .av-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; }
-    .av-header-left h1 { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; color: var(--av-fg); margin: 0; }
-    .av-header-left p { font-size: 0.875rem; color: var(--av-muted-fg); margin: 0.25rem 0 0; }
-    .av-tz-btn {
-      display: inline-flex; align-items: center; gap: 0.5rem;
-      padding: 0.5rem 0.875rem; border-radius: 0.5rem;
-      border: 1px solid var(--av-border); background: var(--av-bg);
-      font-size: 0.8125rem; font-weight: 500; color: var(--av-fg);
-      cursor: default; white-space: nowrap;
-    }
-    .av-tz-btn svg { flex-shrink: 0; }
+    .av-header-left h1 { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.025em; color: var(--av-fg); margin: 0; }
+    .av-header-left p { font-size: 1rem; color: var(--av-muted-fg); margin: 0.25rem 0 0; }
     .av-separator { border: none; border-top: 1px solid var(--av-border); margin: 0 0 1.5rem; }
 
     /* Two-column layout */
@@ -71,8 +63,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* Section titles */
     .av-section-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
-    .av-section-head h2 { font-size: 1rem; font-weight: 600; color: var(--av-fg); margin: 0; }
-    .av-section-desc { font-size: 0.8125rem; color: var(--av-muted-fg); margin: 0 0 1rem; }
+    .av-section-head h2 { font-size: 1.125rem; font-weight: 600; color: var(--av-fg); margin: 0; }
+    .av-section-desc { font-size: 0.9375rem; color: var(--av-muted-fg); margin: 0 0 1rem; }
 
     /* Info tooltip */
     .av-tip-wrap { position: relative; display: inline-flex; }
@@ -87,7 +79,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       position: absolute; left: 50%; bottom: calc(100% + 8px);
       transform: translateX(-50%);
       background: var(--av-fg); color: #fff;
-      font-size: 0.75rem; font-weight: 500; line-height: 1.4;
+      font-size: 0.875rem; font-weight: 500; line-height: 1.4;
       padding: 0.5rem 0.75rem; border-radius: 0.5rem;
       white-space: nowrap; pointer-events: none;
       opacity: 0; transition: opacity 0.15s ease;
@@ -115,7 +107,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .av-day-label input[type="checkbox"] {
       width: 1rem; height: 1rem; accent-color: var(--av-green); cursor: pointer; flex-shrink: 0;
     }
-    .av-day-label span { font-size: 0.875rem; font-weight: 500; color: var(--av-fg); }
+    .av-day-label span { font-size: 1rem; font-weight: 500; color: var(--av-fg); }
     .av-unavailable-text { font-size: 0.8125rem; color: var(--av-muted-fg); font-style: italic; }
 
     /* Time blocks */
@@ -152,22 +144,22 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       min-width: 220px; display: none;
     }
     .av-copy-popover.open { display: block; }
-    .av-copy-popover-title { font-size: 0.75rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.5rem; }
+    .av-copy-popover-title { font-size: 0.875rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.5rem; }
     .av-copy-checks { display: flex; flex-direction: column; gap: 0.375rem; margin-bottom: 0.75rem; }
-    .av-copy-checks label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem; color: var(--av-fg); cursor: pointer; }
+    .av-copy-checks label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; color: var(--av-fg); cursor: pointer; }
     .av-copy-checks input[type="checkbox"] { width: 0.875rem; height: 0.875rem; accent-color: var(--av-green); }
     .av-copy-actions { display: flex; gap: 0.5rem; justify-content: flex-end; }
     .av-copy-cancel {
       padding: 0.375rem 0.75rem; border: 1px solid var(--av-border);
       border-radius: 0.375rem; background: var(--av-bg);
-      font-size: 0.75rem; font-weight: 500; color: var(--av-muted-fg);
+      font-size: 0.875rem; font-weight: 500; color: var(--av-muted-fg);
       cursor: pointer;
     }
     .av-copy-cancel:hover { background: var(--av-muted); }
     .av-copy-apply {
       padding: 0.375rem 0.75rem; border: none;
       border-radius: 0.375rem; background: #18181b;
-      font-size: 0.75rem; font-weight: 500; color: #fff;
+      font-size: 0.875rem; font-weight: 500; color: #fff;
       cursor: pointer;
     }
     .av-copy-apply:hover { background: #27272a; }
@@ -178,7 +170,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       display: flex; align-items: center; justify-content: center; gap: 0.5rem;
       width: 100%; padding: 0.625rem;
       border: 1px dashed var(--av-border); border-radius: 0.5rem;
-      background: transparent; font-size: 0.8125rem; font-weight: 500;
+      background: transparent; font-size: 0.9375rem; font-weight: 500;
       color: var(--av-muted-fg); cursor: pointer; margin-bottom: 1rem;
     }
     .av-add-date-btn:hover { border-color: #18181b; color: #18181b; }
@@ -188,8 +180,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       padding: 2rem 1rem; text-align: center; color: var(--av-muted-fg);
     }
     .av-empty-state svg { width: 48px; height: 48px; margin: 0 auto 0.75rem; opacity: 0.4; }
-    .av-empty-state h3 { font-size: 0.875rem; font-weight: 600; color: var(--av-fg); margin: 0 0 0.25rem; }
-    .av-empty-state p { font-size: 0.8125rem; margin: 0; }
+    .av-empty-state h3 { font-size: 1rem; font-weight: 600; color: var(--av-fg); margin: 0 0 0.25rem; }
+    .av-empty-state p { font-size: 0.9375rem; margin: 0; }
 
     /* Toast – shadcn-inspired */
     .av-toast-container {
@@ -203,7 +195,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       min-width: 300px; max-width: 420px;
       padding: 1rem 1.25rem;
       border-radius: 0.625rem;
-      font-size: 0.8125rem; line-height: 1.4; font-weight: 500;
+      font-size: 0.9375rem; line-height: 1.4; font-weight: 500;
       background: #fff; color: #18181b;
       border: 1px solid #e4e4e7;
       box-shadow: 0 8px 24px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
@@ -216,7 +208,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .av-toast-icon { flex-shrink: 0; width: 1.125rem; height: 1.125rem; margin-top: 1px; }
     .av-toast-body { flex: 1; min-width: 0; }
     .av-toast-title { font-weight: 600; color: #18181b; margin: 0; }
-    .av-toast-desc { font-weight: 400; color: #71717a; margin: 0.125rem 0 0; font-size: 0.8125rem; }
+    .av-toast-desc { font-weight: 400; color: #71717a; margin: 0.125rem 0 0; font-size: 0.9375rem; }
     .av-toast-close {
       flex-shrink: 0; width: 1.25rem; height: 1.25rem;
       display: inline-flex; align-items: center; justify-content: center;
@@ -227,7 +219,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .av-toast-action {
       flex-shrink: 0; height: 2rem; padding: 0 0.75rem;
       border: 1px solid #e4e4e7; border-radius: 0.375rem;
-      background: #fff; color: #18181b; font-size: 0.75rem; font-weight: 600;
+      background: #fff; color: #18181b; font-size: 0.875rem; font-weight: 600;
       cursor: pointer; transition: background 0.12s;
       display: inline-flex; align-items: center; white-space: nowrap;
     }
@@ -251,11 +243,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       transform: translateY(100%); transition: transform 0.25s ease;
     }
     .av-footer.visible { transform: translateY(0); }
-    .av-footer-text { font-size: 0.8125rem; font-weight: 500; color: var(--av-muted-fg); }
+    .av-footer-text { font-size: 0.9375rem; font-weight: 500; color: var(--av-muted-fg); }
     .av-footer-actions { display: flex; gap: 0.5rem; }
     .av-btn {
       padding: 0.5rem 1rem; border-radius: 0.375rem;
-      font-size: 0.8125rem; font-weight: 500; cursor: pointer;
+      font-size: 0.9375rem; font-weight: 500; cursor: pointer;
       transition: all 0.15s ease; font-family: var(--av-font);
     }
     .av-btn-ghost { border: 1px solid var(--av-border); background: var(--av-bg); color: var(--av-fg); }
@@ -271,8 +263,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       padding: 0.625rem 0.75rem; border: 1px solid var(--av-border);
       border-radius: 0.5rem; background: var(--av-bg);
     }
-    .av-override-date { font-size: 0.8125rem; font-weight: 600; color: var(--av-fg); }
-    .av-override-info { font-size: 0.75rem; color: var(--av-muted-fg); }
+    .av-override-date { font-size: 0.9375rem; font-weight: 600; color: var(--av-fg); }
+    .av-override-info { font-size: 0.875rem; color: var(--av-muted-fg); }
     .av-override-remove {
       display: inline-flex; align-items: center; justify-content: center;
       width: 1.5rem; height: 1.5rem; border-radius: 0.25rem;
@@ -322,10 +314,10 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       padding: 0.5rem 0.75rem; border: 1px solid var(--av-border);
       border-radius: 0.375rem;
     }
-    .av-modal-slot-label { font-size: 0.8125rem; font-weight: 500; color: var(--av-fg); }
+    .av-modal-slot-label { font-size: 0.9375rem; font-weight: 500; color: var(--av-fg); }
     .av-modal-slot-toggle {
       padding: 0.25rem 0.625rem; border-radius: 9999px;
-      font-size: 0.75rem; font-weight: 600; cursor: pointer;
+      font-size: 0.875rem; font-weight: 600; cursor: pointer;
       border: 1px solid; transition: all 0.15s ease;
     }
     .av-modal-slot-toggle.on { background: #f0fdf4; color: #065f46; border-color: #bbf7d0; }
@@ -360,11 +352,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-cal-nav-btn { width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: 0.375rem; cursor: pointer; color: var(--av-muted-fg); transition: background 0.15s, color 0.15s; }
     .ov-cal-nav-btn:hover { background: var(--av-muted); color: var(--av-fg); }
     .ov-cal-nav-btn svg { width: 1rem; height: 1rem; }
-    .ov-cal-month { font-size: 0.875rem; font-weight: 600; color: var(--av-fg); }
+    .ov-cal-month { font-size: 1rem; font-weight: 600; color: var(--av-fg); }
     .ov-cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; }
-    .ov-cal-weekdays span { text-align: center; font-size: 0.6875rem; font-weight: 600; color: var(--av-muted-fg); padding: 0.375rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .ov-cal-weekdays span { text-align: center; font-size: 0.8125rem; font-weight: 600; color: var(--av-muted-fg); padding: 0.375rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
     .ov-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
-    .ov-cal-day { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 2.25rem; border-radius: 0.375rem; font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: background 0.12s, color 0.12s; color: var(--av-fg); }
+    .ov-cal-day { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 2.25rem; border-radius: 0.375rem; font-size: 0.9375rem; font-weight: 500; cursor: pointer; transition: background 0.12s, color 0.12s; color: var(--av-fg); }
     .ov-cal-day:hover { background: var(--av-muted); }
     .ov-cal-day.today { font-weight: 700; }
     .ov-cal-day.selected { background: var(--av-green); color: #fff; }
@@ -372,7 +364,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-cal-day.other { color: var(--av-muted-fg); opacity: 0.5; pointer-events: none; }
     .ov-cal-day.has-override::after { content: ''; position: absolute; bottom: 3px; width: 4px; height: 4px; border-radius: 50%; background: var(--av-green); }
     .ov-cal-day.selected.has-override::after { background: #fff; }
-    .ov-cal-legend { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.6875rem; color: var(--av-muted-fg); }
+    .ov-cal-legend { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.8125rem; color: var(--av-muted-fg); }
     .ov-cal-legend span { display: flex; align-items: center; gap: 0.25rem; }
     .ov-cal-legend .ov-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .ov-cal-legend .ov-dot.green { background: var(--av-green); }
@@ -380,43 +372,43 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* Editor right side */
     .ov-editor { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); min-height: 20rem; }
-    .ov-editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 0.875rem; }
+    .ov-editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 1rem; }
     .ov-editor-empty svg { width: 2rem; height: 2rem; margin-bottom: 0.75rem; opacity: 0.5; }
     .ov-editor-head { padding: 1.25rem 1.5rem 0; }
-    .ov-editor-date { font-size: 1rem; font-weight: 600; color: var(--av-fg); }
-    .ov-editor-sub { font-size: 0.8125rem; color: var(--av-muted-fg); margin-top: 0.125rem; }
-    .ov-editor-status { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.5rem; font-size: 0.75rem; font-weight: 500; }
+    .ov-editor-date { font-size: 1.125rem; font-weight: 600; color: var(--av-fg); }
+    .ov-editor-sub { font-size: 0.9375rem; color: var(--av-muted-fg); margin-top: 0.125rem; }
+    .ov-editor-status { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.5rem; font-size: 0.875rem; font-weight: 500; }
     .ov-editor-status .ov-status-dot { width: 6px; height: 6px; border-radius: 50%; }
     .ov-editor-body { padding: 1rem 1.5rem 1.25rem; }
-    .ov-editor-label { font-size: 0.8125rem; font-weight: 500; color: var(--av-fg); margin-bottom: 0.5rem; }
+    .ov-editor-label { font-size: 0.9375rem; font-weight: 500; color: var(--av-fg); margin-bottom: 0.5rem; }
     .ov-hours-display { display: flex; flex-direction: column; gap: 0.375rem; }
-    .ov-hours-range { font-size: 0.875rem; font-weight: 500; color: var(--av-fg); font-variant-numeric: tabular-nums; }
-    .ov-hours-info { font-size: 0.75rem; color: var(--av-muted-fg); margin-top: 0.5rem; line-height: 1.5; }
+    .ov-hours-range { font-size: 1rem; font-weight: 500; color: var(--av-fg); font-variant-numeric: tabular-nums; }
+    .ov-hours-info { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.5rem; line-height: 1.5; }
     .ov-editor-actions { padding: 0 1.5rem 1.25rem; display: flex; gap: 0.5rem; }
 
     /* Editor form (edit/create mode) */
     .ov-mode-group { display: flex; flex-direction: column; gap: 0.625rem; margin-bottom: 1rem; }
-    .ov-mode-option { display: flex; align-items: center; gap: 0.625rem; cursor: pointer; font-size: 0.875rem; font-weight: 500; color: var(--av-fg); }
+    .ov-mode-option { display: flex; align-items: center; gap: 0.625rem; cursor: pointer; font-size: 1rem; font-weight: 500; color: var(--av-fg); }
     .ov-mode-option input[type="radio"] { accent-color: var(--av-green); width: 1rem; height: 1rem; cursor: pointer; }
-    .ov-closed-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: var(--av-muted); font-size: 0.8125rem; color: var(--av-muted-fg); line-height: 1.5; }
+    .ov-closed-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: var(--av-muted); font-size: 0.9375rem; color: var(--av-muted-fg); line-height: 1.5; }
     .ov-time-ranges { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
     .ov-time-range-row { display: flex; align-items: center; gap: 0.5rem; }
     .ov-time-select { position: relative; }
-    .ov-time-select select { appearance: none; -webkit-appearance: none; width: 130px; height: 2.25rem; padding: 0 2rem 0 0.625rem; border: 1px solid var(--av-border); border-radius: 0.375rem; background: var(--av-bg); font-size: 0.8125rem; font-weight: 500; font-family: inherit; color: var(--av-fg); cursor: pointer; }
+    .ov-time-select select { appearance: none; -webkit-appearance: none; width: 130px; height: 2.25rem; padding: 0 2rem 0 0.625rem; border: 1px solid var(--av-border); border-radius: 0.375rem; background: var(--av-bg); font-size: 0.9375rem; font-weight: 500; font-family: inherit; color: var(--av-fg); cursor: pointer; }
     .ov-time-select select:focus { outline: none; border-color: #18181b; }
     .ov-time-select::after { content: '\f078'; font-family: 'Font Awesome 6 Free'; font-weight: 900; position: absolute; right: 0.625rem; top: 50%; transform: translateY(-50%); font-size: 0.5rem; color: var(--av-muted-fg); pointer-events: none; }
-    .ov-range-sep { font-size: 0.8125rem; color: var(--av-muted-fg); }
+    .ov-range-sep { font-size: 0.9375rem; color: var(--av-muted-fg); }
     .ov-range-actions { display: flex; gap: 2px; margin-left: 2px; }
     .ov-editor-foot { padding: 0.875rem 1.5rem; border-top: 1px solid var(--av-border); display: flex; align-items: center; justify-content: space-between; }
-    .ov-editor-foot-text { font-size: 0.75rem; color: var(--av-muted-fg); }
+    .ov-editor-foot-text { font-size: 0.875rem; color: var(--av-muted-fg); }
     .ov-editor-foot-btns { display: flex; gap: 0.5rem; }
 
     /* Override list below calendar */
     .ov-override-list { margin-top: 1rem; }
-    .ov-override-item { display: flex; align-items: center; justify-content: space-between; padding: 0.625rem 0; border-bottom: 1px solid var(--av-border); font-size: 0.8125rem; }
+    .ov-override-item { display: flex; align-items: center; justify-content: space-between; padding: 0.625rem 0; border-bottom: 1px solid var(--av-border); font-size: 0.9375rem; }
     .ov-override-item:last-child { border-bottom: none; }
     .ov-override-date { font-weight: 500; color: var(--av-fg); }
-    .ov-override-info { font-size: 0.75rem; color: var(--av-muted-fg); }
+    .ov-override-info { font-size: 0.875rem; color: var(--av-muted-fg); }
     .ov-override-rm { width: 1.75rem; height: 1.75rem; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: 0.25rem; color: var(--av-muted-fg); cursor: pointer; transition: background 0.12s, color 0.12s; }
     .ov-override-rm:hover { background: #fef2f2; color: #dc2626; }
     .ov-override-rm svg { width: 0.875rem; height: 0.875rem; }
@@ -433,47 +425,47 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .bulk-card { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); padding: 1.5rem; }
     .bulk-section { margin-bottom: 1.75rem; }
     .bulk-section:last-child { margin-bottom: 0; }
-    .bulk-section-title { font-size: 0.8125rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.5rem; }
-    .bulk-section-desc { font-size: 0.75rem; color: var(--av-muted-fg); margin-bottom: 0.75rem; line-height: 1.5; }
+    .bulk-section-title { font-size: 0.9375rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.5rem; }
+    .bulk-section-desc { font-size: 0.875rem; color: var(--av-muted-fg); margin-bottom: 0.75rem; line-height: 1.5; }
     .bulk-date-row { display: flex; align-items: center; gap: 0.75rem; }
-    .bulk-date-row input[type="date"] { width: 160px; height: 2.25rem; padding: 0 0.625rem; border: 1px solid var(--av-border); border-radius: 0.375rem; font-size: 0.8125rem; font-family: inherit; background: var(--av-bg); }
+    .bulk-date-row input[type="date"] { width: 160px; height: 2.25rem; padding: 0 0.625rem; border: 1px solid var(--av-border); border-radius: 0.375rem; font-size: 0.9375rem; font-family: inherit; background: var(--av-bg); }
     .bulk-date-row input[type="date"]:focus { outline: none; border-color: #18181b; box-shadow: 0 0 0 1px #18181b; }
     .bulk-date-arrow { color: var(--av-muted-fg); font-size: 0.875rem; }
     .bulk-date-error { font-size: 0.75rem; color: #dc2626; margin-top: 0.375rem; display: none; }
 
     /* Day chips */
     .bulk-day-chips { display: flex; flex-wrap: wrap; gap: 0.375rem; }
-    .bulk-day-chip { padding: 0.375rem 0.75rem; border: 1px solid var(--av-border); border-radius: 9999px; font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: all 0.15s; user-select: none; background: var(--av-bg); color: var(--av-fg); }
+    .bulk-day-chip { padding: 0.375rem 0.75rem; border: 1px solid var(--av-border); border-radius: 9999px; font-size: 0.9375rem; font-weight: 500; cursor: pointer; transition: all 0.15s; user-select: none; background: var(--av-bg); color: var(--av-fg); }
     .bulk-day-chip.selected { background: #f0fdf4; color: #166534; border-color: #bbf7d0; }
     .bulk-day-quick { display: flex; gap: 0.75rem; margin-bottom: 0.5rem; }
-    .bulk-day-quick button { border: none; background: none; font-size: 0.75rem; font-weight: 500; color: #18181b; cursor: pointer; padding: 0; font-family: inherit; }
+    .bulk-day-quick button { border: none; background: none; font-size: 0.875rem; font-weight: 500; color: #18181b; cursor: pointer; padding: 0; font-family: inherit; }
     .bulk-day-quick button:hover { text-decoration: underline; }
 
     /* Segmented control */
     .bulk-segmented { display: flex; border: 1px solid var(--av-border); border-radius: 0.5rem; overflow: hidden; }
-    .bulk-segmented button { flex: 1; padding: 0.5rem 0.75rem; border: none; background: var(--av-bg); font-size: 0.8125rem; font-weight: 500; color: var(--av-fg); cursor: pointer; transition: all 0.15s; font-family: inherit; border-right: 1px solid var(--av-border); }
+    .bulk-segmented button { flex: 1; padding: 0.5rem 0.75rem; border: none; background: var(--av-bg); font-size: 0.9375rem; font-weight: 500; color: var(--av-fg); cursor: pointer; transition: all 0.15s; font-family: inherit; border-right: 1px solid var(--av-border); }
     .bulk-segmented button:last-child { border-right: none; }
     .bulk-segmented button.active { background: var(--av-fg); color: #fff; }
     .bulk-segmented button:hover:not(.active) { background: var(--av-muted); }
-    .bulk-closed-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: #fffbeb; color: #92400e; font-size: 0.8125rem; line-height: 1.5; margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: flex-start; }
+    .bulk-closed-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: #fffbeb; color: #92400e; font-size: 0.9375rem; line-height: 1.5; margin-top: 0.75rem; display: flex; gap: 0.5rem; align-items: flex-start; }
     .bulk-closed-msg svg { flex-shrink: 0; margin-top: 1px; }
-    .bulk-restore-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: var(--av-muted); font-size: 0.8125rem; color: var(--av-muted-fg); line-height: 1.5; margin-top: 0.75rem; }
+    .bulk-restore-msg { padding: 0.75rem 1rem; border: 1px solid var(--av-border); border-radius: 0.5rem; background: var(--av-muted); font-size: 0.9375rem; color: var(--av-muted-fg); line-height: 1.5; margin-top: 0.75rem; }
 
     /* Time ranges (same as overrides) */
     .bulk-time-ranges { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem; }
 
     /* Summary card */
     .bulk-sum-card { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); padding: 1.5rem; position: sticky; top: 1rem; }
-    .bulk-sum-title { font-size: 0.875rem; font-weight: 600; color: var(--av-fg); margin-bottom: 1rem; }
+    .bulk-sum-title { font-size: 1rem; font-weight: 600; color: var(--av-fg); margin-bottom: 1rem; }
     .bulk-sum-count { font-size: 2rem; font-weight: 700; color: var(--av-fg); line-height: 1; }
-    .bulk-sum-count-label { font-size: 0.8125rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
+    .bulk-sum-count-label { font-size: 0.9375rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
     .bulk-sum-days { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.75rem; }
-    .bulk-sum-day { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.6875rem; font-weight: 500; background: var(--av-muted); color: var(--av-muted-fg); }
+    .bulk-sum-day { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-size: 0.8125rem; font-weight: 500; background: var(--av-muted); color: var(--av-muted-fg); }
     .bulk-sum-divider { height: 1px; background: var(--av-border); margin: 1rem 0; }
-    .bulk-sum-label { font-size: 0.75rem; font-weight: 600; color: var(--av-muted-fg); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.375rem; }
-    .bulk-sum-range { font-size: 0.8125rem; color: var(--av-fg); font-variant-numeric: tabular-nums; line-height: 1.6; }
+    .bulk-sum-label { font-size: 0.875rem; font-weight: 600; color: var(--av-muted-fg); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.375rem; }
+    .bulk-sum-range { font-size: 0.9375rem; color: var(--av-fg); font-variant-numeric: tabular-nums; line-height: 1.6; }
     .bulk-sum-arrow { text-align: center; color: var(--av-muted-fg); font-size: 1.25rem; margin: 0.75rem 0; }
-    .bulk-sum-impact { padding: 0.625rem 0.75rem; border: 1px solid var(--av-border); border-radius: 0.375rem; background: var(--av-muted); font-size: 0.75rem; color: var(--av-muted-fg); margin-top: 0.75rem; line-height: 1.5; }
+    .bulk-sum-impact { padding: 0.625rem 0.75rem; border: 1px solid var(--av-border); border-radius: 0.375rem; background: var(--av-muted); font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.75rem; line-height: 1.5; }
     .bulk-sum-impact strong { color: var(--av-fg); font-weight: 600; }
 
     /* Footer */
@@ -484,10 +476,10 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .bulk-modal-overlay.open { display: flex; }
     .bulk-modal { background: var(--av-bg); border-radius: 0.75rem; box-shadow: 0 16px 48px rgba(0,0,0,0.15); width: 28rem; max-width: 90vw; max-height: 80vh; overflow-y: auto; }
     .bulk-modal-head { padding: 1.25rem 1.5rem 0; }
-    .bulk-modal-head h3 { font-size: 1rem; font-weight: 600; color: var(--av-fg); }
-    .bulk-modal-head p { font-size: 0.8125rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
+    .bulk-modal-head h3 { font-size: 1.125rem; font-weight: 600; color: var(--av-fg); }
+    .bulk-modal-head p { font-size: 0.9375rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
     .bulk-modal-body { padding: 1rem 1.5rem; }
-    .bulk-modal-row { display: flex; justify-content: space-between; font-size: 0.8125rem; padding: 0.375rem 0; }
+    .bulk-modal-row { display: flex; justify-content: space-between; font-size: 0.9375rem; padding: 0.375rem 0; }
     .bulk-modal-row span:first-child { color: var(--av-muted-fg); }
     .bulk-modal-row span:last-child { font-weight: 500; color: var(--av-fg); }
     .bulk-modal-foot { padding: 0.875rem 1.5rem; border-top: 1px solid var(--av-border); display: flex; justify-content: flex-end; gap: 0.5rem; }
@@ -495,7 +487,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     /* Empty state */
     .bulk-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 3rem 1rem; text-align: center; color: var(--av-muted-fg); }
     .bulk-empty svg { width: 2.5rem; height: 2.5rem; margin-bottom: 0.75rem; opacity: 0.4; }
-    .bulk-empty p { font-size: 0.875rem; }
+    .bulk-empty p { font-size: 1rem; }
 
     @media (max-width: 900px) {
       .bulk-layout { flex-direction: column; }
@@ -514,22 +506,23 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-cal-nav-btn { width: 2rem; height: 2rem; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; border-radius: 0.375rem; cursor: pointer; color: var(--av-muted-fg); transition: background 0.15s, color 0.15s; }
     .pv-cal-nav-btn:hover { background: var(--av-muted); color: var(--av-fg); }
     .pv-cal-nav-btn svg { width: 1rem; height: 1rem; }
-    .pv-cal-month { font-size: 0.875rem; font-weight: 600; color: var(--av-fg); }
-    .pv-cal-today { border: none; background: none; font-size: 0.75rem; font-weight: 500; color: #18181b; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: inherit; }
+    .pv-cal-month { font-size: 1rem; font-weight: 600; color: var(--av-fg); }
+    .pv-cal-today { border: none; background: none; font-size: 0.875rem; font-weight: 500; color: #18181b; cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: inherit; }
     .pv-cal-today:hover { background: #f0fdf4; }
     .pv-cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); }
-    .pv-cal-weekdays span { text-align: center; font-size: 0.6875rem; font-weight: 600; color: var(--av-muted-fg); padding: 0.375rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
+    .pv-cal-weekdays span { text-align: center; font-size: 0.8125rem; font-weight: 600; color: var(--av-muted-fg); padding: 0.375rem 0; text-transform: uppercase; letter-spacing: 0.05em; }
     .pv-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--av-border); border: 1px solid var(--av-border); border-radius: 0.375rem; overflow: hidden; }
-    .pv-cal-day { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 2.5rem; font-size: 0.8125rem; font-weight: 500; cursor: pointer; transition: background 0.12s; background: var(--av-bg); color: var(--av-fg); position: relative; }
+    .pv-cal-day { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 2.5rem; font-size: 0.9375rem; font-weight: 500; cursor: pointer; transition: background 0.12s; background: var(--av-bg); color: var(--av-fg); position: relative; }
     .pv-cal-day:hover { background: var(--av-muted); }
     .pv-cal-day.other { color: var(--av-muted-fg); opacity: 0.4; pointer-events: none; }
     .pv-cal-day.today { font-weight: 700; }
     .pv-cal-day.selected { background: #f0fdf4; color: #166534; font-weight: 600; box-shadow: inset 0 0 0 2px var(--av-green); }
     .pv-cal-day.available { background: #f0fdf4; }
     .pv-cal-day.closed { color: var(--av-muted-fg); opacity: 0.6; }
+    .pv-cal-day.resident-closed { background: #f1f1f2; color: #a1a1aa; opacity: 1; cursor: not-allowed; }
     .pv-cal-day.has-override::after { content: ''; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--av-green); }
     .pv-cal-day.selected.has-override::after { background: #166534; }
-    .pv-cal-legend { display: flex; gap: 1rem; padding: 0.75rem 1.25rem; border-top: 1px solid var(--av-border); font-size: 0.6875rem; color: var(--av-muted-fg); }
+    .pv-cal-legend { display: flex; gap: 1rem; padding: 0.75rem 1.25rem; border-top: 1px solid var(--av-border); font-size: 0.8125rem; color: var(--av-muted-fg); }
     .pv-cal-legend span { display: flex; align-items: center; gap: 0.25rem; }
     .pv-cal-legend .pv-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .pv-cal-legend .pv-dot.avail { background: #166534; }
@@ -538,43 +531,43 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* Detail panel */
     .pv-detail { min-height: 20rem; }
-    .pv-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 0.875rem; text-align: center; padding: 2rem; }
+    .pv-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 1rem; text-align: center; padding: 2rem; }
     .pv-detail-empty svg { width: 2.5rem; height: 2.5rem; margin-bottom: 0.75rem; opacity: 0.4; }
     .pv-detail-head { padding: 1.25rem 1.5rem 0; }
     .pv-detail-date { font-size: 1.125rem; font-weight: 600; color: var(--av-fg); }
-    .pv-detail-badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.6875rem; font-weight: 500; margin-left: 0.5rem; vertical-align: middle; }
+    .pv-detail-badge { display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px; font-size: 0.8125rem; font-weight: 500; margin-left: 0.5rem; vertical-align: middle; }
     .pv-detail-badge.weekly { background: var(--av-muted); color: var(--av-muted-fg); }
     .pv-detail-badge.custom { background: #f0fdf4; color: #166534; }
     .pv-detail-badge.closed-badge { background: #fef2f2; color: #991b1b; }
-    .pv-detail-source { font-size: 0.75rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
+    .pv-detail-source { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.25rem; }
     .pv-detail-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 0.75rem; padding: 0 1.5rem; }
-    .pv-detail-nav button { border: none; background: none; font-size: 0.8125rem; font-weight: 500; color: var(--av-muted-fg); cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: inherit; display: flex; align-items: center; gap: 0.25rem; }
+    .pv-detail-nav button { border: none; background: none; font-size: 0.9375rem; font-weight: 500; color: var(--av-muted-fg); cursor: pointer; padding: 0.25rem 0.5rem; border-radius: 0.25rem; font-family: inherit; display: flex; align-items: center; gap: 0.25rem; }
     .pv-detail-nav button:hover { background: var(--av-muted); color: var(--av-fg); }
     .pv-detail-nav button svg { width: 0.875rem; height: 0.875rem; }
     .pv-detail-body { padding: 1rem 1.5rem 1.5rem; }
-    .pv-detail-label { font-size: 0.8125rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.75rem; }
+    .pv-detail-label { font-size: 0.9375rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.75rem; }
 
     /* Slot list */
     .pv-slots { border: 1px solid var(--av-border); border-radius: 0.5rem; overflow: hidden; }
-    .pv-slot { display: flex; align-items: center; justify-content: space-between; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--av-border); font-size: 0.8125rem; }
+    .pv-slot { display: flex; align-items: center; justify-content: space-between; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--av-border); font-size: 0.9375rem; }
     .pv-slot:last-child { border-bottom: none; }
     .pv-slot-time { font-weight: 500; color: var(--av-fg); font-variant-numeric: tabular-nums; }
-    .pv-slot-status { font-size: 0.75rem; font-weight: 500; }
+    .pv-slot-status { font-size: 0.875rem; font-weight: 500; }
     .pv-slot-status.open { color: #166534; }
     .pv-slot-status.closed { color: var(--av-muted-fg); }
-    .pv-slot-count { font-size: 0.75rem; color: var(--av-muted-fg); margin-top: 0.75rem; text-align: right; }
+    .pv-slot-count { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.75rem; text-align: right; }
 
     /* Closed state */
     .pv-closed { display: flex; flex-direction: column; align-items: center; padding: 2.5rem 1.5rem; text-align: center; }
     .pv-closed svg { width: 2.5rem; height: 2.5rem; color: var(--av-muted-fg); opacity: 0.5; margin-bottom: 0.75rem; }
-    .pv-closed h4 { font-size: 0.9375rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.25rem; }
-    .pv-closed p { font-size: 0.8125rem; color: var(--av-muted-fg); line-height: 1.5; }
-    .pv-closed-status { margin-top: 1rem; font-size: 0.75rem; color: var(--av-muted-fg); }
+    .pv-closed h4 { font-size: 1.0625rem; font-weight: 600; color: var(--av-fg); margin-bottom: 0.25rem; }
+    .pv-closed p { font-size: 0.9375rem; color: var(--av-muted-fg); line-height: 1.5; }
+    .pv-closed-status { margin-top: 1rem; font-size: 0.875rem; color: var(--av-muted-fg); }
     .pv-closed-status strong { font-weight: 600; color: var(--av-fg); }
 
     /* View toggle */
-    .pv-view-toggle { display: flex; gap: 0.5rem; align-items: center; font-size: 0.8125rem; }
-    .pv-view-toggle button { border: 1px solid var(--av-border); background: var(--av-bg); padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.8125rem; font-weight: 500; cursor: pointer; font-family: inherit; color: var(--av-fg); transition: all 0.15s; }
+    .pv-view-toggle { display: flex; gap: 0.5rem; align-items: center; font-size: 0.9375rem; }
+    .pv-view-toggle button { border: 1px solid var(--av-border); background: var(--av-bg); padding: 0.375rem 0.75rem; border-radius: 0.375rem; font-size: 0.9375rem; font-weight: 500; cursor: pointer; font-family: inherit; color: var(--av-fg); transition: all 0.15s; }
     .pv-view-toggle button.active { background: var(--av-fg); color: #fff; border-color: var(--av-fg); }
     .pv-view-toggle button:hover:not(.active) { background: var(--av-muted); }
 
@@ -603,13 +596,20 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     <!-- Header -->
     <div class="av-header">
       <div class="av-header-left">
-        <h1>Availability</h1>
-        <p>Set and manage when appointments can be booked.</p>
+        <?php if ($panel === 'overrides'): ?>
+        <h1>Date Overrides</h1>
+        <p>Add custom availability for specific dates.<br>Changes here override your regular weekly schedule.</p>
+        <?php elseif ($panel === 'bulk'): ?>
+        <h1>Bulk Schedule</h1>
+        <p>Set availability for multiple dates at once.<br>Quickly apply the same schedule across a date range.</p>
+        <?php elseif ($panel === 'preview'): ?>
+        <h1>Schedule Preview</h1>
+        <p>Review your availability schedule.<br>See how your weekly and date-specific settings combine.</p>
+        <?php else: ?>
+        <h1>Weekly Availability</h1>
+        <p>Define recurring hours for each day of the week.<br>Set your recurring hours for each day of the week.</p>
+        <?php endif; ?>
       </div>
-      <button class="av-tz-btn" type="button">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-        GMT+08:00 Asia/Manila
-      </button>
     </div>
     <hr class="av-separator" />
 
@@ -620,16 +620,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
       <!-- LEFT: Weekly Availability -->
       <div class="av-col-left">
-        <div class="av-section-head">
-          <h2>Weekly Availability</h2>
-          <span class="av-tip-wrap">
-            <button class="av-tip-btn" type="button">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-            </button>
-            <span class="av-tip-box">Define recurring hours for each day of the week.</span>
-          </span>
-        </div>
-        <p class="av-section-desc">Set your recurring hours for each day of the week.</p>
         <div class="av-days" id="weeklyDays"></div>
       </div>
 
@@ -662,10 +652,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     <!-- PANEL: Date Overrides -->
     <div class="av-panel<?php echo $panel === 'overrides' ? ' active' : ''; ?>" id="panel-overrides">
-      <div class="av-section-head">
-        <h2>Date Overrides</h2>
-      </div>
-      <p class="av-section-desc">Change the availability for specific dates without affecting your recurring weekly schedule.</p>
 
       <div class="ov-layout">
         <!-- Left: Calendar -->
@@ -766,6 +752,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
                 <div id="ovCustomEditor" style="display:none;">
                   <div class="ov-editor-label">Available hours</div>
                   <div class="ov-time-ranges" id="ovTimeRanges"></div>
+                  <div class="bulk-date-error" id="ovTimeRangeError">Each time range must end after it starts.</div>
                   <button class="av-btn av-btn-ghost" type="button" id="ovAddRange" style="margin-top:0.5rem;padding:0.375rem 0.625rem;font-size:0.8125rem;">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                     Add time range
@@ -787,11 +774,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     <!-- PANEL: Bulk Schedule -->
     <div class="av-panel<?php echo $panel === 'bulk' ? ' active' : ''; ?>" id="panel-bulk">
-      <div class="av-section-head">
-        <h2>Bulk Schedule</h2>
-      </div>
-      <p class="av-section-desc">Apply availability changes to multiple dates at once without changing your recurring weekly schedule.</p>
-      <p class="bulk-section-desc" style="margin-top:0.25rem;">Use this for temporary changes such as holidays, clinic closures, or special operating periods.</p>
 
       <div class="bulk-layout">
         <!-- Left: Configuration -->
@@ -840,6 +822,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
             <div class="bulk-section" id="bulkTimeSection">
               <div class="bulk-section-title">Available hours</div>
               <div class="bulk-time-ranges" id="bulkTimeRanges"></div>
+              <div class="bulk-date-error" id="bulkTimeError">Each time range must end after it starts.</div>
               <button class="av-btn av-btn-ghost" type="button" id="bulkAddRange" style="margin-top:0.5rem;padding:0.375rem 0.625rem;font-size:0.8125rem;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 Add time range
@@ -886,10 +869,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     <!-- PANEL: Schedule Preview -->
     <div class="av-panel<?php echo $panel === 'preview' ? ' active' : ''; ?>" id="panel-preview">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;">
-        <div>
-          <div class="av-section-head"><h2>Schedule Preview</h2></div>
-          <p class="av-section-desc">See exactly how your appointment availability will appear to residents when booking.</p>
-        </div>
         <div style="display:flex;align-items:center;gap:1rem;">
           <div class="pv-view-toggle" id="pvViewToggle">
             <button type="button" class="active" data-view="resident">Resident</button>
@@ -897,7 +876,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           </div>
           <span style="font-size:0.75rem;color:var(--av-muted-fg);display:flex;align-items:center;gap:0.375rem;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Resident preview
+            <span id="pvModeLabel">Resident preview</span>
           </span>
         </div>
       </div>
@@ -981,13 +960,16 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
   </div>
 
   <!-- Toast container -->
-  <div class="av-toast-container" id="avToastContainer"></div>  <script>
+  <div class="av-toast-container" id="avToastContainer"></div>
+  <script src="assets/js/availability-utils.js"></script>
+  <script>
   (function() {
     'use strict';
 
+    var AV_UTILS = window.DCVSAvailabilityUtils;
     var DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     var DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    var TIME_OPTIONS = generateTimeOptions();
+    var TIME_OPTIONS = AV_UTILS.generateTimeOptions();
     var AV_SLOTS = ['09:00','10:00','11:00','14:00','15:00'];
 
     var avState = [
@@ -1005,47 +987,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     var serverAvState = null;
     var serverOverridesCount = 0;
 
-    function generateTimeOptions() {
-      var opts = [];
-      for (var i = 0; i < 48; i++) {
-        var h = Math.floor(i / 2);
-        var m = (i % 2) * 30;
-        var ap = h >= 12 ? 'PM' : 'AM';
-        var hh12 = h % 12; if (hh12 === 0) hh12 = 12;
-        var label = String(hh12).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ' ' + ap;
-        var val = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-        opts.push({ value: val, label: label });
-      }
-      return opts;
-    }
+    var timeValToLabel = function(value) { return AV_UTILS.timeValToLabel(value, TIME_OPTIONS); };
+    var format12To24 = AV_UTILS.format12To24;
+    var svgIcon = AV_UTILS.svgIcon;
 
-    function timeValToLabel(v) {
-      for (var i = 0; i < TIME_OPTIONS.length; i++) {
-        if (TIME_OPTIONS[i].value === v) return TIME_OPTIONS[i].label;
-      }
-      return v;
-    }
-
-    function format12To24(t12) {
-      var parts = t12.split(' ');
-      var hm = parts[0].split(':');
-      var h = parseInt(hm[0], 10);
-      var m = hm[1];
-      if (parts[1] === 'PM' && h !== 12) h += 12;
-      if (parts[1] === 'AM' && h === 12) h = 0;
-      return String(h).padStart(2, '0') + ':' + m;
-    }
-
-    function svgIcon(name) {
-      var icons = {
-        plus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
-        minus: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',
-        trash: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
-        copy: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
-        x: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
-      };
-      return icons[name] || '';
-    }    function renderDays() {
+    function renderDays() {
       var container = document.getElementById('weeklyDays');
       container.innerHTML = '';
       for (var d = 0; d < 7; d++) {
@@ -1489,14 +1435,22 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       }, 300);
     }
 
-    function loadFromServer() {
+    function loadFromServer(year, month) {
       var now = new Date();
-      var y = now.getFullYear();
-      var m = now.getMonth() + 1;
+      var panel = new URLSearchParams(window.location.search).get('panel') || '';
+      var y = year || (panel === 'overrides' && typeof ovCalYear === 'number' ? ovCalYear : panel === 'preview' && typeof pvCalYear === 'number' ? pvCalYear : now.getFullYear());
+      var m = month || (panel === 'overrides' && typeof ovCalMonth === 'number' ? ovCalMonth + 1 : panel === 'preview' && typeof pvCalMonth === 'number' ? pvCalMonth + 1 : now.getMonth() + 1);
       fetch('appointment-availability.php?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
         .then(function(r) { return r.json(); })
         .then(function(data) {
           if (!data.ok) return;
+          if (panel === 'preview') {
+            pvAppointmentCounts = data.routineSlots || {};
+            pvHeldSlots = data.held || {};
+            pvBlockedSlots = data.blocked || {};
+            pvSlotCapacity = data.routineCapacity || {};
+            pvMaxPerDay = parseInt(data.maxPerDay, 10) || 3;
+          }
           if (data.weekly) {
             for (var d = 1; d <= 7; d++) {
               var dayIdx = d === 7 ? 0 : d;
@@ -1626,6 +1580,20 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         });
       });
       return slots;
+    }
+    function rangesAreValid(ranges) {
+      return Array.isArray(ranges) && ranges.length > 0 && ranges.every(function(range) {
+        var start = String(range.start || '').split(':');
+        var end = String(range.end || '').split(':');
+        if (start.length !== 2 || end.length !== 2) return false;
+        var startMinutes = parseInt(start[0], 10) * 60 + parseInt(start[1], 10);
+        var endMinutes = parseInt(end[0], 10) * 60 + parseInt(end[1], 10);
+        return Number.isFinite(startMinutes) && Number.isFinite(endMinutes) && endMinutes > startMinutes;
+      });
+    }
+    function updateRangeError(id, ranges) {
+      var error = document.getElementById(id);
+      if (error) error.style.display = rangesAreValid(ranges) ? 'none' : 'block';
     }
     function ovRenderCal() {
       var grid = document.getElementById('ovCalGrid');
@@ -1854,10 +1822,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           actions.appendChild(rmBtn);
         }
         row.appendChild(actions);
-        startSel.addEventListener('change', function() { ranges[i].start = this.value; });
-        endSel.addEventListener('change', function() { ranges[i].end = this.value; });
+        startSel.addEventListener('change', function() { ranges[i].start = this.value; updateRangeError('ovTimeRangeError', ranges); });
+        endSel.addEventListener('change', function() { ranges[i].end = this.value; updateRangeError('ovTimeRangeError', ranges); });
         container.appendChild(row);
       });
+      updateRangeError('ovTimeRangeError', ranges);
     }
 
     function ovRenderOverrideList() {
@@ -1916,6 +1885,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* ===== BULK SCHEDULE PANEL ===== */
     var bulkAction = 'available';
+    var bulkSaving = false;
     var bulkTimeRanges = [{ start: '09:00', end: '12:00' }, { start: '14:00', end: '16:00' }];
 
     function bulkGetAffectedDates() {
@@ -1946,6 +1916,9 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     function bulkRenderSummary() {
       var content = document.getElementById('bulkSumContent');
       var reviewBtn = document.getElementById('bulkReview');
+      var rangesValid = bulkAction !== 'available' || rangesAreValid(bulkTimeRanges);
+      var timeError = document.getElementById('bulkTimeError');
+      if (timeError) timeError.style.display = bulkAction === 'available' && !rangesValid ? 'block' : 'none';
       var dates = bulkGetAffectedDates();
       var s = document.getElementById('bulkStart').value;
       var e = document.getElementById('bulkEnd').value;
@@ -1961,8 +1934,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var startDate = new Date(s + 'T00:00:00');
       var endDate = new Date(e + 'T00:00:00');
       var dateRangeStr = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' – ' + endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      var existingCount = 0;
-      dates.forEach(function(ds) { if (ovFindOverride(ds)) existingCount++; });
       var html = '';
       html += '<div class="bulk-sum-count">' + dates.length + '</div>';
       html += '<div class="bulk-sum-count-label">date' + (dates.length !== 1 ? 's' : '') + ' selected</div>';
@@ -1994,13 +1965,13 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         var totalSlots = dates.length * AV_SLOTS.length;
         html += '<div class="bulk-sum-impact"><strong>' + dates.length + ' date(s)</strong> will be updated.</div>';
       }
-      if (existingCount > 0) {
+      if (bulkAction !== 'restore') {
         html += '<div class="bulk-sum-impact" style="background:#fffbeb;color:#92400e;border-color:#fde68a;margin-top:0.5rem;">';
-        html += '<strong>' + existingCount + '</strong> selected date(s) already have custom schedules. Applying this change will replace those overrides.';
+        html += 'Any existing date-specific schedules on these dates will be replaced.';
         html += '</div>';
       }
       content.innerHTML = html;
-      reviewBtn.disabled = false;
+      reviewBtn.disabled = !rangesValid;
     }
 
     function bulkRenderTimeRanges() {
@@ -2099,7 +2070,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     function bulkShowModal() {
       var dates = bulkGetAffectedDates();
-      if (dates.length === 0) return;
+      if (dates.length === 0 || (bulkAction === 'available' && !rangesAreValid(bulkTimeRanges))) return;
       var s = document.getElementById('bulkStart').value;
       var e = document.getElementById('bulkEnd').value;
       var startDate = new Date(s + 'T00:00:00');
@@ -2134,54 +2105,34 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     function bulkConfirm() {
       var dates = bulkGetAffectedDates();
-      if (dates.length === 0) return;
-      var count = 0;
-      var promises = [];
-      dates.forEach(function(dateStr) {
-        for (var i = 0; i < dateOverrides.length; i++) {
-          if (dateOverrides[i].date === dateStr) { dateOverrides.splice(i, 1); break; }
-        }
-        if (bulkAction === 'restore') {
-          var body = new URLSearchParams();
-          body.append('mode', 'date');
-          body.append('date', dateStr);
-          body.append('slots', '{}');
-          promises.push(fetch('availability-save.php', { method: 'POST', body: body }).then(function(r) { return r.json(); }));
-          count++;
-        } else if (bulkAction === 'closed') {
-          var slots = {};
-          AV_SLOTS.forEach(function(s) { slots[s] = false; });
-          dateOverrides.push({ date: dateStr, slots: slots });
-          var body = new URLSearchParams();
-          body.append('mode', 'date');
-          body.append('date', dateStr);
-          body.append('slots', JSON.stringify(slots));
-          promises.push(fetch('availability-save.php', { method: 'POST', body: body }).then(function(r) { return r.json(); }));
-          count++;
-        } else {
-          var slots = ovRangesToSlots(bulkTimeRanges);
-          dateOverrides.push({ date: dateStr, slots: slots });
-          var body = new URLSearchParams();
-          body.append('mode', 'date');
-          body.append('date', dateStr);
-          body.append('slots', JSON.stringify(slots));
-          promises.push(fetch('availability-save.php', { method: 'POST', body: body }).then(function(r) { return r.json(); }));
-          count++;
-        }
-      });
+      if (bulkSaving || dates.length === 0 || (bulkAction === 'available' && !rangesAreValid(bulkTimeRanges))) return;
+      bulkSaving = true;
+      var confirmBtn = document.getElementById('bulkModalConfirm');
+      if (confirmBtn) confirmBtn.disabled = true;
+      var body = new URLSearchParams();
+      body.append('mode', 'bulk_dates');
+      body.append('dates', JSON.stringify(dates));
+      body.append('action', bulkAction);
+      if (bulkAction === 'available') body.append('slots', JSON.stringify(ovRangesToSlots(bulkTimeRanges)));
       document.getElementById('bulkModal').classList.remove('open');
-      Promise.all(promises).then(function(results) {
-        var failed = results.filter(function(d) { return !d.ok; });
-        if (failed.length > 0) {
-          toast(failed[0].error || 'Some dates failed to save.', { type: 'error' });
-        } else {
-          toast('Bulk schedule updated', { description: count + ' date(s) affected.' });
-        }
-        loadFromServer();
-      }).catch(function() {
-        toast('Network error', { type: 'error', description: 'Could not save bulk changes.' });
-        loadFromServer();
-      });
+      fetch('availability-save.php', { method: 'POST', body: body })
+        .then(function(r) { return r.json(); })
+        .then(function(result) {
+          if (result && result.ok) {
+            toast('Bulk schedule updated', { description: (result.affected || 0) + ' date(s) affected.' });
+          } else {
+            toast((result && result.error) || 'Bulk schedule failed. No changes were saved.', { type: 'error' });
+          }
+          bulkSaving = false;
+          if (confirmBtn) confirmBtn.disabled = false;
+          loadFromServer();
+        })
+        .catch(function() {
+          bulkSaving = false;
+          if (confirmBtn) confirmBtn.disabled = false;
+          toast('Network error', { type: 'error', description: 'Could not save the bulk schedule.' });
+          loadFromServer();
+        });
     }
 
     function bulkInit() {
@@ -2286,6 +2237,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* ===== SCHEDULE PREVIEW PANEL ===== */
     var pvCalYear, pvCalMonth, pvSelectedDate = null, pvViewMode = 'resident';
+    var pvAppointmentCounts = {}, pvHeldSlots = {}, pvBlockedSlots = {}, pvSlotCapacity = {}, pvMaxPerDay = 3;
 
     function pvDateStr(y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
     function pvGetMonthDays(y, m) { return new Date(y, m + 1, 0).getDate(); }
@@ -2310,22 +2262,12 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       if (ov) {
         return { type: 'override', closed: pvIsClosed(ov), slots: ov.slots, dayIdx: dow };
       }
-      var day = avState[dow];
-      if (!day || !day.enabled) {
-        return { type: 'weekly', closed: true, slots: null, dayIdx: dow };
-      }
+      var blocked = pvBlockedSlots[dateStr] || {};
       var slots = {};
       AV_SLOTS.forEach(function(s) {
-        var h = parseInt(s.split(':')[0], 10);
-        var covered = false;
-        for (var b = 0; b < day.blocks.length; b++) {
-          var sH = parseInt(day.blocks[b].start.split(':')[0], 10);
-          var eH = parseInt(day.blocks[b].end.split(':')[0], 10);
-          if (h >= sH && h < eH) { covered = true; break; }
-        }
-        slots[s] = covered;
+        slots[s] = !blocked[s];
       });
-      return { type: 'weekly', closed: false, slots: slots, dayIdx: dow };
+      return { type: 'weekly', closed: AV_SLOTS.every(function(s) { return !slots[s]; }), slots: slots, dayIdx: dow };
     }
     function pvGetAvailableSlots(slots) {
       if (!slots) return [];
@@ -2334,6 +2276,25 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         if (slots[s] !== false) result.push(s);
       });
       return result;
+    }
+    function pvGetResidentSlots(dateStr, scheduleState) {
+      var counts = pvAppointmentCounts[dateStr] || {};
+      var capacities = pvSlotCapacity[dateStr] || {};
+      var dailyCount = 0;
+      AV_SLOTS.forEach(function(slot) { dailyCount += parseInt(counts[slot] || 0, 10); });
+      var dateIsFull = dailyCount >= pvMaxPerDay;
+      var slots = {};
+      AV_SLOTS.forEach(function(slot) {
+        var scheduleOpen = scheduleState.slots && scheduleState.slots[slot] !== false;
+        var slotCount = parseInt(counts[slot] || 0, 10);
+        var capacity = parseInt(capacities[slot] || 0, 10);
+        slots[slot] = !pvIsPastDate(dateStr) && !dateIsFull && scheduleOpen && slotCount < capacity;
+      });
+      return slots;
+    }
+    function pvIsPastDate(dateStr) {
+      var now = new Date();
+      return dateStr < pvDateStr(now.getFullYear(), now.getMonth(), now.getDate());
     }
     function pvRenderCal() {
       var grid = document.getElementById('pvCalGrid');
@@ -2356,16 +2317,38 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       for (var d = 1; d <= total; d++) {
         var ds = pvDateStr(pvCalYear, pvCalMonth, d);
         var state = pvGetDayState(ds);
+        var residentSlots = pvGetResidentSlots(ds, state);
+        var residentOpen = pvGetAvailableSlots(residentSlots).length > 0;
         var el = document.createElement('div');
         el.className = 'pv-cal-day';
         el.textContent = d;
         if (ds === todayStr) el.classList.add('today');
         if (ds === pvSelectedDate) el.classList.add('selected');
         if (!state.closed && state.type === 'override') el.classList.add('has-override');
-        if (state.closed) el.classList.add('closed');
-        else if (state.type === 'override') el.classList.add('available');
+        if (pvViewMode === 'resident') {
+          if (residentOpen) el.classList.add('available');
+          else {
+            el.classList.add('closed');
+            el.classList.add('resident-closed');
+            el.setAttribute('aria-disabled', 'true');
+          }
+        } else if (state.closed) {
+          el.classList.add('closed');
+        } else if (state.type === 'override') {
+          el.classList.add('available');
+        }
         el.dataset.date = ds;
-        el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
+        if (pvViewMode === 'admin' || residentOpen) {
+          el.setAttribute('role', 'button');
+          el.setAttribute('tabindex', '0');
+          el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
+          el.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              pvSelectDate(this.dataset.date);
+            }
+          });
+        }
         grid.appendChild(el);
       }
       var totalCells = first + total;
@@ -2411,8 +2394,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var dateObj = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
       var dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
       var state = pvGetDayState(pvSelectedDate);
-      var availSlots = pvGetAvailableSlots(state.slots);
-      var isClosed = state.closed || availSlots.length === 0;
+      var residentSlots = pvGetResidentSlots(pvSelectedDate, state);
+      var availSlots = pvViewMode === 'resident' ? pvGetAvailableSlots(residentSlots) : pvGetAvailableSlots(state.slots);
+      var isClosed = pvViewMode === 'resident'
+        ? (pvIsPastDate(pvSelectedDate) || availSlots.length === 0)
+        : state.closed || availSlots.length === 0;
 
       var html = '';
       html += '<div class="pv-detail-head">';
@@ -2476,8 +2462,19 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       if (nextBtn) nextBtn.addEventListener('click', function() { pvNavDay(1); });
     }
 
+    var panelInitialized = false;
     function initPanel() {
       var panel = new URLSearchParams(window.location.search).get('panel') || '';
+      if (panelInitialized) {
+        if (panel === 'overrides') {
+          ovRenderCal(); ovRenderEditor(); ovRenderOverrideList();
+        } else if (panel === 'preview') {
+          pvRenderCal();
+          if (pvSelectedDate) pvRenderDetail();
+        }
+        return;
+      }
+      panelInitialized = true;
       if (panel === 'overrides') {
         var now = new Date();
         ovCalYear = now.getFullYear();
@@ -2488,12 +2485,16 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         document.getElementById('ovCalPrev').addEventListener('click', function() {
           ovCalMonth--;
           if (ovCalMonth < 0) { ovCalMonth = 11; ovCalYear--; }
-          ovRenderCal();
+          ovSelectedDate = null;
+          ovEditing = false;
+          loadFromServer(ovCalYear, ovCalMonth + 1);
         });
         document.getElementById('ovCalNext').addEventListener('click', function() {
           ovCalMonth++;
           if (ovCalMonth > 11) { ovCalMonth = 0; ovCalYear++; }
-          ovRenderCal();
+          ovSelectedDate = null;
+          ovEditing = false;
+          loadFromServer(ovCalYear, ovCalMonth + 1);
         });
         var radios = document.querySelectorAll('input[name="ovMode"]');
         radios.forEach(function(r) { r.addEventListener('change', ovUpdateEditForm); });
@@ -2547,6 +2548,10 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
               var sels = row.querySelectorAll('select');
               ranges.push({ start: sels[0].value, end: sels[1].value });
             });
+            if (!rangesAreValid(ranges)) {
+              updateRangeError('ovTimeRangeError', ranges);
+              return;
+            }
             slots = ovRangesToSlots(ranges);
             dateOverrides.push({ date: dateStr, slots: slots });
           }
@@ -2576,26 +2581,32 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         document.getElementById('pvCalPrev').addEventListener('click', function() {
           pvCalMonth--;
           if (pvCalMonth < 0) { pvCalMonth = 11; pvCalYear--; }
-          pvRenderCal();
+          pvSelectedDate = null;
+          pvRenderDetail();
+          loadFromServer(pvCalYear, pvCalMonth + 1);
         });
         document.getElementById('pvCalNext').addEventListener('click', function() {
           pvCalMonth++;
           if (pvCalMonth > 11) { pvCalMonth = 0; pvCalYear++; }
-          pvRenderCal();
+          pvSelectedDate = null;
+          pvRenderDetail();
+          loadFromServer(pvCalYear, pvCalMonth + 1);
         });
         document.getElementById('pvCalToday').addEventListener('click', function() {
           var now = new Date();
           pvCalYear = now.getFullYear();
           pvCalMonth = now.getMonth();
           pvSelectedDate = pvDateStr(pvCalYear, pvCalMonth, now.getDate());
-          pvRenderCal();
-          pvRenderDetail();
+          loadFromServer(pvCalYear, pvCalMonth + 1);
         });
         document.querySelectorAll('#pvViewToggle button').forEach(function(btn) {
           btn.addEventListener('click', function() {
             document.querySelectorAll('#pvViewToggle button').forEach(function(b) { b.classList.remove('active'); });
             btn.classList.add('active');
             pvViewMode = btn.dataset.view;
+            var modeLabel = document.getElementById('pvModeLabel');
+            if (modeLabel) modeLabel.textContent = pvViewMode === 'resident' ? 'Resident preview' : 'Admin details';
+            pvRenderCal();
             pvRenderDetail();
           });
         });

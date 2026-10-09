@@ -13,6 +13,18 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
+
+function rejectValidatedRespond($success, $message) {
+    if (($_POST['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => (bool)$success, 'message' => $message]);
+        exit;
+    }
+    $_SESSION[$success ? 'report_success' : 'report_error'] = $message;
+    header('Location: dashboard-staff.php#reports-pending');
+    exit;
+}
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -24,28 +36,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reason = trim($_POST['reason'] ?? '');
 
     if ($reportId === 0) {
-        $_SESSION['report_error'] = "Invalid report ID.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        rejectValidatedRespond(false, 'Invalid report ID.');
     }
 
     if (empty($reason)) {
-        $_SESSION['report_error'] = "Reason for rejection is required.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        rejectValidatedRespond(false, 'Reason for rejection is required.');
     }
 
     // Check report exists and is validated
-    $checkStmt = $conn->prepare("SELECT report_id, status FROM reports WHERE report_id = ? AND status = 'validated'");
+    $checkStmt = $conn->prepare("SELECT r.report_id, r.status, r.report_type, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON u.user_id = r.reporter_id WHERE r.report_id = ? AND r.status = 'validated'");
     $checkStmt->bind_param("i", $reportId);
     $checkStmt->execute();
     $report = $checkStmt->get_result()->fetch_assoc();
     $checkStmt->close();
 
     if (!$report) {
-        $_SESSION['report_error'] = "Report not found or already processed.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        rejectValidatedRespond(false, 'Report not found or already processed.');
     }
 
     // Reject - use the validated report as a rejection by DCVS
@@ -82,23 +88,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'report', $reportId);
             $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
             sendReportEmail($conn, $reportId, 'rejected', $reason, $staffName);
+            sendReportSms($conn, $reportId, 'rejected', $staffName, $reason);
         }
 
         $action = "Report Rejected by DCVS";
-        $details = "Report #$reportId rejected by DCVS. Reason: $reason";
+        $details = ucfirst($report['report_type']) . " report from " . ($report['reporter_name'] ?: 'a resident') . " rejected by DCVS. Reason: $reason";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['report_success'] = "Validated report rejected successfully.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        rejectValidatedRespond(true, 'Validated report rejected successfully.');
     } else {
-        $_SESSION['report_error'] = "Failed to reject report. Please try again.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        rejectValidatedRespond(false, 'Failed to reject report. Please try again.');
     }
 
     $stmt->close();

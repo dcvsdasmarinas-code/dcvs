@@ -272,6 +272,21 @@ if ($docTableCheck && $docTableCheck->num_rows > 0) {
   .appt-row .k{color:#3E6B4C}
   .appt-row .v{font-weight:600;color:#0B5F25}
   .appt-status{display:inline-block;margin-top:12px;font-size:11.5px;font-weight:700;color:#fff;background:var(--green);padding:5px 11px;border-radius:999px}
+  .pet-edit-modal{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.8)}
+  .pet-edit-modal.open{display:flex}
+  .pet-edit-dialog{position:relative;width:min(560px,100%);max-height:calc(100vh - 32px);overflow-y:auto;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:24px;box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.1)}
+  .pet-edit-dialog h2{margin:0;font-size:18px;font-weight:600;color:#18181b}
+  .pet-edit-dialog p{margin:6px 0 18px;font-size:14px;color:#71717a}
+  .pet-edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .pet-edit-field{display:flex;flex-direction:column;gap:6px}
+  .pet-edit-field.full{grid-column:1/-1}
+  .pet-edit-field label{font-size:14px;font-weight:500;color:#18181b}
+  .pet-edit-field input,.pet-edit-field select{width:100%;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:14px Inter,'Segoe UI',sans-serif;box-sizing:border-box}
+  .pet-edit-field input:focus,.pet-edit-field select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b}
+  .pet-edit-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+  .pet-edit-close{position:absolute;top:16px;right:16px;width:24px;height:24px;border:0;border-radius:4px;background:transparent;color:#71717a;cursor:pointer}
+  .pet-edit-close:hover{background:#f4f4f5;color:#18181b}
+  @media(max-width:560px){.pet-edit-grid{grid-template-columns:1fr}.pet-edit-field.full{grid-column:auto}.pet-edit-actions{flex-direction:column-reverse}.pet-edit-actions button{width:100%}}
   @media(max-width:880px){.layout{grid-template-columns:1fr}.profile-header{flex-direction:column}.field-grid{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
@@ -280,9 +295,13 @@ if ($docTableCheck && $docTableCheck->num_rows > 0) {
   <div class="topbar">
     <div class="breadcrumb"><a href="dashboard-resident.php#my-pets">Pet Records</a> / <strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong></div>
     <div class="actions">
-      <?php if ($isStaff || $isAdmin): ?><button class="sd-btn sd-btn-default" onclick="alert('Edit coming soon.')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Edit Pet Profile</button><?php endif; ?>
+      <?php if ($isStaff || $isAdmin): ?><button class="sd-btn sd-btn-default" type="button" onclick="openPetEditDialog()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Edit Pet Profile</button><?php endif; ?>
       <button class="sd-btn sd-btn-outline" onclick="window.print()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9V4h12v5M6 18h12v3H6zM4 9h16v6H4z"/></svg>Print Pet Profile</button>
-      <button class="sd-btn sd-btn-outline" onclick="window.location.href='dashboard-resident.php#my-pets'"><i class="fas fa-arrow-left"></i>Back to My Pets</button>
+      <?php if ($isStaff || $isAdmin): ?>
+        <button class="sd-btn sd-btn-outline" onclick="window.location.href='dashboard-staff.php#client-pets'"><i class="fas fa-arrow-left"></i>Back to All Clients</button>
+      <?php else: ?>
+        <button class="sd-btn sd-btn-outline" onclick="window.location.href='dashboard-resident.php#my-pets'"><i class="fas fa-arrow-left"></i>Back to My Pets</button>
+      <?php endif; ?>
     </div>
   </div>
 
@@ -381,5 +400,33 @@ if ($docTableCheck && $docTableCheck->num_rows > 0) {
     </div>
   </div>
 </div>
+<?php if ($isStaff || $isAdmin): ?>
+<div class="pet-edit-modal" id="petEditModal" role="dialog" aria-modal="true" aria-labelledby="petEditTitle">
+  <form class="pet-edit-dialog" action="edit-pet.php" method="POST" enctype="multipart/form-data">
+    <button type="button" class="pet-edit-close" onclick="closePetEditDialog()" aria-label="Close">&times;</button>
+    <h2 id="petEditTitle">Edit Pet Profile</h2>
+    <p>Update the registered pet information below.</p>
+    <input type="hidden" name="pet_id" value="<?php echo (int)$pet['pet_id']; ?>">
+    <input type="hidden" name="return_to" value="pet-profile">
+    <div class="pet-edit-grid">
+      <div class="pet-edit-field"><label for="editPetName">Pet Name</label><input id="editPetName" name="pet_name" value="<?php echo htmlspecialchars($pet['pet_name']); ?>" required></div>
+      <div class="pet-edit-field"><label for="editPetSpecies">Species</label><select id="editPetSpecies" name="species" required><option value="dog" <?php echo strtolower($pet['pet_type']) === 'dog' ? 'selected' : ''; ?>>Dog</option><option value="cat" <?php echo strtolower($pet['pet_type']) === 'cat' ? 'selected' : ''; ?>>Cat</option><option value="other" <?php echo !in_array(strtolower($pet['pet_type']), ['dog','cat'], true) ? 'selected' : ''; ?>>Other</option></select></div>
+      <div class="pet-edit-field"><label for="editPetBreed">Breed</label><input id="editPetBreed" name="breed" value="<?php echo htmlspecialchars($pet['breed'] ?? ''); ?>"></div>
+      <div class="pet-edit-field"><label for="editPetGender">Gender</label><select id="editPetGender" name="gender" required><option value="male" <?php echo strtolower($pet['gender'] ?? '') === 'male' ? 'selected' : ''; ?>>Male</option><option value="female" <?php echo strtolower($pet['gender'] ?? '') === 'female' ? 'selected' : ''; ?>>Female</option></select></div>
+      <div class="pet-edit-field"><label for="editPetAge">Age (years)</label><input id="editPetAge" type="number" min="0" name="age" value="<?php echo (int)$pet['age']; ?>"></div>
+      <div class="pet-edit-field"><label for="editPetWeight">Weight (kg)</label><input id="editPetWeight" type="number" step="0.1" min="0" name="weight" value="<?php echo htmlspecialchars((string)$pet['weight']); ?>"></div>
+      <div class="pet-edit-field full"><label for="editPetColor">Color / Markings</label><input id="editPetColor" name="color" value="<?php echo htmlspecialchars($pet['color'] ?? ''); ?>"></div>
+      <div class="pet-edit-field full"><label for="editPetVaccinated">Vaccination Status</label><select id="editPetVaccinated" name="vaccinated"><option value="yes" <?php echo stripos($vaxStatus, 'fully') !== false ? 'selected' : ''; ?>>Vaccinated</option><option value="no" <?php echo stripos($vaxStatus, 'not') !== false ? 'selected' : ''; ?>>Not Vaccinated</option><option value="partial" <?php echo stripos($vaxStatus, 'partial') !== false ? 'selected' : ''; ?>>Partially Vaccinated</option></select></div>
+      <div class="pet-edit-field full"><label for="editPetPhoto">Replace Photo (optional)</label><input id="editPetPhoto" type="file" name="photo" accept="image/jpeg,image/png,image/gif,image/webp"></div>
+    </div>
+    <div class="pet-edit-actions"><button type="button" class="sd-btn sd-btn-outline" onclick="closePetEditDialog()">Cancel</button><button type="submit" class="sd-btn sd-btn-default">Save Changes</button></div>
+  </form>
+</div>
+<script>
+function openPetEditDialog(){ document.getElementById('petEditModal').classList.add('open'); }
+function closePetEditDialog(){ document.getElementById('petEditModal').classList.remove('open'); }
+document.getElementById('petEditModal').addEventListener('click', function(e){ if(e.target === this) closePetEditDialog(); });
+</script>
+<?php endif; ?>
 </body>
 </html>

@@ -79,7 +79,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-chip{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;line-height:1.25;border-radius:5px;padding:3px 6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#F4F4F8;color:#18181b;}
   .cb-app .cb-chip .cb-dot{width:3px;align-self:stretch;border-radius:2px;flex:none}
   .cb-app .cb-chip.cb-blue .cb-dot{background:#4F8CFF}
-  .cb-app .cb-chip.cb-green .cb-dot{background:#35C36D}
+  .cb-app .cb-chip.cb-green .cb-dot{background:#0E8131}
   .cb-app .cb-chip.cb-purple .cb-dot{background:#8B5CF6}
   .cb-app .cb-chip.cb-orange .cb-dot{background:#FF9F43}
   .cb-app .cb-chip.cb-pink .cb-dot{background:#F15BB5}
@@ -115,6 +115,18 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-reminders-list li{margin-bottom:4px;}
   .cb-app .cb-reminders-list li:last-child{margin-bottom:0;}
   .cb-app .cb-appt-details{border-top:1px solid #e4e4e7;padding-top:14px;margin-bottom:22px;}
+  .cb-app .cb-day-appt-picker{display:none;margin:0 0 18px;padding:12px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);font-family:'Inter',sans-serif;color:#18181b;}
+  .cb-app .cb-day-appt-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
+  .cb-app .cb-day-appt-count{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;color:#18181b;}
+  .cb-app .cb-day-appt-nav{display:flex;gap:4px;}
+  .cb-app .cb-day-appt-nav button{width:28px;height:28px;display:grid;place-items:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter',sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:background-color .15s,border-color .15s,color .15s;}
+  .cb-app .cb-day-appt-nav button:hover:not(:disabled){background:#f4f4f5;}
+  .cb-app .cb-day-appt-nav button:focus-visible,.cb-app .cb-day-appt-time:focus-visible{outline:none;box-shadow:0 0 0 2px #fff,0 0 0 4px #18181b;}
+  .cb-app .cb-day-appt-nav button:disabled{color:#a1a1aa;cursor:not-allowed;opacity:.55;}
+  .cb-app .cb-day-appt-times{display:flex;flex-wrap:wrap;gap:6px;}
+  .cb-app .cb-day-appt-time{min-height:24px;padding:3px 10px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;line-height:1.2;cursor:pointer;transition:background-color .15s,border-color .15s,color .15s;}
+  .cb-app .cb-day-appt-time:hover{background:#f4f4f5;}
+  .cb-app .cb-day-appt-time[aria-pressed="true"]{background:#18181b;border-color:#18181b;color:#fafafa;}
   .cb-app .cb-detail-head{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#18181b;margin:0 0 8px;}
   .cb-app .cb-detail-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;}
   .cb-app .cb-detail-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;}
@@ -128,9 +140,53 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-st{display:inline-flex;align-items:center;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;padding:3px 10px;line-height:1.4;white-space:nowrap;border:1px solid;}
   .cb-app .cb-empty-state{display:flex;align-items:center;justify-content:center;padding:80px 30px;text-align:center;}
   .cb-app .cb-empty-state p{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;}
+  .cb-app .cb-event-backdrop{display:none;}
+  .cb-app .cb-panel-close{display:none;}
+  .cb-app .cb-mobile-more{display:none;}
   @media (max-width:1020px){
     .cb-app{flex-direction:column}
     .cb-app .cb-event-pane{width:100%;border-top:1px solid var(--cb-line)}
+  }
+  @media (max-width:768px){
+    .cb-app{display:block;width:100%;min-height:0;overflow:visible}
+    .cb-app .cb-calendar-pane{width:100%;padding-bottom:20px;border-right:0}
+    .cb-app .cb-topbar{display:none}
+    .cb-app .cb-cal-header{align-items:stretch;flex-direction:column;padding:12px 8px;gap:10px}
+    .cb-app .cb-month-nav{justify-content:center;gap:8px}
+    .cb-app .cb-month-nav h1{width:auto;min-width:0;flex:1;text-align:center;font-size:16px}
+    .cb-app .cb-nav-arrow{width:32px;height:32px;flex:none}
+    .cb-app .cb-cal-actions{justify-content:center;gap:8px}
+    .cb-app .cb-btn-primary{height:34px;padding:0 10px;font-size:12px;gap:5px}
+    .cb-app .cb-icon-btn{width:34px;height:34px;flex:none}
+    .cb-app .cb-filter-dropdown{width:min(360px,calc(100vw - 24px));padding:12px}
+    .cb-app .cb-filter-cols{gap:12px}
+    .cb-app .cb-filter-opt{font-size:12px}
+    .cb-app .cb-grid-wrap{padding:0 8px;overflow:visible}
+    .cb-app .cb-cal-grid{width:100%;min-width:0;grid-template-columns:repeat(7,minmax(0,1fr))}
+    .cb-app .cb-dow{padding:7px 1px;text-align:center;font-size:10px}
+    .cb-app .cb-day{min-width:0;min-height:68px;height:68px;padding:4px 2px;overflow:hidden}
+    .cb-app .cb-day-num{margin-bottom:4px;text-align:center;font-size:12px}
+    .cb-app .cb-chip{height:4px;min-height:0;padding:0;margin:0 0 3px;justify-content:center;border-radius:3px}
+    .cb-app .cb-chip > span:last-child{display:none}
+    .cb-app .cb-chip .cb-dot{width:100%;min-height:4px}
+    .cb-app .cb-mobile-hidden{display:none}
+    .cb-app .cb-mobile-more{display:block;text-align:center;color:#52525b;font-size:9px;font-weight:600;line-height:1.2}
+    .cb-app .cb-event-backdrop{position:fixed;inset:0;z-index:1098;background:rgba(15,23,32,.5)}
+    .cb-app.cb-dialog-open .cb-event-backdrop{display:block}
+    .cb-app .cb-event-pane{position:fixed;top:50%;left:50%;z-index:1099;width:calc(100vw - 32px);max-width:480px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 16px 48px rgba(15,23,32,.24);transform:translate(-50%,-48%) scale(.98);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,transform .18s ease,visibility .18s ease}
+    .cb-app .cb-event-pane.open{transform:translate(-50%,-50%) scale(1);opacity:1;visibility:visible;pointer-events:auto}
+    .cb-app .cb-panel-body{min-height:0;padding:20px;overflow-y:auto}
+    .cb-app .cb-panel-close{width:28px;height:28px;margin:0 0 12px auto;border:0;border-radius:6px;background:#f4f4f5;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;cursor:pointer}
+    .cb-app .cb-panel-close:hover{background:#e4e4e7;color:#18181b}
+    .cb-app .cb-empty-state{padding:24px 12px}
+    .cb-app .cb-time-block .cb-t{font-size:26px}
+    body.cb-booking-dialog-open{overflow:hidden}
+  }
+  @media (max-width:380px){
+    .cb-app .cb-cal-header{padding-right:6px;padding-left:6px}
+    .cb-app .cb-grid-wrap{padding-right:6px;padding-left:6px}
+    .cb-app .cb-day{min-height:62px;height:62px;padding:3px 1px}
+    .cb-app .cb-dow{font-size:9px}
   }
 </style>
 
@@ -139,22 +195,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   <!-- ================= CALENDAR ================= -->
   <section class="cb-calendar-pane">
     <div class="cb-topbar">
-      <div class="cb-search-wrap">
-        <svg class="cb-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="cb-search" placeholder="Search by ID, service, or pet" />
-      </div>
-      <div class="cb-topbar-right">
-        <button class="cb-icon-btn" type="button" title="Help">?</button>
-        <button class="cb-icon-btn" type="button" title="Notifications">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
-        </button>
-        <div class="cb-user-chip">
-          <img class="cb-avatar" src="https://i.pravatar.cc/68?img=12" alt="User" />
-          <div>
-            <div class="cb-name"><?php echo htmlspecialchars(($fullName ?? $_SESSION['full_name'] ?? 'Resident')); ?></div>
-            <div class="cb-mail">Resident &#183; Dasmari&#241;as City</div>
-          </div>
-        </div>
+      <div class="cb-topbar-right" style="margin-left:auto;">
       </div>
     </div>
 
@@ -216,12 +257,28 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   </section>
 
   <!-- ================= BOOK APPOINTMENT ================= -->
-  <aside class="cb-event-pane">
+  <div class="cb-event-backdrop" id="cbEventBackdrop"></div>
+  <aside class="cb-event-pane" id="cbEventPane" role="dialog" aria-label="Appointment details" aria-modal="false">
     <div class="cb-panel-body" id="cbPanelBody">
+      <button class="cb-panel-close" id="cbPanelClose" type="button" aria-label="Close appointment details">&times;</button>
       <div class="cb-empty-state" id="cbEmptyState">
         <p>No appointment schedule in this date.</p>
       </div>
       <div id="cbApptDetails" style="display:none;">
+        <div class="cb-day-appt-picker" id="cbDayApptPicker" aria-label="Appointments on selected date">
+          <div class="cb-day-appt-picker-head">
+            <span class="cb-day-appt-count" id="cbDayApptCount"></span>
+            <div class="cb-day-appt-nav">
+              <button type="button" id="cbDayApptPrev" aria-label="Previous appointment" title="Previous appointment">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <button type="button" id="cbDayApptNext" aria-label="Next appointment" title="Next appointment">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="cb-day-appt-times" id="cbDayApptTimes"></div>
+        </div>
         <div class="cb-section">
           <div class="cb-title-row">
             <input class="cb-title-input" id="cbTitleInput" type="text" value="" placeholder="Add appointment title" readonly />
@@ -305,15 +362,53 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
 (function(){
   var grid = document.getElementById('cbCalGrid');
   var monthLabel = document.getElementById('cbMonthLabel');
+  var app = document.querySelector('.cb-app');
+  var eventPane = document.getElementById('cbEventPane');
+  var eventBackdrop = document.getElementById('cbEventBackdrop');
+  var panelClose = document.getElementById('cbPanelClose');
+  var mobileDialogQuery = window.matchMedia('(max-width: 768px)');
   var current = new Date(); current.setDate(1);
   var selectedKey = '';
+  var selectedApptIndex = 0;
+  var bodyOverflowBeforeDialog = '';
+
+  function isMobileDialog(){
+    return mobileDialogQuery.matches;
+  }
+
+  function openApptDialog(){
+    if (!isMobileDialog()) return;
+    bodyOverflowBeforeDialog = document.body.style.overflow;
+    app.classList.add('cb-dialog-open');
+    eventPane.classList.add('open');
+    eventPane.setAttribute('aria-modal', 'true');
+    document.body.classList.add('cb-booking-dialog-open');
+    panelClose.focus();
+  }
+
+  function closeApptDialog(){
+    app.classList.remove('cb-dialog-open');
+    eventPane.classList.remove('open');
+    eventPane.setAttribute('aria-modal', 'false');
+    document.body.classList.remove('cb-booking-dialog-open');
+    document.body.style.overflow = bodyOverflowBeforeDialog;
+  }
+
+  panelClose.addEventListener('click', closeApptDialog);
+  eventBackdrop.addEventListener('click', closeApptDialog);
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && eventPane.classList.contains('open')) closeApptDialog();
+  });
+  mobileDialogQuery.addEventListener('change', function(e){
+    if (!e.matches) closeApptDialog();
+  });
 
   /* ---- Real appointment data from PHP ---- */
   var rawAppts = <?php echo json_encode($cbAppointments, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
   var statusColor = {
     pending:'cb-orange', scheduled:'cb-green', approved:'cb-blue',
-    rescheduled:'cb-purple', in_progress:'cb-blue', completed:'cb-purple',
+    rescheduled:'cb-purple', in_progress:'cb-blue', completed:'cb-blue',
     cancelled:'cb-pink', rejected:'cb-pink', no_show:'cb-orange'
   };
 
@@ -334,6 +429,12 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       photoUrl: a.photo_url || ''
     });
   });
+
+  function getVisibleAppts(key){
+    return (apptEvents[key] || []).filter(function(ev){
+      return matchStatus(ev.status) && matchService(ev.type) && matchDate(ev.date);
+    });
+  }
 
   function fmtTime24(t){
     if (!t) return '';
@@ -373,29 +474,28 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       num.className = 'cb-day-num'; num.textContent = day.getDate();
       cell.appendChild(num);
 
-      (apptEvents[key] || []).forEach(function(ev){
-        if (!matchStatus(ev.status)) return;
-        if (!matchService(ev.type)) return;
-        if (!matchDate(ev.date)) return;
+      var visibleAppts = getVisibleAppts(key);
+      visibleAppts.forEach(function(ev, apptIndex){
         var chip = document.createElement('div');
-        chip.className = 'cb-chip ' + ev.chipClass;
+        chip.className = 'cb-chip ' + ev.chipClass + (apptIndex >= 2 ? ' cb-mobile-hidden' : '');
         chip.innerHTML = '<span class="cb-dot"></span><span><b>' + ev.time + '</b> &#183; ' + ev.label + '</span>';
         cell.appendChild(chip);
       });
+      if (visibleAppts.length > 2) {
+        var more = document.createElement('div');
+        more.className = 'cb-mobile-more';
+        more.textContent = '+' + (visibleAppts.length - 2);
+        cell.appendChild(more);
+      }
 
-      var hasAppts = false;
-      (apptEvents[key] || []).forEach(function(ev){
-        if (!matchStatus(ev.status)) return;
-        if (!matchService(ev.type)) return;
-        if (!matchDate(ev.date)) return;
-        hasAppts = true;
-      });
+      var hasAppts = visibleAppts.length > 0;
       if (!hasAppts) cell.style.cursor = 'default';
 
       cell.addEventListener('click', function(k, dt, has){
         return function(){
           if (!has) return;
           selectedKey = k;
+          selectedApptIndex = 0;
           var prev = grid.querySelector('.cb-day.cb-selected');
           if (prev) prev.classList.remove('cb-selected');
           this.classList.add('cb-selected');
@@ -405,6 +505,12 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
 
       grid.appendChild(cell);
     }
+    if (selectedKey) showDayAppt(selectedKey, parseCalendarKey(selectedKey), selectedApptIndex);
+  }
+
+  function parseCalendarKey(key){
+    var p = key.split('-');
+    return new Date(Number(p[0]), Number(p[1]), Number(p[2]));
   }
 
   document.getElementById('cbPrevMonth').addEventListener('click', function(){
@@ -525,14 +631,19 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   var emptyState   = document.getElementById('cbEmptyState');
   var apptDetails  = document.getElementById('cbApptDetails');
   var petAvatar    = document.getElementById('cbPetAvatar');
+  var dayApptPicker = document.getElementById('cbDayApptPicker');
+  var dayApptCount = document.getElementById('cbDayApptCount');
+  var dayApptTimes = document.getElementById('cbDayApptTimes');
+  var dayApptPrev = document.getElementById('cbDayApptPrev');
+  var dayApptNext = document.getElementById('cbDayApptNext');
 
   var pillColors = {
     pending:     { bg:'#fef3c7', color:'#92400e', border:'#fde68a' },
-    scheduled:   { bg:'#dcebe0', color:'#045e1f', border:'#bbf7d0' },
+    scheduled:   { bg:'#0E8131', color:'#ffffff', border:'#0E8131' },
     approved:    { bg:'#dcebe0', color:'#045e1f', border:'#bbf7d0' },
     rescheduled: { bg:'#ede9fe', color:'#6d28d9', border:'#ddd6fe' },
     in_progress: { bg:'#dcebe0', color:'#045e1f', border:'#bbf7d0' },
-    completed:   { bg:'#e2e8f0', color:'#475569', border:'#cbd5e1' },
+    completed:   { bg:'#dbeafe', color:'#1e40af', border:'#bfdbfe' },
     cancelled:   { bg:'#fee2e2', color:'#991b1b', border:'#fecaca' },
     rejected:    { bg:'#fee2e2', color:'#991b1b', border:'#fecaca' },
     no_show:     { bg:'#fef3c7', color:'#92400e', border:'#fde68a' }
@@ -550,18 +661,40 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
     no_show:    'You did not attend this appointment.'
   };
 
-  function showDayAppt(key, dt){
-    var appts = apptEvents[key];
+  function showDayAppt(key, dt, index){
+    var appts = getVisibleAppts(key);
     if (!appts || appts.length === 0){
       emptyState.style.display = '';
       apptDetails.style.display = 'none';
+      dayApptPicker.style.display = 'none';
       statusPill.className = 'cb-st';
       statusPill.textContent = '';
       petAvatar.style.display = 'none';
       petAvatar.src = '';
+      closeApptDialog();
       return;
     }
-    var appt = appts[0];
+    selectedKey = key;
+    selectedApptIndex = Math.max(0, Math.min(Number(index) || 0, appts.length - 1));
+    var appt = appts[selectedApptIndex];
+    if (appts.length > 1) {
+      dayApptPicker.style.display = 'block';
+      dayApptCount.textContent = (selectedApptIndex + 1) + ' of ' + appts.length + ' appointments';
+      dayApptPrev.disabled = selectedApptIndex === 0;
+      dayApptNext.disabled = selectedApptIndex === appts.length - 1;
+      dayApptTimes.innerHTML = '';
+      appts.forEach(function(dayAppt, apptIndex) {
+        var timeButton = document.createElement('button');
+        timeButton.type = 'button';
+        timeButton.className = 'cb-day-appt-time';
+        timeButton.textContent = dayAppt.time || 'Time not set';
+        timeButton.setAttribute('aria-pressed', apptIndex === selectedApptIndex ? 'true' : 'false');
+        timeButton.addEventListener('click', function() { showDayAppt(key, dt, apptIndex); });
+        dayApptTimes.appendChild(timeButton);
+      });
+    } else {
+      dayApptPicker.style.display = 'none';
+    }
     var isPending = appt.status === 'pending';
     titleInput.value = appt.type.charAt(0).toUpperCase() + appt.type.slice(1) + ' service for ' + appt.pet;
     startTime.textContent = appt.time || '12:00 AM';
@@ -605,7 +738,16 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
     reminders.style.display = (appt.status === 'pending' || appt.status === 'scheduled') ? '' : 'none';
     emptyState.style.display = 'none';
     apptDetails.style.display = '';
+    openApptDialog();
   }
+
+  dayApptPrev.addEventListener('click', function(){
+    if (selectedApptIndex > 0) showDayAppt(selectedKey, parseCalendarKey(selectedKey), selectedApptIndex - 1);
+  });
+  dayApptNext.addEventListener('click', function(){
+    var appts = getVisibleAppts(selectedKey);
+    if (selectedApptIndex < appts.length - 1) showDayAppt(selectedKey, parseCalendarKey(selectedKey), selectedApptIndex + 1);
+  });
 
   render();
 })();

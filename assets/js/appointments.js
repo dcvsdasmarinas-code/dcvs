@@ -12,9 +12,9 @@
 
     var STATUS = {
         pending:     { bg: '#fef3c7', fg: '#92400e' },
-        scheduled:   { bg: '#f0fdf4', fg: '#045e1f' },
+        scheduled:   { bg: '#0E8131', fg: '#ffffff' },
         rescheduled: { bg: '#ede9fe', fg: '#7c3aed' },
-        completed:   { bg: '#f1f5f9', fg: '#475569' },
+        completed:   { bg: '#dbeafe', fg: '#1e40af' },
         cancelled:   { bg: '#fee2e2', fg: '#dc2626' },
         no_show:     { bg: '#fef3c7', fg: '#92400e' },
         rejected:    { bg: '#fee2e2', fg: '#dc2626' },
@@ -285,25 +285,62 @@
         if (!a) return;
         drawerId = id;
         var st = STATUS[a.status] || { bg: '#f1f5f9', fg: '#64748b' };
+        var stColor = st.fg;
+        var stBg = st.bg;
+        var stBorder = st.fg === '#92400e' ? '#fde68a' : st.fg === '#045e1f' ? '#D1FADF' : st.fg === '#dc2626' ? '#FECACA' : '#E2E8F0';
 
-        function f(label, value) {
-            return '<div class="sd-field"><span class="sd-label">' + label + '</span><span class="sd-value">' + value + '</span></div>';
+        var body = '';
+
+        body += '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">';
+        body += '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (a.full_name ? esc(a.full_name.split(' ').map(function(w){return w.charAt(0)}).join('').substring(0,2)) : '?') + '</div>';
+        body += '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">';
+        body += '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Requested by</span>';
+        body += '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(a.full_name || '—') + '</span>';
+        body += '</div>';
+        body += '<span style="margin-left:auto;font-size:13px;font-weight:500;color:' + stColor + ';background:' + stBg + ';border:1px solid ' + stBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + esc(label(a.status)) + '</span>';
+        body += '</div>';
+
+        body += '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;">';
+        body += '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:500;color:#64748b;">Service</span>';
+        body += '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:500;color:#18181b;">' + esc(label(a.appointment_type)) + '</span>';
+        body += '</div>';
+
+        body += '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">';
+
+        body += '<div class="rpt-col">';
+        body += '<div class="rpt-section-title" style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#71717a;margin:18px 0 10px;">General Information</div>';
+        body += '<div class="info-rows">';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Resident ID</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(resRef(a)) + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Mobile Number</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(a.phone || '-') + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Email</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(a.email || '-') + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Barangay</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(a.barangay_name || '-') + '</p></div></div>';
+        body += '</div></div>';
+
+        body += '<div class="rpt-col">';
+        body += '<div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:transparent;margin:18px 0 10px;">General Information</div>';
+        body += '<div class="info-rows">';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Pet</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(a.pet_name || 'N/A') + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Date</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + fmtDateLong(a.preferred_date) + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Time</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + fmtTime(a.preferred_time) + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Requested</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + fmtDate(a.created_at) + '</p></div></div>';
+        body += '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">Address</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(a.address || '-') + '</p></div></div>';
+        body += '</div></div>';
+
+        body += '</div>';
+
+        if (a.notes) {
+            body += '<div style="margin-top:8px;">';
+            body += '<div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#71717a;margin:18px 0 10px;">Notes</div>';
+            body += '<div style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">' + esc(a.notes) + '</div>';
+            body += '</div>';
+        }
+        if (a.staff_message) {
+            body += '<div style="margin-top:8px;">';
+            body += '<div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#71717a;margin:18px 0 10px;">DCVS Message</div>';
+            body += '<div style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">' + esc(a.staff_message) + '</div>';
+            body += '</div>';
         }
 
-        var body = '<div class="sd-field-group">';
-        body += f('Resident', esc(a.full_name || '—'));
-        body += f('Status', '<span class="appt-status" style="background:' + st.bg + ';color:' + st.fg + '">' + esc(label(a.status)) + '</span>');
-        body += f('Date', fmtDateLong(a.preferred_date));
-        body += f('Time', fmtTime(a.preferred_time));
-        body += f('Service', esc(label(a.appointment_type)));
-        body += f('Pet', esc(a.pet_name || 'N/A'));
-        body += f('Email', esc(a.email || '—'));
-        body += f('Phone', esc(a.phone || '—'));
-        body += f('Address', esc(a.address || a.barangay_name || '—'));
-        body += f('Requested', fmtDate(a.created_at));
-        if (a.notes) body += f('Notes', esc(a.notes));
-        if (a.staff_message) body += f('DCVS Message', esc(a.staff_message));
-        body += '</div>';
         document.getElementById('apptViewBody').innerHTML = body;
         document.getElementById('apptViewRef').textContent = ref(a);
         var hint = document.getElementById('apptViewHint');
@@ -375,14 +412,19 @@
         var menu = document.createElement('div');
         menu.className = 'appt-more-menu';
         var items = [];
-        if (a.status === 'pending') items.push(['Review', "APP.review(" + id + ")"]);
-        if (a.status === 'pending' || a.status === 'scheduled' || a.status === 'rescheduled') items.push(['Reschedule', "APP.reschedSingle(" + id + ")"]);
-        if (a.status !== 'completed' && a.status !== 'cancelled' && a.status !== 'rejected') items.push(['Mark as Completed', "APP.statusChange(" + id + ",'completed')"]);
+        var eyeIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+        var calendarIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
+        var checkIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        var archiveIcon = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+        if (a.status === 'pending') items.push(['Review', "APP.review(" + id + ")", eyeIcon]);
+        if (a.status === 'pending' || a.status === 'scheduled' || a.status === 'rescheduled') items.push(['Reschedule', "APP.reschedSingle(" + id + ")", calendarIcon]);
+        if (a.status !== 'pending' && a.status !== 'completed' && a.status !== 'cancelled' && a.status !== 'rejected') items.push(['Mark as Completed', "APP.statusChange(" + id + ",'completed')", checkIcon]);
+        if (a.status === 'scheduled' || a.status === 'rescheduled') items.push(['Archive', "APP.archive(" + id + ")", archiveIcon]);
         if (!items.length) { toast('No actions available for this appointment.', true); return; }
         items.forEach(function (it) {
             var b = document.createElement('button');
             b.type = 'button';
-            b.textContent = it[0];
+            b.innerHTML = it[2] + it[0];
             b.onclick = function () { closeMore(); eval(it[1]); };
             menu.appendChild(b);
         });
@@ -405,9 +447,16 @@
         var a = find(id);
         if (!a) return;
         closeDrawer();
+        if (window.APP && typeof window.APP.reviewIds === 'function') {
+            window.APP.reviewIds([String(id)], 0);
+            return;
+        }
         openAddAppointmentModal();
         var li = document.getElementById('lookupRequestId');
-        if (li && typeof lookupAppointmentRequest === 'function') {
+        if (li && window.APP && typeof window.APP.reviewLookup === 'function') {
+            li.value = ref(a);
+            window.APP.reviewLookup();
+        } else if (li && typeof lookupAppointmentRequest === 'function') {
             li.value = ref(a);
             lookupAppointmentRequest();
         }
@@ -439,7 +488,8 @@
         openModal('apptConfirmModal');
     }
     function applyStatus(ids, status) {
-        api(ids, status, null).then(function (res) {
+        var action = status === 'completed' ? 'complete' : status;
+        api(ids, action, null).then(function (res) {
             if (res && res.success) {
                 ids.forEach(function (id) {
                     var a = find(id);
@@ -449,6 +499,9 @@
                 closeDrawer();
                 render();
                 toast(res.message || ids.length + ' appointment(s) updated.');
+                window.dispatchEvent(new CustomEvent('dcvs:calendar-appointments-updated', {
+                    detail: { ids: ids.map(String), status: status }
+                }));
                 if (typeof window.onApptStatusChanged === 'function') window.onApptStatusChanged();
             } else {
                 toast((res && res.message) || 'Update failed.', true);
@@ -499,6 +552,13 @@
                 closeDrawer();
                 render();
                 toast(res.message || 'Appointment rescheduled.');
+                window.dispatchEvent(new CustomEvent('dcvs:calendar-appointments-rescheduled', {
+                    detail: {
+                        changes: reschedIds.map(function (id) {
+                            return { id: String(id), date: date, time: String(time).slice(0, 5) };
+                        })
+                    }
+                }));
                 if (typeof window.onApptStatusChanged === 'function') window.onApptStatusChanged();
             } else {
                 toast((res && res.message) || 'Reschedule failed.', true);
@@ -639,6 +699,19 @@
             });
         });
     }
+    function archive(id) {
+        var a = find(id);
+        if (typeof window.archiveAppt === 'function') {
+            window.archiveAppt(id, a && a.pet_name, a && a.full_name);
+            return;
+        }
+        confirmDialog('Archive Appointment', 'Are you sure you want to archive this appointment?', function () {
+            api([id], 'archive', null).then(function (res) {
+                if (res && res.success) { items = items.filter(function (item) { return String(item.appointment_id) !== String(id); }); render(); toast(res.message || 'Appointment archived.'); }
+                else toast((res && res.message) || 'Archive failed.', true);
+            });
+        });
+    }
 
     /* ── Init ── */
     window.APP = {
@@ -671,6 +744,7 @@
         toggleSelect: toggleSelect,
         bulkStatusChange: bulkStatusChange,
         bulkDelete: bulkDelete
+        ,archive: archive
     };
 
     document.addEventListener('DOMContentLoaded', function () {

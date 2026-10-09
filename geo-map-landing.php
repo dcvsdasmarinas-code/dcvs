@@ -1,12 +1,6 @@
 <?php
 require_once 'db.php';
 
-$advisories = [];
-$aq = $conn->query("SELECT * FROM announcements WHERE category = 'advisory' AND status = 'published' AND is_active = 1 ORDER BY created_at DESC LIMIT 3");
-if ($aq) {
-    while ($row = $aq->fetch_assoc()) $advisories[] = $row;
-}
-
 $barangaySummary = [];
 $bsq = $conn->query("SELECT b.barangay_name,
     COUNT(DISTINCT CASE WHEN cc.status = 'active'  THEN cc.case_id END) AS confirmed,
@@ -58,7 +52,7 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
       color: var(--ink);
       background: #ffffff;
       min-height: 100vh;
@@ -319,6 +313,55 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       .gm-stat-card .num { font-size: 1.15rem; }
       .gm-stat-card .label { font-size: 0.68rem; }
     }
+
+    /* Inter font (shadcn dialog style) */
+    body {
+      font-family: 'Inter', sans-serif !important;
+    }
+
+    .gm-hero h2,
+    .gm-hero p,
+    .gm-stat-card .num,
+    .gm-stat-card .label,
+    .gm-table-wrapper,
+    .gm-table,
+    .gm-table th,
+    .gm-table td,
+    .gm-sidebar h3,
+    .gm-sidebar p,
+    .gm-sidebar li,
+    .gm-advisory-card,
+    .gm-advisory-card h4,
+    .gm-advisory-card p,
+    .gm-search-box,
+    .gm-legend-label,
+    .gm-table-search {
+      font-family: 'Inter', sans-serif !important;
+    }
+
+    .gm-hero h2 {
+      letter-spacing: -0.025em !important;
+      font-weight: 700 !important;
+    }
+
+    .gm-hero p {
+      letter-spacing: -0.01em !important;
+    }
+
+    .gm-stat-card .num {
+      letter-spacing: -0.02em !important;
+      font-weight: 700 !important;
+    }
+
+    .gm-sidebar h3 {
+      letter-spacing: -0.02em !important;
+      font-weight: 700 !important;
+    }
+
+    .gm-advisory-card h4 {
+      letter-spacing: -0.015em !important;
+      font-weight: 600 !important;
+    }
   </style>
   <link rel="stylesheet" href="assets/css/responsive.css" />
 </head>
@@ -326,7 +369,7 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
 
 <header class="site-header">
   <nav class="navbar">
-    <img src="uploads/site/logo.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;">
+    <img src="uploads/site/DCVS LOGO.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;">
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -348,13 +391,6 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
         </div>
       </li>
       <li><a href="adoption.php">Adoption</a></li>
-      <li class="nav-item">
-        <a href="javascript:void(0)" class="dropdown-toggle">Insights <span class="arrow">▾</span></a>
-        <div class="dropdown-menu">
-          <a href="Knowledge-Hub.php">Knowledge Hub</a>
-          <a href="Philippine-Initiatives.php">Philippine Initiatives</a>
-        </div>
-      </li>
     </ul>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
@@ -393,33 +429,8 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}' style="width:100%;height:520px;position:relative;">
         <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
       </div>
-      <div class="geo-info-panel" id="geoInfoPanel">
-        <div class="geo-panel-header">
-          <h3><span id="geoPanelName">Barangay</span></h3>
-          <button class="geo-panel-close" onclick="MapCN.barangayOverlay.closePanel()">&times;</button>
-        </div>
-        <div class="geo-panel-body">
-          <div style="margin-bottom:1rem;">
-            <span class="geo-panel-risk-badge" id="geoPanelRisk" style="background:#dcfce7;color:#166534;">Low</span>
-          </div>
-          <div class="geo-panel-stat">
-            <span class="geo-panel-stat-label">Confirmed Cases</span>
-            <span class="geo-panel-stat-value" id="geoPanelConfirmed">0</span>
-          </div>
-          <div class="geo-panel-stat">
-            <span class="geo-panel-stat-label">Pending Reports</span>
-            <span class="geo-panel-stat-value" id="geoPanelPending">0</span>
-          </div>
-          <div class="geo-panel-stat">
-            <span class="geo-panel-stat-label">Resolved Cases</span>
-            <span class="geo-panel-stat-value" id="geoPanelResolved">0</span>
-          </div>
-          <div class="geo-panel-stat">
-            <span class="geo-panel-stat-label">Last Updated</span>
-            <span class="geo-panel-stat-value" id="geoPanelUpdated">--</span>
-          </div>
-        </div>
-      </div>
+      <!-- Hidden panel kept for mapcn bundle compatibility -->
+      <div class="geo-info-panel" id="geoInfoPanel" style="display:none;"></div>
       <div class="gm-legend">
         <span style="font-weight:700;color:#0f172a;">Risk Level:</span>
         <div class="gm-legend-item"><span class="gm-legend-swatch" style="background:#22c55e;"></span> 0 cases</div>
@@ -441,26 +452,10 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
           <li><strong>Yellow</strong> — 1 to 5 confirmed cases (low)</li>
           <li><strong>Orange</strong> — 6 to 15 confirmed cases (moderate)</li>
           <li><strong>Red</strong> — 16 or more confirmed cases (high)</li>
-          <li>Click any barangay on the map to view detailed statistics</li>
+          <li>Barangay names are displayed on the map</li>
           <li>Use the search box to locate a specific barangay</li>
           <li>Data refreshes automatically every 30 seconds</li>
         </ul>
-      </div>
-      <div class="gm-info-card">
-        <h3>Latest Advisories</h3>
-        <?php if (count($advisories) > 0): ?>
-          <?php foreach ($advisories as $adv): ?>
-          <div class="advisory-mini">
-            <h4><?php echo htmlspecialchars($adv['title']); ?></h4>
-            <p><?php echo htmlspecialchars($adv['content']); ?></p>
-            <?php if (!empty($adv['link_url'])): ?>
-            <a href="<?php echo htmlspecialchars($adv['link_url']); ?>">Read more →</a>
-            <?php endif; ?>
-          </div>
-          <?php endforeach; ?>
-        <?php else: ?>
-        <p>No recent advisories. Check back later for updates on animal welfare initiatives and programs.</p>
-        <?php endif; ?>
       </div>
     </div>
 
@@ -655,6 +650,47 @@ handleScrollState();
 
   renderTable();
 })();
+
+// ── Barangay Labels (same as dashboard-staff-geo) ──
+document.addEventListener('DOMContentLoaded', function() {
+  var mapEl = document.getElementById('geoMap');
+  if (!mapEl) return;
+  function addGeoLabels(map) {
+    if (!map || !map.getSource('barangays')) return false;
+    try {
+      if (map.getLayer('barangay-label')) {
+        map.setLayoutProperty('barangay-label', 'visibility', 'none');
+      }
+      if (!map.getLayer('geo-brgy-label')) {
+        map.addLayer({
+          id: 'geo-brgy-label', type: 'symbol', source: 'barangays',
+          layout: {
+            'text-field': ['get', 'name'],
+            'text-size': 11, 'text-anchor': 'center', 'text-allow-overlap': false
+          },
+          paint: { 'text-color': '#1e293b', 'text-halo-color': '#ffffff', 'text-halo-width': 2 }
+        });
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+  function tryStyle(map) {
+    if (addGeoLabels(map)) {
+      map.on('sourcedata', function() { addGeoLabels(map); });
+      map.on('styledata', function() { addGeoLabels(map); });
+      return true;
+    }
+    return false;
+  }
+  var tries = 0;
+  var iv = setInterval(function() {
+    if (tryStyle(window.MapCN && window.MapCN.map) || tries++ > 100) clearInterval(iv);
+  }, 200);
+  mapEl.addEventListener('mapcn:load', function(e) {
+    var map = e.detail && e.detail.map;
+    if (map && tryStyle(map)) clearInterval(iv);
+  });
+});
 </script>
 </body>
 </html>

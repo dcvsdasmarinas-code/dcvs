@@ -27,12 +27,20 @@ if (!isset($barangayName)) {
 }
 if (!isset($activePage)) $activePage = '';
 if (!isset($pageTitle)) $pageTitle = 'Resident Portal';
+$notifRootPath = realpath(__DIR__ . DIRECTORY_SEPARATOR . '..');
+$notifDocumentRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
+$notifAppBaseUrl = '';
+if ($notifRootPath !== false && $notifDocumentRoot !== false
+    && strncasecmp($notifRootPath, $notifDocumentRoot, strlen($notifDocumentRoot)) === 0) {
+    $notifAppBaseUrl = '/' . trim(str_replace(DIRECTORY_SEPARATOR, '/', substr($notifRootPath, strlen($notifDocumentRoot))), '/');
+}
 
 // Fetch staff_message notifications for this resident (for bell icon)
 $staffMessages = [];
+$archivedStaffMessages = [];
 $unreadMsgCount = 0;
 if (isset($_SESSION['user_id'])) {
-    $nq = $conn->prepare("SELECT * FROM notifications WHERE user_id = ? AND type = 'staff_message' ORDER BY created_at DESC LIMIT 20");
+    $nq = $conn->prepare("SELECT * FROM notifications WHERE user_id = ? AND type = 'staff_message' AND archived_at IS NULL ORDER BY created_at DESC LIMIT 30");
     if ($nq) {
         $nq->bind_param("i", $_SESSION['user_id']);
         $nq->execute();
@@ -40,6 +48,15 @@ if (isset($_SESSION['user_id'])) {
         while ($row = $nr->fetch_assoc()) $staffMessages[] = $row;
         $nq->close();
     }
+    $archivedQuery = $conn->prepare("SELECT * FROM notifications WHERE user_id = ? AND type = 'staff_message' AND archived_at IS NOT NULL ORDER BY archived_at DESC LIMIT 30");
+    if ($archivedQuery) {
+        $archivedQuery->bind_param("i", $_SESSION['user_id']);
+        $archivedQuery->execute();
+        $archivedResult = $archivedQuery->get_result();
+        while ($row = $archivedResult->fetch_assoc()) $archivedStaffMessages[] = $row;
+        $archivedQuery->close();
+    }
+    $staffMessages = array_merge($staffMessages, $archivedStaffMessages);
     // Enrich each notification with message_type label
     $typeLabels = ['general'=>'General','report'=>'Report','appointment'=>'Appointment','adoption'=>'Adoption','followup'=>'Follow-up','other'=>'Other'];
     foreach ($staffMessages as &$n) {
@@ -69,7 +86,7 @@ if (isset($_SESSION['user_id'])) {
         }
     }
     // Count only unread staff_message notifications (what this dropdown shows)
-    $ucStmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'staff_message' AND is_read = 0");
+    $ucStmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'staff_message' AND is_read = 0 AND archived_at IS NULL");
     if ($ucStmt) {
         $ucStmt->bind_param("i", $_SESSION['user_id']);
         $ucStmt->execute();
@@ -114,28 +131,31 @@ $sbModules = [
                 'title' => 'Pets', 'icon' => 'fa-paw',
                 'items' => [
                     sbItem('Pet List', 'fa-list', ['section' => 'my-pets', 'href' => 'dashboard-resident.php#my-pets', 'initialActive' => $activePage === 'my-pets']),
+                    sbItem('Adoption Listings', 'fa-paw', ['section' => 'adoption', 'href' => 'dashboard-resident.php#adoption', 'initialActive' => $activePage === 'adoption']),
+                ],
+            ],
+            [
+                'title' => 'Reports', 'icon' => 'fa-file-medical-alt',
+                'items' => [
                     sbItem('Reports', 'fa-file-medical-alt', ['section' => 'my-reports', 'href' => 'dashboard-resident.php#my-reports', 'initialActive' => $activePage === 'my-reports']),
+                    sbItem('Submit Report', 'fa-file-medical-alt', ['section' => 'submit-report', 'href' => 'submit-report-page.php', 'initialActive' => $activePage === 'submit-report']),
                 ],
             ],
             [
                 'title' => 'Appointments', 'icon' => 'fa-calendar-alt',
                 'items' => [
                     sbItem('Appointments', 'fa-calendar-alt', ['section' => 'appointments', 'href' => 'dashboard-resident.php#appointments', 'initialActive' => $activePage === 'appointments']),
-                    sbItem('Schedule Appointment', 'fa-calendar-plus', ['section' => 'book-appt', 'href' => 'dashboard-resident.php#book-appt', 'initialActive' => $activePage === 'book-appt', 'conditional' => 'book-appt']),                    sbItem('Calendar Booking', 'fa-calendar-check', ['section' => 'calendar-booking', 'href' => 'dashboard-resident.php#calendar-booking', 'initialActive' => $activePage === 'calendar-booking']),
-                ],
-            ],
-            [
-                'title' => 'Adoption Listings', 'icon' => 'fa-paw',
-                'items' => [
-                    sbItem('Adoption Listings', 'fa-paw', ['section' => 'adoption', 'href' => 'dashboard-resident.php#adoption', 'initialActive' => $activePage === 'adoption']),
+                    sbItem('My Waitlist', 'fa-list-alt', ['section' => 'my-waitlist', 'href' => 'dashboard-resident.php#my-waitlist', 'initialActive' => $activePage === 'my-waitlist']),
+                    sbItem('Schedule Appointment', 'fa-calendar-plus', ['section' => 'book-appt', 'href' => 'dashboard-resident.php#book-appt', 'initialActive' => $activePage === 'book-appt']),
+                    sbItem('Calendar Booking', 'fa-calendar-check', ['section' => 'calendar-booking', 'href' => 'dashboard-resident.php#calendar-booking', 'initialActive' => $activePage === 'calendar-booking']),
                 ],
             ],
             [
                 'title' => 'Archive', 'icon' => 'fa-archive',
                 'items' => [
-                    sbItem('Archived Pets', 'fa-dog', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'pet', 'initialActive' => $activePage === 'archive']),
-                    sbItem('Archived Reports', 'fa-file-medical-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'report']),
-                    sbItem('Archived Appointments', 'fa-calendar-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'appointment']),
+                    sbItem('Pets', 'fa-dog', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'pet', 'initialActive' => $activePage === 'archive']),
+                    sbItem('Reports', 'fa-file-medical-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'report']),
+                    sbItem('Appointments', 'fa-calendar-alt', ['section' => 'archive', 'href' => 'dashboard-resident.php#archive', 'fn' => 'setArchiveType', 'arg' => 'appointment']),
                 ],
             ],
         ],
@@ -163,13 +183,24 @@ $sbModules = [
 <style>
   .sb2-menu-item.sb2-conditional { display:none; }
   .sb2-menu-item.sb2-conditional.visible { display:block; }
+  #logoutModal.modal{background:rgba(0,0,0,.5);padding:1rem;z-index:1100;}
+  #logoutModal .sd-logout-dialog{width:100%;max-width:400px;background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:24px;box-shadow:0 20px 25px -5px rgba(0,0,0,.1),0 10px 10px -5px rgba(0,0,0,.04);}
+  #logoutModal .sd-logout-title{margin:0 0 8px;color:#18181b;font:600 18px/1.25 Inter,'Segoe UI',sans-serif;}
+  #logoutModal .sd-logout-description{margin:0;color:#71717a;font:400 14px/1.5 Inter,'Segoe UI',sans-serif;}
+  #logoutModal .sd-logout-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:24px;}
+  #logoutModal .sd-logout-actions a,#logoutModal .sd-logout-actions button{height:36px;padding:0 16px;border-radius:6px;font:500 14px/1 Inter,'Segoe UI',sans-serif;display:inline-flex;align-items:center;gap:7px;cursor:pointer;text-decoration:none;}
+  #logoutModal .sd-logout-actions a{background:#18181b;color:#fafafa;border:1px solid #18181b;}
+  #logoutModal .sd-logout-actions button{background:#fff;color:#18181b;border:1px solid #e4e4e7;}
 </style>
 <script>
 window.SB2_CONFIG = {
   activeModule: <?php echo json_encode($sbActiveModule); ?>,
   activePage: <?php echo json_encode($activePage); ?>
 };
+window.DCVS_PORTAL_ROLE = 'resident';
+window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
 </script>
+<script src="<?php echo htmlspecialchars($notifAppBaseUrl . '/assets/js/portal-form-drafts.js', ENT_QUOTES, 'UTF-8'); ?>?v=20261007"></script>
 
 <aside class="sb2" id="sidebar" data-state="expanded" data-collapsible="icon">
   <div class="sb2-inner">
@@ -178,7 +209,7 @@ window.SB2_CONFIG = {
     <div class="sb2-header">
       <div class="sb2-brand">
         <div class="sb2-brand-logo">
-          <img src="uploads/site/logo.png" alt="DCVS" />
+          <img src="uploads/site/DCVS LOGO.png" alt="DCVS" />
         </div>
         <div class="sb2-brand-text">
           <span class="sb2-brand-name">DCVS</span>
@@ -241,26 +272,6 @@ window.SB2_CONFIG = {
         </div>
       <?php endforeach; ?>
     </div>
-
-    <!-- SidebarFooter: user row -->
-    <div class="sb2-footer">
-      <div class="sb2-user">
-        <div class="sb2-user-avatar" title="<?php echo htmlspecialchars($fullName); ?>">
-          <?php if (!empty($residentAvatar)): ?>
-            <img src="<?php echo htmlspecialchars($residentAvatar); ?>" alt="Avatar">
-          <?php else: ?>
-            <?php echo strtoupper(substr($fullName, 0, 1)); ?>
-          <?php endif; ?>
-        </div>
-        <div class="sb2-user-info">
-          <span class="sb2-user-name"><?php echo htmlspecialchars($fullName); ?></span>
-          <span class="sb2-user-role">Resident</span>
-        </div>
-        <button type="button" class="sb2-user-more" id="sb2Logout" aria-label="Logout" title="Logout">
-          <i class="fas fa-sign-out-alt"></i>
-        </button>
-      </div>
-    </div>
   </div>
 
   <!-- SidebarRail: desktop collapse handle -->
@@ -272,57 +283,116 @@ window.SB2_CONFIG = {
   <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
     <i class="fas fa-bars"></i>
   </button>
+  <div class="topbar-breadcrumb">
+    <span class="breadcrumb-root">Resident Portal</span>
+    <span class="breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+    <span class="breadcrumb-current" id="breadcrumbCurrent"><?php
+      $breadcrumbMap = [
+        'overview' => 'Dashboard', 'my-pets' => 'Pet List', 'my-reports' => 'My Reports',
+        'submit-report' => 'Submit Report', 'appointments' => 'Appointments', 'book-appt' => 'Schedule Appointment',
+        'calendar-booking' => 'Calendar Booking', 'adoption' => 'Adoption Listings', 'archive' => 'Archive',
+        'account-settings' => 'Account Settings'
+      ];
+      echo htmlspecialchars($breadcrumbMap[$activePage] ?? 'Dashboard');
+    ?></span>
+  </div>
   <div class="topbar-right">
-    <div class="notif-dropdown" id="msgDropdown" style="margin-left:auto;">
-      <button class="notif-bell" id="msgBell" onclick="toggleMsg()">
-        <i class="fas fa-envelope"></i>
-        <?php if ($unreadMsgCount > 0): ?>
-          <span class="notif-badge" data-realtime="notif-badge"><?php echo $unreadMsgCount > 9 ? '9+' : $unreadMsgCount; ?></span>
-        <?php endif; ?>
+    <!-- Notification Bell -->
+    <div class="notif-dropdown" id="msgDropdown">
+      <button class="notif-btn" id="msgBell" type="button">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <span class="notif-badge" data-realtime="notif-badge" style="<?php echo $unreadMsgCount > 0 ? '' : 'display:none;'; ?>"><?php echo $unreadMsgCount > 9 ? '9+' : $unreadMsgCount; ?></span>
       </button>
-      <div class="notif-panel" id="msgPanel">
+      <div class="notif-panel" id="msgPanel" data-notification-panel
+        data-portal="resident"
+        data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+        data-action-url="<?php echo htmlspecialchars($notifAppBaseUrl . '/includes/staff-notification-action.php?portal=resident', ENT_QUOTES, 'UTF-8'); ?>"
+        data-app-base-url="<?php echo htmlspecialchars($notifAppBaseUrl, ENT_QUOTES, 'UTF-8'); ?>"
+        data-unread-count="<?php echo (int)$unreadMsgCount; ?>">
         <div class="notif-panel-header">
           <h4>Staff Messages</h4>
-          <?php if ($unreadMsgCount > 0): ?>
-            <a onclick="markMsgRead()">Mark all read</a>
-          <?php endif; ?>
+          <button class="notif-mark-all" type="button" <?php echo $unreadMsgCount === 0 ? 'disabled' : ''; ?>>
+            <i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read
+          </button>
         </div>
+        <div class="notif-tabs" role="tablist" aria-label="Notification filters">
+          <button class="notif-tab active" type="button" role="tab" aria-selected="true" data-notif-tab="all">All</button>
+          <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="inbox">Inbox<span class="notif-tab-count" data-tab-count="inbox"><?php echo $unreadMsgCount > 0 ? ($unreadMsgCount > 99 ? '99+' : $unreadMsgCount) : ''; ?></span></button>
+          <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="archived">Archived</button>
+        </div>
+        <div class="notif-feedback" role="status" aria-live="polite"></div>
         <div class="notif-panel-body" id="notificationList">
-          <?php if (empty($staffMessages)): ?>
-            <div class="notif-empty">No messages from staff.</div>
-          <?php else: ?>
-            <?php foreach ($staffMessages as $n): ?>
-              <div class="notif-item <?php echo $n['is_read'] ? '' : 'unread'; ?>" onclick="openMsg(<?php echo $n['notification_id']; ?>)" data-nid="<?php echo $n['notification_id']; ?>">
-                <div class="notif-icon staff_message"><i class="fas fa-envelope"></i></div>
-                <div class="notif-content">
-                  <div class="notif-title"><?php echo htmlspecialchars($n['title']); ?></div>
-                  <div class="notif-msg"><?php echo htmlspecialchars($n['message']); ?></div>
-                  <div class="notif-time"><?php echo date('M d, h:i A', strtotime($n['created_at'])); ?></div>
+          <?php foreach ($staffMessages as $n): ?>
+              <?php
+                $senderName = trim((string)($n['sender_name'] ?? ''));
+                $senderParts = preg_split('/\s+/', $senderName, -1, PREG_SPLIT_NO_EMPTY);
+                $senderInitials = '';
+                if (!empty($senderParts)) {
+                    $senderInitials = strtoupper(substr($senderParts[0], 0, 1));
+                    if (count($senderParts) > 1) $senderInitials .= strtoupper(substr($senderParts[count($senderParts) - 1], 0, 1));
+                }
+                $senderAvatar = trim((string)($n['sender_avatar'] ?? ''));
+                if ($senderAvatar !== '' && !preg_match('#^https?://#i', $senderAvatar) && $senderAvatar[0] !== '/') {
+                    $senderAvatar = $notifAppBaseUrl . '/' . ltrim($senderAvatar, '/');
+                }
+              ?>
+              <article class="notif-item <?php echo empty($n['is_read']) ? 'unread' : ''; ?>"
+                data-notif-item data-nid="<?php echo (int)$n['notification_id']; ?>"
+                data-unread="<?php echo empty($n['is_read']) ? '1' : '0'; ?>" data-archived="<?php echo empty($n['archived_at']) ? '0' : '1'; ?>">
+                <div class="notif-avatar" aria-hidden="true" title="<?php echo htmlspecialchars($senderName, ENT_QUOTES, 'UTF-8'); ?>">
+                  <?php echo htmlspecialchars($senderInitials, ENT_QUOTES, 'UTF-8'); ?>
+                  <?php if ($senderAvatar !== ''): ?><img src="<?php echo htmlspecialchars($senderAvatar, ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy"><?php endif; ?>
                 </div>
-              </div>
-            <?php endforeach; ?>
-          <?php endif; ?>
+                <div class="notif-content">
+                  <div class="notif-row-heading">
+                    <div class="notif-copy">
+                      <div class="notif-title"><?php echo htmlspecialchars($n['title'], ENT_QUOTES, 'UTF-8'); ?></div>
+                      <div class="notif-msg"><?php echo htmlspecialchars($n['message'], ENT_QUOTES, 'UTF-8'); ?></div>
+                    </div>
+                    <button type="button" class="notif-more" aria-label="Notification options" aria-expanded="false"><i class="fas fa-ellipsis-h" aria-hidden="true"></i></button>
+                    <span class="notif-unread-dot" aria-label="Unread"></span>
+                  </div>
+                  <div class="notif-meta"><span><?php echo htmlspecialchars(date('M j, g:i A', strtotime($n['created_at'])), ENT_QUOTES, 'UTF-8'); ?></span></div>
+                </div>
+                <div class="notif-row-menu" role="menu">
+                  <button type="button" role="menuitem" data-notif-action="<?php echo empty($n['is_read']) ? 'read' : 'unread'; ?>"><i class="fas fa-check" aria-hidden="true"></i><?php echo empty($n['is_read']) ? 'Mark as read' : 'Mark as unread'; ?></button>
+                  <button type="button" role="menuitem" data-notif-action="<?php echo empty($n['archived_at']) ? 'archive' : 'unarchive'; ?>"><i class="fas fa-inbox" aria-hidden="true"></i><?php echo empty($n['archived_at']) ? 'Archive' : 'Move to inbox'; ?></button>
+                </div>
+              </article>
+          <?php endforeach; ?>
+          <div class="notif-empty" hidden>No messages from staff.</div>
         </div>
       </div>
     </div>
-    <span class="topbar-time" id="clockDisplay"></span>
-    <div class="topbar-user">
-      <div class="topbar-avatar">
+
+    <!-- User Profile Pill -->
+    <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-avatar">
         <?php if (!empty($residentAvatar)): ?>
-          <img src="<?php echo htmlspecialchars($residentAvatar); ?>" alt="Avatar" style="width:30px;height:30px;border-radius:50%;object-fit:cover;">
+          <img src="<?php echo htmlspecialchars($residentAvatar); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
         <?php else: ?>
-          <?php echo strtoupper(substr($fullName, 0, 1)); ?>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
         <?php endif; ?>
       </div>
-      <span class="topbar-user-name"><?php echo htmlspecialchars($fullName); ?></span>
+      <div class="user-meta">
+        <span class="user-name"><?php echo htmlspecialchars($fullName); ?></span>
+        <span class="user-role">Resident</span>
+      </div>
     </div>
   </div>
 </header>
 
 <style>
+  /* Notification Bell */
   .notif-dropdown { position: relative; }
-  .notif-bell { background: none; border: none; font-size: 1.2rem; color: #475569; cursor: pointer; padding: 6px; position: relative; border-radius: 8px; transition: background 0.15s; }
-  .notif-bell:hover { background: #f1f5f9; }
+  .notif-btn { background: none; border: none; font-size: 1.2rem; color: #475569; cursor: pointer; padding: 6px; position: relative; border-radius: 8px; transition: background 0.15s; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
+  .notif-btn:hover { background: #f1f5f9; }
   .notif-badge { position: absolute; top: 0; right: 0; background: #dc2626; color: #fff; font-size: 0.6rem; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: flex; align-items: center; justify-content: center; padding: 0 4px; line-height: 1; }
   .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; width: 380px; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid #e2e8f0; z-index: 200; display: none; overflow: hidden; }
   .notif-panel.open { display: block; }
@@ -334,43 +404,32 @@ window.SB2_CONFIG = {
   .notif-item { display: flex; gap: 0.75rem; padding: 0.85rem 1rem; cursor: pointer; transition: background 0.12s; border-bottom: 1px solid #f1f5f9; }
   .notif-item:hover { background: #f8fafc; }
   .notif-item.unread { background: #f0fdf4; }
-  .notif-item.unread:hover { background: #dcfce7; }
+  .notif-item.unread:hover { background: #dcebe0; }
   .notif-icon { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; flex-shrink: 0; background: transparent; color: #000; }
-  .notif-icon.staff_message { background: transparent; color: #000; }
   .notif-content { flex: 1; min-width: 0; }
   .notif-title { font-size: 0.8rem; font-weight: 700; color: #0f172a; }
   .notif-msg { font-size: 0.74rem; color: #64748b; line-height: 1.3; margin-top: 1px; }
   .notif-time { font-size: 0.65rem; color: #94a3b8; margin-top: 3px; }
   .notif-empty { text-align: center; padding: 2rem; color: #94a3b8; font-size: 0.82rem; }
-  .topbar-time { font-size:0.8rem; color:#94a3b8; font-weight:500; }
-  .topbar-user {
-    display:flex; align-items:center; gap:8px;
-    background:#f8fafc; border:1px solid #eef2f6;
-    border-radius:999px; padding:4px 12px 4px 6px;
-  }
-  .topbar-avatar {
-    width:30px; height:30px; border-radius:50%;
-    background:linear-gradient(135deg,#045e1f,#043012);
-    color:#fff; display:flex; align-items:center; justify-content:center;
-    font-weight:800; font-size:0.75rem;
-  }
-  .topbar-avatar img { width:30px; height:30px; border-radius:50%; object-fit:cover; }
-  .topbar-user-name { font-size:0.82rem; font-weight:600; color:#0f172a; }
+
+  /* User Profile Pill */
+  .user-profile { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid transparent; }
+  .user-profile:hover { background-color: #F3F4F6; border-color: #F0F2F5; }
+  .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: #D5ECE0; border: 1px solid #B8DEC9; display: flex; align-items: center; justify-content: center; color: #0B4D26; font-weight: 700; font-size: 12px; overflow: hidden; }
+  .user-meta { display: flex; flex-direction: column; line-height: 1.25; }
+  .user-name { font-size: 14px; font-weight: 600; color: #18181B; }
+  .user-role { font-size: 12px; color: #71717A; }
 </style>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($notifAppBaseUrl . '/assets/css/notification.css?v=' . (int)filemtime(__DIR__ . '/../assets/css/notification.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+<script src="<?php echo htmlspecialchars($notifAppBaseUrl . '/assets/js/notification-panel.js?v=' . (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 
 <div class="modal" id="logoutModal">
-  <div class="modal-content" style="max-width:400px;">
-    <div class="modal-header">
-      <h3><i class="fas fa-sign-out-alt"></i> Confirm Logout</h3>
-      <button class="modal-close" onclick="closeModal('logoutModal')"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="modal-body" style="text-align:center;padding:2rem;">
-      <i class="fas fa-question-circle" style="font-size:3rem;color:#94a3b8;margin-bottom:1rem;"></i>
-      <p style="font-size:1.05rem;color:#475569;">Are you sure you want to logout of the Resident Portal?</p>
-    </div>
-    <div class="modal-actions" style="justify-content:center;">
-      <a href="logout.php" class="btn-primary" style="padding:10px 28px;" onclick="localStorage.removeItem('activeSection');localStorage.removeItem('sb2State')"><i class="fas fa-check"></i> Yes, Logout</a>
-      <button type="button" class="btn-secondary" onclick="closeModal('logoutModal')">Cancel</button>
+  <div class="sd-logout-dialog" role="alertdialog" aria-modal="true" aria-labelledby="logoutDialogTitle">
+    <h2 class="sd-logout-title" id="logoutDialogTitle">Confirm Logout</h2>
+    <p class="sd-logout-description">Are you sure you want to logout of the Resident Portal?</p>
+    <div class="sd-logout-actions">
+      <button type="button" onclick="closeModal('logoutModal')">Cancel</button>
+      <a href="logout.php" onclick="localStorage.removeItem('activeSection');localStorage.removeItem('sb2State')"><i class="fas fa-sign-out-alt"></i> Logout</a>
     </div>
   </div>
 </div>
@@ -528,11 +587,26 @@ window.SB2_CONFIG = {
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem('sb2State') || 'null'); } catch (e) {}
     activateModule(cfg.activeModule || 'main');
-    // Dashboard is the default landing page
-    var def = document.querySelector('.sb2-menu-button[data-section="overview"]');
-    if (def) def.classList.add('active');
-    updateConditionalItems('');
-    // Restore previously open collapsibles + active item after a cross-page navigation
+    // Use activePage from PHP config to highlight the correct sidebar item
+    var pageSection = cfg.activePage || 'overview';
+    if (sectionToModule[pageSection]) {
+      activateSection(pageSection);
+    } else if (pageSection) {
+      // Cross-page navigation (e.g. submit-report-page.php) — find and activate the matching item directly
+      var matchItem = document.querySelector('.sb2-menu-sub-button[data-section="' + pageSection + '"]') ||
+                      document.querySelector('.sb2-menu-button[data-section="' + pageSection + '"]');
+      if (matchItem) {
+        activateItem(matchItem);
+      } else {
+        var def = document.querySelector('.sb2-menu-button[data-section="overview"]');
+        if (def) def.classList.add('active');
+      }
+    } else {
+      var def = document.querySelector('.sb2-menu-button[data-section="overview"]');
+      if (def) def.classList.add('active');
+    }
+    updateConditionalItems(pageSection);
+    // Restore previously open collapsibles after a cross-page navigation
     if (saved && saved.open && saved.open.length) {
       document.querySelectorAll('.sb2-collapsible').forEach(function(b) {
         var t = b.querySelector(':scope > span');
@@ -540,11 +614,6 @@ window.SB2_CONFIG = {
           b.classList.add('open');
           b.setAttribute('aria-expanded', 'true');
         }
-      });
-    }
-    if (saved && saved.activeKey) {
-      document.querySelectorAll('.sb2-menu-button:not(.sb2-collapsible), .sb2-menu-sub-button').forEach(function(item) {
-        if (getItemKey(item) === saved.activeKey) activateItem(item);
       });
     }
   }
@@ -584,6 +653,13 @@ window.SB2_CONFIG = {
       var fn = item.getAttribute('data-fn');
       var arg = item.getAttribute('data-arg');
       var href = item.getAttribute('data-href');
+
+      // Cross-page links (href contains .php) should navigate directly
+      if (href && href.indexOf('.php') !== -1 && href.indexOf('#') === -1) {
+        activateItem(item);
+        saveSidebarState();
+        return;
+      }
 
       if (section && typeof switchSection === 'function') {
         e.preventDefault();
@@ -676,4 +752,18 @@ function openMsg(id) {
   // Close the dropdown
   document.getElementById('msgPanel')?.classList.remove('open');
 }
+
+window.setInterval(function() {
+  fetch('includes/account-status.php?sess=PHPSESSID', { credentials: 'same-origin', cache: 'no-store' })
+    .then(function(response) {
+      if (response.status !== 401) return null;
+      return response.json();
+    })
+    .then(function(result) {
+      if (result && result.redirect) window.location.replace(result.redirect);
+    })
+    .catch(function(error) {
+      console.error('Account status check failed:', error);
+    });
+}, 8000);
 </script>

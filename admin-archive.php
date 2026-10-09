@@ -35,7 +35,8 @@ $targetRole = $roleMap[$archiveType];
 $pageTitle = ucfirst($archiveType) . ' Archive';
 
 $search = trim($_GET['search'] ?? '');
-$where = "WHERE u.role = ? AND u.archived_at IS NOT NULL";
+$barangayFilter = isset($_GET['barangay']) ? intval($_GET['barangay']) : 0;
+$where = "WHERE u.role = ? AND u.archived_at IS NOT NULL AND u.deleted_at IS NULL";
 $params = [$targetRole];
 $types = "s";
 
@@ -44,6 +45,11 @@ if ($search) {
     $s = "%$search%";
     $params[] = $s; $params[] = $s; $params[] = $s; $params[] = $s;
     $types .= "ssss";
+}
+if ($barangayFilter) {
+    $where .= " AND u.barangay_id = ?";
+    $params[] = $barangayFilter;
+    $types .= "i";
 }
 
 $countSql = "SELECT COUNT(*) FROM users u $where";
@@ -74,11 +80,15 @@ $users = [];
 while ($r = $rows->fetch_assoc()) $users[] = $r;
 $stmt->close();
 
+$barangays = [];
+$br = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
+if ($br) $barangays = $br->fetch_all(MYSQLI_ASSOC);
+
 if (isset($_POST['action']) && $_POST['action'] === 'restore_user') {
     header('Content-Type: application/json');
     $userId = intval($_POST['user_id'] ?? 0);
     if ($userId === 0) { echo json_encode(['success' => false, 'message' => 'Invalid user.']); exit; }
-    $old = $conn->prepare("SELECT full_name, email FROM users WHERE user_id = ?");
+    $old = $conn->prepare("SELECT full_name, email, status FROM users WHERE user_id = ? AND archived_at IS NOT NULL AND deleted_at IS NULL");
     $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
     if (!$u) { echo json_encode(['success' => false, 'message' => 'User not found.']); exit; }
 
@@ -90,15 +100,18 @@ if (isset($_POST['action']) && $_POST['action'] === 'restore_user') {
         $stmt->close();
     };
 
-    $stmt = $conn->prepare("UPDATE users SET archived_at = NULL, status = 'active' WHERE user_id = ?");
+    $stmt = $conn->prepare("UPDATE users SET archived_at = NULL WHERE user_id = ? AND deleted_at IS NULL");
     $stmt->bind_param("i", $userId);
     if ($stmt->execute()) {
-        $logAction($adminId, 'User Restored', "Restored user '{$u['full_name']}'");
-        $subject = 'Account Restored — Dasmariñas City Veterinary Services';
-        $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account has been <strong>restored</strong> by an administrator. You can now log in again.</p>";
-        require_once 'mailer.php';
-        sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
-        $_SESSION['flash_msg'] = "User '{$u['full_name']}' restored successfully.";
+        $logAction($adminId, 'User Unarchived', "Unarchived user '{$u['full_name']}'");
+        if ($archiveType === 'resident') {
+            $accessText = $u['status'] === 'active' ? 'Your account access remains active.' : 'Your account remains deactivated until an administrator activates it.';
+            $subject = 'Account Unarchived — Dasmariñas City Veterinary Services';
+            $htmlBody = dcvsEmailTemplate('Account Unarchived', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your account has been removed from the administrator’s archive. ' . $accessText . '</p>');
+            require_once 'mailer.php';
+            sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+        }
+        $_SESSION['flash_msg'] = "User '{$u['full_name']}' unarchived successfully.";
         $_SESSION['flash_type'] = 'success';
         echo json_encode(['success' => true]);
     } else {
@@ -132,7 +145,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 .sd-btn-danger{color:#dc2626;}
 .sd-btn-danger:hover{background:#fef2f2;}
 .appt-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;}
-.appt-card-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e4e4e7;}
+.appt-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;}
 .appt-header-left{display:flex;align-items:center;gap:12px;}
 .appt-header-right{display:flex;align-items:center;gap:8px;}
 .appt-search-wrap{display:flex;align-items:center;gap:8px;}
@@ -196,6 +209,14 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 .sd-dialog-title{font-size:16px;font-weight:600;color:#18181b;margin:0 0 8px;}
 .sd-dialog-desc{font-size:14px;color:#71717a;margin:0 0 20px;line-height:1.5;}
 .sd-dialog-actions{display:flex;justify-content:flex-end;gap:8px;}
+.appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.appt-search-wrap{position:relative;}
+.appt-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#71717a;pointer-events:none;}
+.appt-search-input{height:36px;padding:0 12px 0 36px;width:280px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s,box-shadow .15s;}
+.appt-search-input:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;background:#fff;}
+.appt-search-input::placeholder{color:#a1a1aa;}
+.appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
+.appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 </style>
 </head>
 <body>
@@ -206,16 +227,23 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
   <script>document.addEventListener('DOMContentLoaded',function(){showToast('<?php echo $_SESSION["flash_type"] === "error" ? "Error" : "Success"; ?>',{type:'<?php echo $_SESSION["flash_type"] === "error" ? "error" : "success"; ?>',description:'<?php echo addslashes($_SESSION["flash_msg"]); ?>'});});</script>
 <?php unset($_SESSION['flash_msg']); unset($_SESSION['flash_type']); endif; ?>
 
-<div class="appt-card">
-  <div class="appt-card-header">
-    <div class="appt-header-right">
-      <div class="appt-search-wrap">
-        <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by name, email, or reference ID..." value="<?php echo htmlspecialchars($search); ?>" />
-      </div>
-      <button class="pet-action-btn" id="clearFiltersBtn" style="display:<?php echo $search ? 'inline-flex' : 'none'; ?>;" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+<div class="appt-card-header">
+  <div class="appt-header-right">
+    <div class="appt-search-wrap">
+      <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by name, email, or reference ID..." value="<?php echo htmlspecialchars($search); ?>" />
     </div>
+    <select class="appt-status-select" id="barangayFilter">
+      <option value="">All Barangays</option>
+      <?php foreach ($barangays as $br): ?>
+        <option value="<?php echo $br['barangay_id']; ?>" <?php echo $barangayFilter==$br['barangay_id']?'selected':''; ?>><?php echo htmlspecialchars($br['barangay_name']); ?></option>
+      <?php endforeach; ?>
+    </select>
+    <button class="pet-action-btn" id="clearFiltersBtn" style="display:<?php echo ($search||$barangayFilter)?'inline-flex':'none'; ?>;" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
   </div>
+</div>
 
+<div class="appt-card">
   <?php if (empty($users)): ?>
     <div class="empty-state">
       <p><strong>No archived <?php echo htmlspecialchars($archiveType); ?> accounts found.</strong></p>
@@ -249,7 +277,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
             <td style="font-size:14px;color:#18181b;"><?php echo date('M d, Y', strtotime($u['archived_at'])); ?></td>
             <td>
               <button class="pet-action-btn restore" onclick="restoreUser(<?php echo $u['user_id']; ?>, '<?php echo htmlspecialchars(addslashes($u['full_name'])); ?>')">
-                <i class="fas fa-undo"></i> Restore
+                <i class="fas fa-undo"></i> Unarchive
               </button>
             </td>
           </tr>
@@ -282,11 +310,11 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 
 <div class="sd-dialog-overlay" id="confirmModal">
   <div class="sd-dialog-content">
-    <h3 class="sd-dialog-title" id="confirmTitle">Restore User</h3>
-    <p class="sd-dialog-desc" id="confirmText">Are you sure you want to restore this user?</p>
+    <h3 class="sd-dialog-title" id="confirmTitle">Unarchive User</h3>
+    <p class="sd-dialog-desc" id="confirmText">Unarchiving will not change account access.</p>
     <div class="sd-dialog-actions">
       <button class="sd-btn" onclick="closeModal('confirmModal')">Cancel</button>
-      <button class="sd-btn sd-btn-primary" id="confirmSubmitBtn" onclick="submitRestore()"><i class="fas fa-undo"></i> Restore</button>
+      <button class="sd-btn sd-btn-primary" id="confirmSubmitBtn" onclick="submitRestore()"><i class="fas fa-undo"></i> Unarchive</button>
     </div>
   </div>
 </div>
@@ -296,30 +324,30 @@ var restoreUserId = 0;
 
 function restoreUser(userId, name) {
   restoreUserId = userId;
-  document.getElementById('confirmText').textContent = 'Are you sure you want to restore "' + name + '"? They will be able to log in again.';
+  document.getElementById('confirmText').textContent = 'Unarchive "' + name + '"? Their account access status will not change.';
   openModal('confirmModal');
 }
 
 function submitRestore() {
   var btn = document.getElementById('confirmSubmitBtn');
-  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Restoring...';
+  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Unarchiving...';
   var fd = new FormData();
   fd.append('action', 'restore_user');
   fd.append('user_id', restoreUserId);
   fetch('admin-archive.php', { method: 'POST', body: fd })
     .then(function(r) { return r.json(); })
     .then(function(resp) {
-      btn.disabled = false; btn.innerHTML = '<i class="fas fa-undo"></i> Restore';
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-undo"></i> Unarchive';
       closeModal('confirmModal');
       if (resp.success) {
         var params = new URLSearchParams(window.location.search);
         window.location.href = 'admin-archive.php?' + params.toString();
       } else {
-        showToast('Restore failed', { type: 'error', description: resp.message || 'Could not restore user.' });
+        showToast('Unarchive failed', { type: 'error', description: resp.message || 'Could not unarchive user.' });
       }
     })
     .catch(function() {
-      btn.disabled = false; btn.innerHTML = '<i class="fas fa-undo"></i> Restore';
+      btn.disabled = false; btn.innerHTML = '<i class="fas fa-undo"></i> Unarchive';
       closeModal('confirmModal');
       showToast('Network error', { type: 'error', description: 'Could not connect to server.' });
     });
@@ -343,9 +371,17 @@ document.getElementById('searchInput').addEventListener('input', function() {
   }, 500);
 });
 
+document.getElementById('barangayFilter').addEventListener('change', function() {
+  var params = new URLSearchParams(window.location.search);
+  if (this.value) { params.set('barangay', this.value); } else { params.delete('barangay'); }
+  params.delete('page');
+  window.location.href = 'admin-archive.php?' + params.toString();
+});
+
 function clearSearch() {
   var params = new URLSearchParams(window.location.search);
   params.delete('search');
+  params.delete('barangay');
   params.delete('page');
   window.location.href = 'admin-archive.php?' + params.toString();
 }

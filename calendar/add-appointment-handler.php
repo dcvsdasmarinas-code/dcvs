@@ -12,6 +12,7 @@ session_set_cookie_params([
 session_start();
 
 require_once dirname(__DIR__) . '/db.php';
+require_once dirname(__DIR__) . '/includes/availability.php';
 require_once dirname(__DIR__) . '/mailer.php';
 
 header('Content-Type: application/json');
@@ -42,14 +43,19 @@ if (!$user_id || !in_array($appointment_type, $validTypes, true) || !$preferred_
     echo json_encode(['success' => false, 'message' => 'All fields are required.']);
     exit;
 }
+if (!dcvsIsStandardTime($preferred_time)) {
+    echo json_encode(['success' => false, 'message' => 'Please choose one of the available clinic appointment times.']);
+    exit;
+}
 if (!in_array($status, $validStatuses, true)) {
     $status = 'scheduled';
 }
 
-$checkUser = $conn->prepare("SELECT user_id FROM users WHERE user_id = ? AND role = 'resident' AND status = 'active'");
+$checkUser = $conn->prepare("SELECT user_id, full_name FROM users WHERE user_id = ? AND role = 'resident' AND status = 'active'");
 $checkUser->bind_param('i', $user_id);
 $checkUser->execute();
-if (!$checkUser->get_result()->fetch_assoc()) {
+$resident = $checkUser->get_result()->fetch_assoc();
+if (!$resident) {
     echo json_encode(['success' => false, 'message' => 'Invalid resident selected.']);
     $checkUser->close();
     exit;
@@ -68,25 +74,24 @@ if ($dupStmt->get_result()->fetch_row()[0] > 0) {
 }
 $dupStmt->close();
 
-$dStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status IN ($activeStatuses) AND archived_at IS NULL");
-$dStmt->bind_param('s', $preferred_date);
-$dStmt->execute();
-if ($dStmt->get_result()->fetch_row()[0] >= 5) {
-    $dStmt->close();
-    echo json_encode(['success' => false, 'message' => 'This date is fully booked (max 5).']);
+$dCount = dcvsAppointmentDayCount($conn, $preferred_date);
+if ($dCount >= DCVS_MAX_APPOINTMENTS_PER_DAY) {
+    echo json_encode(['success' => false, 'message' => 'This date is fully booked (max ' . DCVS_MAX_APPOINTMENTS_PER_DAY . ').']);
     exit;
 }
-$dStmt->close();
 
-$cStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND preferred_time = ? AND status IN ($activeStatuses) AND archived_at IS NULL");
-$cStmt->bind_param('ss', $preferred_date, $preferred_time);
-$cStmt->execute();
-if ($cStmt->get_result()->fetch_row()[0] >= 5) {
-    $cStmt->close();
-    echo json_encode(['success' => false, 'message' => 'This time slot is full (max 5).']);
+if (!dcvsSlotAvailable($conn, $preferred_date, $preferred_time)) {
+    echo json_encode(['success' => false, 'message' => 'This time slot is closed by the clinic schedule.']);
     exit;
 }
-$cStmt->close();
+if (dcvsSlotHeld($conn, $preferred_date, $preferred_time)) {
+    echo json_encode(['success' => false, 'message' => 'This time slot is already reserved (max 1).']);
+    exit;
+}
+if (dcvsAppointmentSlotCount($conn, $preferred_date, $preferred_time) >= dcvsRoutineSlotCapacity($conn, $preferred_date, substr($preferred_time, 0, 5))) {
+    echo json_encode(['success' => false, 'message' => 'This time slot is already at its staff capacity.']);
+    exit;
+}
 
 $refId = generateReferenceId($conn, '#APT-', 'appointments');
 $stmt = $conn->prepare("INSERT INTO appointments (user_id, appointment_type, pet_id, pet_name, preferred_date, preferred_time, status, notes, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
@@ -112,7 +117,9 @@ if ($stmt->execute()) {
     $staff_id = $_SESSION['user_id'];
     $logAction = 'Appointment Scheduled';
     $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
-    $details = "Scheduled $appointment_type for User ID: $user_id on $preferred_date (ID: $refId).";
+    $details = "Scheduled " . ucfirst($appointment_type) . " appointment for " . $resident['full_name']
+        . ($pet_name !== '' ? " (pet: " . $pet_name . ")" : "")
+        . " on $preferred_date at " . date('g:i A', strtotime($preferred_time)) . ".";
     $logStmt->bind_param('isss', $staff_id, $logAction, $details, $ip);
     $logStmt->execute();
     $logStmt->close();

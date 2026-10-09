@@ -139,7 +139,7 @@ function clientCellHtml(col, c){
   if (col==='ref') return '<span class="client-id">'+cpdEsc(c.ref)+'</span>';
   if (col==='email') return cpdEsc(c.email||'-');
   if (col==='phone') return cpdEsc(c.phone||'-');
-  if (col==='brgy') return cpdEsc(c.brgy||'-');
+  if (col==='brgy') return '<div class="client-name">'+cpdEsc(c.brgy||'-')+'</div>';
   if (col==='pets') return '<span class="pets-badge">'+c.pets+'</span>';
   if (col==='date') return cpdEsc(c.date);
   if (col==='status') return '<span class="status-pill '+(c.status==='Active'?'status-active':'status-inactive')+'">'+c.status+'</span>';
@@ -149,13 +149,13 @@ function petCellHtml(col, p){
   var v = vaxInfo(p.vax);
   if (col==='name') return '<div class="client-cell"><div class="avatar">'+petPhotoHtml(p)+'</div><div class="client-name">'+cpdEsc(p.name)+'</div></div>';
   if (col==='ref') return '<span class="client-id">'+cpdEsc(p.ref)+'</span>';
-  if (col==='owner') return cpdEsc(p.ownerName);
+  if (col==='owner') return '<div class="client-name">'+cpdEsc(p.ownerName)+'</div>';
   if (col==='ownerRef') return '<span class="client-id">'+cpdEsc(p.ownerRef||'')+'</span>';
   if (col==='species') return cpdEsc(p.typeLabel);
   if (col==='gender') return cpdEsc(p.gender);
   if (col==='age') return cpdEsc(p.age);
   if (col==='vax') return '<span class="vax-pill '+v.c+'">'+v.l+'</span>';
-  if (col==='brgy') return cpdEsc(p.brgy||'-');
+  if (col==='brgy') return '<div class="client-name">'+cpdEsc(p.brgy||'-')+'</div>';
   if (col==='date') return cpdEsc(p.date);
   return '';
 }
@@ -163,6 +163,9 @@ function rowHtml(mode, item){
   var selCls = state.selected===item.id ? 'selected' : '';
   var clickAttr = mode==='clients' ? " onclick=\"selectClient("+item.id+")\"" : " onclick=\"selectPet("+item.ownerId+")\"";
   var html = '<tr data-id="'+item.id+'" class="sd-tr '+selCls+'"'+clickAttr+'>';
+  if (mode==='clients'){
+    html += '<td class="sd-td"><input type="checkbox" class="sd-table-cb row-cb" value="'+item.id+'" onclick="event.stopPropagation();cpdUpdateBulkBar()" /></td>';
+  }
   var defs = getDefs();
   for (var i=0;i<defs.length;i++){
     var col = defs[i];
@@ -207,6 +210,9 @@ function renderTableHead(){
   var head = document.getElementById('tableHead');
   var html = '<tr class="sd-tr">';
   var defs = getDefs();
+  if (state.mode==='clients'){
+    html += '<th class="sd-th" style="width:40px;"><input type="checkbox" class="sd-table-cb" id="cpdSelectAll" onclick="cpdToggleSelectAll(this)" /></th>';
+  }
   for (var i=0;i<defs.length;i++){
     var col = defs[i];
     html += '<th class="sd-th">'+sortHeaderHtml(col)+'</th>';
@@ -228,7 +234,7 @@ function render(){
   var tbody = document.getElementById('dataRows');
   var cards = document.getElementById('cardsWrap');
 
-  var visibleCount = getDefs().length + 1;
+  var visibleCount = getDefs().length + (state.mode==='clients' ? 2 : 1);
   if (total === 0){
     tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="'+visibleCount+'"><div class="no-results"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><p>No '+state.mode+' found.</p></div></td></tr>';
     cards.innerHTML = '';
@@ -244,6 +250,7 @@ function render(){
   cards.style.display = state.view==='cards' ? '' : 'none';
 
   renderPagination(pages);
+  cpdUpdateBulkBar();
 }
 
 function renderPagination(pages){
@@ -403,45 +410,64 @@ function renderProfile(tab){
   var box = document.getElementById('profileContent');
   var activeTab = tab || 'profile';
 
-  box.innerHTML =
-    '<div class="profile-header">'+
-      '<div class="profile-avatar">'+ (c.avatar ? '<img src="'+cpdEsc(c.avatar)+'" alt="">' : cpdEsc(c.initials)) +'</div>'+
-      '<div style="min-width:0;">'+
-        '<div class="profile-name-row"><h2>'+cpdEsc(c.full_name)+'</h2><span class="status-pill '+(c.status==='active'?'status-active':'status-inactive')+'">'+(c.status==='active'?'Active':'Inactive')+'</span></div>'+
-        '<p class="profile-id">'+cpdEsc(c.reference_id)+'</p>'+
+  var headerEl = document.getElementById('profileHeader');
+  headerEl.style.display = (activeTab === 'profile') ? '' : 'none';
+  headerEl.innerHTML = activeTab === 'profile' ?
+    '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">'+
+      '<div class="profile-avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">'+ (c.avatar ? '<img src="'+cpdEsc(c.avatar)+'" alt="" style="width:100%;height:100%;object-fit:cover;">' : cpdEsc(c.initials)) +'</div>'+
+      '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">'+
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Registered client</span>'+
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+cpdEsc(c.full_name)+'</span>'+
       '</div>'+
-      '<button class="close-x" title="Close" onclick="closeProfile()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>'+
-    '</div>'+
-    '<div class="tabs">'+
-      '<button class="tab'+(activeTab==='profile'?' active':'')+'" onclick="renderProfile(\'profile\')">Profile</button>'+
-      '<button class="tab'+(activeTab==='pets'?' active':'')+'" onclick="renderProfile(\'pets\')">Pets ('+pets.length+')</button>'+
-    '</div>'+
-    '<div id="profileTabBody"></div>';
+      '<span style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;background:'+(c.status==='active'?'#ECFDF3':'#F1F5F9')+';color:'+(c.status==='active'?'#027A48':'#64748b')+';border:1px solid '+(c.status==='active'?'#D1FADF':'#E2E8F0')+';">'+(c.status==='active'?'Active':'Inactive')+'</span>'+
+    '</div>' : '';
+
+  var footer = document.getElementById('clientProfileFooter');
+  if (footer) {
+    footer.innerHTML =
+      '<a class="sd-btn sd-btn-default" href="staff-communication.php?recipient_id='+encodeURIComponent(c.user_id)+'&recipient_role=resident">Email/Message</a>' +
+      '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="confirmArchive('+c.user_id+',\''+cpdEsc(c.full_name).replace(/'/g,"\\'")+'\')">Archive</button>';
+  }
+
+  box.innerHTML = '<div id="profileTabBody"></div>';
+
+  document.getElementById('profileTabs').innerHTML =
+    '<button class="rpt-tab'+(activeTab==='profile'?' active':'')+'" onclick="renderProfile(\'profile\')">Profile</button>'+
+    '<button class="rpt-tab'+(activeTab==='pets'?' active':'')+'" onclick="renderProfile(\'pets\')">Pets ('+pets.length+')</button>'+
+    '<button class="rpt-tab'+(activeTab==='history'?' active':'')+'" onclick="renderProfile(\'history\')">History</button>';
 
   var body = document.getElementById('profileTabBody');
 
   if (activeTab==='profile'){
     body.innerHTML =
-      '<div class="info-card-head"><h3>Client Information</h3>'+
-        '<button class="link-btn" onclick="openEditClient('+c.user_id+')"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Edit</button>'+
+      '<div style="margin-top:2px;"><div class="info-card-head"><div class="rpt-section-title-action"><h3 style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:0;">Client Information</h3><button type="button" class="cpd-edit-icon" onclick="openEditClient('+c.user_id+')" aria-label="Edit client" title="Edit client"><img src="assets/images/edit%20icon.png" alt=""></button></div>'+
       '</div>'+
-      '<div class="info-rows">'+infoRow('user','Full Name',c.full_name)+infoRow('mail','Email Address',c.email||'-')+infoRow('phone','Mobile Number',c.phone||'-')+infoRow('home','Barangay',c.barangay_name||'-')+infoRow('home2','Address',c.address||'-')+infoRow('cal','Registration Date',c.registration_date)+infoRow('check','Status',c.status==='active'?'Active':'Inactive')+'</div>';
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Resident ID</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.reference_id||'-')+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Barangay</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.barangay_name||'-')+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Full Name</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.full_name)+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Address</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.address||'-')+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Email Address</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.email||'-')+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Registration Date</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.registration_date)+'</p></div></div>'+
+        '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Mobile Number</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.phone||'-')+'</p></div></div>'+
+      '</div></div>';
   } else if (activeTab==='pets'){
     body.innerHTML = pets.length ? pets.map(petCardProfile).join('') : '<p style="color:var(--ink-400); font-size:13px;">No registered pets.</p>';
+  } else if (activeTab==='history'){
+    var history = d.history || [];
+    if (!history.length){
+      body.innerHTML = '<div class="no-results"><i class="fas fa-history"></i><p>No activity yet.</p></div>';
+    } else {
+      body.innerHTML = '<div class="rpt-section-title">Activity Timeline</div>'+
+        '<div class="rpt-history">'+history.map(function(h){
+          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">'+cpdEsc(h.t)+'</div><div class="rpt-h-meta">by '+cpdEsc(h.a)+(h.d ? ' \u00b7 '+cpdEsc(h.d) : '')+'</div></div></div>';
+        }).join('')+'</div>';
+    }
   }
 }
 
 function infoRow(icon, label, value){
-  var icons = {
-    user:'<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
-    mail:'<path d="M22 6L12 13 2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/>',
-    phone:'<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>',
-    home:'<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
-    home2:'<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>',
-    cal:'<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
-    check:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>'
-  };
-  return '<div class="info-row"><div class="info-row-icon"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+(icons[icon]||'')+'</svg></div><div><p class="info-row-label">'+label+'</p><p class="info-row-value">'+cpdEsc(value)+'</p></div></div>';
+  return '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">'+label+'</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(value)+'</p></div></div>';
 }
 
 function petCardProfile(p){
@@ -470,6 +496,25 @@ function closeProfile(){
 
 // ── Add / Edit / Archive ──
 function openAddClient(){ openModal('addClientModal'); }
+
+var addAvatarInput = document.getElementById('addAvatar');
+var addAvatarPreview = document.getElementById('addAvatarPreview');
+var removeAddAvatar = document.getElementById('removeAddAvatar');
+if (addAvatarInput) addAvatarInput.addEventListener('change', function(){
+  var file = this.files && this.files[0];
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function(e){
+    addAvatarPreview.innerHTML = '<img src="' + e.target.result + '" alt="Client display picture preview">';
+    removeAddAvatar.style.display = 'block';
+  };
+  reader.readAsDataURL(file);
+});
+if (removeAddAvatar) removeAddAvatar.addEventListener('click', function(){
+  addAvatarInput.value = '';
+  addAvatarPreview.innerHTML = '<i class="fas fa-user"></i>';
+  removeAddAvatar.style.display = 'none';
+});
 
 function openEditClient(userId){
   var c = CLIENTS.find(function(x){ return x.id===userId; });
@@ -557,6 +602,7 @@ document.getElementById('editClientForm').addEventListener('submit', function(e)
       btn.textContent = 'Save changes';
       btn.disabled = false;
       if (data.success){
+        if (window.cpdEditAdvance) { window.cpdEditAdvance(); return; }
         closeModal('editClientModal');
         cpdToast(data.message || 'Client updated');
         setTimeout(function(){ location.reload(); }, 700);
@@ -570,6 +616,11 @@ document.getElementById('editClientForm').addEventListener('submit', function(e)
 // Toast
 var cpdToastTimer = null;
 function cpdToast(msg, isError){
+  if (typeof window.portalToast === 'function') {
+    if (isError) window.portalToast('Action failed', msg);
+    else window.portalToast(msg);
+    return;
+  }
   var t = document.getElementById('cpdToast');
   t.textContent = msg;
   t.className = 'cpd-toast '+(isError?'error':'success')+' show';
@@ -612,8 +663,251 @@ function exportCSV(){
     document.addEventListener('DOMContentLoaded', function() {
       var section = document.getElementById('client-pets');
       if (section && getComputedStyle(section).display !== 'none' && CLIENTS.length) {
-        loadClient(CLIENTS[0].id, 'profile');
+        render();
       }
     });
   }
 })();
+
+/* ── CPD bulk BEGIN: checkbox quick actions (same pattern as All Reports) ── */
+var cpdSeq = null;
+var cpdEditOrig = null;
+
+function cpdSelectedIds() {
+  var ids = [];
+  document.querySelectorAll('#dataRows .row-cb:checked').forEach(function (cb) { ids.push(String(cb.value)); });
+  return ids;
+}
+
+function cpdSelectedClients() {
+  var ids = cpdSelectedIds();
+  return CLIENTS.filter(function (c) { return ids.indexOf(String(c.id)) !== -1; });
+}
+
+function cpdToggleSelectAll(cb) {
+  document.querySelectorAll('#dataRows .row-cb').forEach(function (b) { b.checked = cb.checked; });
+  cpdUpdateBulkBar();
+}
+window.cpdToggleSelectAll = cpdToggleSelectAll;
+
+function cpdUpdateBulkBar() {
+  var checked = document.querySelectorAll('#dataRows .row-cb:checked');
+  var cnt = document.getElementById('cpdBulkCount');
+  if (cnt) cnt.textContent = checked.length;
+  var bar = document.getElementById('cpdBulkBar');
+  if (bar) bar.classList.toggle('active', checked.length > 0);
+  var all = document.getElementById('cpdSelectAll');
+  var total = document.querySelectorAll('#dataRows .row-cb').length;
+  if (all) {
+    all.checked = total > 0 && checked.length === total;
+    all.indeterminate = checked.length > 0 && checked.length < total;
+  }
+}
+window.cpdUpdateBulkBar = cpdUpdateBulkBar;
+
+function cpdFlash(msg, title) {
+  try { sessionStorage.setItem('cpdBulkToast', JSON.stringify({ title: title || 'Action complete', message: msg })); } catch (e) {}
+  setTimeout(function () { location.reload(); }, 700);
+}
+
+// Post-reload flash toast (set by bulk action summaries before location.reload())
+try {
+  var _cpdFlash = sessionStorage.getItem('cpdBulkToast');
+  if (_cpdFlash) {
+    sessionStorage.removeItem('cpdBulkToast');
+    var _cpdFlashData;
+    try { _cpdFlashData = JSON.parse(_cpdFlash); } catch (e) { _cpdFlashData = null; }
+    var _showCpdFlash = function () {
+      if (_cpdFlashData && typeof window.portalToast === 'function') window.portalToast(_cpdFlashData.title, _cpdFlashData.message);
+      else cpdToast(_cpdFlashData ? _cpdFlashData.message : _cpdFlash);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _showCpdFlash, { once: true });
+    else _showCpdFlash();
+  }
+} catch (e) {}
+
+function cpdArchiveProfileHtml(item) {
+  var isActive = String(item.status || '').toLowerCase() === 'active';
+  var avatar = item.avatar
+    ? '<img src="' + cpdEsc(item.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">'
+    : cpdEsc(item.initials || (item.name || '?').split(/\s+/).map(function (part) { return part.charAt(0); }).join('').slice(0, 2).toUpperCase());
+  return '<div style="display:flex;align-items:center;gap:12px;margin:4px 0 20px;">' +
+    '<div style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + avatar + '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+      '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;color:#71717a;">Registered client</span>' +
+      '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;overflow-wrap:anywhere;">' + cpdEsc(item.name || 'Unnamed resident') + '</span>' +
+    '</div>' +
+    '<span style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;white-space:nowrap;background:' + (isActive ? '#ECFDF3' : '#F1F5F9') + ';color:' + (isActive ? '#027A48' : '#64748b') + ';border:1px solid ' + (isActive ? '#D1FADF' : '#E2E8F0') + ';">' + cpdEsc(item.status || 'Unknown') + '</span>' +
+  '</div>' +
+  '<div class="info-card-head"><h3 style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:0;">Client Information</h3></div>' +
+  '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;padding-bottom:8px;">' +
+    infoRow('', 'Resident ID', item.ref || '-') +
+    infoRow('', 'Barangay', item.brgy || '-') +
+    infoRow('', 'Full Name', item.name || '-') +
+    infoRow('', 'Address', item.address || '-') +
+    infoRow('', 'Email Address', item.email || '-') +
+    infoRow('', 'Registration Date', item.date || '-') +
+    infoRow('', 'Mobile Number', item.phone || '-') +
+  '</div>';
+}
+
+/* Archive — review each selected client profile before applying the bulk action */
+function cpdBulkArchive() {
+  var items = cpdSelectedClients();
+  if (!items.length) { cpdToast('Select at least one client first.', true); return; }
+  cpdSeq = { type: 'archive', queue: items.slice(), total: items.length, applied: [], failed: 0, processing: false };
+  cpdShowArchiveStep();
+}
+window.cpdBulkArchive = cpdBulkArchive;
+
+function cpdShowArchiveStep() {
+  if (!cpdSeq || !cpdSeq.queue.length) { cpdFinishArchive(); return; }
+  var seq = cpdSeq;
+  var item = seq.queue[0];
+  var index = seq.total - seq.queue.length + 1;
+  var profile = document.getElementById('archiveClientsBulkProfile');
+  var description = document.getElementById('archiveClientsBulkDescription');
+  var confirm = document.getElementById('archiveClientsBulkConfirm');
+  var cancel = document.getElementById('archiveClientsBulkCancel');
+  var close = document.getElementById('archiveClientsBulkClose');
+  if (profile) profile.innerHTML = cpdArchiveProfileHtml(item);
+  if (description) {
+    description.textContent = 'Review ' + (item.name || 'this resident') + ' before archiving. ' +
+      (seq.total === 1 ? '1 client selected.' : seq.total + ' clients selected.') +
+      (seq.total > 1 ? ' Client ' + index + ' of ' + seq.total + '.' : '');
+  }
+  if (confirm) { confirm.textContent = 'Archive this client'; confirm.disabled = false; confirm.onclick = cpdRunBulkArchive; }
+  if (cancel) { cancel.disabled = false; cancel.onclick = cpdAbort; }
+  if (close) { close.disabled = false; close.onclick = cpdAbort; }
+  openModal('archiveClientsBulkModal');
+}
+
+function cpdRunBulkArchive() {
+  var seq = cpdSeq;
+  if (!seq || seq.type !== 'archive' || seq.processing) return;
+  seq.processing = true;
+  var description = document.getElementById('archiveClientsBulkDescription');
+  var confirm = document.getElementById('archiveClientsBulkConfirm');
+  var cancel = document.getElementById('archiveClientsBulkCancel');
+  var close = document.getElementById('archiveClientsBulkClose');
+  var item = seq.queue[0];
+  if (confirm) confirm.disabled = true;
+  if (cancel) cancel.disabled = true;
+  if (close) close.disabled = true;
+  if (confirm) confirm.textContent = 'Archiving...';
+  if (description) description.textContent = 'Archiving ' + (item.name || 'client') + '...';
+  var fd = new FormData();
+  fd.append('action', 'archive_client');
+  fd.append('user_id', item.id);
+  fetch('client-database-handler.php', { method: 'POST', body: fd })
+    .then(function (r) { return r.json(); })
+    .then(function (data) { if (data && data.success) seq.applied.push(item); else seq.failed++; })
+    .catch(function () { seq.failed++; })
+    .then(function () {
+      if (cpdSeq !== seq) return;
+      seq.processing = false;
+      seq.queue.shift();
+      if (seq.queue.length) cpdShowArchiveStep();
+      else cpdFinishArchive();
+    });
+}
+
+function cpdFinishArchive() {
+  if (!cpdSeq) return;
+  var seq = cpdSeq;
+  cpdSeq = null;
+  closeModal('archiveClientsBulkModal');
+  cpdFlash(seq.applied.length + ' of ' + seq.total + ' client(s) archived.' + (seq.failed ? ' ' + seq.failed + ' failed.' : ''), 'Clients Archived');
+}
+
+/* Edit — sequential editClientModal steps (form save advances the sequence) */
+function cpdBulkEdit() {
+  var items = cpdSelectedClients();
+  if (!items.length) { cpdToast('Select at least one client first.', true); return; }
+  cpdSeq = { type: 'edit', queue: items.slice(), total: items.length, applied: [], failed: 0 };
+  var root = document.getElementById('editClientModal');
+  var descEl = root ? root.querySelector('.sd-dialog-description') : null;
+  var closeBtn = root ? root.querySelector('.sd-dialog-close') : null;
+  var cancelBtn = root ? root.querySelector('.sd-dialog-footer .sd-btn-outline') : null;
+  if (!cpdEditOrig && descEl) {
+    cpdEditOrig = { html: descEl.innerHTML, close: closeBtn ? closeBtn.onclick : null, cancel: cancelBtn ? cancelBtn.onclick : null };
+  }
+  if (closeBtn) closeBtn.onclick = function () { closeModal('editClientModal'); cpdAbort(); };
+  if (cancelBtn) cancelBtn.onclick = function () { closeModal('editClientModal'); cpdAbort(); };
+  window.cpdEditAdvance = cpdEditAdvanceFn;
+  cpdShowEditStep();
+}
+window.cpdBulkEdit = cpdBulkEdit;
+
+function cpdShowEditStep() {
+  if (!cpdSeq || !cpdSeq.queue.length) { cpdFinishEdit(); return; }
+  var item = cpdSeq.queue[0];
+  var idx = cpdSeq.total - cpdSeq.queue.length + 1;
+  openEditClient(item.id);
+  var root = document.getElementById('editClientModal');
+  var descEl = root ? root.querySelector('.sd-dialog-description') : null;
+  if (descEl && cpdEditOrig) {
+    descEl.innerHTML = cpdEditOrig.html + (cpdSeq.total > 1 ? ' Editing ' + idx + ' of ' + cpdSeq.total + ' selected clients.' : '');
+  }
+}
+
+function cpdEditAdvanceFn() {
+  if (!cpdSeq || cpdSeq.type !== 'edit') return;
+  var item = cpdSeq.queue.shift();
+  if (item) cpdSeq.applied.push(item);
+  if (cpdSeq.queue.length) { cpdShowEditStep(); return; }
+  cpdFinishEdit();
+}
+
+function cpdFinishEdit() {
+  if (!cpdSeq) return;
+  var seq = cpdSeq;
+  cpdSeq = null;
+  window.cpdEditAdvance = null;
+  cpdRestoreEdit();
+  closeModal('editClientModal');
+  cpdFlash(seq.applied.length + ' of ' + seq.total + ' client(s) updated.');
+}
+
+function cpdRestoreEdit() {
+  if (!cpdEditOrig) return;
+  var root = document.getElementById('editClientModal');
+  var descEl = root ? root.querySelector('.sd-dialog-description') : null;
+  var closeBtn = root ? root.querySelector('.sd-dialog-close') : null;
+  var cancelBtn = root ? root.querySelector('.sd-dialog-footer .sd-btn-outline') : null;
+  if (descEl) descEl.innerHTML = cpdEditOrig.html;
+  if (closeBtn && cpdEditOrig.close) closeBtn.onclick = cpdEditOrig.close;
+  if (cancelBtn && cpdEditOrig.cancel) cancelBtn.onclick = cpdEditOrig.cancel;
+  cpdEditOrig = null;
+}
+
+/* Cancel/abort a running bulk sequence (Cancel button, backdrop click, or Escape) */
+function cpdAbort() {
+  if (!cpdSeq) return;
+  var seq = cpdSeq;
+  if (seq.type === 'archive' && seq.processing) return;
+  cpdSeq = null;
+  if (seq.type === 'archive') closeModal('archiveClientsBulkModal');
+  if (seq.type === 'edit') { window.cpdEditAdvance = null; cpdRestoreEdit(); }
+  if (seq.applied && seq.applied.length) cpdFlash(seq.applied.length + ' change(s) applied before cancelling.');
+  else cpdToast('Cancelled.');
+}
+
+// Treat external closes (backdrop click / Escape) as sequence cancellation
+document.addEventListener('click', function (e) {
+  if (!cpdSeq || !e.target) return;
+  if (cpdSeq.type === 'archive' && e.target.id === 'archiveClientsBulkModal') {
+    if (cpdSeq.processing) { e.preventDefault(); e.stopPropagation(); return; }
+    cpdAbort();
+  }
+  else if (cpdSeq.type === 'edit' && e.target.id === 'editClientModal') cpdAbort();
+}, true);
+document.addEventListener('keydown', function (e) {
+  if (!cpdSeq || e.key !== 'Escape') return;
+  if (cpdSeq.type === 'archive') {
+    if (cpdSeq.processing) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+    cpdAbort();
+  }
+  else { closeModal('editClientModal'); cpdAbort(); }
+}, true);
+/* ── CPD bulk END ── */

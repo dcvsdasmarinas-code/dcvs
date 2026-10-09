@@ -15,12 +15,12 @@ if (in_array($sessParam, $sessionWhitelist, true)) {
 session_start();
 header('Content-Type: application/json');
 
+require_once __DIR__ . '/../db.php';
+
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     echo json_encode(['error' => 'Unauthorized']);
     exit;
 }
-
-require_once __DIR__ . '/../db.php';
 
 $role     = $_SESSION['role'] ?? 'resident';
 $userId   = (int)$_SESSION['user_id'];
@@ -40,8 +40,22 @@ $response = [
 ];
 
 // ── 1. Notifications (every role) ──
-$nStmt = $conn->prepare("SELECT notification_id, type, title, message, reference_type, reference_id, is_read, created_at
-    FROM notifications WHERE user_id = ? AND created_at > ? ORDER BY created_at DESC LIMIT 20");
+$nStmt = $conn->prepare("SELECT n.notification_id, n.type, n.title, n.message, n.reference_type, n.reference_id, n.is_read, n.created_at,
+        activity_user.full_name AS activity_user_name, activity_user.avatar_url AS activity_avatar_url
+    FROM notifications n
+    LEFT JOIN reports r ON n.reference_type = 'report' AND n.reference_id = r.report_id
+    LEFT JOIN appointments a ON n.reference_type = 'appointments' AND n.reference_id = a.appointment_id
+    LEFT JOIN pets p ON n.reference_type = 'pets' AND n.reference_id = p.pet_id
+    LEFT JOIN users activity_user ON activity_user.user_id = CASE
+        WHEN n.reference_type = 'report' AND n.type = 'report_validated' THEN r.validated_by
+        WHEN n.reference_type = 'report' THEN r.reporter_id
+        WHEN n.reference_type = 'appointments' THEN a.user_id
+        WHEN n.reference_type = 'pets' THEN p.owner_id
+        WHEN n.reference_type = 'staff_message' THEN n.reference_id
+        ELSE NULL
+    END
+    WHERE n.user_id = ? AND n.created_at > ? AND n.archived_at IS NULL
+    ORDER BY n.created_at DESC LIMIT 20");
 $nStmt->bind_param("is", $userId, $lastPoll);
 $nStmt->execute();
 $nr = $nStmt->get_result();
@@ -51,16 +65,12 @@ while ($row = $nr->fetch_assoc()) {
 $nStmt->close();
 
 // Unread badge count — matches what each portal's dropdown actually shows.
-// Resident bell lists only staff_message notifications; other portals show all
-// visible notifications (excluding stale report_validated ones).
 if ($role === 'resident') {
-    $ucStmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'staff_message' AND is_read = 0");
+    $ucStmt = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND type = 'staff_message' AND is_read = 0 AND archived_at IS NULL");
     $ucStmt->bind_param("i", $userId);
 } else {
     $ucStmt = $conn->prepare("SELECT COUNT(*) FROM notifications n
-        LEFT JOIN reports r ON n.reference_type = 'report' AND n.reference_id = r.report_id
-        WHERE n.user_id = ? AND n.is_read = 0
-          AND NOT (n.type = 'report_validated' AND r.report_id IS NOT NULL AND r.status != 'validated')");
+        WHERE n.user_id = ? AND n.is_read = 0 AND n.archived_at IS NULL");
     $ucStmt->bind_param("i", $userId);
 }
 $ucStmt->execute();
@@ -89,7 +99,8 @@ if ($role === 'resident') {
         JOIN users u ON a.user_id = u.user_id
         LEFT JOIN pets p ON a.pet_id = p.pet_id
         LEFT JOIN barangays b ON u.barangay_id = b.barangay_id
-        WHERE a.archived_at IS NULL AND a.updated_at > ? ORDER BY a.appointment_id ASC");
+        WHERE a.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
+          AND a.updated_at > ? ORDER BY a.appointment_id ASC");
     $aStmt->bind_param("s", $lastPoll);
     $aStmt->execute();
     $ar = $aStmt->get_result();
@@ -115,7 +126,7 @@ if ($role === 'resident') {
 
 // ── 3. Reports ──
 if ($role === 'resident') {
-    $rStmt = $conn->prepare("SELECT report_id, reference_id, report_type, location_address, status, urgency_level, created_at, updated_at
+    $rStmt = $conn->prepare("SELECT report_id, reference_id, report_type, location_address, status, urgency_level, incident_at, created_at, updated_at
         FROM reports WHERE reporter_id = ? AND archived_at IS NULL AND updated_at > ? ORDER BY created_at DESC");
     $rStmt->bind_param("is", $userId, $lastPoll);
     $rStmt->execute();
@@ -123,12 +134,16 @@ if ($role === 'resident') {
     while ($row = $rr->fetch_assoc()) $response['reports'][] = $row;
     $rStmt->close();
 } elseif ($role === 'staff' || $role === 'admin') {
-    $rStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.location_address, r.status,
-        r.urgency_level, r.created_at, r.updated_at, u.full_name AS reporter_name,
-        b.barangay_name FROM reports r
+    $rStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.barangay_id, r.location_address, r.description,
+        r.status, r.urgency_level, r.created_at, r.updated_at, r.validated_at, r.confirmed_at, r.scheduled_at, r.dcvs_notes,
+        u.full_name AS reporter_name, u.phone AS reporter_phone, u.email AS reporter_email, u.avatar_url,
+        b.barangay_name, cc.case_id, cc.status AS case_status, cc.confirmed_at AS case_confirmed_at, cc.resolved_at
+        FROM reports r
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
-        WHERE r.archived_at IS NULL AND r.updated_at > ? ORDER BY r.created_at DESC");
+        LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id
+        WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
+          AND r.updated_at > ? ORDER BY r.created_at DESC");
     $rStmt->bind_param("s", $lastPoll);
     $rStmt->execute();
     $rr = $rStmt->get_result();
@@ -193,22 +208,32 @@ if ($role === 'resident') {
 }
 
 if ($role === 'staff' || $role === 'admin') {
-    $cStmt = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident' AND status = 'active'");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident' AND status = 'active' AND deleted_at IS NULL");
     $counts['residents'] = (int)$cStmt->fetch_row()[0];
     $counts['active_residents'] = $counts['residents'];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM pets WHERE archived_at IS NULL");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM pets p JOIN users u ON p.owner_id = u.user_id
+        WHERE p.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['pets'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id
+        WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['reports'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending','validated') AND archived_at IS NULL");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id
+        WHERE r.report_type = 'rabies' AND r.status IN ('pending','validated') AND r.archived_at IS NULL
+          AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['rabies'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND status = 'pending'");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id
+        WHERE r.archived_at IS NULL AND r.status = 'pending' AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['pending_reports'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND status = 'validated'");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id
+        WHERE r.archived_at IS NULL AND r.status = 'validated' AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['validated_reports'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM appointments WHERE archived_at IS NULL AND status = 'pending'");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id
+        WHERE a.archived_at IS NULL AND a.status = 'pending' AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['pending_appointments'] = (int)$cStmt->fetch_row()[0];
-    $cStmt = $conn->query("SELECT COUNT(*) FROM confirmed_cases WHERE status = 'active'");
+    $cStmt = $conn->query("SELECT COUNT(*) FROM confirmed_cases cc
+        JOIN reports r ON cc.report_id = r.report_id
+        JOIN users u ON r.reporter_id = u.user_id
+        WHERE cc.status = 'active' AND u.status = 'active' AND u.deleted_at IS NULL");
     $counts['active_cases'] = (int)$cStmt->fetch_row()[0];
 }
 

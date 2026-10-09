@@ -13,6 +13,7 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -26,11 +27,19 @@ $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
 
 $messageTypes = [
     'general'          => 'General Message',
-    'report'           => 'Regarding Your Animal Report',
-    'appointment'      => 'Regarding Your Appointment',
-    'adoption'         => 'Regarding Your Adoption Request',
+  'report'           => 'Animal Report',
+  'appointment'      => 'Appointment',
+  'adoption'         => 'Adoption Request',
     'followup'         => 'Follow-up / Reminder',
-    'other'            => 'Other'
+  'barangay_general'       => 'General Message',
+  'barangay_report'        => 'Animal Report',
+  'barangay_rescue'        => 'Rescue Case',
+  'barangay_pets'          => 'Pet Records',
+  'barangay_vaccination'   => 'Vaccination',
+  'barangay_coordination'  => 'Barangay Coordination',
+  'barangay_followup'      => 'Follow-up / Reminder',
+  'barangay_other'         => 'Other',
+  'other'            => 'Other'
 ];
 $typeShortLabels = [
     'general'     => 'General',
@@ -38,8 +47,74 @@ $typeShortLabels = [
     'appointment' => 'Appointment',
     'adoption'    => 'Adoption',
     'followup'    => 'Follow-up',
+    'barangay_general'      => 'General',
+    'barangay_report'       => 'Report',
+    'barangay_rescue'       => 'Rescue',
+    'barangay_pets'         => 'Pet Records',
+    'barangay_vaccination'  => 'Vaccination',
+    'barangay_coordination' => 'Coordination',
+    'barangay_followup'     => 'Follow-up',
+    'barangay_other'        => 'Other',
     'other'       => 'Other',
 ];
+
+  function communicationNodeText($node) {
+    if ($node->nodeType === XML_TEXT_NODE || $node->nodeType === XML_CDATA_SECTION_NODE) {
+      return $node->nodeValue;
+    }
+    if ($node->nodeType === XML_ELEMENT_NODE && strtolower($node->nodeName) === 'br') {
+      return "\n";
+    }
+
+    $text = '';
+    foreach ($node->childNodes as $child) {
+      $text .= communicationNodeText($child);
+    }
+    return $text;
+  }
+
+  function normalizeCommunicationText($text) {
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = str_replace(["\r\n", "\r"], "\n", $text);
+    $text = preg_replace('/[ \t]+/', ' ', $text);
+    $text = preg_replace('/ *\n */', "\n", $text);
+    $text = preg_replace('/\n{3,}/', "\n\n", $text);
+    return trim($text);
+  }
+
+  function extractCommunicationMessage($htmlBody) {
+    $previousLibxmlState = libxml_use_internal_errors(true);
+    $document = new DOMDocument('1.0', 'UTF-8');
+    $document->loadHTML('<?xml encoding="UTF-8">' . $htmlBody, LIBXML_NONET);
+    libxml_clear_errors();
+    libxml_use_internal_errors($previousLibxmlState);
+
+    $paragraphs = $document->getElementsByTagName('p');
+    for ($index = 0; $index < $paragraphs->length - 1; $index++) {
+      $intro = normalizeCommunicationText($paragraphs->item($index)->textContent);
+      if (strpos($intro, 'We sent you the following message regarding') === false) continue;
+
+      $message = normalizeCommunicationText(communicationNodeText($paragraphs->item($index + 1)));
+      if ($message !== '') return $message;
+    }
+
+    $withBreaks = preg_replace('/<(br\b[^>]*|\/p\s*|\/div\s*|\/tr\s*)>/i', "\n", $htmlBody);
+    return normalizeCommunicationText(strip_tags($withBreaks));
+  }
+
+  function buildCommunicationSms($firstName, $messageType, $message) {
+    $parts = [getSmsGreeting($firstName)];
+    $intros = [
+      'report' => 'Here is an update regarding the animal report.',
+      'appointment' => 'Here is an update regarding the appointment.',
+      'adoption' => 'Here is an update regarding the adoption request.',
+      'followup' => 'We have a follow-up and reminder for your appointment.'
+    ];
+
+    if (isset($intros[$messageType])) $parts[] = $intros[$messageType];
+    $parts[] = trim($message);
+    return implode("\n\n", array_filter($parts, function($part) { return $part !== ''; }));
+  }
 
 // Handle sending message (PRG pattern — redirect after POST to avoid resubmission)
 $sendSuccess = $_SESSION['comm_success'] ?? null;
@@ -57,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_message'])) {
         $_SESSION['comm_error'] = "All fields are required.";
     } else {
         // Fetch the recipient from DB (always use the registered email, never hardcoded)
-        $userStmt = $conn->prepare("SELECT user_id, full_name, email, role FROM users WHERE user_id = ? AND role = ? AND status = 'active'");
+        $userStmt = $conn->prepare("SELECT user_id, full_name, email, phone, role FROM users WHERE user_id = ? AND role = ? AND status = 'active' AND deleted_at IS NULL");
         $userStmt->bind_param("is", $recipientId, $recipientRole);
         $userStmt->execute();
         $recipient = $userStmt->get_result()->fetch_assoc();
@@ -73,21 +148,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_message'])) {
 
             $emailSent = false;
 
-            // For residents: also queue an email to their registered email address (delivered in background)
-            if ($recipientRole === 'resident' && !empty($recipient['email'])) {
+            // Queue email to the registered address for both residents and barangay officers.
+            if (in_array($recipientRole, ['resident', 'barangay'], true) && !empty($recipient['email'])) {
                 $typeLabel = $messageTypes[$messageType] ?? 'Message';
+                $portalLabel = $recipientRole === 'barangay' ? 'barangay' : 'resident';
 
                 $escapedMsg = nl2br(htmlspecialchars($message));
                 $htmlBody = dcvsEmailTemplate($typeLabel, '
-                    <p>Dear ' . htmlspecialchars($recipient['full_name']) . ',</p>
-                    <p><strong>' . htmlspecialchars($staffName) . '</strong> from Dasmariñas City Veterinary Services sent you the following message regarding <strong>' . htmlspecialchars($typeLabel) . '</strong>:</p>
-                    <div style="margin:14px 0;">
-                    <div style="border-top:1px solid #e2e8f0;margin-bottom:10px;"></div>
-                    <p style="margin:0;font-size:14px;color:#1e293b;line-height:1.6;">' . $escapedMsg . '</p>
-                    <div style="border-top:1px solid #e2e8f0;margin-top:10px;"></div>
-                    </div>
-                    <p style="margin-top:16px;">You can view this message and respond by logging into the DCVS resident portal.</p>
-                    <p style="margin-top:8px;">— Dasmariñas City Veterinary Services</p>
+                    <p style="margin:0 0 16px;">Dear ' . htmlspecialchars($recipient['full_name']) . ',</p>
+                    <p style="margin:0 0 16px;">We sent you the following message regarding <strong>' . htmlspecialchars($typeLabel) . '</strong>:</p>
+                    <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#0f172a;">' . $escapedMsg . '</p>
+                    <p style="margin:0 0 8px;font-size:13px;color:#64748b;">You can view this message and respond by logging into the DCVS ' . $portalLabel . ' portal.</p>
                 ');
 
                 $queueId = enqueueDcvsEmail(
@@ -105,19 +176,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_message'])) {
                 if ($emailSent) spawnEmailWorker();
             }
 
-            // Log barangay messages to email_logs too (portal-only delivery)
-            if ($recipientRole === 'barangay') {
-                logEmail($conn, $recipient['email'] ?? '', $recipient['full_name'], $subject, $message, 'sent', null, $staffId, 'barangay', $messageType, true);
+            // For residents: also send SMS if phone number is available
+            $smsSent = false;
+            $smsError = null;
+            if ($recipientRole === 'resident' && !empty($recipient['phone']) && isSmsEnabled($conn)) {
+                $firstName = getFirstName($recipient['full_name']);
+                $smsMsg = buildCommunicationSms($firstName, $messageType, $message);
+                $smsResult = sendTextbeeSms($recipient['phone'], $smsMsg);
+                $smsSent = $smsResult['success'];
+                $smsError = $smsResult['error'];
+                logSms($conn, $recipient['phone'], $recipient['full_name'], $smsMsg,
+                    $smsSent ? 'sent' : 'failed', $smsResult['error'], $staffId, $recipientRole, 'communication', $smsResult['id']);
             }
 
-            if ($recipientRole === 'resident' && $emailSent) {
-                $_SESSION['comm_success'] = "Message queued for delivery to " . htmlspecialchars($recipient['full_name']) . " — will be delivered to portal and email shortly.";
-            } elseif ($recipientRole === 'resident' && !empty($recipient['email'])) {
-                $_SESSION['comm_error'] = "Failed to queue email delivery. Portal notification was sent.";
+            if ($recipientRole === 'resident' && $emailSent && $smsSent) {
+              $_SESSION['comm_success'] = "Message sent successfully to <strong>" . htmlspecialchars($recipient['full_name'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . "</strong> via portal, email, and SMS.";
+            } elseif ($recipientRole === 'resident' && $emailSent) {
+              $_SESSION['comm_success'] = "Message queued for delivery to " . htmlspecialchars($recipient['full_name']) . " — delivered to portal and email." . (!empty($recipient['phone']) ? " SMS was not accepted by IPROG SMS: " . htmlspecialchars($smsError ?: 'unknown error') : " No phone number is on file for SMS.");
+            } elseif ($recipientRole === 'resident' && $smsSent) {
+              $_SESSION['comm_success'] = "Message sent to " . htmlspecialchars($recipient['full_name']) . " via portal; SMS accepted by IPROG SMS (carrier delivery may still be pending)." . (!empty($recipient['email']) ? " Email was not queued — check mailer settings." : "");
             } elseif ($recipientRole === 'barangay') {
-                $_SESSION['comm_success'] = "Message sent successfully to " . htmlspecialchars($recipient['full_name']) . " — delivered to barangay portal.";
+                if ($emailSent) {
+                    $_SESSION['comm_success'] = "Message queued for delivery to " . htmlspecialchars($recipient['full_name']) . " — delivered to barangay portal and queued for email.";
+                } else {
+                    $_SESSION['comm_success'] = "Message delivered to " . htmlspecialchars($recipient['full_name']) . " via barangay portal." . (!empty($recipient['email']) ? " Email was not queued — check mailer settings." : " No email address is on file.");
+                }
             } else {
-                $_SESSION['comm_success'] = "Message sent to portal. (Recipient has no email address on file.)";
+              $_SESSION['comm_success'] = "Message sent to portal." . ($smsError ? " SMS was not accepted by IPROG SMS: " . htmlspecialchars($smsError) : " (Recipient has no email or phone on file.)");
             }
         }
     }
@@ -147,15 +232,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resend_log_id'])) {
         $messageType     = $orig['message_type'] ?? 'general';
         $sentToRole      = $orig['sent_to_role'] ?? 'resident';
 
-        // Rebuild a readable plain message for the portal notification
-        $plainMsg = strip_tags($body);
-        $plainMsg = html_entity_decode(str_replace(['&nbsp;'], ' ', $plainMsg));
+        // Recover only the staff-composed text from the stored email template.
+        $plainMsg = extractCommunicationMessage($body);
         $msgPreview = function_exists('mb_substr') ? mb_substr($plainMsg, 0, 200) : substr($plainMsg, 0, 200);
 
         $emailSent = false;
+        $smsSent = false;
+        $smsError = null;
         if ($sentToRole === 'barangay') {
-            // Portal-only redelivery for barangay: look up the recipient by email
-            $rcptStmt = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND role = 'barangay' AND status = 'active' LIMIT 1");
+            // Redeliver to the barangay portal and queue email to the registered address.
+            $rcptStmt = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND role = 'barangay' AND status = 'active' AND deleted_at IS NULL LIMIT 1");
             $rcptStmt->bind_param("s", $recipientEmail);
             $rcptStmt->execute();
             $rcptRow = $rcptStmt->get_result()->fetch_assoc();
@@ -164,13 +250,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resend_log_id'])) {
             if ($rcptRow) {
                 createNotification($conn, $rcptRow['user_id'], 'staff_message', 'Message from Staff — ' . $subject, $staffName . ' wrote: ' . $msgPreview, 'staff_message', $staffId, $messageType);
             }
-            // Rebuild an HTML body for the log entry (portal-only delivery)
-            $htmlBody = dcvsEmailTemplate($messageTypes[$messageType] ?? 'Message', '<p>' . nl2br(htmlspecialchars($plainMsg)) . '</p>');
-            logEmail($conn, $recipientEmail, $recipientName, $subject, $plainMsg, 'sent', null, $staffId, 'barangay', $messageType, true);
-            $emailSent = true;
+            $typeLabel = $messageTypes[$messageType] ?? 'Message';
+            $htmlBody = dcvsEmailTemplate($typeLabel, '
+                <p style="margin:0 0 16px;">Dear ' . htmlspecialchars($recipientName) . ',</p>
+                <p style="margin:0 0 16px;">We sent you the following message regarding <strong>' . htmlspecialchars($typeLabel) . '</strong>:</p>
+                <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#0f172a;">' . nl2br(htmlspecialchars($plainMsg)) . '</p>
+                <p style="margin:0 0 8px;font-size:13px;color:#64748b;">You can view this message and respond by logging into the DCVS barangay portal.</p>
+            ');
+            $queueId = enqueueDcvsEmail($conn, $recipientEmail, $recipientName, $subject, $htmlBody, $staffId, 'barangay', $messageType, true);
+            $emailSent = $queueId !== null;
+            if ($emailSent) spawnEmailWorker();
         } else {
-            // Residents: portal notification + email
-            $rcptStmt = $conn->prepare("SELECT user_id FROM users WHERE email = ? AND role = 'resident' AND status = 'active' LIMIT 1");
+            // Residents: portal notification + email + SMS
+            $rcptStmt = $conn->prepare("SELECT user_id, phone FROM users WHERE email = ? AND role = 'resident' AND status = 'active' AND deleted_at IS NULL LIMIT 1");
             $rcptStmt->bind_param("s", $recipientEmail);
             $rcptStmt->execute();
             $rcptRow = $rcptStmt->get_result()->fetch_assoc();
@@ -178,6 +270,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resend_log_id'])) {
 
             if ($rcptRow) {
                 createNotification($conn, $rcptRow['user_id'], 'staff_message', 'Message from Staff — ' . $subject, $staffName . ' wrote: ' . $msgPreview, 'staff_message', $staffId, $messageType);
+
+                // Also resend SMS if phone is available
+                if (!empty($rcptRow['phone']) && isSmsEnabled($conn)) {
+                    $firstName = getFirstName($recipientName);
+                    $smsMsg = buildCommunicationSms($firstName, $messageType, $plainMsg);
+                    $smsResult = sendTextbeeSms($rcptRow['phone'], $smsMsg);
+                    $smsSent = $smsResult['success'];
+                    $smsError = $smsResult['error'];
+                    logSms($conn, $rcptRow['phone'], $recipientName, $smsMsg,
+                      $smsSent ? 'sent' : 'failed', $smsError, $staffId, 'resident', 'communication', $smsResult['id']);
+                }
             }
             // Body stored is already the full HTML email template — reuse it
             $queueId = enqueueDcvsEmail($conn, $recipientEmail, $recipientName, $subject, $body, $staffId, $sentToRole, $messageType, true);
@@ -185,8 +288,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resend_log_id'])) {
             if ($emailSent) spawnEmailWorker();
         }
 
-        if ($emailSent) {
-            $_SESSION['comm_success'] = "Message queued for resend to " . htmlspecialchars($recipientName ?: $recipientEmail) . " — will be re-delivered shortly.";
+        if ($emailSent && $smsSent) {
+          $_SESSION['comm_success'] = "Message queued for resend to " . htmlspecialchars($recipientName ?: $recipientEmail) . " — portal and email queued; SMS accepted by IPROG SMS (carrier delivery may still be pending).";
+        } elseif ($emailSent) {
+          $_SESSION['comm_success'] = "Message queued for resend to " . htmlspecialchars($recipientName ?: $recipientEmail) . " — portal and email queued." . ($smsError ? " SMS was not accepted by IPROG SMS: " . htmlspecialchars($smsError) : " SMS was not sent.");
         } else {
             $_SESSION['comm_error'] = "Resend failed. The message was recorded as failed. Please check email configuration.";
         }
@@ -208,6 +313,7 @@ if (isset($_GET['ajax_logs'])) {
     $sortMap = [
         'date' => 'el.created_at', 'time' => 'el.created_at',
         'recipient' => 'el.recipient_name', 'email' => 'el.recipient_email',
+        'mobile' => 'u.phone', 'barangay' => 'b.barangay_name',
         'subject' => 'el.subject', 'type' => 'el.message_type',
         'delivery' => 'el.status'
     ];
@@ -240,7 +346,7 @@ if (isset($_GET['ajax_logs'])) {
 
     $offset = ($page - 1) * $perPage;
     $logs = [];
-    $logStmt = $conn->prepare("SELECT el.* FROM email_logs el WHERE $where ORDER BY $orderBy, el.log_id DESC LIMIT ? OFFSET ?");
+    $logStmt = $conn->prepare("SELECT el.*, u.phone AS recipient_phone, b.barangay_name AS recipient_barangay FROM email_logs el LEFT JOIN users u ON u.email = el.recipient_email AND u.role = el.sent_to_role LEFT JOIN barangays b ON b.barangay_id = u.barangay_id WHERE $where ORDER BY $orderBy, el.log_id DESC LIMIT ? OFFSET ?");
     if ($logStmt) {
         $logStmt->bind_param($types . 'ii', ...[...$params, $perPage, $offset]);
         $logStmt->execute();
@@ -268,6 +374,13 @@ if ($countStmt) {
 // Fetch active residents and barangay users
 $residents = getUsersByRole($conn, 'resident');
 $barangayUsers = getUsersByRole($conn, 'barangay');
+$barangays = [];
+$barangayResult = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
+if ($barangayResult) {
+  while ($barangayRow = $barangayResult->fetch_assoc()) {
+    $barangays[] = $barangayRow;
+  }
+}
 
 // DO NOT close $conn here — sidebar include uses it for notifications
 ?>
@@ -313,18 +426,32 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-page { padding-bottom: 3rem; }
 
     .comm-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem; }
-    .comm-header .page-title { font-size: 1.35rem; font-weight: 800; color: #0f172a; margin: 0; font-family: 'Montserrat', sans-serif; }
+    .comm-header .page-title { font-size: 1.35rem; font-weight: 800; color: #0f172a; margin: 0; font-family: 'Inter', sans-serif; }
     .comm-header .page-subtitle { font-size: 0.88rem; color: #64748b; margin: 4px 0 0; }
 
 .btn-compose { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; background: var(--green, #045e1f); color: #fff; border: none; border-radius: 10px; padding: 0.7rem 1.3rem; font-family: inherit; font-size: 0.88rem; font-weight: 600; cursor: pointer; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); transition: all 0.2s; }
   .btn-compose:hover { background: var(--green-dark, #043012); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); }
 
-    /* ── Alert banners ── */
-    .comm-alert { display: flex; align-items: flex-start; gap: 0.55rem; padding: 0.8rem 1.1rem; border-radius: 10px; font-size: 0.85rem; font-weight: 500; line-height: 1.4; margin-bottom: 1.1rem; width: fit-content; max-width: 100%; opacity: 1; transition: opacity 0.6s ease; }
-    .comm-alert.fade-out { opacity: 0; }
-    .comm-alert.success { background: var(--comm-success-soft); color: #065f46; border: 1px solid #bbf7d0; }
-    .comm-alert.error { background: var(--comm-danger-soft); color: #991b1b; border: 1px solid #fecaca; }
-    .comm-alert i { margin-top: 2px; }
+    /* ── Toast notifications ── */
+    .toast-container{position:fixed;bottom:1.5rem;right:1.5rem;display:flex;flex-direction:column-reverse;gap:0.5rem;z-index:9999;pointer-events:none;}
+    .toast{pointer-events:auto;display:flex;align-items:flex-start;gap:0.75rem;min-width:300px;max-width:420px;padding:1rem 1.25rem;border-radius:0.625rem;font-size:0.8125rem;line-height:1.4;font-weight:500;background:#fff;color:#18181b;border:1px solid #e4e4e7;box-shadow:0 8px 24px rgba(0,0,0,0.12),0 2px 6px rgba(0,0,0,0.06);transform:translateX(calc(100% + 1.5rem));opacity:0;transition:transform 0.3s cubic-bezier(0.16,1,0.3,1),opacity 0.25s ease;}
+    .toast.show{transform:translateX(0);opacity:1;}
+    .toast.hiding{transform:translateX(calc(100% + 1.5rem));opacity:0;}
+    .toast-icon{flex-shrink:0;width:1.125rem;height:1.125rem;margin-top:1px;}
+    .toast-body{flex:1;min-width:0;}
+    .toast-title{font-weight:600;color:#18181b;margin:0;}
+    .toast-desc{font-weight:400;color:#71717a;margin:0.125rem 0 0;font-size:0.8125rem;}
+    .toast-close{flex-shrink:0;width:1.25rem;height:1.25rem;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:#71717a;cursor:pointer;border-radius:0.25rem;transition:background 0.12s,color 0.12s;}
+    .toast-close:hover{background:#f4f4f5;color:#18181b;}
+    .toast.success{border-color:#bbf7d0;background:#f0fdf4;}
+    .toast.success .toast-icon{color:#16a34a;}
+    .toast.success .toast-title{color:#065f46;}
+    .toast.error{border-color:#fecaca;background:#fef2f2;}
+    .toast.error .toast-icon{color:#dc2626;}
+    .toast.error .toast-title{color:#991b1b;}
+    .toast.info{border-color:#bae6fd;background:#f0f9ff;}
+    .toast.info .toast-icon{color:#0284c7;}
+    .toast.info .toast-title{color:#0c4a6e;}
 
     /* ── Search & Filter toolbar ── */
     .comm-toolbar { display: flex; align-items: center; justify-content: flex-start; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -346,29 +473,33 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-card .sd-data-table .sd-tr { border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
     .comm-card .sd-data-table .sd-tr:last-child { border-bottom: none; }
     .comm-card .sd-data-table tbody .sd-tr:hover { background: #f8fafc; }
-    .comm-card .sd-th { height: 40px; padding: 0 8px; text-align: left; vertical-align: middle; font-family: inherit; font-size: 14px; font-weight: 700; color: #000; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
-    .comm-card .sd-th:nth-child(1) { width: 110px; }
-    .comm-card .sd-th:nth-child(2) { width: 85px; }
-    .comm-card .sd-th:nth-child(3) { width: 16%; }
-    .comm-card .sd-th:nth-child(4) { width: 20%; }
-    .comm-card .sd-th:nth-child(5) { width: auto; }
-    .comm-card .sd-th:nth-child(6) { width: 90px; }
-    .comm-card .sd-th:nth-child(7) { width: 140px; }
-    .comm-card .sd-th-action { width: 48px; }
+    .comm-card .sd-th:nth-child(1) { width: 8%; }
+    .comm-card .sd-th:nth-child(2) { width: 8%; }
+    .comm-card .sd-th:nth-child(3) { width: 12%; }
+    .comm-card .sd-th:nth-child(4) { width: 9%; }
+    .comm-card .sd-th:nth-child(5) { width: 14%; }
+    .comm-card .sd-th:nth-child(6) { width: 9%; }
+    .comm-card .sd-th:nth-child(7) { width: 9%; }
+    .comm-card .sd-th:nth-child(8) { width: 12%; }
+    .comm-card .sd-th:nth-child(9) { width: 9%; }
+    .comm-card .sd-th:nth-child(10) { width: 7%; }
+    .comm-card .sd-th-action { width: 3%; }
+    .comm-card .sd-th { text-align: left; vertical-align: middle; }
     .comm-card .sd-td { padding: 12px; vertical-align: middle; font-size: 13px; color: #3f3f46; line-height: 1.4; }
+    .comm-card .sd-td { text-align: left; }
     .comm-card .sd-td-action { text-align: right; }
 
     .log-col-date { white-space: nowrap; color: var(--comm-text-3); font-size: 0.8rem; }
-    .log-recipient .name { font-weight: 600; color: var(--comm-text); }
-    .log-recipient .email { font-size: 0.74rem; color: var(--comm-text-3); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
-    .log-subject .subj { font-weight: 500; color: var(--comm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+    .log-recipient .name { font-weight: 600; color: var(--comm-text); overflow-wrap: anywhere; }
+    .log-recipient .email { font-size: 0.74rem; color: var(--comm-text-3); margin-top: 1px; overflow-wrap: anywhere; }
+    .log-subject .subj { font-weight: 500; color: var(--comm-text); overflow-wrap: anywhere; }
 
     /* ── Message type (plain black bold text) ── */
-    .type-badge { font-size: 0.78rem; font-weight: 700; white-space: nowrap; color: #0f172a; }
+    .type-badge { font-size: 0.78rem; font-weight: 700; color: #0f172a; overflow-wrap: anywhere; }
 
     /* ── Delivery status (plain black bold text) ── */
     .delivery-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-    .delivery-badge { font-size: 0.76rem; font-weight: 700; white-space: nowrap; color: #0f172a; }
+    .delivery-badge { font-size: 0.76rem; font-weight: 700; color: #0f172a; overflow-wrap: anywhere; }
 
     /* ── Inline action button (ghost) ── */
     .comm-card .sd-row-actions { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px; background: transparent; color: #71717a; cursor: pointer; font-size: 0.85rem; transition: background 0.15s ease, color 0.15s ease; }
@@ -388,30 +519,31 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .log-empty { text-align: center; padding: 3.5rem 1.5rem; color: var(--comm-text-3); font-size: 0.88rem; }
     .log-empty i { font-size: 2.4rem; display: block; margin-bottom: 0.6rem; color: #cbd5e1; }
 
-    /* ── Compose drawer ── */
-    .comm-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45); z-index: 9990; opacity: 0; visibility: hidden; transition: opacity 0.28s ease, visibility 0.28s ease; }
-    .comm-backdrop.open { opacity: 1; visibility: visible; }
-    .comm-drawer { position: fixed; top: 0; right: 0; height: 100vh; width: min(460px, 92vw); background: #fff; z-index: 9995; box-shadow: -8px 0 40px rgba(15, 23, 42, 0.18); transform: translateX(105%); transition: transform 0.32s cubic-bezier(0.32, 0.72, 0.25, 1); display: flex; flex-direction: column; }
-    .comm-drawer.open { transform: translateX(0); }
-    .drawer-header { display: flex; align-items: center; gap: 0.6rem; padding: 1.1rem 1.35rem; border-bottom: 1px solid var(--comm-border-soft); }
-    .drawer-header h2 { font-size: 1.05rem; font-weight: 800; color: var(--comm-text); margin: 0; font-family: 'Montserrat', sans-serif; }
-    .drawer-close { margin-left: auto; width: 32px; height: 32px; border-radius: 8px; border: none; background: #f1f5f9; color: var(--comm-text-2); font-size: 0.9rem; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: all 0.15s; }
-    .drawer-close:hover { background: var(--comm-danger-soft); color: var(--comm-danger); }
-    .drawer-body { padding: 1.35rem; overflow-y: auto; flex: 1; }
-    .drawer-body .form-group { margin-bottom: 1.1rem; }
-    .drawer-body label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--comm-text); margin-bottom: 0.35rem; }
-    .drawer-body label .req { color: #dc2626; font-weight: 700; margin-left: 1px; }
-    .drawer-body select,
-    .drawer-body input,
-    .drawer-body textarea { width: 100%; padding: 0.65rem 0.85rem; border: 1.5px solid var(--comm-border); border-radius: 9px; font-family: inherit; font-size: 0.86rem; color: var(--comm-text); background: #fff; transition: border-color 0.2s, box-shadow 0.2s; box-sizing: border-box; }
-    .drawer-body select:focus,
-    .drawer-body input:focus,
-    .drawer-body textarea:focus { outline: none; border-color: var(--comm-primary); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
-    .drawer-body textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
-    #deliveryInfo { font-size: 0.78rem; padding: 0.45rem 0.8rem; border-radius: 8px; margin-top: 0.4rem; display: none; }
-    #deliveryInfo.resident { display: block; background: var(--comm-success-soft); color: #065f46; border: 1px solid #bbf7d0; }
-    #deliveryInfo.barangay { display: block; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    /* ── Compose dialog (shadcn style) ── */
+    #composeDialog { z-index: 10000; background: rgba(0,0,0,0.5); }
+    #composeDialog .comm-compose-dialog-content { position: relative; width: 100%; max-width: 560px; max-height: 90vh; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation: modalIn 0.2s ease; font-family:'Inter','Segoe UI',sans-serif; }
+    .comm-compose-header { display: flex; flex-direction: column; gap: 6px; padding-right: 32px; }
+    .comm-compose-header h2 { margin: 0; color: #18181b; font-size: 18px; font-weight: 600; line-height: 1; letter-spacing: -0.025em; }
+    .comm-compose-header p { margin: 0; color: #71717a; font-size: 14px; font-weight: 400; line-height: 1.5; }
+    .comm-compose-close { position: absolute; top: 16px; right: 16px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 4px; background: transparent; color: #71717a; cursor: pointer; }
+    .comm-compose-close:hover { background: #f4f4f5; color: #18181b; }
+    .comm-compose-form { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+    .comm-compose-body { min-height: 0; overflow-y: auto; padding: 2px 2px 8px 0; }
+    .comm-compose-body .form-group { margin-bottom: 16px; }
+    .comm-compose-body label { display: block; font-family:'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 500; line-height: 1; color: #18181b; margin-bottom: 8px; }
+    .comm-compose-body label .req { color: #dc2626; font-weight: 700; margin-left: 1px; }
+    .comm-compose-body select,
+    .comm-compose-body input,
+    .comm-compose-body textarea { width: 100%; height: 36px; padding: 0 12px; border: 1px solid #e4e4e7; border-radius: 6px; font-family:'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 400; color: #18181b; background: #fff; transition: border-color 0.15s, box-shadow 0.15s; box-sizing: border-box; }
+    .comm-compose-body select:focus,
+    .comm-compose-body input:focus,
+    .comm-compose-body textarea:focus { outline: none; border-color: #18181b; box-shadow: 0 0 0 1px #18181b; }
+    .comm-compose-body textarea { height: auto; min-height: 120px; padding: 8px 12px; resize: vertical; line-height: 1.5; }
+    .comm-compose-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid #e4e4e7; }
+    .comm-compose-footer .btn-send { width: auto; }
     .recipient-count { font-size: 0.76rem; color: var(--comm-text-3); margin-top: 0.3rem; }
+    .recipient-filter-group { display: none; }
+    .recipient-filter-group.visible { display: block; }
     .subject-suggestions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.35rem; }
     .subject-suggestions button { padding: 0.22rem 0.65rem; font-size: 0.7rem; border: 1px solid var(--comm-border); border-radius: 20px; background: #fff; color: var(--comm-text-2); cursor: pointer; font-family: inherit; transition: all 0.15s; }
     .subject-suggestions button:hover { border-color: var(--comm-primary); color: var(--comm-primary); background: var(--comm-primary-soft); }
@@ -421,7 +553,7 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
 
     /* Resend confirm modal */
     .resend-modal-icon { width: 56px; height: 56px; margin: 0 auto 0.9rem; border-radius: 50%; background: var(--comm-success-soft); color: var(--comm-success); display: flex; align-items: center; justify-content: center; font-size: 1.4rem; }
-    .resend-modal-title { font-size: 1.05rem; font-weight: 800; color: var(--comm-text); margin: 0 0 0.4rem; font-family: 'Montserrat', sans-serif; }
+    .resend-modal-title { font-size: 1.05rem; font-weight: 800; color: var(--comm-text); margin: 0 0 0.4rem; font-family: 'Inter', sans-serif; }
     .resend-modal-text { font-size: 0.86rem; color: var(--comm-text-2); line-height: 1.5; margin: 0 0 1.25rem; }
 
     /* ── Responsive: tablet & below ── */
@@ -435,11 +567,12 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
       .comm-toolbar .comm-filter { flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; }
       .comm-toolbar .comm-filter select { width: 100%; max-width: none; box-sizing: border-box; }
       .comm-card .sd-pagination { flex-direction: column; gap: 0.5rem; align-items: center; }
+      .comm-card .sd-data-table { min-width: 1000px; }
     }
 
     @media (max-width: 640px) {
       .comm-card .sd-data-table-wrap { min-height: 24rem; }
-      .drawer-body { padding: 1.1rem; }
+      #composeDialog .comm-compose-dialog-content { padding: 20px; }
     }
 
     /* ── Dialog font + button style (shadcn) — Communication ── */
@@ -469,22 +602,22 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
     .comm-filter select:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .comm-count{ font-size:14px; color:#71717a; }
     /* table data (All Clients table style) */
-    .comm-card .sd-th{ background:transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; height:40px; padding:0 8px; border-bottom:none; }
-    .comm-card .sd-td{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; padding:8px; overflow:hidden; }
+    .comm-card .sd-th{ background:#fafafa; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; letter-spacing:0; text-transform:none; color:#71717a; height:40px; padding:0 8px; border-bottom:1px solid #e4e4e7; }
+    .comm-card .sd-td{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; padding:8px; }
     .comm-card .sd-data-table tbody .sd-tr:hover{ background:#fafafa; }
-    .comm-card .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
+    .comm-card .th-sort{ display:inline-flex; align-items:center; gap:4px; min-height:28px; height:auto; margin-left:0; padding:0; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:normal; text-align:left; font-family:inherit; }
     .comm-card .th-sort:hover{ background:#f4f4f5; color:#18181b; }
     .comm-card .th-sort.th-sorted{ color:#18181b; }
     .comm-card .th-sort-icon{ width:14px; height:14px; color:#71717a; flex-shrink:0; }
     .comm-card .th-sorted .th-sort-icon{ color:#18181b; }
-    .log-recipient .name{ font-family:'Inter','Segoe UI',sans-serif; font-size:13.5px; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .log-recipient .email{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
-    .log-subject .subj{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+    .log-recipient .name{ font-family:'Inter','Segoe UI',sans-serif; font-size:13.5px; font-weight:600; color:#18181b; overflow-wrap:anywhere; }
+    .log-recipient .email{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; overflow-wrap:anywhere; }
+    .log-subject .subj{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; overflow-wrap:anywhere; }
     .log-col-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
-    .type-badge, .delivery-badge{ font-family:'Inter','Segoe UI',sans-serif; font-size:12.5px; font-weight:700; color:#18181b; }
+    .log-recipient .email, .type-badge, .delivery-badge{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
     .log-empty{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
     /* drawer + modal fonts/buttons */
-    .drawer-header h2, .resend-modal-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; }
+    .resend-modal-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; }
     .btn-compose{ background:#18181b; color:#fafafa; border:1px solid transparent; border-radius:6px; height:36px; padding:0 16px; font-size:14px; font-weight:500; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
     .btn-compose:hover{ background:#27272a; transform:none; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
     .btn-send{ background:#18181b; color:#fff; border:1px solid transparent; border-radius:6px; height:36px; font-size:14px; font-weight:500; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
@@ -509,11 +642,10 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
 
   <div class="comm-page">
     <?php if ($sendSuccess): ?>
-      <div class="comm-alert success"><i class="fas fa-check-circle"></i> <span><?php echo $sendSuccess; ?></span></div>
+      <script>document.addEventListener('DOMContentLoaded',function(){showToast('Success',{type:'success',description:<?php echo json_encode($sendSuccess, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>});});</script>
     <?php endif; ?>
-
     <?php if ($sendError): ?>
-      <div class="comm-alert error"><i class="fas fa-exclamation-circle"></i> <span><?php echo $sendError; ?></span></div>
+      <script>document.addEventListener('DOMContentLoaded',function(){showToast('Error',{type:'error',description:'<?php echo addslashes($sendError); ?>'});});</script>
     <?php endif; ?>
 
     <!-- History toolbar (outside the table container) -->
@@ -534,7 +666,7 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
         </select>
       </div>
       <div class="comm-toolbar-actions">
-        <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDrawer()">Compose Message</button>
+        <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDialog()">Compose Message</button>
       </div>
     </div>
 
@@ -544,13 +676,16 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
         <div class="log-empty">No messages sent yet.</div>
       <?php else: ?>
         <div class="sd-data-table-wrap">
-          <table class="sd-data-table">
+          <table class="sd-data-table no-responsive">
             <thead>
               <tr class="sd-tr">
                 <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="commSort('date')">Date<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="commSort('time')">Time<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="recipient" onclick="commSort('recipient')">Recipient Name<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th">Role</th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="email" onclick="commSort('email')">Email<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="mobile" onclick="commSort('mobile')">Mobile Number<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="barangay" onclick="commSort('barangay')">Barangay<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="subject" onclick="commSort('subject')">Subject<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="type" onclick="commSort('type')">Type<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="delivery" onclick="commSort('delivery')">Delivery<svg class="th-sort-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -560,6 +695,9 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
             <tbody id="logTbody"></tbody>
           </table>
         </div>
+      <?php endif; ?>
+    </div>
+    <?php if ($logsTotal > 0): ?>
         <div class="dt-pagination" id="logPagination">
             <div class="dt-pagination-right">
               <div class="dt-rows">
@@ -588,34 +726,44 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
                 </button>
               </div>
             </div>
-          </div>
-      <?php endif; ?>
-    </div>
+        </div>
+    <?php endif; ?>
   </div>
 </main>
 
-<!-- Compose Drawer -->
-<div class="comm-backdrop" id="commBackdrop" onclick="closeComposeDrawer()"></div>
-<div class="comm-drawer" id="composeDrawer">
-  <div class="drawer-header">
-    <h2>Compose Message</h2>
-    <button class="drawer-close" onclick="closeComposeDrawer()" title="Close"><i class="fas fa-times"></i></button>
-  </div>
-  <div class="drawer-body">
-    <form method="POST" action="staff-communication.php" id="composeForm">
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- Compose Message Dialog -->
+<div class="modal" id="composeDialog" onclick="if(event.target === this) closeComposeDialog()">
+  <section class="comm-compose-dialog-content" role="dialog" aria-modal="true" aria-labelledby="composeDialogTitle" aria-describedby="composeDialogDescription">
+    <button type="button" class="comm-compose-close" onclick="closeComposeDialog()" aria-label="Close compose message dialog"><i class="fas fa-times"></i></button>
+    <div class="comm-compose-header">
+      <h2 id="composeDialogTitle">Compose Message</h2>
+      <p id="composeDialogDescription">Send a message directly to a resident or barangay officer.</p>
+    </div>
+    <form method="POST" action="staff-communication.php" id="composeForm" class="comm-compose-form">
+      <div class="comm-compose-body">
       <div class="form-group">
         <label for="recipient_role">Send To <span class="req">*</span></label>
         <select id="recipient_role" name="recipient_role" onchange="onRoleChange()" required>
           <option value="">Select role...</option>
-          <option value="resident">Resident (portal + email)</option>
-          <option value="barangay">Barangay Officer (portal only)</option>
+          <option value="resident">Resident</option>
+          <option value="barangay">Barangay Officer</option>
         </select>
-        <div id="deliveryInfo"></div>
       </div>
-      <div class="form-group">
-        <label for="recipient_id">Select Recipient <span class="req">*</span></label>
-        <select id="recipient_id" name="recipient_id" required>
-          <option value="">Select a role first...</option>
+      <div class="form-group recipient-filter-group" id="recipientBarangayGroup">
+          <label for="recipientBarangay">Barangay <span class="req">*</span></label>
+          <select id="recipientBarangay" onchange="filterCommunicationRecipients()" disabled>
+            <option value="">Select Barangay...</option>
+            <?php foreach ($barangays as $barangay): ?>
+              <option value="<?php echo (int)$barangay['barangay_id']; ?>"><?php echo htmlspecialchars($barangay['barangay_name']); ?></option>
+            <?php endforeach; ?>
+          </select>
+      </div>
+      <div class="form-group recipient-filter-group" id="recipientAccountGroup">
+        <label for="recipient_id" id="recipientAccountLabel">Registered Accounts <span class="req">*</span></label>
+        <select id="recipient_id" name="recipient_id" required disabled>
+          <option value="">Select a barangay first...</option>
         </select>
         <div class="recipient-count" id="recipientCount"></div>
       </div>
@@ -636,10 +784,15 @@ $barangayUsers = getUsersByRole($conn, 'barangay');
         <label for="message">Message <span class="req">*</span></label>
         <textarea id="message" name="message" placeholder="Type your message here..." required></textarea>
       </div>
+
+      </div>
       <input type="hidden" name="send_message" value="1">
-      <button type="submit" class="sd-btn sd-btn-default btn-send" id="sendBtn"><span id="sendBtnLabel">Send Message</span></button>
+      <div class="comm-compose-footer">
+        <button type="button" class="sd-btn sd-btn-outline" onclick="closeComposeDialog()">Cancel</button>
+        <button type="submit" class="sd-btn sd-btn-default btn-send" id="sendBtn"><span id="sendBtnLabel">Send Message</span></button>
+      </div>
     </form>
-  </div>
+  </section>
 </div>
 
 <!-- Resend Confirm Modal -->
@@ -666,11 +819,41 @@ var barangayUsers = <?php echo json_encode($barangayUsers); ?>;
 
 var subjectTemplates = {
     general:     ['Important Update from DCVS', 'Notification from DCVS Staff'],
-    report:      ['Update on Your Animal Report', 'Action Needed on Your Report', 'Follow-up on Your Report'],
+    report:      ['Update on Animal Report', 'Action Needed on Report', 'Follow-up on Report'],
     appointment: ['Appointment Confirmation', 'Appointment Reminder', 'Appointment Rescheduled'],
-    adoption:    ['Update on Your Adoption Request', 'Adoption Application Status'],
+    adoption:    ['Update on Adoption Request', 'Adoption Application Status'],
     followup:    ['Friendly Reminder from DCVS', 'Follow-up on Previous Concern'],
     other:       []
+};
+var messageTypeOptions = {
+    resident: [
+        { value: 'general', label: 'General Message' },
+        { value: 'report', label: 'Animal Report' },
+        { value: 'appointment', label: 'Appointment' },
+        { value: 'adoption', label: 'Adoption Request' },
+        { value: 'followup', label: 'Follow-up / Reminder' },
+        { value: 'other', label: 'Other' }
+    ],
+    barangay: [
+        { value: 'barangay_general', label: 'General Message' },
+        { value: 'barangay_report', label: 'Animal Report' },
+        { value: 'barangay_rescue', label: 'Rescue Case' },
+        { value: 'barangay_pets', label: 'Pet Records' },
+        { value: 'barangay_vaccination', label: 'Vaccination' },
+        { value: 'barangay_coordination', label: 'Barangay Coordination' },
+        { value: 'barangay_followup', label: 'Follow-up / Reminder' },
+        { value: 'barangay_other', label: 'Other' }
+    ]
+};
+var barangaySubjectTemplates = {
+    barangay_general: ['Barangay Coordination'],
+    barangay_report: ['Report Follow-up', 'Report Validation'],
+    barangay_rescue: ['Rescue Coordination'],
+    barangay_pets: ['Pet Record Verification'],
+    barangay_vaccination: ['Vaccination Update'],
+    barangay_coordination: ['Barangay Coordination'],
+    barangay_followup: ['Follow-up Required', 'Reminder'],
+    barangay_other: []
 };
 
 function escapeHtml(s) {
@@ -680,35 +863,72 @@ function escapeHtml(s) {
 
 function onRoleChange() {
     updateRecipients();
+    updateMessageTypeOptions();
+}
+
+function updateMessageTypeOptions() {
     var role = document.getElementById('recipient_role').value;
-    var info = document.getElementById('deliveryInfo');
-    info.className = '';
-    info.textContent = '';
-    if (role === 'resident') {
-        info.className = 'resident';
-        info.textContent = 'Will be sent to portal + email';
-    } else if (role === 'barangay') {
-        info.className = 'barangay';
-        info.textContent = 'Will be sent to portal only (no email)';
-    }
+    var typeSelect = document.getElementById('message_type');
+    var options = messageTypeOptions[role] || messageTypeOptions.resident;
+    typeSelect.innerHTML = '';
+    options.forEach(function(option) {
+        var element = document.createElement('option');
+        element.value = option.value;
+        element.textContent = option.label;
+        typeSelect.appendChild(element);
+    });
+    document.getElementById('subject').value = '';
+    onMessageTypeChange();
 }
 
 function updateRecipients() {
     var role = document.getElementById('recipient_role').value;
     var select = document.getElementById('recipient_id');
     var count = document.getElementById('recipientCount');
-    select.innerHTML = '<option value="">Select ' + role + '...</option>';
-    var users = role === 'resident' ? residents : (role === 'barangay' ? barangayUsers : []);
-    users.forEach(function(u) {
-        var opt = document.createElement('option');
-        opt.value = u.user_id;
-        var label = u.full_name;
-        if (u.reference_id) label += ' (' + u.reference_id + ')';
-        if (u.email && role === 'resident') label += ' — ' + u.email;
-        opt.textContent = label;
-        select.appendChild(opt);
+    var barangaySelect = document.getElementById('recipientBarangay');
+    var hasRole = role === 'resident' || role === 'barangay';
+    document.getElementById('recipientBarangayGroup').classList.toggle('visible', hasRole);
+    document.getElementById('recipientAccountGroup').classList.remove('visible');
+    document.getElementById('recipientAccountLabel').innerHTML = (role === 'barangay' ? 'Registered Accounts' : 'Registered Clients') + ' <span class="req">*</span>';
+    barangaySelect.value = '';
+    barangaySelect.disabled = !hasRole;
+    select.disabled = true;
+    select.required = false;
+    select.innerHTML = '<option value="">' + (hasRole ? 'Select a barangay first...' : 'Select a role first...') + '</option>';
+    count.textContent = '';
+}
+
+function filterCommunicationRecipients() {
+    var role = document.getElementById('recipient_role').value;
+    var barangayId = document.getElementById('recipientBarangay').value;
+    var select = document.getElementById('recipient_id');
+    var accountGroup = document.getElementById('recipientAccountGroup');
+    var count = document.getElementById('recipientCount');
+    var users = role === 'barangay' ? barangayUsers : residents;
+
+    select.innerHTML = '<option value="">' + (barangayId ? 'Select a registered account...' : 'Select a barangay first...') + '</option>';
+    accountGroup.classList.toggle('visible', !!barangayId);
+    select.disabled = !barangayId;
+    select.required = !!barangayId;
+    count.textContent = '';
+    if (!barangayId) return;
+
+    var matches = users.filter(function(user) {
+      return String(user.barangay_id || '') === String(barangayId);
     });
-    count.textContent = users.length + ' active ' + role + (users.length !== 1 ? 's' : '');
+
+    count.textContent = matches.length + ' registered ' + (role === 'barangay' ? 'account' : 'client') + (matches.length !== 1 ? 's' : '') + ' found';
+    matches.forEach(function(user) {
+        var option = document.createElement('option');
+        option.value = user.user_id;
+        option.textContent = user.full_name + (user.email ? ' — ' + user.email : '');
+        select.appendChild(option);
+    });
+    if (!matches.length) {
+        select.innerHTML = '<option value="">No registered ' + (role === 'barangay' ? 'accounts' : 'clients') + ' for this barangay</option>';
+        select.disabled = true;
+        select.required = false;
+    }
 }
 
 function onMessageTypeChange() {
@@ -716,7 +936,7 @@ function onMessageTypeChange() {
     var suggestions = document.getElementById('subjectSuggestions');
     var subjectInput = document.getElementById('subject');
     suggestions.innerHTML = '';
-    var subs = subjectTemplates[type] || [];
+    var subs = barangaySubjectTemplates[type] || subjectTemplates[type] || [];
     subs.forEach(function(s) {
         var btn = document.createElement('button');
         btn.type = 'button';
@@ -726,19 +946,32 @@ function onMessageTypeChange() {
     });
 }
 
-/* ── Compose drawer ── */
-function openComposeDrawer() {
-    document.getElementById('composeDrawer').classList.add('open');
-    document.getElementById('commBackdrop').classList.add('open');
+/* ── Compose dialog ── */
+function openComposeDialog() {
+  document.getElementById('composeDialog').classList.add('active');
     document.body.style.overflow = 'hidden';
+  document.getElementById('recipient_role').focus();
 }
-function closeComposeDrawer() {
-    document.getElementById('composeDrawer').classList.remove('open');
-    document.getElementById('commBackdrop').classList.remove('open');
+function closeComposeDialog() {
+  document.getElementById('composeDialog').classList.remove('active');
     document.body.style.overflow = '';
 }
 
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && document.getElementById('composeDialog').classList.contains('active')) closeComposeDialog();
+});
+
 document.getElementById('composeForm')?.addEventListener('submit', function(e) {
+  var role = document.getElementById('recipient_role').value;
+  var barangay = document.getElementById('recipientBarangay').value;
+  var recipient = document.getElementById('recipient_id').value;
+  if ((role === 'resident' || role === 'barangay') && (!barangay || !recipient)) {
+    e.preventDefault();
+    document.getElementById('recipientCount').textContent = !barangay
+      ? 'Select a barangay before sending.'
+      : 'Select a registered ' + (role === 'barangay' ? 'barangay account' : 'client') + ' before sending.';
+    return;
+  }
     var btn = document.getElementById('sendBtn');
     btn.disabled = true;
     document.getElementById('sendBtnLabel').textContent = 'Sending...';
@@ -759,6 +992,14 @@ var typeMeta = {
     appointment: { label: 'Appointment' },
     followup:    { label: 'Follow-up' },
     general:     { label: 'General' },
+    barangay_general:      { label: 'General' },
+    barangay_report:       { label: 'Report' },
+    barangay_rescue:       { label: 'Rescue' },
+    barangay_pets:         { label: 'Pet Records' },
+    barangay_vaccination:  { label: 'Vaccination' },
+    barangay_coordination: { label: 'Coordination' },
+    barangay_followup:     { label: 'Follow-up' },
+    barangay_other:        { label: 'Other' },
     other:       { label: 'Other' }
 };
 
@@ -779,25 +1020,20 @@ function logRowHtml(log) {
     var tm = typeMeta[log.message_type] || typeMeta.other;
     var recipientName = (log.recipient_name || log.recipient_email || '');
     var recipientEmail = (log.recipient_email || '');
-
-    var badges = '';
-    if (log.status === 'sent') {
-        badges += '<span class="delivery-badge">Email Sent</span>';
-    } else {
-        badges += '<span class="delivery-badge">Email Failed</span>';
-    }
-    if (log.portal_delivered) {
-        badges += '<span class="delivery-badge">Portal</span>';
-    }
+    var delivery = log.status === 'sent' ? 'Email/Sms Sent' : 'Email/Sms Failed';
+    var recipientRole = log.sent_to_role === 'barangay' ? 'Barangay Officer' : (log.sent_to_role === 'resident' ? 'Resident' : (log.sent_to_role || '—'));
 
     return '<tr class="sd-tr">' +
         '<td class="sd-td log-col-date">' + fmtLogDate(log.created_at) + '</td>' +
         '<td class="sd-td log-col-date">' + fmtLogTime(log.created_at) + '</td>' +
         '<td class="sd-td"><div class="log-recipient"><div class="name">' + escapeHtml(recipientName) + '</div></div></td>' +
+        '<td class="sd-td">' + escapeHtml(recipientRole) + '</td>' +
         '<td class="sd-td"><div class="log-recipient"><div class="email">' + escapeHtml(recipientEmail) + '</div></div></td>' +
+        '<td class="sd-td log-col-value">' + escapeHtml(log.recipient_phone || '—') + '</td>' +
+      '<td class="sd-td log-col-value">' + escapeHtml(log.recipient_barangay || '—') + '</td>' +
         '<td class="sd-td"><div class="log-subject"><div class="subj">' + escapeHtml(log.subject || '') + '</div></div></td>' +
         '<td class="sd-td"><span class="type-badge">' + tm.label + '</span></td>' +
-        '<td class="sd-td"><div class="delivery-badges">' + badges + '</div></td>' +
+      '<td class="sd-td"><span class="delivery-badge">' + delivery + '</span></td>' +
         '<td class="sd-td sd-td-action">' +
             '<button class="sd-row-actions" title="Resend message" onclick="confirmResend(' + log.log_id + ')"><i class="fas fa-paper-plane"></i><span class="sr-only">Resend</span></button>' +
         '</td>' +
@@ -822,7 +1058,7 @@ function renderLogPage(page) {
             var rowLogs = data.logs || [];
 
             if (total === 0) {
-                tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="8" style="text-align:center;padding:2.5rem;color:#94a3b8;">No messages match your search.</td></tr>';
+                tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="11" style="text-align:center;padding:2.5rem;color:#94a3b8;">No messages match your search.</td></tr>';
                 if (pag) pag.style.display = 'none';
                 return;
             }
@@ -896,13 +1132,42 @@ function logDebouncedSearch() {
 
 if (document.getElementById('logTbody')) renderLogPage(1);
 
-/* Auto-fade alert banners after 5 seconds */
-document.querySelectorAll('.comm-alert').forEach(function (alert) {
-    setTimeout(function () {
-        alert.classList.add('fade-out');
-        setTimeout(function () { alert.style.display = 'none'; }, 650);
-    }, 5000);
-});
+/* ── Toast notifications ── */
+function showToast(title, opts) {
+  opts = opts || {};
+  var type = opts.type || 'success';
+  var desc = opts.description || '';
+  var duration = opts.duration != null ? opts.duration : 4000;
+  var container = document.getElementById('toastContainer');
+  var el = document.createElement('div');
+  el.className = 'toast ' + type;
+  var icons = {
+    success: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    error: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    info: '<svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+  };
+  var html = icons[type] || icons.success;
+  html += '<div class="toast-body"><p class="toast-title">' + title + '</p>';
+  if (desc) html += '<p class="toast-desc">' + desc + '</p>';
+  html += '</div>';
+  html += '<button class="toast-close" aria-label="Close"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>';
+  el.innerHTML = html;
+  container.appendChild(el);
+  requestAnimationFrame(function() { requestAnimationFrame(function() { el.classList.add('show'); }); });
+  el.querySelector('.toast-close').addEventListener('click', function() { dismissToast(el); });
+  var timer = setTimeout(function() { dismissToast(el); }, duration);
+  el._timer = timer;
+  el.addEventListener('mouseenter', function() { clearTimeout(el._timer); });
+  el.addEventListener('mouseleave', function() { el._timer = setTimeout(function() { dismissToast(el); }, 2000); });
+}
+function dismissToast(el) {
+  if (el._dismissed) return;
+  el._dismissed = true;
+  clearTimeout(el._timer);
+  el.classList.remove('show');
+  el.classList.add('hiding');
+  setTimeout(function() { el.remove(); }, 300);
+}
 </script>
 </body>
 </html>

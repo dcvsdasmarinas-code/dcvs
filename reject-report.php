@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    $checkReport = $conn->prepare("SELECT report_id, barangay_id, reporter_id FROM reports WHERE report_id = ? AND status = 'pending'");
+    $checkReport = $conn->prepare("SELECT r.report_id, r.barangay_id, r.reporter_id, r.report_type, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON u.user_id = r.reporter_id WHERE r.report_id = ? AND r.status = 'pending'");
     $checkReport->bind_param("i", $reportId);
     $checkReport->execute();
     $reportData = $checkReport->get_result()->fetch_assoc();
@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'report', $reportId);
 
         $action = "Report Rejected by Barangay";
-        $details = "Report #$reportId rejected by barangay. Reason: $reason";
+        $details = ucfirst($reportData['report_type']) . " report from " . ($reportData['reporter_name'] ?: 'a resident') . " rejected by barangay. Reason: $reason";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);

@@ -50,6 +50,15 @@ if ($pr && $pRow = $pr->fetch_assoc()) {
 }
 $pq->close();
 
+$unreadNotifs = 0;
+$uq = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0 AND archived_at IS NULL");
+if ($uq) {
+    $uq->bind_param('i', $userId);
+    $uq->execute();
+    $unreadNotifs = (int)$uq->get_result()->fetch_row()[0];
+    $uq->close();
+}
+
 $pageTitle = 'Account Settings';
 ?>
 <!DOCTYPE html>
@@ -64,16 +73,56 @@ $pageTitle = 'Account Settings';
   <link rel="stylesheet" href="assets/css/sb2.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #f4f4f5; color: #18181b; --topbar-h: 64px; }
-    body.sb2-active .topbar { left: var(--sidebar-w) !important; }
-    .topbar { position: sticky; top: 0; left: var(--sidebar-w, 16rem); height: var(--topbar-h); background: #fff; border-bottom: 1px solid #e4e4e7; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; z-index: 40; transition: left 0.2s ease; }
+    body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #ffffff !important; color: #18181b; --topbar-h: 64px; --bg: #ffffff !important; }
+    body.sb2-active .topbar { left: auto !important; margin-left: var(--sidebar-w); width: calc(100% - var(--sidebar-w)); }
+    .topbar { position: sticky; top: 0; left: auto; width: calc(100% - var(--sidebar-w, 16rem)); margin-left: var(--sidebar-w, 16rem); height: var(--topbar-h); background: #fff; border-bottom: 1px solid #e4e4e7; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; z-index: 40; transition: margin-left 0.2s ease, width 0.2s ease; }
     .topbar-left { display: flex; align-items: center; gap: 16px; }
     .topbar-toggle { display: none; align-items: center; justify-content: center; width: 38px; height: 38px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; color: #18181b; cursor: pointer; }
-    @media(max-width:768px) { .topbar-toggle { display: flex !important; } .topbar { left: 0 !important; } }
+    @media(max-width:768px) {
+      .topbar-toggle { display: flex !important; }
+      .topbar,
+      body.sb2-active .topbar { left: 0 !important; width: 100%; margin-left: 0; padding: 0 16px; }
+      .topbar-left { min-width: 0; }
+      .topbar-breadcrumb { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+      .breadcrumb-root,
+      .breadcrumb-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    }
+    .topbar-breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #94a3b8; }
+    .breadcrumb-root { color: #0B4D26; font-weight: 600; }
+    .breadcrumb-sep { font-size: 0.6rem; }
+    .breadcrumb-current { color: #0f172a; font-weight: 600; }
     .barangay-selector { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; background: #fff; border: 1px solid #e4e4e7; border-radius: 999px; font-size: 14px; font-weight: 500; color: #18181b; cursor: pointer; transition: all .15s; }
     .barangay-selector:hover { background: #f4f4f5; }
     .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-    .main-content { margin-top: 0 !important; padding: 1.75rem 2rem; min-height: calc(100vh - var(--topbar-h)); }
+    .notif-dropdown{position:relative;}
+    .notif-btn{background:none;border:none;font-size:1.2rem;color:#475569;cursor:pointer;padding:6px;position:relative;border-radius:8px;transition:background .15s;width:36px;height:36px;display:flex;align-items:center;justify-content:center;}
+    .notif-btn:hover{background:#f1f5f9;}
+    .notif-badge{position:absolute;top:0;right:0;background:#dc2626;color:#fff;font-size:.6rem;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;line-height:1;}
+    .notif-panel{position:absolute;top:calc(100% + 8px);right:0;width:380px;background:#fff;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.12);border:1px solid #e2e8f0;z-index:200;display:none;overflow:hidden;}
+    .notif-panel.open{display:block;}
+    .notif-panel-header{display:flex;justify-content:space-between;align-items:center;padding:.9rem 1rem;border-bottom:1px solid #e2e8f0;}
+    .notif-panel-header h4{margin:0;font-size:.85rem;font-weight:700;color:#0f172a;}
+    .notif-panel-header a{font-size:.75rem;color:#0E8131;text-decoration:none;font-weight:600;cursor:pointer;}
+    .notif-panel-header a:hover{text-decoration:underline;}
+    .notif-panel-body{max-height:360px;overflow-y:auto;}
+    .notif-item{display:flex;gap:.75rem;padding:.85rem 1rem;cursor:pointer;transition:background .12s;border-bottom:1px solid #f1f5f9;}
+    .notif-item:hover{background:#f8fafc;}
+    .notif-item.unread{background:#f0fdf4;}
+    .notif-item.unread:hover{background:#dcebe0;}
+    .notif-icon{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;flex-shrink:0;background:transparent;color:#000;}
+    .notif-content{flex:1;min-width:0;}
+    .notif-title{font-size:.8rem;font-weight:700;color:#0f172a;}
+    .notif-msg{font-size:.74rem;color:#64748b;line-height:1.3;margin-top:1px;}
+    .notif-time{font-size:.65rem;color:#94a3b8;margin-top:3px;}
+    .notif-empty{text-align:center;padding:2rem;color:#94a3b8;font-size:.82rem;}
+    @media(max-width:640px){.notif-panel{width:calc(100vw - 2rem)!important;right:.5rem!important;}}
+    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);border:1px solid transparent;}
+    .user-profile:hover{background:#F3F4F6;border-color:#F0F2F5;}
+    .user-avatar{width:34px;height:34px;border-radius:50%;background:#D5ECE0;border:1px solid #B8DEC9;display:flex;align-items:center;justify-content:center;color:#0B4D26;font-weight:700;font-size:12px;overflow:hidden;}
+    .user-meta{display:flex;flex-direction:column;line-height:1.25;}
+    .user-name{font-size:14px;font-weight:600;color:#18181B;}
+    .user-role{font-size:12px;color:#71717A;}
+    .main-content { margin-top: 0 !important; padding: 1.75rem 2rem; min-height: calc(100vh - var(--topbar-h)); background: #ffffff !important; }
 
     /* Profile Settings */
     .profile-settings-wrapper * { box-sizing: border-box; }
@@ -156,18 +205,60 @@ $pageTitle = 'Account Settings';
       <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
         <i class="fas fa-bars"></i>
       </button>
+      <div class="topbar-breadcrumb">
+        <span class="breadcrumb-root">Barangay Portal</span>
+        <span class="breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+        <span class="breadcrumb-current" id="breadcrumbCurrent">Account Settings</span>
+      </div>
     </div>
-    <div class="topbar-right"></div>
+    <div class="topbar-right">
+      <div class="notif-dropdown" id="notifDropdown">
+        <button class="notif-btn" id="notif-btn" type="button" title="<?php echo $unreadNotifs; ?> unread notifications">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+          </svg>
+          <span class="notif-badge" id="notifBadge" data-realtime="notif-badge" style="<?php echo $unreadNotifs > 0 ? '' : 'display:none;'; ?>"><?php echo $unreadNotifs > 9 ? '9+' : $unreadNotifs; ?></span>
+        </button>
+        <div class="notif-panel" id="notifPanel" data-notification-panel data-portal="barangay"
+          data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+          data-action-url="includes/staff-notification-action.php?portal=barangay"
+          data-load-url="get-notifications.php?limit=30" data-app-base-url="">
+          <div class="notif-panel-header">
+            <h4>Notifications</h4>
+            <button class="notif-mark-all" type="button" <?php echo $unreadNotifs === 0 ? 'disabled' : ''; ?>><i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read</button>
+          </div>
+          <div class="notif-tabs" role="tablist" aria-label="Notification filters">
+            <button class="notif-tab active" type="button" role="tab" aria-selected="true" data-notif-tab="all">All</button>
+            <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="inbox">Inbox<span class="notif-tab-count" data-tab-count="inbox"><?php echo $unreadNotifs > 0 ? ($unreadNotifs > 99 ? '99+' : $unreadNotifs) : ''; ?></span></button>
+            <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="archived">Archived</button>
+          </div>
+          <div class="notif-feedback" role="status" aria-live="polite"></div>
+          <div class="notif-panel-body" id="notifList">
+            <div class="notif-empty">Loading notifications…</div>
+          </div>
+        </div>
+      </div>
+      <div class="user-profile" id="user-profile-btn" title="View Profile">
+        <div class="user-avatar">
+          <?php if (!empty($avatarUrl)): ?>
+            <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
+          <?php else: ?>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
+              <circle cx="12" cy="7" r="4"/>
+            </svg>
+          <?php endif; ?>
+        </div>
+        <div class="user-meta">
+          <span class="user-name"><?php echo htmlspecialchars($fullName); ?></span>
+          <span class="user-role">Barangay Officer</span>
+        </div>
+      </div>
+    </div>
   </header>
 
   <main class="main-content">
-    <div class="page-header">
-      <div>
-        <h1 style="font-size:1.25rem;font-weight:700;color:#0f172a;letter-spacing:-0.02em;">Account Settings</h1>
-        <p class="page-subtitle">Manage your profile and password</p>
-      </div>
-    </div>
-
     <?php if (isset($_SESSION['profile_error'])): ?>
       <div class="flash-msg error" id="profileError"><?php echo htmlspecialchars($_SESSION['profile_error']); unset($_SESSION['profile_error']); ?></div>
     <?php endif; ?>
@@ -390,6 +481,9 @@ if (toggle && sidebar) {
     sidebar.classList.toggle('mobile-open');
   });
 }
+
 </script>
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/notification-panel.js'); ?>" defer></script>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/notification.css'); ?>">
 </body>
 </html>

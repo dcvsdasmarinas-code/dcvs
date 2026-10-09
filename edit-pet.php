@@ -22,6 +22,16 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     exit;
 }
 
+$isStaffEdit = in_array($_SESSION['role'] ?? '', ['staff', 'admin'], true);
+function editPetRedirect($petId, $sec, $isStaffEdit) {
+    if ($isStaffEdit) {
+        header('Location: pet-profile.php?id=' . (int)$petId . '&ref=staff');
+    } else {
+        header('Location: dashboard-resident.php' . $sec);
+    }
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sec = isset($_POST['return_section']) && preg_match('/^[a-z0-9_-]+$/', $_POST['return_section']) ? '#' . $_POST['return_section'] : '';
     $petId = intval($_POST['pet_id'] ?? 0);
@@ -52,20 +62,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!empty($errors)) {
         $_SESSION['pet_error'] = implode('<br>', $errors);
-        header('Location: dashboard-resident.php' . $sec);
-        exit;
+        editPetRedirect($petId, $sec, $isStaffEdit);
     }
 
-    // Check if pet belongs to user
-    $checkPet = $conn->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND owner_id = ?");
-    $checkPet->bind_param("ii", $petId, $_SESSION['user_id']);
+    // Residents may edit their own pets; staff/admin may edit any active pet.
+    if ($isStaffEdit) {
+        $checkPet = $conn->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND archived_at IS NULL");
+        $checkPet->bind_param("i", $petId);
+    } else {
+        $checkPet = $conn->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND owner_id = ?");
+        $checkPet->bind_param("ii", $petId, $_SESSION['user_id']);
+    }
     $checkPet->execute();
     $checkPet->store_result();
 
     if ($checkPet->num_rows === 0) {
         $_SESSION['pet_error'] = "Invalid pet selected.";
-        header('Location: dashboard-resident.php' . $sec);
-        exit;
+        editPetRedirect($petId, $sec, $isStaffEdit);
     }
     $checkPet->close();
 
@@ -98,14 +111,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!in_array($detectedType, $allowedTypes) || !in_array($ext, $allowedExts)) {
             $_SESSION['pet_error'] = "Invalid file type. Please upload a JPEG, PNG, GIF, or WebP image.";
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
+            editPetRedirect($petId, $sec, $isStaffEdit);
         }
 
         if ($photo['size'] > $maxSize) {
             $_SESSION['pet_error'] = "File size exceeds 5MB limit.";
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
+            editPetRedirect($petId, $sec, $isStaffEdit);
         }
 
         // Create upload directory if it doesn't exist
@@ -130,34 +141,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Update pet in database
     if (!empty($photoUrl)) {
         // Update with new photo
-        $stmt = $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ?, photo_url = ? WHERE pet_id = ? AND owner_id = ?");
+        $stmt = $isStaffEdit
+            ? $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ?, photo_url = ? WHERE pet_id = ?")
+            : $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ?, photo_url = ? WHERE pet_id = ? AND owner_id = ?");
         if (!$stmt) {
             error_log("edit-pet: prepare (with photo) failed: " . $conn->error);
             $_SESSION['pet_error'] = "Database error: " . $conn->error;
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
+            editPetRedirect($petId, $sec, $isStaffEdit);
         }
-        $stmt->bind_param("sssidssssii", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $photoUrl, $petId, $_SESSION['user_id']);
+        if ($isStaffEdit) {
+            $stmt->bind_param("sssidssssi", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $photoUrl, $petId);
+        } else {
+            $stmt->bind_param("sssidssssii", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $photoUrl, $petId, $_SESSION['user_id']);
+        }
     } else {
         // Update without changing photo
-        $stmt = $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ? WHERE pet_id = ? AND owner_id = ?");
+        $stmt = $isStaffEdit
+            ? $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ? WHERE pet_id = ?")
+            : $conn->prepare("UPDATE pets SET pet_name = ?, pet_type = ?, breed = ?, age = ?, weight = ?, gender = ?, color = ?, vaccination_status = ? WHERE pet_id = ? AND owner_id = ?");
         if (!$stmt) {
             error_log("edit-pet: prepare (no photo) failed: " . $conn->error);
             $_SESSION['pet_error'] = "Database error: " . $conn->error;
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
+            editPetRedirect($petId, $sec, $isStaffEdit);
         }
-        $stmt->bind_param("sssidsssii", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $petId, $_SESSION['user_id']);
+        if ($isStaffEdit) {
+            $stmt->bind_param("sssidsssi", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $petId);
+        } else {
+            $stmt->bind_param("sssidsssii", $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $petId, $_SESSION['user_id']);
+        }
     }
 
     if ($stmt->execute()) {
         $_SESSION['pet_success'] = "Pet updated successfully!";
-        header('Location: dashboard-resident.php' . $sec);
-        exit;
+        editPetRedirect($petId, $sec, $isStaffEdit);
     } else {
         $_SESSION['pet_error'] = "Failed to update pet: " . $stmt->error;
-        header('Location: dashboard-resident.php' . $sec);
-        exit;
+        editPetRedirect($petId, $sec, $isStaffEdit);
     }
 
     $stmt->close();

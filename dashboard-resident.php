@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -10,6 +10,8 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/waitlist.php';
+require_once 'includes/adoption-workflow.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -23,10 +25,19 @@ if ($_SESSION['role'] !== 'resident') {
     exit;
 }
 
-// Adoption flow � check if user came from "Adopt Me" on petlist.php
-$showAdoptModal = $_SESSION['show_adopt_modal'] ?? false;
-$adoptData = $_SESSION['adopt_data'] ?? null;
-$adoptListingId = $_SESSION['adopt_listing_id'] ?? null;
+adoptionReleaseExpiredReservations($conn);
+
+if (!empty($_SESSION['adoption_apply_listing_id'])) {
+    $pendingAdoptionListingId = (int)$_SESSION['adoption_apply_listing_id'];
+    unset($_SESSION['adoption_apply_listing_id']);
+    header('Location: resident-adoption-applications.php?apply=' . $pendingAdoptionListingId);
+    exit;
+}
+
+// Adopt Me now routes through the reviewed application workflow.
+$showAdoptModal = false;
+$adoptData = null;
+$adoptListingId = null;
 unset($_SESSION['show_adopt_modal'], $_SESSION['adopt_data'], $_SESSION['adopt_listing_id']);
 
 // Handle password change messages
@@ -51,7 +62,7 @@ unset($_SESSION['profile_error'], $_SESSION['profile_success']);
 
 // Fetch user's pets from database (excluding archived)
 $pets = [];
-$stmt = $conn->prepare("SELECT pet_id, reference_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, photo_url, created_at, EXISTS(SELECT 1 FROM adoption_listings WHERE pet_id = p.pet_id) AS from_adoption, (SELECT DATE(COALESCE(NULLIF(al.updated_at,''), al.created_at)) FROM adoption_listings al WHERE al.pet_id = p.pet_id ORDER BY al.updated_at DESC LIMIT 1) AS adopted_date FROM pets p WHERE owner_id = ? AND archived_at IS NULL ORDER BY pet_id ASC");
+$stmt = $conn->prepare("SELECT pet_id, reference_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, photo_url, created_at, EXISTS(SELECT 1 FROM adoption_listings WHERE pet_id = p.pet_id) AS from_adoption, (SELECT DATE(COALESCE(source_listing.adopted_at, NULLIF(al.updated_at,''), al.created_at)) FROM adoption_listings al LEFT JOIN pet_listings source_listing ON source_listing.listing_id = al.source_listing_id WHERE al.pet_id = p.pet_id AND al.status = 'adopted' ORDER BY al.updated_at DESC LIMIT 1) AS adopted_date FROM pets p WHERE owner_id = ? AND archived_at IS NULL ORDER BY pet_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -73,7 +84,7 @@ $stmt->close();
 
 // Fetch user's reports from database (excluding archived)
 $reports = [];
-$stmt = $conn->prepare("SELECT report_id, reference_id, report_type, description, location_address, status, created_at, updated_at, photo_url, urgency_level FROM reports WHERE reporter_id = ? AND archived_at IS NULL ORDER BY report_id ASC");
+$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address, r.status, r.created_at, r.updated_at, r.photo_url, r.video_url, r.urgency_level, rw.response_mode, rw.state AS response_state, rw.response_deadline, rw.progress_deadline, rw.turnover_deadline, rw.holding_location, rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at, tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at FROM reports r LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -84,7 +95,7 @@ $stmt->close();
 
 // Fetch archived reports
 $archivedReports = [];
-$stmt = $conn->prepare("SELECT report_id, reference_id, report_type, description, location_address, status, created_at, archived_at, photo_url FROM reports WHERE reporter_id = ? AND archived_at IS NOT NULL ORDER BY report_id ASC");
+$stmt = $conn->prepare("SELECT report_id, reference_id, report_type, description, location_address, status, created_at, archived_at, photo_url, video_url FROM reports WHERE reporter_id = ? AND archived_at IS NOT NULL ORDER BY report_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -95,7 +106,7 @@ $stmt->close();
 
 // Fetch user's appointments from database (excluding archived)
 $appointments = [];
-$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
+$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -103,6 +114,58 @@ while ($row = $result->fetch_assoc()) {
     $appointments[] = $row;
 }
 $stmt->close();
+
+dcvsExpireWaitlistClaims($conn, (int)$_SESSION['user_id']);
+$residentWaitlist = [];
+$waitlistStmt = $conn->prepare("SELECT w.waitlist_id, w.pet_id, w.appointment_type, w.urgency_level, w.preferred_date, w.preferred_time, w.status, w.created_at, w.notified_at, w.claim_expires_at, p.pet_name, p.photo_url AS pet_photo
+    FROM appointment_waitlist w
+    LEFT JOIN pets p ON p.pet_id = w.pet_id AND p.owner_id = w.user_id
+    WHERE w.user_id = ? ORDER BY w.created_at DESC");
+if (!$waitlistStmt) {
+    error_log('Failed to prepare resident waitlist query: ' . $conn->error);
+} else {
+    $waitlistStmt->bind_param('i', $_SESSION['user_id']);
+    if (!$waitlistStmt->execute()) {
+        error_log('Failed to query resident waitlist: ' . $waitlistStmt->error);
+    } else {
+        $residentWaitlist = $waitlistStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+    }
+    $waitlistStmt->close();
+}
+$residentWaitlistStats = ['total' => count($residentWaitlist), 'waiting' => 0, 'notified' => 0];
+$residentWaitlistDemandDate = null;
+$residentWaitlistDemandCount = 0;
+$residentWaitlistDemand = [];
+foreach ($residentWaitlist as $waitlistEntry) {
+    if (isset($residentWaitlistStats[$waitlistEntry['status']])) {
+        $residentWaitlistStats[$waitlistEntry['status']]++;
+    }
+    if ($waitlistEntry['status'] === 'waiting') {
+        $demandDateKey = $waitlistEntry['preferred_date'];
+        $residentWaitlistDemand[$demandDateKey] = ($residentWaitlistDemand[$demandDateKey] ?? 0) + 1;
+    }
+}
+if ($residentWaitlistDemand) {
+    arsort($residentWaitlistDemand);
+    $residentWaitlistDemandDate = (string)array_key_first($residentWaitlistDemand);
+    $residentWaitlistDemandCount = (int)$residentWaitlistDemand[$residentWaitlistDemandDate];
+}
+$residentWaitlistBooking = null;
+$requestedWaitlistBookingId = (int)($_GET['waitlist_booking'] ?? 0);
+if ($requestedWaitlistBookingId > 0) {
+    foreach ($residentWaitlist as $entry) {
+        if ((int)$entry['waitlist_id'] === $requestedWaitlistBookingId && $entry['status'] === 'notified') {
+            $residentWaitlistBooking = [
+                'pet_id' => (int)$entry['pet_id'],
+                'appointment_type' => $entry['appointment_type'],
+                'urgency_level' => $entry['urgency_level'],
+                'preferred_date' => $entry['preferred_date'],
+                'preferred_time' => $entry['preferred_time'] ? substr($entry['preferred_time'], 0, 5) : null,
+            ];
+            break;
+        }
+    }
+}
 
 // Fetch archived appointments
 $archivedAppointments = [];
@@ -215,13 +278,18 @@ $userId = $_SESSION['user_id'];
 $alq = $conn->prepare("
     SELECT al.*, p.pet_name, p.pet_type, p.breed, p.age, p.gender, p.color, p.weight, p.photo_url, p.reference_id AS pet_ref_id,
            pl.description AS source_description,
+           pl.status AS pl_status,
+           pl.adopted_at AS pl_adopted_at,
+           pl.updated_at AS pl_updated_at,
            (SELECT status FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_status,
            (SELECT preferred_date FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_date,
            (SELECT reference_id FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_ref,
            (SELECT appointment_id FROM appointments WHERE pet_id = al.pet_id AND archived_at IS NULL ORDER BY created_at DESC LIMIT 1) AS appt_id
     FROM adoption_listings al
     JOIN pets p ON al.pet_id = p.pet_id
-    LEFT JOIN pet_listings pl ON LOWER(pl.name) = LOWER(p.pet_name)
+    LEFT JOIN pet_listings pl
+        ON pl.listing_id = al.source_listing_id
+        OR (al.source_listing_id IS NULL AND LOWER(pl.name) = LOWER(p.pet_name))
     WHERE al.listed_by = ? AND al.status IN ('available','pending','adopted')
     ORDER BY FIELD(al.status, 'pending', 'available', 'adopted'), al.created_at DESC
 ");
@@ -230,6 +298,28 @@ $alq->execute();
 $alResult = $alq->get_result();
 while ($row = $alResult->fetch_assoc()) $adoptionListings[] = $row;
 $alq->close();
+
+$residentAdoptionApplications = [];
+$applicationStmt = $conn->prepare("
+    SELECT aa.application_id, aa.application_date, aa.status, aa.pet_listing_id, aa.resulting_pet_id,
+           pl.name AS pet_name, pl.species, pl.breed, pl.age, pl.gender, pl.photo_url,
+           aa.approved_pickup_at, aa.finalized_at
+    FROM adoption_applications aa
+    JOIN pet_listings pl ON pl.listing_id = aa.pet_listing_id
+    WHERE aa.applicant_id = ?
+      AND aa.status IN ('pending','under_review','needs_info','approved','adopted','expired')
+    ORDER BY aa.application_date DESC, aa.application_id DESC
+");
+if (!$applicationStmt) {
+    throw new RuntimeException('Your adoption applications could not be loaded.');
+}
+$applicationStmt->bind_param('i', $userId);
+$applicationStmt->execute();
+$applicationResult = $applicationStmt->get_result();
+while ($row = $applicationResult->fetch_assoc()) {
+    $residentAdoptionApplications[] = $row;
+}
+$applicationStmt->close();
 
 // ?? New Dashboard Queries ??
 
@@ -292,8 +382,8 @@ $rtmStmt->execute();
 $reportsThisMonth = (int)$rtmStmt->get_result()->fetch_row()[0];
 $rtmStmt->close();
 
-// Upcoming appointments count (today onward)
-$upcomingApptCount = count(array_filter($appointments, fn($a) => strtotime($a['preferred_date']) >= strtotime('today') && $a['status'] !== 'completed' && $a['status'] !== 'cancelled'));
+// Upcoming appointments count (matches todayAppts query)
+$upcomingApptCount = count($todayAppts);
 
 // Recent activity logs
 $recentActivities = [];
@@ -324,27 +414,51 @@ $annResult = $annStmt->get_result();
 
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="resident-portal">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="Resident Dashboard - Dasmari&ntilde;as City Veterinary Services Animal Welfare System" />
   <title><?php echo htmlspecialchars($pageTitle); ?> - Resident | DCVS</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/responsive.css'); ?>&resident-dialog=2" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
+    :root {
+      --primary-green: #0B4D26;
+      --primary-green-hover: #083B1D;
+      --primary-green-light: #EBF7EE;
+      --bg-page: #FFFFFF;
+      --bg-card: #FFFFFF;
+      --bg-subtle: #F9FAFB;
+      --bg-hover: #F3F4F6;
+      --border-color: #E5E7EB;
+      --border-color-light: #F0F2F5;
+      --border-color-dark: #D1D5DB;
+      --text-main: #111827;
+      --text-secondary: #4B5563;
+      --text-muted: #6B7280;
+      --text-faint: #9CA3AF;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 13.5px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
     .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
-    .page-title { font-size:1.5rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.025em; }
-    .page-subtitle { font-size:0.9rem; color:#71717a; margin:4px 0 0; font-family:'Inter','Segoe UI',sans-serif; }
+    .page-title { font-size:1.5rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.025em; }
+    .page-subtitle { font-size:0.9rem; color:#71717a; margin:4px 0 0; font-family:'Inter',sans-serif; }
     .header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .dashboard-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .card-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
@@ -352,7 +466,7 @@ $annResult = $annStmt->get_result();
     .kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:1rem; margin-bottom:1.75rem; }
     .kpi-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .kpi-label { font-size:0.78rem; font-weight:600; color:#94a3b8; text-transform:uppercase; letter-spacing:0.03em; }
-    .kpi-value { font-size:1.75rem; font-weight:800; color:#0f172a; font-family:'Montserrat',sans-serif; margin-top:4px; }
+    .kpi-value { font-size:1.75rem; font-weight:800; color:#0f172a; font-family:'Inter',sans-serif; margin-top:4px; }
     .table-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:1.25rem 1.5rem; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .table-header-actions { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:1rem; }
     .btn-sm { padding:6px 14px; font-size:0.78rem; border-radius:6px; }
@@ -424,11 +538,33 @@ $annResult = $annStmt->get_result();
     .view-all { font-size:0.78rem; color:#045e1f; font-weight:600; cursor:pointer; }
     .view-all:hover { text-decoration:underline; }
     .archive-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.25rem; flex-wrap:wrap; gap:0.75rem; }
-    .archive-title { font-size:1.1rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.01em; }
+    .archive-title { font-size:1.1rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.01em; }
     .archive-section { margin-top:0; padding-top:0; border-top:none; }
-    .archive-section h2 { font-size:1.1rem; font-weight:600; color:#18181b; margin:0 0 1rem 0; font-family:'Inter','Segoe UI',sans-serif; letter-spacing:-0.01em; }
-    #archive .appt-table { font-family:'Inter','Segoe UI',sans-serif; }
-    .archive-empty { text-align:center; padding:2.5rem 1rem; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; }
+    #archive .archive-section { display:none !important; }
+    #archive .archive-unified-table-area { min-height:var(--staff-table-min-height); overflow:hidden; }
+    #archive .archive-unified-table-area table { width:100%; border-collapse:collapse; }
+    #archive .archive-unified-table-area th { height:40px; padding:0 12px; text-align:left; vertical-align:middle; white-space:nowrap; }
+    #archive .archive-unified-table-area td { padding:10px 12px; vertical-align:middle; }
+    #archive .archive-unified-table-area .archive-empty-row td { height:var(--staff-table-min-height); text-align:center; color:#71717a; }
+    #archive .archive-unified-table-area .archive-empty-row i { display:block; margin-bottom:10px; color:#cbd5e1; font-size:1.5rem; }
+    #archive #archivePagination { min-height:57px; margin-top:0; border-top:1px solid #e4e4e7; background:#fff; }
+    .archive-section h2 { font-size:1.1rem; font-weight:600; color:#18181b; margin:0 0 1rem 0; font-family:'Inter',sans-serif; letter-spacing:-0.01em; }
+    #archive .archive-header { justify-content:flex-start; }
+    #archive .archive-toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; width:100%; }
+    #archive .archive-toolbar .search-grow-wrap { position:relative; width:280px; min-width:180px; }
+    #archive .archive-search-icon { position:absolute; left:12px; top:50%; transform:translateY(-50%); width:15px; height:15px; color:#71717a; pointer-events:none; }
+    #archive .archive-search-input { height:36px; width:100%; padding:0 12px 0 36px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; outline:none; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    #archive .archive-search-input:focus { border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #archive .archive-search-input::placeholder { color:#a1a1aa; }
+    #archive .archive-filter-select { height:36px; min-width:140px; padding:0 28px 0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; appearance:none; -webkit-appearance:none; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    #archive .archive-filter-select:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    @media (max-width:768px) {
+      #archive .archive-toolbar { align-items:stretch; flex-direction:column; }
+      #archive .archive-toolbar .search-grow-wrap,
+      #archive .archive-filter-select { width:100%; min-width:0; }
+    }
+    #archive .appt-table { font-family:'Inter',sans-serif; }
+    .archive-empty { text-align:center; padding:2.5rem 1rem; color:#71717a; font-family:'Inter',sans-serif; }
     .archive-empty i { font-size:1.75rem; color:#d4d4d8; display:block; margin-bottom:0.6rem; }
     .archive-empty p { margin:0; font-size:0.9rem; }
 
@@ -443,9 +579,9 @@ $annResult = $annStmt->get_result();
     .search-box { display:inline-flex; align-items:center; background:#fff; border:1px solid #e4e4e7; border-radius:6px; padding:0 12px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); transition:border-color 0.15s,box-shadow 0.15s; }
     .search-box:focus-within { border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .search-box i { color:#71717a; font-size:0.85rem; }
-    .search-box input { border:none; background:transparent; padding:8px 10px; font-size:0.85rem; color:#18181b; outline:none; width:100%; min-width:180px; font-family:'Inter','Segoe UI',sans-serif; }
+    .search-box input { border:none; background:transparent; padding:8px 10px; font-size:0.85rem; color:#18181b; outline:none; width:100%; min-width:180px; font-family:'Inter',sans-serif; }
     .search-box input::placeholder { color:#71717a; }
-    .filter-select { padding:8px 14px; border-radius:6px; border:1px solid #e4e4e7; font-size:0.85rem; background:#fff; color:#18181b; cursor:pointer; transition:border-color 0.15s; font-family:'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
+    .filter-select { padding:8px 14px; border-radius:6px; border:1px solid #e4e4e7; font-size:0.85rem; background:#fff; color:#18181b; cursor:pointer; transition:border-color 0.15s; font-family:'Inter',sans-serif; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
     .filter-select:focus { border-color:#18181b; outline:none; box-shadow:0 0 0 1px #18181b; }
     .action-btn-sm { padding:6px 14px; border-radius:6px; border:none; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; display:inline-flex; align-items:center; gap:6px; }
     .action-btn-sm.green { background:#f0fdf4; color:var(--green); } .action-btn-sm.green:hover { background:#dcfce7; }
@@ -478,55 +614,6 @@ $annResult = $annStmt->get_result();
     .no-profile-photo { text-align:center; padding:1.5rem; color:#94a3b8; }
     .no-profile-photo i { font-size:3rem; display:block; margin-bottom:0.5rem; }
 
-    /* �"?�"? Adoption Listings (premium CRM record design) �"?�"? */
-    .adopt-wrap { box-sizing:border-box; }
-    .adopt-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-bottom:24px; }
-    .adopt-pills { display:flex; gap:12px; flex-wrap:wrap; }
-    .adopt-pill { display:inline-flex; align-items:center; gap:6px; height:38px; padding:0 16px; border-radius:999px; background:#fff; border:1px solid #E5E7EB; color:#374151; font-size:13px; font-weight:600; cursor:pointer; transition:all .15s; white-space:nowrap; }
-    .adopt-pill:hover { border-color:#0E8131; color:#0E8131; }
-    .adopt-pill.active { background:#0E8131; border-color:#0E8131; color:#fff; box-shadow:0 4px 12px rgba(14,129,49,0.25); }
-    .adopt-tools { display:flex; gap:12px; align-items:center; }
-    .adopt-search { position:relative; }
-    .adopt-search i { position:absolute; left:13px; top:50%; transform:translateY(-50%); color:#94a3af; font-size:0.85rem; }
-    .adopt-search input { padding:9px 14px 9px 38px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:0.88rem; outline:none; width:220px; background:#f8fafc; color:#334155; transition:all 0.2s; box-sizing:border-box; }
-    .adopt-search input:focus { border-color:#10b981; box-shadow:0 0 0 3px rgba(16,185,129,0.1); }
-    .adopt-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:24px; margin-bottom:32px; }
-    .adopt-card { display:flex; flex-direction:column; background:#fff; border:1px solid #E5E7EB; border-radius:18px; padding:20px; box-shadow:0 1px 2px rgba(16,24,40,0.04),0 4px 12px rgba(16,24,40,0.03); box-sizing:border-box; }
-    .adopt-badges { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-    .adopt-ref-badge { display:inline-flex; align-items:center; gap:6px; background:#F3F4F6; color:#4B5563; font-family:'IBM Plex Mono',monospace; font-size:12px; font-weight:600; padding:5px 11px; border-radius:7px; }
-    .adopt-status-badge { display:inline-flex; align-items:center; gap:5px; font-size:11.5px; font-weight:700; padding:3px 10px; border-radius:20px; font-family:'Inter','Segoe UI',sans-serif; white-space:nowrap; }
-    .adopt-status-badge.pending { background:#fffbeb; color:#b45309; }
-    .adopt-status-badge.available { background:var(--green-100); color:var(--green-700); }
-    .adopt-status-badge.adopted { background:#eff6ff; color:#1d4ed8; }
-    .adopt-status-badge.cancelled { background:#fef2f2; color:#b91c1c; }
-    .adopt-split { display:flex; gap:20px; flex:1; min-height:0; }
-    .adopt-media { flex:0 0 38%; }
-    .adopt-media img { width:100%; aspect-ratio:320/260; object-fit:cover; border-radius:16px; display:block; }
-    .adopt-media-plain { width:100%; aspect-ratio:320/260; border-radius:16px; background:#F3F4F6; display:flex; align-items:center; justify-content:center; color:#9CA3AF; font-size:14px; font-weight:600; font-family:'IBM Plex Mono',monospace; text-align:center; }
-    .adopt-info { flex:1; display:flex; flex-direction:column; min-width:0; }
-    .adopt-name { font-size:36px; font-weight:800; color:#111827; letter-spacing:-0.02em; line-height:1.05; margin:0; }
-    .adopt-breed { font-size:13px; font-weight:600; color:#6B7280; text-transform:uppercase; letter-spacing:.08em; margin:8px 0 0; }
-    .adopt-desc { font-size:14px; line-height:1.5; color:#6B7280; margin:12px 0 0; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-    .adopt-divider { border:0; border-top:1px solid #E5E7EB; margin:16px 0; }
-    .adopt-info-grid { display:grid; grid-template-columns:1fr 1fr; row-gap:16px; column-gap:28px; }
-    .adopt-info-item { display:flex; align-items:center; gap:10px; min-width:0; }
-    .adopt-info-item .icon { width:20px; flex-shrink:0; color:#9CA3AF; display:flex; align-items:center; justify-content:center; font-size:14px; }
-    .adopt-info-item .ic-label { font-size:11px; font-weight:500; color:#9CA3AF; text-transform:uppercase; letter-spacing:.04em; }
-    .adopt-info-item .ic-value { font-size:13px; font-weight:700; color:#111827; }
-    .adopt-actions { display:flex; align-items:center; margin-top:auto; padding-top:16px; }
-    .adopt-status-btn { display:inline-flex; align-items:center; gap:8px; height:40px; padding:0 18px; border-radius:10px; font-size:13px; font-weight:700; border:1.5px solid transparent; cursor:default; white-space:nowrap; box-sizing:border-box; }
-    .adopt-status-btn.pending { background:#FFF7ED; border-color:#FED7AA; color:#C2540B; }
-    .adopt-status-btn.adopted { background:#F3F4F6; border-color:#E5E7EB; color:#6B7280; }
-    .adopt-status-btn.available { background:#fff; border-color:#0E8131; color:#0E8131; cursor:pointer; }
-    .adopt-status-btn.available:hover { background:#0E8131; color:#fff; }
-    .adopt-status-btn i { font-size:13px; }
-    .adopt-footer { text-align:center; padding:24px 0 8px; }
-    .adopt-footer-icon { width:72px; height:72px; margin:12px auto 18px; border-radius:50%; border:2px solid #0E8131; color:#0E8131; display:flex; align-items:center; justify-content:center; font-size:28px; }
-    .adopt-footer h3 { font-size:22px; font-weight:800; color:#111827; margin:0; }
-    .adopt-footer p { font-size:15px; color:#6B7280; margin:8px 0 0; }
-    .adopt-empty { text-align:center; color:#6B7280; padding:3rem 1rem; grid-column:1 / -1; }
-    @media (max-width:1000px) { .adopt-grid { grid-template-columns:1fr; } .adopt-split { flex-direction:column; } .adopt-media { flex:auto; } .adopt-media img, .adopt-media-plain { aspect-ratio:16/9; } }
-    @media (max-width:560px) { .adopt-search input { width:100%; } .adopt-info-grid { grid-template-columns:1fr; } }
     .modal-body .form-group input,
     .modal-body .form-group select,
     .modal-body .form-group textarea { width:100%; padding:10px 14px; border:1.5px solid #e2e8f0; border-radius:8px; font-size:0.85rem; outline:none; transition:border-color 0.2s; box-sizing:border-box; }
@@ -552,7 +639,7 @@ $annResult = $annStmt->get_result();
     .badge-category { font-size: 0.8rem; font-weight: 600; color: #475569; white-space: nowrap; }
     .view-all { font-size: 0.85rem; font-weight: 600; color: var(--green); text-decoration: none; transition: color 0.2s; }
     .view-all:hover { color: #084a1c; text-decoration: underline; }
-/* �"?�"? Profile Settings (new layout) �"?�"? */
+/* ï¿½"?ï¿½"? Profile Settings (new layout) ï¿½"?ï¿½"? */
 .profile-settings-wrapper * { box-sizing:border-box; }
 .profile-settings-wrapper { max-width:680px; margin:0 auto; }
 .profile-settings-wrapper .ps-card { background:#fff; border:1px solid #e6e8eb; border-radius:14px; padding:22px 24px; margin-bottom:20px; box-shadow:0 1px 2px rgba(0,0,0,0.02); }
@@ -561,17 +648,17 @@ $annResult = $annStmt->get_result();
 .profile-settings-wrapper .ps-avatar { width:56px; height:56px; border-radius:50%; overflow:hidden; flex-shrink:0; background:#d9d9d9; cursor:pointer; }
 .profile-settings-wrapper .ps-avatar img { width:100%; height:100%; object-fit:cover; }
 .profile-settings-wrapper .ps-avatar-plain { width:56px; height:56px; border-radius:50%; background:#d9d9d9; display:flex; align-items:center; justify-content:center; font-size:1.3rem; color:#666; cursor:pointer; }
-.profile-settings-wrapper .ps-profile-name { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
-.profile-settings-wrapper .ps-profile-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; margin-top:2px; }
+.profile-settings-wrapper .ps-profile-name { font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+.profile-settings-wrapper .ps-profile-sub { font-family:'Inter',sans-serif; font-size:14px; color:#71717a; line-height:1.5; margin-top:2px; }
 .profile-settings-wrapper .ps-card-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:18px; }
-.profile-settings-wrapper .ps-card-header h2 { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; margin:0; }
-.profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; cursor:pointer; transition:background .15s,border-color .15s; }
+.profile-settings-wrapper .ps-card-header h2 { font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; margin:0; }
+.profile-settings-wrapper .ps-edit-btn { display:inline-flex; align-items:center; gap:6px; background:#fff; border:1px solid #d7dae0; border-radius:8px; padding:7px 14px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; cursor:pointer; transition:background .15s,border-color .15s; }
 .profile-settings-wrapper .ps-edit-btn:hover { background:#f5f6f8; border-color:#c3c8d0; }
 .profile-settings-wrapper .ps-edit-btn.active { background:#f0f0f0; border-color:#000; color:#000; }
 .profile-settings-wrapper .ps-edit-btn svg { width:13px; height:13px; }
 .profile-settings-wrapper .ps-form-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:14px; }
 .profile-settings-wrapper .ps-form-row.ps-single { grid-template-columns:1fr; }
-.profile-settings-wrapper .ps-field label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
+.profile-settings-wrapper .ps-field label { display:block; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
 .profile-settings-wrapper .ps-field input,
 .profile-settings-wrapper .ps-field select,
 .profile-settings-wrapper .ps-field textarea { width:100%; padding:10px 12px; font-size:14px; border-radius:8px; border:1px solid #e2e5ea; background:#f9fafb; color:#1f2328; outline:none; transition:background .15s,border-color .15s,box-shadow .15s; box-sizing:border-box; font-family:inherit; }
@@ -585,7 +672,7 @@ $annResult = $annStmt->get_result();
 .profile-settings-wrapper .ps-field select:not(:disabled):focus,
 .profile-settings-wrapper .ps-field textarea:not(:disabled):focus { border-color:#000; box-shadow:0 0 0 3px rgba(0,0,0,0.08); }
 .profile-settings-wrapper .ps-actions-row { display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
-.profile-settings-wrapper .ps-btn { padding:9px 18px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; border-radius:8px; cursor:pointer; border:1px solid transparent; }
+.profile-settings-wrapper .ps-btn { padding:9px 18px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; border-radius:8px; cursor:pointer; border:1px solid transparent; }
 .profile-settings-wrapper .ps-btn-primary { background:#000; color:#fff; border-color:#000; }
 .profile-settings-wrapper .ps-btn-primary:hover { background:#1a1a1a; }
 .profile-settings-wrapper .ps-btn-primary:disabled { background:#c7c9d9; border-color:#c7c9d9; cursor:not-allowed; }
@@ -596,9 +683,9 @@ $annResult = $annStmt->get_result();
 .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 #account-settings { background:#fff; }
 
-/* �"?�"? Dashboard Layout (corrected) �"?�"? */
+/* ï¿½"?ï¿½"? Dashboard Layout (corrected) ï¿½"?ï¿½"? */
 :root{--card-bg:#ffffff;--text:#0f172a;--text-2:#475569;--text-3:#94a3b8;--border:#eef2f6;--border-2:#e2e8f0;--green:#045e1f;--shadow:0 1px 3px rgba(0,0,0,0.04);--text-main:var(--text);--text-secondary:var(--text-2);--text-muted:var(--text-3);--accent-blue:var(--green);--shadow-md:0 4px 6px rgba(0,0,0,0.05);}
-.section-title{font-size:0.95rem;font-weight:700;color:var(--text);margin-bottom:0.85rem;display:flex;align-items:center;gap:0.5rem;font-family:'Montserrat',sans-serif;}
+.section-title{font-size:0.95rem;font-weight:700;color:var(--text);margin-bottom:0.85rem;display:flex;align-items:center;gap:0.5rem;font-family:'Inter',sans-serif;}
 .title-wrapper{margin-bottom:1rem;}
 .badge{background:var(--accent-blue);color:white;font-size:0.75rem;font-weight:600;padding:0.25rem 0.5rem;border-radius:6px;}
 .card{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);border:1px solid var(--border-2);overflow:hidden;display:flex;flex-direction:column;}
@@ -608,7 +695,7 @@ $annResult = $annStmt->get_result();
 .action-card{background:var(--card-bg);border-radius:12px;box-shadow:var(--shadow);border:1px solid var(--border-2);padding:1.25rem;display:flex;align-items:center;gap:1rem;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s;}
 .action-card:hover{transform:translateY(-2px);box-shadow:var(--shadow-md);}
 .action-icon{color:#000;width:48px;height:48px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.action-content h3{font-size:1rem;font-weight:700;color:var(--text);margin-bottom:0.25rem;font-family:'Montserrat',sans-serif;}
+.action-content h3{font-size:1rem;font-weight:700;color:var(--text);margin-bottom:0.25rem;font-family:'Inter',sans-serif;}
 .action-content p{font-size:0.85rem;color:var(--text-3);line-height:1.3;}
 .dashboard-grid{display:grid;grid-template-columns:2fr 1fr;gap:2rem;}
 .dash-main{display:flex;flex-direction:column;gap:2rem;height:100%;}
@@ -630,7 +717,7 @@ $annResult = $annStmt->get_result();
 
 .calendar-widget{background:#fff;border-radius:12px;padding:1.5rem;display:flex;flex-direction:column;gap:1.5rem;height:100%;border:1px solid var(--border-2);box-shadow:var(--shadow);}
 .calendar-header{display:flex;justify-content:space-between;align-items:center;}
-.calendar-header h3{font-size:0.88rem;font-weight:700;color:var(--text);margin:0;font-family:'Montserrat',sans-serif;}
+.calendar-header h3{font-size:0.88rem;font-weight:700;color:var(--text);margin:0;font-family:'Inter',sans-serif;}
 .calendar-nav{display:flex;gap:0.5rem;}
 .calendar-nav-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border-2);background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text);transition:background-color 0.2s;}
 .calendar-nav-btn:hover{background:#f3f4f6;}
@@ -649,13 +736,13 @@ $annResult = $annStmt->get_result();
 .calendar-tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#1f2937 transparent transparent transparent;}
 .calendar-date:hover .calendar-tooltip{opacity:1;visibility:visible;}
 /* Dedicated page container */
-.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;font-family:'Inter','Segoe UI',sans-serif;}
-.bk-card2{background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);padding:28px 32px;font-family:'Inter','Segoe UI',sans-serif;}
+.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;font-family:'Inter',sans-serif;}
+.bk-card2{background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);padding:28px 32px;font-family:'Inter',sans-serif;}
 @media (max-width:640px){ .bk-page{padding:16px 20px;} .bk-card2{padding:20px 18px;} }
 /* Two-column body: LEFT = calendar, RIGHT = pet/service/time */
-.bk-heading{font-family:'Inter','Segoe UI',sans-serif;}
-.bk-heading-title{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1;margin:0;}
-.bk-heading-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;line-height:1.5;margin:6px 0 0;}
+.bk-heading{font-family:'Inter',sans-serif;}
+.bk-heading-title{font-family:'Inter',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1;margin:0;}
+.bk-heading-sub{font-family:'Inter',sans-serif;font-size:14px;color:#71717a;line-height:1.5;margin:6px 0 0;}
 /* Two-column body: LEFT ~45% (calendar), RIGHT ~55% (fields) */
 .bk-body{display:grid;grid-template-columns:minmax(0,45%) minmax(0,55%);gap:40px;align-items:start;margin-top:28px;}
 .bk-col{min-width:0;}
@@ -681,7 +768,7 @@ $annResult = $annStmt->get_result();
 .bk-petprofile-avatar img{width:100%;height:100%;object-fit:cover;}
 .bk-petprofile-info{flex:1;min-width:0;}
 .bk-petprofile-eyebrow{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:#18181b;margin:0 0 3px;}
-.bk-petprofile-name{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:700;color:#18181b;letter-spacing:-0.02em;margin:0;text-transform:capitalize;}
+.bk-petprofile-name{font-family:'Inter',sans-serif;font-size:18px;font-weight:700;color:#18181b;letter-spacing:-0.02em;margin:0;text-transform:capitalize;}
 .bk-petprofile-meta{font-size:14px;color:#71717a;margin:4px 0 0;}
 /* Pet + appointment type selectors */
 .bk-dropdowns{display:flex;flex-direction:column;gap:12px;padding:0 0 14px;}
@@ -692,29 +779,31 @@ $annResult = $annStmt->get_result();
 .bk-select select{width:100%;padding:12px 36px 12px 12px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:10px;font-family:inherit;font-size:14px;color:#18181b;appearance:none;-webkit-appearance:none;cursor:pointer;transition:border-color 0.15s,background 0.15s;box-sizing:border-box;}
 .bk-select select:focus{outline:none;border-color:#18181b;}
 .bk-select-chevron{position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#71717a;pointer-events:none;}
-/* Calendar */
-.bk-cal-area{padding:0;}
+/* Calendar: match the staff schedule preview */
+.bk-cal-area{padding:0;max-width:390px;width:100%;}
 /* Booking primary (teal) - defined globally because the white card wrapper was removed */
 :root{--bk-primary:#0d9488;--bk-primary-hover:#0f766e;--bk-primary-soft:#ccfbf1;--bk-fg:#18181b;--bk-muted:#71717a;--bk-border:#e4e4e7;}
-.bk-cal{border:1px solid var(--bk-border);border-radius:12px;padding:14px;background:#fff;}
-.bk-cal-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;}
-.bk-cal-title{font-family:inherit;font-size:16px;font-weight:600;color:var(--bk-fg);min-width:120px;text-align:center;}
-.bk-cal-btn{width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:none;background:transparent;color:var(--bk-muted);cursor:pointer;transition:background 0.15s,color 0.15s;font-size:18px;}
-.bk-cal-btn:hover{background:#f4f4f5;color:var(--bk-fg);}
+.bk-cal{border:1px solid #e4e4e7;border-radius:12px;padding:0;background:#fff;overflow:hidden;}
+.bk-cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:12px 14px 8px;}
+.bk-month-nav{display:flex;align-items:center;gap:8px;min-width:0;}
+.bk-cal-controls{display:flex;align-items:center;gap:4px;flex:none;}
+.bk-cal-title{font-family:inherit;font-size:16px;font-weight:600;color:#18181b;min-width:0;text-align:left;white-space:nowrap;}
+.bk-cal-btn{width:32px;height:32px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;transition:background 0.15s,color 0.15s;font-size:18px;}
+.bk-cal-btn:hover{background:#f4f4f5;color:#18181b;}
 .bk-cal-btn svg{width:18px;height:18px;}
-.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin-bottom:6px;}
-.bk-weekdays span{text-align:center;font-size:13px;font-weight:600;color:var(--bk-muted);height:34px;line-height:34px;text-transform:capitalize;}
-.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;}
-/* Available date: readable dark text, clearly clickable - box shape */
-.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;max-width:42px;aspect-ratio:1/1;margin:0 auto;border-radius:8px;border:2px solid transparent;font-size:15px;font-weight:500;color:var(--bk-fg);background:transparent;cursor:pointer;transition:background 0.15s,color 0.15s,border-color 0.15s;}
+.bk-cal-today{border:none;background:transparent;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;padding:6px 8px;border-radius:4px;cursor:pointer;}
+.bk-cal-today:hover{background:#f4f4f5;}
+.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 14px;}
+.bk-weekdays span{text-align:center;font-size:12px;font-weight:600;color:#71717a;height:34px;line-height:34px;text-transform:uppercase;letter-spacing:.04em;}
+.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;margin:0 14px 14px;background:#e4e4e7;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden;}
+.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:1/1;max-width:none;margin:0;border:0;border-radius:0;font-family:inherit;font-size:14px;font-weight:500;color:#18181b;background:#fff;cursor:pointer;transition:background 0.12s,color 0.12s;}
 .bk-day:hover:not(:disabled){background:#f4f4f5;color:#18181b;}
-/* Today: black box outline */
-.bk-day.bk-day-today{border-color:#18181b;color:#18181b;font-weight:700;}
-.bk-day.bk-day-today:hover:not(:disabled){background:#f4f4f5;}
-/* Selected: box filled black, white text */
-.bk-day.bk-day-selected{background:#18181b;color:#fff;font-weight:700;border-color:#18181b;}
-/* Past / fully booked: muted gray, disabled */
-.bk-day.bk-day-disabled{color:#c9cdd3;cursor:not-allowed;background:transparent;opacity:0.7;}
+.bk-day.bk-day-today{font-weight:700;}
+.bk-day.bk-day-selected{background:#f0fdf4;color:#166534;font-weight:600;box-shadow:inset 0 0 0 2px #0e8131;}
+.bk-day.bk-day-disabled{color:#a1a1aa;cursor:not-allowed;background:#f1f1f2;opacity:1;}
+.bk-day.bk-day-dim{color:#a1a1aa;background:#f1f1f2;cursor:default;pointer-events:none;}
+.bk-day.bk-day-custom:not(.bk-day-disabled)::after{content:'';position:absolute;bottom:4px;width:4px;height:4px;border-radius:50%;background:#0e8131;}
+.bk-day.bk-day-selected.bk-day-custom::after{background:#166534;}
 /* Available Time section */
 .bk-slots-wrap{display:flex;flex-direction:column;gap:0;margin-top:4px;}
 .bk-slots-title{font-family:inherit;font-size:15px;font-weight:600;color:var(--bk-fg);margin-bottom:4px;}
@@ -736,29 +825,33 @@ $annResult = $annStmt->get_result();
 .bk-next-arrow{display:inline-flex;font-size:16px;line-height:1;transition:transform 0.15s;}
 .bk-btn-primary:hover:not(:disabled) .bk-next-arrow{transform:translateX(2px);}
 /* Confirm booking dialog base styles */
-.bk-confirm-section{display:flex;flex-direction:column;}
-.bk-confirm-summary{display:flex;align-items:center;gap:12px;padding:10px 0;}
-.bk-confirm-avatar{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,#045e1f,#043012);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;overflow:hidden;flex-shrink:0;}
+.bk-confirm-section{display:flex;flex-direction:column;gap:8px;}
+.bk-confirm-summary{display:flex;align-items:center;gap:12px;padding:0;}
+.bk-confirm-avatar{width:64px;height:64px;border-radius:8px;background:linear-gradient(135deg,#045e1f,#043012);color:#fff;display:flex;align-items:center;justify-content:center;font-size:24px;overflow:hidden;flex-shrink:0;}
 .bk-confirm-avatar img{width:100%;height:100%;object-fit:cover;}
-.bk-confirm-summary h4{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;text-transform:capitalize;}
-.bk-confirm-summary p{font-size:13px;color:#71717a;margin:2px 0 0;text-transform:capitalize;}
-.bk-confirm-details{display:flex;flex-direction:column;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:2px 14px;}
-.bk-detail-row{display:flex;align-items:center;justify-content:space-between;padding:11px 0;border-bottom:1px solid #eef1f4;gap:16px;}
-.bk-detail-row:last-child{border-bottom:none;}
-.bk-detail-row span{font-size:14px;color:#71717a;flex-shrink:0;}
-.bk-detail-row strong{font-size:14px;font-weight:500;color:#18181b;text-align:right;max-width:72%;}
+.bk-confirm-summary h4{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;margin:0;text-transform:capitalize;}
+.bk-confirm-summary p{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin:2px 0 0;text-transform:capitalize;}
+.bk-confirm-details{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;border:0;border-radius:0;background:transparent;padding:0;}
+.bk-detail-row{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;min-width:0;padding:0;border:0;gap:3px;}
+.bk-detail-row span{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;line-height:1.4;color:#71717a;}
+.bk-detail-row strong{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;line-height:1.4;color:#18181b;text-align:left;max-width:100%;overflow-wrap:anywhere;}
 /* Confirm Booking dialog (matches Register a Pet shadcn dialog) */
 #confirmBookingModal.modal { background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
 #confirmBookingModal .sd-dialog { width:100%; display:flex; justify-content:center; }
-#confirmBookingModal .sd-dialog-content { position:relative; width:100%; max-width:560px; background:#ffffff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; max-height:90vh; overflow-y:auto; }
+#confirmBookingModal .sd-dialog-content { position:relative; box-sizing:border-box; width:100%; max-width:520px; background:#ffffff; border:1px solid #e4e4e7; border-radius:8px; padding:20px; display:flex; flex-direction:column; gap:14px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; max-height:90vh; overflow-y:auto; }
 #confirmBookingModal .sd-dialog-close { position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all 0.15s ease; }
 #confirmBookingModal .sd-dialog-close:hover { background:#f4f4f5; color:#18181b; }
-#confirmBookingModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
-#confirmBookingModal .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+#confirmBookingModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; font-family:'Inter','Segoe UI',sans-serif; }
+#confirmBookingModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
 #confirmBookingModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
-#confirmBookingModal .sd-field-group { display:flex; flex-direction:column; gap:16px; }
+#confirmBookingModal .sd-field-group { display:flex; flex-direction:column; gap:18px; }
+#confirmBookingModal .bk-confirm-section > .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; line-height:1.4; color:#18181b; margin:0; }
 #confirmBookingModal .sd-dialog-footer { display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:8px; }
-#confirmBookingModal .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:8px; }
+#confirmBookingModal .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin-bottom:8px; }
+@media (max-width:600px) {
+  #confirmBookingModal .sd-dialog-content { padding:16px; }
+  .bk-confirm-details { column-gap:12px; }
+}
 .appointment-list{display:flex;flex-direction:column;gap:1.25rem;margin-top:0.5rem;max-height:260px;overflow-y:auto;padding-right:0.5rem;}
 .appointment-list::-webkit-scrollbar{width:6px;}
 .appointment-list::-webkit-scrollbar-track{background:transparent;}
@@ -793,7 +886,7 @@ $annResult = $annStmt->get_result();
 .message-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.75rem;}
 .message-sender{display:flex;align-items:center;gap:0.75rem;}
 .sender-avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;}
-.sender-info h4{font-size:0.95rem;font-weight:700;color:var(--text);font-family:'Montserrat',sans-serif;}
+.sender-info h4{font-size:0.95rem;font-weight:700;color:var(--text);font-family:'Inter',sans-serif;}
 .sender-info p{font-size:0.85rem;color:var(--text-3);margin:0 0 2px;}
 .message-subject{font-size:0.82rem;font-weight:600;color:var(--text-2);}
 .message-type-label{font-size:0.75rem;font-weight:600;color:var(--green);text-transform:uppercase;letter-spacing:0.04em;}
@@ -801,7 +894,7 @@ $annResult = $annStmt->get_result();
 .message-preview a{color:var(--accent-blue);text-decoration:none;}
 .insights-card{background:var(--card-bg);border-radius:16px;box-shadow:0 4px 20px rgba(0,0,0,0.04);border:1px solid var(--border-2);display:flex;flex-direction:column;flex:1;}
 .insights-header{padding:1.25rem 1.25rem 1rem;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border-2);}
-.insights-title{font-size:0.95rem;font-weight:700;color:var(--text);margin:0;font-family:'Montserrat',sans-serif;}
+.insights-title{font-size:0.95rem;font-weight:700;color:var(--text);margin:0;font-family:'Inter',sans-serif;}
 .period-filter{font-size:0.75rem;font-weight:500;color:var(--text-secondary);background:#f3f4f6;padding:0.25rem 0.75rem;border-radius:20px;display:flex;align-items:center;gap:0.25rem;cursor:pointer;position:relative;}
 .period-menu{display:none;position:absolute;top:100%;right:0;background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.08);z-index:20;min-width:140px;margin-top:4px;}
 .period-option{display:block;padding:0.5rem 1rem;font-size:0.78rem;color:#0f172a;text-decoration:none;border-bottom:1px solid #f1f5f9;}
@@ -855,11 +948,11 @@ $annResult = $annStmt->get_result();
 .summary-value{font-size:0.78rem;font-weight:600;color:var(--text);}
 
 
-/* �"?�"? Overflow guard: prevent horizontal scroll on any screen size �"?�"? */
+/* ï¿½"?ï¿½"? Overflow guard: prevent horizontal scroll on any screen size ï¿½"?ï¿½"? */
 .main-content,#mainContent,.dashboard-grid,.dash-main,.dash-sidebar{max-width:100%;overflow-x:hidden;box-sizing:border-box;}
 .dashboard-grid>*,.dash-main>*,.dash-sidebar>*,.top-row>*{min-width:0;}
 
-/* �"?�"? Responsive breakpoints �"?�"? */
+/* ï¿½"?ï¿½"? Responsive breakpoints ï¿½"?ï¿½"? */
 @media (max-width:1100px){
   .dashboard-grid{grid-template-columns:1fr}
   .top-row{grid-template-columns:1fr}
@@ -944,44 +1037,191 @@ $annResult = $annStmt->get_result();
   .welcome-banner .date-year{font-size:0.55rem}
 }
 </style>
+<style>
+  /* ========== RESIDENT DASHBOARD REWORK - SCOPED STYLES ========== */
+  .resident-rework{--primary-green:#0B4D26;--primary-green-hover:#07381B;--primary-green-light:#EBF7EE;--primary-green-soft:#D1F0DA;--accent-green:#107C41;--bg-body:#FFFFFF;--bg-card:#FFFFFF;--bg-subtle:#F9FBF9;--bg-hover:#F1F5F1;--border-color:#E6ECE6;--border-light:#F0F4F0;--border-dark:#D4DDD4;--text-main:#111827;--text-secondary:#4B5563;--text-muted:#6B7280;--text-faint:#9CA3AF;--badge-green-bg:#ECFDF3;--badge-green-text:#027A48;--badge-green-border:#D1FADF;--badge-amber-bg:#FEF0C7;--badge-amber-text:#B54708;--badge-amber-border:#FEDF89;--badge-blue-bg:#E0F2FE;--badge-blue-text:#0284C7;--badge-blue-border:#BAE6FD;--badge-purple-bg:#F4EBFF;--badge-purple-text:#6941C6;--badge-purple-border:#E9D7FE;--radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-full:9999px;--shadow-sm:0 1px 2px 0 rgba(16,24,40,0.04);--shadow-card:0 1px 3px 0 rgba(16,24,40,0.05),0 1px 2px -1px rgba(16,24,40,0.04);--shadow-popover:0 12px 28px -4px rgba(15,23,42,0.12),0 4px 10px -2px rgba(15,23,42,0.05);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-main);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .resident-rework *,.resident-rework *::before,.resident-rework *::after{box-sizing:border-box;margin:0;padding:0}
+  .resident-rework .dashboard-content{padding:24px 28px 60px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1440px;margin:0 auto}
+  .resident-rework .greeting-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .resident-rework .greeting-date{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;margin-bottom:4px}
+  .resident-rework .greeting-headline{font-family:'Inter',sans-serif;font-size:28px;font-weight:700;color:#18181b;letter-spacing:-0.025em;line-height:1.2}
+  .resident-rework .greeting-subtext{font-family:'Inter',sans-serif;font-size:15px;color:#71717a;margin-top:4px}
+  .resident-rework .greeting-actions{display:flex;align-items:center;gap:10px}
+  .resident-rework .btn-secondary-white{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid #e4e4e7;background:#ffffff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background 0.15s ease,border-color 0.15s ease}
+  .resident-rework .btn-secondary-white:hover{background:#f4f4f5;border-color:#d4d4d8}
+  .resident-rework .action-dropdown-wrapper{position:relative}
+  .resident-rework .btn-action-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;background:#18181b;color:#fafafa;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background 0.15s ease}
+  .resident-rework .btn-action-primary:hover{background:#27272a}
+  .resident-rework .action-dropdown-menu{position:absolute;right:0;top:calc(100% + 8px);background:#FFF;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);min-width:200px;padding:4px;display:flex;flex-direction:column;gap:2px;z-index:60;opacity:0;visibility:hidden;transform:translateY(-8px);transition:all 0.2s cubic-bezier(0.16,1,0.3,1)}
+  .resident-rework .action-dropdown-menu.show{opacity:1;visibility:visible;transform:translateY(0)}
+  .resident-rework .action-dropdown-item{display:flex;align-items:center;justify-content:flex-start;gap:8px;padding:8px 16px;border-radius:6px;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;color:#18181b;text-align:left;transition:background 0.15s ease;width:100%;background:none;border:none;cursor:pointer}
+  .resident-rework .action-dropdown-item > svg{flex:0 0 16px;}
+  .resident-rework .action-dropdown-item > span{flex:1;min-width:0;text-align:left;}
+  .resident-rework .action-dropdown-item:hover{background:#f4f4f5}
+  .resident-rework .metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .resident-rework .metric-card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px 20px;background:#FFFFFF;border:1px solid var(--border-color);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);font-family:'Inter',sans-serif;cursor:default;transition:all 0.2s ease}
+  .resident-rework .metric-card:hover{border-color:var(--border-dark);box-shadow:0 4px 12px -2px rgba(0,0,0,0.05),0 2px 4px -1px rgba(0,0,0,0.03)}
+  .resident-rework .metric-icon-box{display:none}
+  .resident-rework .icon-box-green{background-color:#ECFDF3;color:#0B4D26}
+  .resident-rework .icon-box-blue{background-color:#EFF8FF;color:#0284C7}
+  .resident-rework .icon-box-purple{background-color:#F9F5FF;color:#7C3AED}
+  .resident-rework .icon-box-amber{background-color:#FFFBEB;color:#B45309}
+  .resident-rework .icon-box-amber{background-color:#FEF6EE;color:#D97706}
+  .resident-rework .metric-info{display:flex;flex-direction:column;gap:2px}
+  .resident-rework .metric-label{font-family:'Inter',sans-serif;font-size:14px;font-weight:500;color:#18181b;text-transform:uppercase;letter-spacing:0.03em;margin:0 0 6px}
+  .resident-rework .metric-value{font-family:'Inter',sans-serif;font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px}
+  .resident-rework .metric-subtext{font-family:'Inter',sans-serif;font-size:14px;color:#71717a}
+  .resident-rework .dashboard-workflow-layout{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  .resident-rework .primary-vertical-column,.resident-rework .secondary-vertical-column{display:flex;flex-direction:column;gap:22px;align-self:start}
+  .resident-rework .primary-vertical-column>.card-box:first-child{min-height:408px}
+  .resident-rework .primary-vertical-column>.card-box:nth-child(2){min-height:413px}
+  .resident-rework .secondary-vertical-column>.card-box:first-child{min-height:413px}
+  .resident-rework .secondary-vertical-column>.card-box:nth-child(2){min-height:413px}
+  .resident-rework .card-box{background:var(--bg-card);border:1px solid var(--border-color);border-radius:var(--radius-lg);box-shadow:var(--shadow-card);padding:22px 24px;display:flex;flex-direction:column;position:relative}
+  .resident-rework .card-header-bar{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+  .resident-rework .card-meta-tag{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;margin-bottom:3px}
+  .resident-rework .card-title-text{font-family:'Inter',sans-serif;font-size:16px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1.25}
+  .resident-rework .card-action-link{display:inline-flex;align-items:center;gap:4px;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:#18181b;transition:gap 0.15s ease}
+  .resident-rework .card-action-link:hover{color:#18181b;gap:7px}
+  .resident-rework .appointment-items-list{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+  .resident-rework .appointment-item-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:12px;background:#FFF;border:1px solid var(--border-color);transition:all 0.15s ease;cursor:pointer}
+  .resident-rework .appointment-item-row.active-visit{border-left:4px solid var(--primary-green);background-color:#F8FAF8}
+  .resident-rework .appointment-time-col{display:flex;align-items:center;gap:8px;min-width:90px;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:#18181b}
+  .resident-rework .status-dot-indicator{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .resident-rework .dot-green{background-color:#12B76A}
+  .resident-rework .dot-amber{background-color:#F79009}
+  .resident-rework .dot-blue{background-color:#0BA5EC}
+  .resident-rework .appointment-details-col{flex:1;display:flex;flex-direction:column;padding:0 12px}
+  .resident-rework .appointment-pet-name{font-family:'Inter',sans-serif;font-size:14px;font-weight:500;color:#18181b}
+  .resident-rework .appointment-reason-meta{font-family:'Inter',sans-serif;font-size:13px;color:#71717a}
+  .resident-rework .status-pill-badge{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;flex-shrink:0}
+  .resident-rework .badge-pending{background-color:#fef3c7;color:#92400e;border-color:#fde68a}
+  .resident-rework .badge-reviewing{background-color:#dbeafe;color:#1d4ed8;border-color:#bfdbfe}
+  .resident-rework .badge-confirmed{background-color:#dcebe0;color:#045e1f;border-color:#bbf7d0}
+  .resident-rework .badge-scheduled{background-color:#0E8131;color:#ffffff;border-color:#0E8131}
+  .resident-rework .badge-completed{background-color:#dbeafe;color:#1e40af;border-color:#bfdbfe}
+  .resident-rework .appointment-chevron{color:var(--text-faint);margin-left:8px;flex-shrink:0}
+  .resident-rework .card-bottom-link-center{text-align:center;padding-top:4px;margin-top:auto}
+  .resident-rework .pets-list-rework{display:flex;flex-direction:column}
+  .resident-rework .pet-row-rework{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f4f4f5;cursor:pointer;transition:background 0.15s ease}
+  .resident-rework .pet-row-rework:last-child{border-bottom:none}
+  .resident-rework .pet-row-rework:hover{background:#f9fafb}
+  .resident-rework .pet-avatar-rework{width:56px;height:56px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#e8f5ee;color:#045e1f;font-size:20px;font-weight:700}
+  .resident-rework .pet-avatar-rework img{width:100%;height:100%;object-fit:cover}
+  .resident-rework .pet-info-rework{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+  .resident-rework .pet-name-rework{font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#18181b}
+  .resident-rework .pet-meta-rework{font-family:'Inter',sans-serif;font-size:13px;font-weight:400;color:#71717a}
+  .resident-rework .pet-vax-pill-rework{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;padding:3px 10px;border-radius:4px;border:1px solid;flex-shrink:0}
+  .resident-rework .need-help-footer{display:flex;justify-content:center;margin-top:40px}
+  .resident-rework .next-visit-hero-card{background:#F4FBF6;border:1px solid #E1F2E7;border-radius:14px;padding:16px 18px;display:flex;align-items:center;gap:14px;margin-bottom:16px}
+  .resident-rework .next-visit-pet-avatar{width:52px;height:52px;border-radius:50%;overflow:hidden;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:#ECFDF3;color:#0B4D26;font-size:20px;font-weight:700}
+  .resident-rework .next-visit-pet-avatar img{width:100%;height:100%;object-fit:cover}
+  .resident-rework .date-big-badge{display:flex;flex-direction:column;align-items:center;justify-content:center;background:#FFF;border:1px solid #C7EBD2;border-radius:12px;padding:10px 14px;min-width:62px;flex-shrink:0}
+  .resident-rework .date-big-num{font-family:'Inter',sans-serif;font-size:26px;font-weight:600;color:var(--primary-green);line-height:1}
+  .resident-rework .date-big-month{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;margin-top:3px}
+  .resident-rework .next-visit-hero-info{flex:1;display:flex;flex-direction:column;gap:4px}
+  .resident-rework .next-visit-title{font-family:'Inter',sans-serif;font-size:15px;font-weight:600;color:#18181b;line-height:1.25}
+  .resident-rework .next-visit-pet{font-family:'Inter',sans-serif;font-size:13px;color:#71717a;font-weight:400}
+  .resident-rework .visit-details-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px;padding:4px 0}
+  .resident-rework .visit-detail-item{display:flex;align-items:flex-start;gap:8px}
+  .resident-rework .visit-detail-item svg{color:var(--text-muted);width:16px;height:16px;flex-shrink:0;margin-top:2px}
+  .resident-rework .detail-item-meta{display:flex;flex-direction:column}
+  .resident-rework .detail-item-label{font-family:'Inter',sans-serif;font-size:12px;color:#71717a}
+  .resident-rework .detail-item-value{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:#18181b}
+  .resident-rework .next-step-callout{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+  .resident-rework .next-step-check-circle{width:24px;height:24px;border-radius:50%;background:#D1FADF;color:#027A48;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .resident-rework .next-step-text-group{display:flex;flex-direction:column}
+  .resident-rework .next-step-label{font-family:'Inter',sans-serif;font-size:12px;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:0.04em}
+  .resident-rework .next-step-instruction{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:#18181b}
+  .resident-rework .visit-action-buttons{display:flex;gap:10px;justify-content:center}
+  .resident-rework .visit-action-buttons button{flex:0 1 auto;min-width:0}
+  .resident-rework .btn-primary-green{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;background:#18181b;color:#fafafa;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background 0.15s ease}
+  .resident-rework .btn-primary-green:hover{background:#27272a}
+  .resident-rework .btn-full{width:100%;justify-content:center}
+  .resident-rework .reports-cards-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-top:12px;margin-bottom:14px}
+  .resident-rework .report-item-box{background:#FFF;border:1px solid var(--border-color);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;transition:all 0.15s ease}
+  .resident-rework .report-item-box:hover{border-color:var(--border-dark);box-shadow:var(--shadow-sm)}
+  .resident-rework .report-header-row{display:flex;align-items:center;justify-content:space-between}
+  .resident-rework .report-id-code{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;color:#71717a}
+  .resident-rework .report-title-heading{font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#18181b;line-height:1.3}
+  .resident-rework .report-sub-meta{display:flex;align-items:center;justify-content:space-between;font-family:'Inter',sans-serif;font-size:12px;color:#71717a}
+  .resident-rework .report-progress-wrapper{display:flex;flex-direction:column;gap:4px}
+  .resident-rework .progress-header{display:flex;justify-content:space-between;font-family:'Inter',sans-serif;font-size:13px;font-weight:500}
+  .resident-rework .progress-track{width:100%;height:8px;background:#F1F5F9;overflow:hidden}
+  .resident-rework .progress-bar-fill{height:100%;transition:width 0.4s ease}
+  .resident-rework .fill-blue{background-color:#1A1A1A}
+  .resident-rework .fill-purple{background-color:#1A1A1A}
+  .resident-rework .report-link-footer{font-family:'Inter',sans-serif;display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:500;color:#18181b;margin-top:3px;transition:color 0.15s ease}
+  .resident-rework .report-link-footer:hover{color:var(--primary-green)}
+  .resident-rework .submit-report-cta{display:inline-flex;align-items:center;gap:5px;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:var(--primary-green);cursor:pointer;margin-top:3px;align-self:flex-start;transition:all 0.15s ease;background:none;border:none;padding:0}
+  .resident-rework .submit-report-cta:hover{color:var(--primary-green-hover);transform:translateX(2px)}
+  .resident-rework .announcements-list{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+  .resident-rework .announcement-item-row{display:flex;align-items:flex-start;gap:12px;padding-bottom:12px;border-bottom:1px solid var(--border-light)}
+  .resident-rework .announcement-item-row:last-child{border-bottom:none;padding-bottom:0}
+  .resident-rework .announcement-icon-badge{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  .resident-rework .badge-icon-green{background-color:#ECFDF3;color:#027A48}
+  .resident-rework .badge-icon-blue{background-color:#EFF8FF;color:#0284C7}
+  .resident-rework .badge-icon-purple{background-color:#F4EBFF;color:#6941C6}
+  .resident-rework .announcement-body{display:flex;flex-direction:column;gap:2px}
+  .resident-rework .announcement-tag-label{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.06em}
+  .resident-rework .tag-green{color:#027A48}
+  .resident-rework .tag-blue{color:#0284C7}
+  .resident-rework .tag-purple{color:#6941C6}
+  .resident-rework .announcement-headline{font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#18181b;line-height:1.3}
+  .resident-rework .announcement-snippet{font-family:'Inter',sans-serif;font-size:13px;color:#71717a;line-height:1.5}
+  .resident-rework .announcement-timestamp{font-family:'Inter',sans-serif;font-size:12px;color:#71717a;margin-top:2px}
+  .resident-rework .need-help-banner-card{background:#18181b;border:1px solid #18181b;border-radius:0;padding:24px;color:#FFF;display:inline-flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(24,24,27,0.18);text-align:center}
+  .resident-rework .help-icon-badge{width:38px;height:38px;border-radius:12px;background:rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:center;color:#86EFAC}
+  .resident-rework .help-tag-label{font-family:'Inter',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:#FFF}
+  .resident-rework .help-headline{font-family:'Inter',sans-serif;font-size:17px;font-weight:600;color:#FFF;line-height:1.25}
+  .resident-rework .help-subtext{font-family:'Inter',sans-serif;font-size:13px;color:#FFF;line-height:1.45}
+  .resident-rework .help-cta-link{display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:700;color:#FFF;margin-top:3px;transition:gap 0.15s ease}
+  .resident-rework .help-cta-link:hover{color:#FFF;gap:8px}
+  .resident-rework .pets-open-section{display:flex;flex-direction:column;gap:14px;padding-top:10px;border-top:1px solid var(--border-light)}
+  .resident-rework .section-open-header{display:flex;align-items:flex-start;justify-content:space-between}
+  .resident-rework .pets-cards-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:16px}
+  .resident-rework .pet-photo-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:14px;background:#FFF;cursor:pointer;transition:all 0.2s ease;position:relative}
+  .resident-rework .pet-photo-item:hover{background:#F8FAF8;transform:translateY(-2px)}
+  .resident-rework .pet-photo-frame{position:relative;width:60px;height:60px;border-radius:14px;overflow:hidden;flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.08);border:2px solid #FFF}
+  .resident-rework .pet-real-photo{width:100%;height:100%;object-fit:cover;display:block;transition:transform 0.25s ease}
+  .resident-rework .pet-photo-item:hover .pet-real-photo{transform:scale(1.06)}
+  .resident-rework .pet-species-badge{position:absolute;bottom:2px;right:2px;background:rgba(15,23,42,0.75);color:#FFF;font-family:'Inter',sans-serif;font-size:9px;font-weight:600;padding:1px 4px;border-radius:3px;letter-spacing:0.03em}
+  .resident-rework .pet-photo-initial{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:#E8F5EE;color:var(--primary-green);font-size:20px;font-weight:800}
+  .resident-rework .pet-profile-meta{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .resident-rework .pet-display-name{font-family:'Inter',sans-serif;font-size:14px;font-weight:600;color:#18181b;line-height:1.2}
+  .resident-rework .pet-display-breed{font-family:'Inter',sans-serif;font-size:12px;color:#71717a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .resident-rework .pet-status-pill{font-family:'Inter',sans-serif;font-size:11px;font-weight:500;color:#027A48;background:#ECFDF3;padding:1px 7px;border-radius:var(--radius-full);align-self:flex-start;margin-top:1px;border:1px solid #D1FADF}
+  .resident-rework .add-pet-open-btn{display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:14px;border:1.5px dashed #CBD5E1;background:#FAFCFA;cursor:pointer;transition:all 0.2s ease}
+  .resident-rework .add-pet-open-btn:hover{background:#F0FDF4;border-color:var(--primary-green);color:var(--primary-green);transform:translateY(-2px)}
+  .resident-rework .add-pet-plus-circle{width:50px;height:50px;border-radius:14px;background:#EAF5ED;color:var(--primary-green);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.2s ease}
+  .resident-rework .add-pet-open-btn:hover .add-pet-plus-circle{background:var(--primary-green);color:#FFF}
+  .resident-rework .add-pet-label{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;color:#71717a}
+  .resident-rework .add-pet-open-btn:hover .add-pet-label{color:var(--primary-green)}
+  .resident-rework .toast-popup{position:fixed;bottom:24px;right:24px;background:#0F172A;color:#FFF;padding:12px 18px;border-radius:12px;font-size:13px;font-weight:600;display:flex;align-items:center;gap:10px;box-shadow:0 10px 25px -3px rgba(0,0,0,0.2);z-index:200;opacity:0;transform:translateY(20px);transition:all 0.25s cubic-bezier(0.16,1,0.3,1);pointer-events:none}
+  .resident-rework .toast-popup.show{opacity:1;transform:translateY(0);pointer-events:auto}
+  .resident-rework .toast-icon{color:#10B981;flex-shrink:0}
+  .resident-rework .rework-empty{padding:28px 0;text-align:center;color:var(--text-muted);font-size:12px}
+  @media(max-width:1200px){.resident-rework .dashboard-workflow-layout{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:860px){.resident-rework .dashboard-content{padding:16px 12px 48px}.resident-rework .metrics-grid{grid-template-columns:1fr}.resident-rework .reports-cards-grid{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:1fr}}
+</style>
 <link rel="stylesheet" href="assets/css/resident-overview.css" />
 <style>
   html, body.dashboard, body.dashboard .main-content { background: #ffffff !important; }
 </style>
 </head>
-<body class="dashboard" data-realtime-page="resident">
+<body class="dashboard resident-portal" data-realtime-page="resident">
 
 <?php include 'includes/resident-sidebar.php'; ?>
 
-<!-- �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+<!-- ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½
      MAIN CONTENT
-�.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.� -->
+ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ -->
 <main class="main-content" id="mainContent">
 
-<?php if ($petSuccess): ?>
-  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
-    <i class="fas fa-check-circle"></i>
-    <span><?php echo htmlspecialchars($petSuccess); ?></span>
-  </div>
-<?php endif; ?>
-<?php if ($reportSuccess): ?>
-  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
-    <i class="fas fa-check-circle"></i>
-    <span><?php echo htmlspecialchars($reportSuccess); ?></span>
-  </div>
-<?php endif; ?>
-<?php if ($appointmentSuccess): ?>
-  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
-    <i class="fas fa-check-circle"></i>
-    <span><?php echo htmlspecialchars($appointmentSuccess); ?></span>
-  </div>
-<?php endif; ?>
-<?php if ($profileSuccess): ?>
-  <div class="auth-alert auth-alert-success" style="margin: 1rem 0;">
-    <i class="fas fa-check-circle"></i>
-    <span><?php echo htmlspecialchars($profileSuccess); ?></span>
-  </div>
-<?php endif; ?>
+<?php
+$portalToasts = array_filter([$petSuccess, $reportSuccess, $appointmentSuccess, $profileSuccess, $passwordSuccess]);
+include 'includes/portal-toast.php';
+?>
 
 <?php if ($passwordError): ?>
   <div class="auth-alert auth-alert-error" style="margin: 1rem 0;">
@@ -998,7 +1238,7 @@ $annResult = $annStmt->get_result();
 <?php endif; ?>
 
 <?php if ($reportError): ?>
-  <div class="auth-alert auth-alert-error" style="margin: 1rem 0;">
+  <div id="report-submit-error" class="auth-alert auth-alert-error" style="margin: 1rem 0;">
     <i class="fas fa-exclamation-circle"></i>
     <span><?php echo htmlspecialchars($reportError); ?></span>
   </div>
@@ -1018,7 +1258,7 @@ $annResult = $annStmt->get_result();
   </div>
 <?php endif; ?>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? OVERVIEW / DASHBOARD �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? OVERVIEW / DASHBOARD ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="overview" class="content-section active">
 
     <?php if (isset($_SESSION['login_notice'])): ?>
@@ -1029,56 +1269,323 @@ $annResult = $annStmt->get_result();
       </div>
     <?php endif; ?>
 
-     <div class="resident-overview">
-         <div class="ro-head">
-         <div class="ro-head-right">
-           <button class="ro-primary" type="button" onclick="openBookApptModal()"><i class="far fa-calendar-alt"></i> New Appointment <i class="fas fa-chevron-down" style="font-size:9px"></i></button>
-         </div>
-       </div>
+     <div class="resident-rework">
+       <div class="dashboard-content">
 
-       <div class="ro-kpis">
-         <?php $kpis = [
-           ['fa-calendar-alt', 'Upcoming Appointments', $upcomingApptCount, 'Today'],
-           ['fa-paw', 'My Pets', count($pets), 'View all pets &rarr;'],
-           ['fa-file-medical', 'Active Treatments', $activeTreatments, 'Ongoing care'],
-           ['fa-file-alt', 'Reports Submitted', $reportsThisMonth, 'This month'],
-           ['fa-wallet', 'Balance Due', '?0.00', 'All clear']
-         ]; foreach ($kpis as $kpi): ?>
-           <div class="ro-kpi"><span class="ro-kpi-icon"><i class="fas <?php echo $kpi[0]; ?>"></i></span><div><p class="ro-kpi-label"><?php echo $kpi[1]; ?></p><p class="ro-kpi-value"><?php echo $kpi[2]; ?></p><p class="ro-kpi-sub <?php echo strpos($kpi[3], 'View') === 0 || $kpi[3] === 'All clear' ? 'ro-link' : ''; ?>"><?php echo $kpi[3]; ?></p></div></div>
-         <?php endforeach; ?>
-       </div>
+         <?php
+         $greetingHour = (int)date('H');
+         $greetingWord = ($greetingHour < 12) ? 'Good morning' : (($greetingHour < 18) ? 'Good afternoon' : 'Good evening');
+         $firstAppt = null;
+         if (!empty($todayAppts)) { $firstAppt = $todayAppts[0]; }
+         elseif (!empty($upcomingAppts)) { $firstAppt = $upcomingAppts[0]; }
+         ?>
 
-       <div class="ro-grid">
-         <div class="ro-card ro-schedule">
-           <div class="ro-card-head"><div><h2>Today's Schedule</h2><small><?php echo date('l, F j, Y'); ?></small></div><button class="ro-outline" type="button" onclick="switchSection('appointments')"><i class="far fa-calendar-alt"></i> View Calendar</button></div>
-           <div class="ro-card-body">
-             <?php if (empty($todayAppts)): ?><div class="ro-empty" style="padding:30px 0;text-align:center;color:#667085;font-size:12px">No upcoming appointments.</div><?php else: ?><div class="ro-timeline">
-               <?php foreach ($todayAppts as $apt): $isPending = strtolower($apt['status']) === 'pending'; $isFutureDate = $apt['preferred_date'] !== $todayDate; ?>
-                 <div class="ro-appt"><span class="ro-time"><?php echo $isFutureDate ? date('M j', strtotime($apt['preferred_date'])) : date('g:i A', strtotime($apt['preferred_time'])); ?></span><span class="ro-dot<?php echo $isPending ? ' pending' : ''; ?>"></span><div class="ro-appt-card">
-                   <?php if (!empty($apt['pet_photo'])): ?><img class="ro-pet-img" src="<?php echo htmlspecialchars($apt['pet_photo']); ?>" alt="<?php echo htmlspecialchars($apt['pet_name']); ?>"><?php else: ?><span class="ro-pet-img"><?php echo strtoupper(substr($apt['pet_name'],0,1)); ?></span><?php endif; ?>
-                   <div class="ro-appt-info"><strong><?php echo htmlspecialchars($apt['pet_name']); ?></strong><span><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?></span><span><?php echo $isPending ? 'Awaiting confirmation' : 'Veterinary Services'; ?></span></div><span class="ro-status<?php echo $isPending ? ' pending' : ''; ?>"><?php echo ucfirst($apt['status']); ?></span>
-                 </div></div>
-               <?php endforeach; ?></div><?php endif; ?>
-             <button class="ro-full-btn" type="button" onclick="switchSection('appointments')">View All Appointments <span>&rarr;</span></button>
+         <section class="greeting-banner">
+           <div>
+             <div class="greeting-date" id="rework-live-date"><?php echo date('l, F j, Y'); ?></div>
+             <h2 class="greeting-headline"><?php echo $greetingWord . ', ' . htmlspecialchars($firstName); ?>.</h2>
+             <p class="greeting-subtext">Here's what needs your attention today.</p>
            </div>
-         </div>
+            <div class="greeting-actions">
+              <button class="btn-secondary-white" onclick="switchSection('calendar-booking')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <span>View calendar</span>
+              </button>
+              <div class="action-dropdown-wrapper">
+                <button class="btn-action-primary" id="rework-action-btn" onclick="reworkToggleDropdown(event)">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                  <span>Action</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:2px"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="action-dropdown-menu" id="rework-action-menu">
+                  <button class="action-dropdown-item" onclick="reworkOpenModal('addPetModal');reworkCloseDropdown();">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="4" cy="8" r="2"/><path d="M12 18c3 0 6-2 6-6 0-3-2-5-6-5s-6 2-6 5c0 4 3 6 6 6z"/></svg>
+                    <span>Register a Pet</span>
+                  </button>
+                  <button class="action-dropdown-item" onclick="window.location.href='submit-report-page.php';reworkCloseDropdown();">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+                    <span>Submit a Report</span>
+                  </button>
+                  <button class="action-dropdown-item" onclick="openBookApptModal();reworkCloseDropdown();">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                    <span>Schedule Appointment</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+         </section>
 
-         <div class="ro-stack">
-           <div class="ro-card"><div class="ro-card-head"><h2>My Pets Overview</h2><a class="ro-view" href="#my-pets" onclick="switchSection('my-pets');return false;">View All</a></div><div class="ro-pets">
-             <?php if (empty($pets)): ?><div style="width:100%;text-align:center;color:#667085;font-size:12px;padding:10px">No pets registered yet. <a class="ro-link" href="#" onclick="openModal('addPetModal');return false;">Register one</a></div><?php else: foreach (array_slice($pets,0,3) as $pet): ?><div class="ro-pet"><?php if (!empty($pet['photo_url'])): ?><img class="ro-pet-img" src="<?php echo htmlspecialchars($pet['photo_url']); ?>" alt="<?php echo htmlspecialchars($pet['pet_name']); ?>"><?php else: ?><span class="ro-pet-img"><?php echo strtoupper(substr($pet['pet_name'],0,1)); ?></span><?php endif; ?><strong><?php echo htmlspecialchars($pet['pet_name']); ?></strong><span><?php echo htmlspecialchars($pet['breed'] ?: ucfirst($pet['pet_type'])); ?></span><span class="ro-pet-meta"><?php echo htmlspecialchars($pet['age'] ?: '-'); ?> yrs &bull; <?php echo htmlspecialchars(ucfirst($pet['gender'] ?: '-')); ?></span></div><?php endforeach; ?><a class="ro-pet ro-add-pet" href="#" onclick="openModal('addPetModal');return false;"><span class="ro-plus">+</span><span>Add New Pet</span></a><?php endif; ?>
-           </div></div>
-           <div class="ro-card"><div class="ro-card-head"><h2>My Tasks</h2></div><div class="ro-tasks">
-             <?php $taskAppointments = array_values(array_filter($upcomingAppts, fn($a) => strtolower($a['status']) === 'pending')); if (empty($taskAppointments)): ?><div style="padding:20px 0;text-align:center;color:#667085;font-size:12px">You're all caught up.</div><?php else: foreach (array_slice($taskAppointments,0,3) as $task): ?><div class="ro-task"><input type="checkbox" aria-label="Task"><span class="ro-task-text">Confirm <?php echo htmlspecialchars($task['pet_name']); ?>'s appointment</span><span class="ro-task-date"><i class="far fa-calendar-alt"></i><?php echo date('M j, Y', strtotime($task['preferred_date'])); ?></span></div><?php endforeach; endif; ?><button class="ro-full-btn" type="button" onclick="switchSection('appointments')">View All Tasks <span>&rarr;</span></button>
-           </div></div>
-         </div>
+         <section class="metrics-grid">
+           <div class="metric-card">
+             <div class="metric-icon-box icon-box-green">
+               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+             </div>
+             <div class="metric-info">
+               <span class="metric-label">Upcoming appointments</span>
+               <span class="metric-value"><?php echo $upcomingApptCount; ?></span>
+               <span class="metric-subtext"><?php echo $upcomingApptCount > 0 ? 'Scheduled' : 'No appointments'; ?></span>
+             </div>
+           </div>
+            <div class="metric-card">
+              <div class="metric-icon-box icon-box-blue">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+              </div>
+              <div class="metric-info">
+                <span class="metric-label">Reports submitted</span>
+                <span class="metric-value"><?php echo count($reports); ?></span>
+                <span class="metric-subtext">Total filed</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon-box icon-box-amber">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div class="metric-info">
+                <span class="metric-label">Pending reports</span>
+                <span class="metric-value"><?php echo $activeCases; ?></span>
+                <span class="metric-subtext">Awaiting review</span>
+              </div>
+            </div>
+           <div class="metric-card">
+             <div class="metric-icon-box icon-box-purple">
+               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+             </div>
+             <div class="metric-info">
+               <span class="metric-label">Active care plans</span>
+               <span class="metric-value"><?php echo count($pets); ?></span>
+               <span class="metric-subtext">Across <?php echo count($pets); ?> pet<?php echo count($pets) !== 1 ? 's' : ''; ?></span>
+             </div>
+           </div>
 
-         <div class="ro-stack"><div class="ro-card"><div class="ro-card-head"><h2>Clinic Status</h2><span class="ro-live">Live Updates</span></div><div class="ro-row"><i class="far fa-clock"></i><span class="ro-row-label">Clinic Operating Hours</span><strong>8:00 AM - 5:00 PM</strong></div><div class="ro-row"><i class="fas fa-users"></i><span class="ro-row-label">Today's Queue</span><span class="ro-moderate">Moderate</span></div><div class="ro-row"><i class="fas fa-user-md"></i><span class="ro-row-label">On-Duty Veterinarians</span><strong>3</strong></div><div class="ro-row"><i class="fas fa-ambulance"></i><span class="ro-row-label">Active Emergency Cases</span><strong>0</strong></div></div>
-           <div class="ro-card"><div class="ro-card-head"><h2>Announcements</h2><a class="ro-view" href="#">View All</a></div><?php if (empty($announcements)): ?><div style="padding:25px;text-align:center;color:#667085;font-size:12px">No announcements at this time.</div><?php else: foreach (array_slice($announcements,0,2) as $announcement): ?><div class="ro-announcement"><span class="ro-icon"><i class="fas <?php $annCat = strtolower($announcement['category'] ?? 'announcement'); echo in_array($annCat, ['advisory','schedule','update']) ? 'fa-envelope' : (in_array($annCat, ['event','activity']) ? 'fa-calendar-alt' : 'fa-bullhorn'); ?>"></i></span><div><strong><?php echo htmlspecialchars($announcement['title']); ?></strong><p><?php echo htmlspecialchars(mb_substr($announcement['content'],0,105)) . (mb_strlen($announcement['content']) > 105 ? '...' : ''); ?></p><time><?php echo date('M j, Y', strtotime($announcement['created_at'])); ?></time></div></div><?php endforeach; endif; ?></div>
-         </div>
-       </div>
+         </section>
 
-       <div class="ro-bottom"><div class="ro-card"><div class="ro-card-head"><h2>Recent Activity</h2><a class="ro-view" href="#">View All</a></div><div class="ro-table-wrap" style="padding:16px 10px"><table class="ro-table"><thead><tr><th>Activity</th><th>Date &amp; Time</th><th>Status</th></tr></thead><tbody><?php if (empty($recentActivities)): ?><tr><td colspan="3" style="text-align:center">No recent activity.</td></tr><?php else: foreach ($recentActivities as $activity): ?><tr><td><?php echo htmlspecialchars($activity['action']); ?><br><span style="font-size:10px;color:#98a2b3"><?php echo htmlspecialchars($activity['details'] ?? ''); ?></span></td><td><?php echo date('M j, Y . g:i A', strtotime($activity['created_at'])); ?></td><td><span class="ro-badge">Completed</span></td></tr><?php endforeach; endif; ?></tbody></table></div></div>
-         <div class="ro-card"><div class="ro-card-head"><h2>Need Help?</h2><a class="ro-view" href="#">Contact DCVS</a></div><div class="ro-help"><span class="ro-icon"><i class="fas fa-hospital"></i></span><div class="ro-help-copy"><strong>DCVS Veterinary Services</strong><p>We're here for you and your pets.</p><div class="ro-contact"><i class="fas fa-phone"></i> (046) 123 4567<br><i class="fas fa-envelope"></i> dcvs.dasma@gmail.com<br><i class="fas fa-map-marker-alt"></i> Brgy. Paliparan I, Dasmari�as City</div></div><div class="ro-actions"><button type="button"><i class="fas fa-phone"></i>Call Now</button><button type="button"><i class="fas fa-envelope"></i>Send Email</button><button type="button"><i class="fas fa-location-dot"></i>Directions</button></div></div></div>
+         <div class="dashboard-workflow-layout">
+           <div class="primary-vertical-column">
+
+             <div class="card-box">
+               <div class="card-header-bar">
+                 <div>
+                   <div class="card-meta-tag"><?php echo $upcomingApptCount; ?> appointment<?php echo $upcomingApptCount !== 1 ? 's' : ''; ?></div>
+                   <h3 class="card-title-text">Upcoming Appointments</h3>
+                 </div>
+                  <a href="#" class="card-action-link" onclick="switchSection('calendar-booking');return false;">
+                    <span>View calendar</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                  </a>
+                </div>
+                <div class="appointment-items-list" id="rework-appointments-container">
+                 <?php if (empty($todayAppts)): ?>
+                   <div class="rework-empty">No upcoming appointments.</div>
+                 <?php else: ?>
+                   <?php foreach (array_slice($todayAppts, 0, 3) as $apt): ?>
+                     <?php
+                     $aptIsPending = strtolower($apt['status']) === 'pending';
+                     $aptDotClass = $aptIsPending ? 'dot-amber' : 'dot-green';
+                     $aptBadgeClass = $aptIsPending ? 'badge-pending' : (strtolower($apt['status']) === 'completed' ? 'badge-completed' : 'badge-scheduled');
+                     $aptDay = date('d', strtotime($apt['preferred_date']));
+                     $aptMonth = date('M Y', strtotime($apt['preferred_date']));
+                     ?>
+                     <div class="appointment-item-row" onclick="reworkSelectVisit(this,{apptId:<?php echo (int)$apt['appointment_id']; ?>,type:'<?php echo htmlspecialchars(addslashes($apt['appointment_type'])); ?>',petId:<?php echo (int)($apt['pet_id'] ?? 0); ?>,date:'<?php echo htmlspecialchars($apt['preferred_date']); ?>',timeRaw:'<?php echo htmlspecialchars($apt['preferred_time']); ?>',notes:'<?php echo htmlspecialchars(addslashes($apt['notes'] ?? '')); ?>',pet:'<?php echo htmlspecialchars(addslashes($apt['pet_name'])); ?>',service:'<?php echo htmlspecialchars(addslashes(ucfirst($apt['appointment_type']))); ?>',time:'<?php echo date('g:i A', strtotime($apt['preferred_time'])); ?>',status:'<?php echo ucfirst($apt['status']); ?>',day:'<?php echo $aptDay; ?>',month:'<?php echo $aptMonth; ?>',nextStep:'Bring your pet records'})">
+                       <div class="appointment-time-col">
+                         <span><?php echo date('g:i A', strtotime($apt['preferred_time'])); ?></span>
+                         <span class="status-dot-indicator <?php echo $aptDotClass; ?>"></span>
+                       </div>
+                       <div class="appointment-details-col">
+                         <span class="appointment-pet-name"><?php echo htmlspecialchars($apt['pet_name']); ?></span>
+                         <span class="appointment-reason-meta"><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?> &bull; <?php echo $aptIsPending ? 'Awaiting confirmation' : 'Veterinary Services'; ?></span>
+                       </div>
+                        <span class="status-pill-badge <?php echo $aptBadgeClass; ?>"><?php echo ucfirst($apt['status']); ?></span>
+                       <svg class="appointment-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                     </div>
+                   <?php endforeach; ?>
+                 <?php endif; ?>
+                </div>
+              </div>
+
+             <div class="card-box">
+               <div class="card-header-bar">
+                 <div>
+                   <div class="card-meta-tag">Service Requests</div>
+                   <h3 class="card-title-text">My reports</h3>
+                 </div>
+                 <a href="#" class="card-action-link" onclick="switchSection('my-reports');return false;">
+                   <span>View all</span>
+                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                 </a>
+               </div>
+               <?php if (empty($reports)): ?>
+                 <div class="rework-empty">No reports submitted yet.</div>
+               <?php else: ?>
+                 <div class="reports-cards-grid">
+                   <?php foreach (array_slice($reports, 0, 4) as $r): ?>
+                     <?php
+                     $rStatus = strtolower($r['status']);
+                      if ($rStatus === 'pending') { $rBadge = 'badge-pending'; $rBadgeText = 'Pending'; $rProgress = 20; $rBarColor = 'fill-blue'; }
+                      elseif ($rStatus === 'validated') { $rBadge = 'badge-reviewing'; $rBadgeText = 'Reviewing'; $rProgress = 40; $rBarColor = 'fill-blue'; }
+                      elseif ($rStatus === 'active') { $rBadge = 'badge-scheduled'; $rBadgeText = 'Active'; $rProgress = 70; $rBarColor = 'fill-purple'; }
+                      else { $rBadge = 'badge-confirmed'; $rBadgeText = 'Resolved'; $rProgress = 100; $rBarColor = 'fill-blue'; }
+                     ?>
+                     <div class="report-item-box">
+                       <div class="report-header-row">
+                         <span class="report-id-code"><?php echo htmlspecialchars($r['reference_id']); ?></span>
+                       <span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span>
+                       </div>
+                       <h4 class="report-title-heading"><?php echo htmlspecialchars(ucfirst($r['report_type'])); ?></h4>
+                        <div class="report-sub-meta">
+                          <span><?php echo htmlspecialchars($r['location_address']); ?></span>
+                          <span>Submitted <?php echo date('M d, Y', strtotime($r['created_at'])); ?></span>
+                        </div>
+                       <div class="report-progress-wrapper">
+                         <div class="progress-header"><span>Progress</span><span><?php echo $rProgress; ?>%</span></div>
+                         <div class="progress-track"><div class="progress-bar-fill <?php echo $rBarColor; ?>" style="width:<?php echo $rProgress; ?>%"></div></div>
+                       </div>
+                       <a href="#" class="report-link-footer" onclick="switchSection('my-reports');return false;">
+                         <span>View report</span>
+                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                       </a>
+                     </div>
+                   <?php endforeach; ?>
+                 </div>
+                <?php endif; ?>
+              </div>
+
+            </div>
+
+            <div class="secondary-vertical-column">
+
+             <div class="card-box">
+               <div class="card-header-bar">
+                 <div>
+                   <div class="card-meta-tag">Next Appointment</div>
+                   <h3 class="card-title-text">Your next visit</h3>
+                 </div>
+               </div>
+
+               <?php if ($firstAppt): ?>
+                 <div class="next-visit-hero-card">
+                    <div class="date-big-badge">
+                      <span class="date-big-num" id="rework-visit-day"><?php echo date('d', strtotime($firstAppt['preferred_date'])); ?></span>
+                      <span class="date-big-month" id="rework-visit-month"><?php echo date('M Y', strtotime($firstAppt['preferred_date'])); ?></span>
+                    </div>
+                    <div class="next-visit-pet-avatar">
+                      <?php if (!empty($firstAppt['pet_photo'])): ?>
+                        <img src="<?php echo htmlspecialchars($firstAppt['pet_photo']); ?>" alt="">
+                      <?php else: ?>
+                        <span><?php echo strtoupper(substr($firstAppt['pet_name'], 0, 1)); ?></span>
+                      <?php endif; ?>
+                    </div>
+                    <div class="next-visit-hero-info">
+                      <span class="status-pill-badge <?php echo strtolower($firstAppt['status']) === 'pending' ? 'badge-pending' : 'badge-confirmed'; ?>" id="rework-visit-status" style="align-self:flex-start;margin-bottom:2px"><?php echo ucfirst($firstAppt['status']); ?></span>
+                     <span class="next-visit-title" id="rework-visit-title"><?php echo htmlspecialchars(ucfirst($firstAppt['appointment_type'])); ?></span>
+                     <span class="next-visit-pet" id="rework-visit-pet">For <?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
+                   </div>
+                 </div>
+
+                 <div class="visit-details-row">
+                   <div class="visit-detail-item">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                     <div class="detail-item-meta">
+                       <span class="detail-item-label">Time</span>
+                       <span class="detail-item-value" id="rework-visit-time"><?php echo date('g:i A', strtotime($firstAppt['preferred_time'])); ?></span>
+                     </div>
+                   </div>
+                   <div class="visit-detail-item">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                     <div class="detail-item-meta">
+                       <span class="detail-item-label">Pet</span>
+                       <span class="detail-item-value"><?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
+                     </div>
+                   </div>
+                   <div class="visit-detail-item">
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                     <div class="detail-item-meta">
+                       <span class="detail-item-label">Date</span>
+                       <span class="detail-item-value"><?php echo date('M d, Y', strtotime($firstAppt['preferred_date'])); ?></span>
+                     </div>
+                   </div>
+                 </div>
+
+                 <div class="next-step-callout">
+                    <div class="next-step-text-group">
+                      <span class="next-step-label">Next step</span>
+                      <span class="next-step-instruction" id="rework-visit-instruction">Bring your pet records</span>
+                    </div>
+                  </div>
+
+                 <div class="visit-action-buttons" style="margin-top:auto">
+                    <button class="btn-primary-green" id="rework-view-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" onclick="reworkViewAppointment()">View appointment</button>
+                    <button class="btn-secondary-white" id="rework-reschedule-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" data-appt-type="<?php echo htmlspecialchars($firstAppt['appointment_type']); ?>" data-appt-pet="<?php echo (int)($firstAppt['pet_id'] ?? 0); ?>" data-appt-date="<?php echo htmlspecialchars($firstAppt['preferred_date']); ?>" data-appt-time="<?php echo htmlspecialchars($firstAppt['preferred_time']); ?>" data-appt-notes="<?php echo htmlspecialchars($firstAppt['notes'] ?? ''); ?>" onclick="reworkRescheduleVisit()">Reschedule</button>
+                 </div>
+               <?php else: ?>
+                 <div class="rework-empty">No upcoming appointments.</div>
+               <?php endif; ?>
+             </div>
+
+             <div class="card-box">
+               <div class="card-header-bar">
+                 <div>
+                   <div class="card-meta-tag">Registered Pets</div>
+                   <h3 class="card-title-text">My Pets</h3>
+                 </div>
+                 <a href="#" class="card-action-link" onclick="switchSection('my-pets');return false;">
+                   <span>View all pets</span>
+                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                 </a>
+               </div>
+               <?php if (empty($pets)): ?>
+                 <div class="rework-empty">No pets registered yet.</div>
+               <?php else: ?>
+                 <div class="pets-list-rework">
+                   <?php foreach (array_slice($pets, 0, 4) as $pet): ?>
+                     <?php
+                       $pVaxText = !empty($pet['vaccination_status']) ? $pet['vaccination_status'] : 'Not vaccinated';
+                       $pVaxLower = strtolower($pVaxText);
+                       if (in_array($pVaxLower, ['vaccinated', 'complete', 'fully vaccinated'])) { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
+                       elseif ($pVaxLower === 'up to date') { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
+                       elseif ($pVaxLower === 'due soon') { $pVaxBg = '#fef3c7'; $pVaxColor = '#92400e'; $pVaxBorder = '#fde68a'; }
+                       else { $pVaxBg = '#fee2e2'; $pVaxColor = '#991b1b'; $pVaxBorder = '#fecaca'; }
+                       $pPhoto = $pet['photo_url'] ?? '';
+                       $pInitial = strtoupper(substr($pet['pet_name'], 0, 1));
+                     ?>
+                     <div class="pet-row-rework" onclick="window.location.href='pet-profile.php?id=<?php echo (int)$pet['pet_id']; ?>&ref=resident'">
+                       <div class="pet-avatar-rework">
+                         <?php if ($pPhoto): ?>
+                           <img src="<?php echo htmlspecialchars($pPhoto); ?>" alt="">
+                         <?php else: ?>
+                           <span><?php echo $pInitial; ?></span>
+                         <?php endif; ?>
+                       </div>
+                       <div class="pet-info-rework">
+                         <span class="pet-name-rework"><?php echo htmlspecialchars($pet['pet_name']); ?></span>
+                         <span class="pet-meta-rework"><?php echo ucfirst(htmlspecialchars($pet['pet_type'])); ?> &bull; <?php echo htmlspecialchars($pet['breed'] ?: '-'); ?> &bull; <?php echo ucfirst(htmlspecialchars($pet['gender'] ?: '-')); ?> &bull; <?php echo htmlspecialchars($pet['age'] ? $pet['age'].' year'.((int)$pet['age']!==1?'s':'') : '-'); ?></span>
+                       </div>
+                       <span class="pet-vax-pill-rework" style="background:<?php echo $pVaxBg; ?>;color:<?php echo $pVaxColor; ?>;border-color:<?php echo $pVaxBorder; ?>"><?php echo htmlspecialchars(ucfirst($pVaxText)); ?></span>
+                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                     </div>
+                   <?php endforeach; ?>
+                 </div>
+               <?php endif; ?>
+             </div>
+
+            </div>
+          </div>
+
+          <div class="need-help-footer">
+            <div class="need-help-banner-card">
+              <div>
+                <span class="help-tag-label">Need Help?</span>
+                <h3 class="help-headline">We're here for you and your pets.</h3>
+                <p class="help-subtext">Contact the DCVS team for appointment or report assistance.</p>
+              </div>
+              <a href="#" class="help-cta-link" onclick="switchSection('account-settings');return false;">
+                <span>Contact support</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </a>
+            </div>
+          </div>
+
+
+
        </div>
      </div>
 
@@ -1114,7 +1621,7 @@ $annResult = $annStmt->get_result();
           <p>Add a new pet to your profile</p>
         </div>
       </div>
-      <div class="action-card" onclick="openSubmitReportModal()">
+      <div class="action-card" onclick="window.location.href='submit-report-page.php'">
         <div class="action-icon">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path>
@@ -1187,7 +1694,7 @@ $annResult = $annStmt->get_result();
             </ul>
             <div class="med-footer">
               <a href="#" onclick="switchSection('my-reports');return false;">View all reports</a>
-              <a href="#" class="action" onclick="openSubmitReportModal();return false;">
+              <a href="submit-report-page.php" class="action">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
                 Submit New
               </a>
@@ -1311,8 +1818,9 @@ $annResult = $annStmt->get_result();
                         $statusPillBg = '#ECFDF5';
                         $statusPillBorder = '#bbf7d0';
                         if ($apptStatusStr === 'pending') { $statusPillColor = '#C2540B'; $statusPillBg = '#FFF7ED'; $statusPillBorder = '#fed7aa'; }
-                        elseif ($apptStatusStr === 'scheduled') { $statusPillColor = '#0E8131'; $statusPillBg = '#ECFDF5'; $statusPillBorder = '#bbf7d0'; }
-                        elseif (in_array($apptStatusStr, ['completed','resolved'])) { $statusPillColor = '#10B981'; $statusPillBg = '#ECFDF5'; $statusPillBorder = '#a7f3d0'; }
+                        elseif ($apptStatusStr === 'scheduled') { $statusPillColor = '#ffffff'; $statusPillBg = '#0E8131'; $statusPillBorder = '#0E8131'; }
+                        elseif ($apptStatusStr === 'completed') { $statusPillColor = '#1e40af'; $statusPillBg = '#dbeafe'; $statusPillBorder = '#bfdbfe'; }
+                        elseif ($apptStatusStr === 'resolved') { $statusPillColor = '#10B981'; $statusPillBg = '#ECFDF5'; $statusPillBorder = '#a7f3d0'; }
                         elseif (in_array($apptStatusStr, ['cancelled','rejected'])) { $statusPillColor = '#B91C1C'; $statusPillBg = '#FEF2F2'; $statusPillBorder = '#fecaca'; }
                         $statusPillText = ucfirst(str_replace('_',' ',$apptStatusStr));
                         ?>
@@ -1803,24 +2311,29 @@ $annResult = $annStmt->get_result();
      </div>
   </section>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? MY PETS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY PETS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-pets" class="content-section">
     <!-- Overview KPIs -->
-    <div class="pet-kpis">
-      <div class="pet-kpi-card">
-        <p class="pet-kpi-label">Total Pets</p>
-        <div class="pet-kpi-value" id="sumTotal">0</div>
-        <p class="pet-kpi-sub">Registered pets</p>
+    <div class="pets-kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
+      <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Total Pets</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="sumTotal">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Registered pets</p>
       </div>
-      <div class="pet-kpi-card">
-        <p class="pet-kpi-label">Fully Vaccinated</p>
-        <div class="pet-kpi-value" id="sumVaccinated">0</div>
-        <p class="pet-kpi-sub">Up to date</p>
+      <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Fully Vaccinated</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="sumVaccinated">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Up to date</p>
       </div>
-      <div class="pet-kpi-card">
-        <p class="pet-kpi-label">Needs Attention</p>
-        <div class="pet-kpi-value" id="sumAttention">0</div>
-        <p class="pet-kpi-sub">Pending vaccination</p>
+      <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Adopted Pets</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="sumAdopted">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Pets adopted</p>
+      </div>
+      <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Needs Attention</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="sumAttention">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Pending vaccination</p>
       </div>
     </div>
 
@@ -1859,9 +2372,9 @@ $annResult = $annStmt->get_result();
             <th class="sd-th"><button type="button" class="th-sort" data-col="breed" onclick="PET.sortBy('breed')">Breed<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="vaccination" onclick="PET.sortBy('vaccination')">Vaccination<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="category" onclick="PET.sortBy('category')">Category<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="adopted" onclick="PET.sortBy('adopted')">Date Adopted<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="adopted" onclick="PET.sortBy('adopted')">Confirmed/Adopted Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="registered" onclick="PET.sortBy('registered')">Registered Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th sd-th-action">Actions</th>
+            <th class="sd-th" style="width:40px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -1910,7 +2423,7 @@ $annResult = $annStmt->get_result();
               <span class="appt-status-pill" style="background:<?php echo $pVaxColor['bg']; ?>;color:<?php echo $pVaxColor['color']; ?>;border-color:<?php echo $pVaxColor['border']; ?>;"><?php echo htmlspecialchars($pVaxText); ?></span>
             </td>
             <td class="sd-td">
-              <span class="pet-cat-tag <?php echo $pCat; ?>"><?php echo $pCatLabel; ?></span>
+              <div class="contact-main contact-normal"><?php echo $pCatLabel; ?></div>
             </td>
             <td class="sd-td">
               <div class="contact-main contact-normal"><?php echo $pAdoptedDate ?: '-'; ?></div>
@@ -1919,51 +2432,32 @@ $annResult = $annStmt->get_result();
               <div class="contact-main contact-normal"><?php echo $pRegisteredDate; ?></div>
             </td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
-              <div class="pet-action-btns">
-                <a href="pet-profile.php?id=<?php echo (int)$pet['pet_id']; ?>&ref=resident" class="pet-action-btn" title="Pet Resume">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                </a>
-                <button type="button" class="pet-action-btn" title="View Profile" onclick="PET.view(<?php echo (int)$pet['pet_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                </button>
-                <?php if (!$pet['from_adoption']): ?>
-                <button type="button" class="pet-action-btn" title="Edit Pet" onclick="PET.edit(<?php echo (int)$pet['pet_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                </button>
-                <?php endif; ?>
-                <button type="button" class="pet-action-btn" title="Archive Pet" onclick="PET.archive(<?php echo (int)$pet['pet_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                </button>
-              </div>
+              <button class="sd-row-actions" title="More options" onclick="event.stopPropagation();petRowActions(event,<?php echo (int)$pet['pet_id']; ?>)"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             </td>
           </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
     </div>
-    <div id="petPagination" class="appt-pagination"></div>
+    <div id="petPagination" class="appt-pagination dt-pagination"></div>
     <?php endif; ?>
   </section>
 
   <style>
         /* ?? My Pets (HubSpot CRM style) ?? */
-    #my-pets{font-family:'Inter','Segoe UI',sans-serif;}
-    /* White page background for Pet List / Reports / Appointments */
+    #my-pets{font-family:'Inter',sans-serif;}
     body.page-white{background:#ffffff;}
-    #my-pets .pet-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px;}
-    #my-pets .pet-kpi-card{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:18px 20px;background:none;border:none;border-radius:0;box-shadow:none;font-family:'Inter','Segoe UI',sans-serif;}
-    #my-pets .pet-kpi-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;}
-    #my-pets .pet-kpi-value{font-family:'Inter','Segoe UI',sans-serif;font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;}
-    #my-pets .pet-kpi-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;margin:0;}
-    @media(max-width:1180px){#my-pets .pet-kpis{grid-template-columns:repeat(2,1fr);}}
-    @media(max-width:620px){#my-pets .pet-kpis{grid-template-columns:1fr 1fr;}}
 
     /* sd buttons (shadcn) */
-    .sd-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 16px; border-radius:6px; border:1px solid transparent; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; white-space:nowrap; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); transition:background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
+    .sd-btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; height:36px; padding:0 16px; border-radius:6px; border:1px solid transparent; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; line-height:1; white-space:nowrap; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); transition:background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease; }
     .sd-btn-default { background:#18181b; color:#fafafa; }
     .sd-btn-default:hover { background:#27272a; }
     .sd-btn-outline { background:#ffffff; border-color:#e4e4e7; color:#18181b; }
     .sd-btn-outline:hover { background:#f4f4f5; }
+    .sd-btn-primary { background:#18181b; color:#fafafa; border-color:#18181b; }
+    .sd-btn-primary:hover { background:#27272a; }
+    .sd-btn-danger { background:#ffffff; border-color:#fecaca; color:#b91c1c; }
+    .sd-btn-danger:hover { background:#fef2f2; }
     .sd-btn:disabled, .sd-btn[disabled] { opacity:0.5; cursor:not-allowed; pointer-events:none; }
     .sd-btn i { font-size:12px; }
 
@@ -1974,15 +2468,18 @@ $annResult = $annStmt->get_result();
     #addPetModal .sd-dialog-close, #editPetModal .sd-dialog-close { position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all 0.15s ease; }
     #addPetModal .sd-dialog-close:hover, #editPetModal .sd-dialog-close:hover { background:#f4f4f5; color:#18181b; }
     #addPetModal .sd-dialog-header, #editPetModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
-    #addPetModal .sd-dialog-title, #editPetModal .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    #addPetModal .sd-dialog-title, #editPetModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #addPetModal .sd-dialog-description, #editPetModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
     #addPetModal .sd-field-group, #editPetModal .sd-field-group { display:flex; flex-direction:column; gap:16px; }
     #addPetModal .sd-form-grid, #editPetModal .sd-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     #addPetModal .sd-field-full, #editPetModal .sd-field-full { grid-column:1 / -1; }
     #addPetModal .sd-field, #editPetModal .sd-field { display:flex; flex-direction:column; gap:6px; }
-    #addPetModal .sd-label, #editPetModal .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; }
+    #addPetModal .sd-label, #editPetModal .sd-label { font-family:'Inter',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; }
     #addPetModal .sd-label .req, #editPetModal .sd-label .req { color:#dc2626; }
-    #addPetModal .sd-input, #editPetModal .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; background:transparent; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:box-shadow 0.15s ease, border-color 0.15s ease; box-sizing:border-box; }
+    #addPetModal .adoption-readonly-value { display:flex; align-items:center; width:100%; min-height:36px; margin:0; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); box-sizing:border-box; font-family:'Inter',sans-serif; font-size:14px; font-weight:400; line-height:1.4; color:#18181b; }
+    #addPetModal .adoption-readonly-photo { width:100%; min-height:120px; margin:0; padding:8px; border:1px solid #e4e4e7; border-radius:6px; background:#fafafa; box-sizing:border-box; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    #addPetModal .adoption-readonly-photo img { display:block; width:100%; max-height:220px; object-fit:contain; border-radius:4px; }
+    #addPetModal .sd-input, #editPetModal .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter',sans-serif; font-size:14px; color:#18181b; background:transparent; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:box-shadow 0.15s ease, border-color 0.15s ease; box-sizing:border-box; }
     #addPetModal .sd-input::placeholder, #editPetModal .sd-input::placeholder { color:#a1a1aa; }
     #addPetModal .sd-input:focus-visible, #editPetModal .sd-input:focus-visible { border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     #addPetModal select.sd-input, #editPetModal select.sd-input { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
@@ -2008,16 +2505,18 @@ $annResult = $annStmt->get_result();
     .appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
     .appt-search-wrap{position:relative;}
     .appt-search-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#71717a;pointer-events:none;}
-    .appt-search-input{height:36px;padding:0 12px 0 36px;width:280px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s,box-shadow .15s;}
+    .appt-search-input{height:36px;padding:0 12px 0 36px;width:280px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s,box-shadow .15s;}
     .appt-search-input:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;background:#fff;}
     .appt-search-input::placeholder{color:#a1a1aa;}
-    .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
+    .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
     .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 
     /* ?? HubSpot-style table ?? */
     .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
     .appt-table{width:100%;border-collapse:collapse;color:#18181b;font-size:14px;}
-    .appt-table thead th{background:#fafafa;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:600;letter-spacing:0.02em;text-transform:uppercase;color:#71717a;height:40px;padding:0 12px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:middle;white-space:nowrap;user-select:none;}
+    .appt-table thead th{background:#fafafa;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;letter-spacing:0;text-transform:none;color:#71717a;height:40px;padding:0 8px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:middle;white-space:nowrap;user-select:none;}
+    .appt-table thead th:first-child{border-top-left-radius:7px;}
+    .appt-table thead th:last-child{border-top-right-radius:7px;}
     .appt-table thead th.sd-th-action{text-align:right;}
     .appt-table tbody tr{border-bottom:1px solid #f4f4f5;cursor:pointer;transition:background .1s;}
     .appt-table tbody tr:last-child{border-bottom:none;}
@@ -2027,7 +2526,7 @@ $annResult = $annStmt->get_result();
     .appt-table tbody td.sd-td-action{text-align:right;}
 
     /* ?? Sortable column headers ?? */
-    .th-sort{display:inline-flex;align-items:center;gap:4px;height:28px;margin-left:-8px;padding:0 8px;border-radius:4px;background:transparent;border:none;font-size:12px;font-weight:600;color:#71717a;cursor:pointer;white-space:nowrap;font-family:inherit;letter-spacing:0.02em;text-transform:uppercase;transition:background .1s,color .1s;}
+    .th-sort{display:inline-flex;align-items:center;gap:4px;height:28px;margin-left:-8px;padding:0 8px;border-radius:4px;background:transparent;border:none;font-size:14px;font-weight:500;color:#71717a;cursor:pointer;white-space:nowrap;font-family:inherit;letter-spacing:0;text-transform:none;transition:background .1s,color .1s;}
     .th-sort:hover{background:#e4e4e7;color:#18181b;}
     .th-sort.th-sorted{color:#18181b;}
     .th-sort-icon{width:14px;height:14px;color:#a1a1aa;flex-shrink:0;}
@@ -2037,23 +2536,35 @@ $annResult = $annStmt->get_result();
     .client-cell{display:flex;align-items:center;gap:10px;min-width:0;}
     .avatar{width:36px;height:36px;border-radius:50%;background:#f4f4f5;color:#71717a;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;overflow:hidden;flex-shrink:0;border:1px solid #e4e4e7;}
     .avatar img{width:100%;height:100%;object-fit:cover;}
-    .client-name{font-family:'Inter','Segoe UI',sans-serif;font-weight:500;color:#18181b;font-size:14px;white-space:nowrap;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:2px;transition:text-decoration-color .15s;}
+    .appt-pet-avatar{width:36px;height:36px;border-radius:50%;background:#f0fdf4;color:#0e8131;display:inline-flex;align-items:center;justify-content:center;font-size:15px;overflow:hidden;flex-shrink:0;border:1px solid #bbf7d0;}
+    .appt-pet-avatar img{width:100%;height:100%;object-fit:cover;}
+    .client-name{font-family:'Inter',sans-serif;font-weight:500;color:#18181b;font-size:14px;white-space:nowrap;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:2px;transition:text-decoration-color .15s;}
     .sd-tr:hover .client-name{text-decoration-color:#a1a1aa;}
-    .client-id{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin-top:2px;}
-    .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
+    .client-id{font-family:'Inter',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin-top:2px;}
+    .contact-main{font-family:'Inter',sans-serif;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
     .contact-main.contact-normal{font-weight:500;}
-    .appt-status-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;}
+    .appt-status-pill{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;}
 
     /* ?? Pet table cells ?? */
     .pet-avatar-box{width:40px;height:40px;border-radius:50%;background:#f4f4f5;color:#71717a;display:inline-flex;align-items:center;justify-content:center;font-size:15px;font-weight:600;overflow:hidden;flex-shrink:0;border:1px solid #e4e4e7;}
     .pet-avatar-box img{width:100%;height:100%;object-fit:cover;}
     .pet-cell-main{display:flex;flex-direction:column;min-width:0;}
-    .pet-id-label{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin-top:2px;}
+    .pet-id-label{font-family:'Inter',sans-serif;font-size:12px;font-weight:400;color:#71717a;margin-top:2px;}
     .pet-cat-cell{display:flex;flex-direction:column;align-items:flex-start;gap:3px;}
-    .pet-cat-tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;color:#52525b;background:#f4f4f5;border:1px solid #e4e4e7;white-space:nowrap;line-height:1.4;}
+    .pet-cat-tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;color:#52525b;background:#f4f4f5;border:1px solid #e4e4e7;white-space:nowrap;line-height:1.4;}
     .pet-cat-tag.owned{background:#f0fdf4;color:#166534;border-color:#bbf7d0;}
     .pet-cat-tag.adopted{background:#eff6ff;color:#1e40af;border-color:#bfdbfe;}
-    .pet-adopted-date{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;color:#71717a;white-space:nowrap;}
+    .pet-adopted-date{font-family:'Inter',sans-serif;font-size:12px;color:#71717a;white-space:nowrap;}
+
+    #my-pets .client-name{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;line-height:1.4;color:#18181b;}
+    #my-pets .pet-id-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.4;color:#18181b;}
+    #adoption .pet-id-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.4;color:#18181b;}
+    #my-pets .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.4;color:#18181b;}
+    #my-reports .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.4;color:#18181b;}
+    #my-reports #reportTable .client-name,
+    #my-reports #reportTable .report-type-value,
+    #my-reports #reportTable .report-location-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;}
+    #appointments .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.4;color:#18181b;}
 
     /* ?? Row action buttons ?? */
     .pet-action-btns{display:inline-flex;align-items:center;gap:2px;}
@@ -2067,7 +2578,7 @@ $annResult = $annStmt->get_result();
     .appt-more-dropdown{position:relative;display:inline-block;}
     .appt-dropdown{position:absolute;right:0;top:calc(100% + 4px);min-width:180px;background:#fff;border:1px solid #e4e4e7;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:6px;display:none;z-index:30;}
     .appt-more-dropdown.open .appt-dropdown{display:block;}
-    .appt-dropdown-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:6px;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer;white-space:nowrap;}
+    .appt-dropdown-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:6px;color:#18181b;font-family:'Inter',sans-serif;font-size:13px;font-weight:500;text-decoration:none;cursor:pointer;white-space:nowrap;}
     .appt-dropdown-item:hover{background:#f4f4f5;}
     .appt-dropdown-item svg{flex-shrink:0;color:#71717a;}
 
@@ -2092,9 +2603,9 @@ $annResult = $annStmt->get_result();
     /* shared sd form controls (modals) */
     .sd-field { display:flex; flex-direction:column; gap:5px; }
     .sd-field-full { grid-column:1 / -1; }
-    .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:500; line-height:1; color:#18181b; }
+    .sd-label { font-family:'Inter',sans-serif; font-size:13px; font-weight:500; line-height:1; color:#18181b; }
     .sd-label .req { color:#dc2626; }
-    .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; background:#fff; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:box-shadow 0.15s ease, border-color 0.15s ease; box-sizing:border-box; }
+    .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter',sans-serif; font-size:14px; color:#18181b; background:#fff; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:box-shadow 0.15s ease, border-color 0.15s ease; box-sizing:border-box; }
     .sd-input::placeholder { color:#a1a1aa; }
     .sd-input:focus-visible { border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     select.sd-input { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
@@ -2106,7 +2617,7 @@ $annResult = $annStmt->get_result();
     .sd-photo-upload .upload-placeholder span { font-size:0.82rem; color:#a1a1aa; }
     .sd-photo-upload input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-    /* �"?�"? Pet Profile Drawer (shadcn right drawer) �"?�"? */
+    /* ï¿½"?ï¿½"? Pet Profile Drawer (shadcn right drawer) ï¿½"?ï¿½"? */
     .pet-drawer-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:998; display:none; }
     .pet-drawer-overlay.open { display:block; }
     .pet-drawer { position:fixed; top:0; right:0; bottom:0; width:min(480px,92vw); background:#fff; z-index:999; box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform 0.32s cubic-bezier(.32,.72,.25,1); display:flex; flex-direction:column; overflow:hidden; }
@@ -2114,52 +2625,270 @@ $annResult = $annStmt->get_result();
     .pet-drawer-head { display:flex; align-items:flex-start; gap:14px; padding:22px 24px; border-bottom:1px solid #e4e4e7; }
     .pet-drawer-avatar { width:72px; height:72px; border-radius:50%; overflow:hidden; background:#e4e4e7; color:#71717a; display:flex; align-items:center; justify-content:center; font-size:26px; font-weight:600; flex-shrink:0; }
     .pet-drawer-avatar img { width:100%; height:100%; object-fit:cover; }
-    .pet-drawer-name { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; margin:0; }
-    .pet-drawer-ref { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:2px 0 0; }
-    .pet-drawer-sub { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:6px 0 0; }
+    .pet-drawer-name { font-family:'Inter',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; margin:0; }
+    .pet-drawer-ref { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:2px 0 0; }
+    .pet-drawer-sub { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:6px 0 0; }
     .pet-drawer-close { margin-left:auto; width:32px; height:32px; border-radius:6px; background:transparent; border:none; color:#71717a; font-size:16px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s; }
     .pet-drawer-close:hover { background:#f4f4f5; color:#18181b; }
     .pet-drawer-body { flex:1; overflow-y:auto; padding:24px; }
     .pet-drawer-tabs { display:flex; gap:4px; background:#f4f4f5; padding:4px; border-radius:8px; margin-bottom:22px; }
-    .pet-drawer-tab { flex:1; padding:8px 12px; border:none; border-radius:6px; background:transparent; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; cursor:pointer; transition:background .15s,color .15s; }
+    .pet-drawer-tab { flex:1; padding:8px 12px; border:none; border-radius:6px; background:transparent; color:#71717a; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; cursor:pointer; transition:background .15s,color .15s; }
     .pet-drawer-tab.active { background:#fff; color:#18181b; box-shadow:0 1px 2px rgba(0,0,0,.06); }
-    .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:.04em; margin:0 0 12px; }
+    .pet-drawer-section-title { font-family:'Inter',sans-serif; font-size:12px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:.04em; margin:0 0 12px; }
     .pet-drawer-info { display:grid; grid-template-columns:1fr 1fr; gap:16px 24px; margin-bottom:22px; }
     .pet-drawer-info-item-full { grid-column:1 / -1; }
-    .pet-drawer-info.rpt-info-3col { grid-template-columns:repeat(3,1fr); }
-    @media (max-width:560px){ .pet-drawer-info.rpt-info-3col { grid-template-columns:1fr; } }
-    .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; }
-    .pet-drawer-info-item .v { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin-top:2px; word-break:break-word; }
+    .pet-drawer-info-item .k { font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#71717a; }
+    .pet-drawer-info-item .v { font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin-top:2px; word-break:break-word; }
     .pet-vax-box { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; padding:16px 20px; }
-    .pet-vax-box .vax-head { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin-bottom:4px; }
-    .pet-vax-box .vax-desc { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.4; }
+    .pet-vax-box .vax-head { font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin-bottom:4px; }
+    .pet-vax-box .vax-desc { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.4; }
     .pet-vax-box .sd-btn { margin-top:12px; }
     .pet-drawer-foot { display:flex; gap:10px; padding:16px 24px; border-top:1px solid #e4e4e7; }
     .pet-drawer-foot .sd-btn { flex:1; justify-content:center; }
     @media (max-width:768px) {
       .appt-header-right { width:100%; }
-      .appt-search-input { width:100%; }
+      .appt-search-wrap { flex:1 1 100%; min-width:0; }
+      .appt-search-input { width:100%; min-width:0; }
+      #my-pets .appt-card-header > .sd-btn { width:100%; margin-left:0 !important; }
+      #my-pets .appt-status-select { width:100%; }
+
+      #my-pets {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+
+      #my-pets .pets-kpi-grid {
+        grid-template-columns:repeat(2, minmax(0, 1fr)) !important;
+        gap:10px !important;
+      }
+
+      #my-pets .pets-kpi-card {
+        min-width:0;
+        padding:16px 10px !important;
+        overflow-wrap:anywhere;
+      }
+
+      #my-pets .pets-kpi-card p {
+        max-width:100%;
+        overflow-wrap:anywhere;
+      }
+
+      #my-pets .appt-db-table-area {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        overflow-x:auto;
+        overflow-y:hidden;
+        -webkit-overflow-scrolling:touch;
+      }
+
+      #my-pets .appt-table {
+        min-width:820px;
+      }
+
+      #my-pets .appt-pagination {
+        width:100%;
+        padding:12px;
+      }
+
+      #my-pets .appt-pagination .dt-pagination-right {
+        width:100%;
+        flex-direction:column;
+        align-items:stretch;
+        gap:10px;
+      }
+
+      #my-pets .appt-pagination .dt-rows,
+      #my-pets .appt-pagination .dt-page-label,
+      #my-pets .appt-pagination .dt-page-btns {
+        width:100%;
+        justify-content:space-between;
+      }
+
+      #my-pets .appt-pagination .dt-page-label {
+        text-align:left;
+      }
+
+      #addPetModal.modal,
+      #editPetModal.modal {
+        align-items:flex-start;
+        overflow-y:auto;
+        padding:8px;
+      }
+
+      #addPetModal .sd-dialog,
+      #editPetModal .sd-dialog,
+      #addPetModal .sd-dialog-content,
+      #editPetModal .sd-dialog-content {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+
+      #addPetModal .sd-dialog-content,
+      #editPetModal .sd-dialog-content {
+        max-height:calc(100dvh - 16px);
+        padding:18px 16px;
+        overflow-y:auto;
+      }
+
+      #addPetModal .sd-dialog-title,
+      #editPetModal .sd-dialog-title {
+        padding-right:32px;
+        line-height:1.25;
+      }
+
+      #addPetModal .sd-form-grid,
+      #editPetModal .sd-form-grid {
+        grid-template-columns:1fr;
+        gap:12px;
+      }
+
+      #addPetModal .sd-dialog-footer,
+      #editPetModal .sd-dialog-footer {
+        flex-direction:column;
+        align-items:stretch;
+      }
+
+      #addPetModal .sd-dialog-footer .sd-btn,
+      #editPetModal .sd-dialog-footer .sd-btn {
+        width:100%;
+      }
+
+      #addPetModal .sd-photo-upload,
+      #editPetModal .sd-photo-upload {
+        width:100%;
+        max-width:100%;
+      }
+
+      #editPetModal .sd-photo-row {
+        flex-direction:column;
+      }
+
+      #editPetModal .sd-photo-current,
+      #editPetModal .sd-photo-upload {
+        width:100%;
+        max-width:100%;
+      }
+    }
+
+    /* Resident data tables follow the All Clients table shell and pagination. */
+    #appointments .appt-db-table-area,
+    #my-reports .appt-db-table-area,
+    #my-pets .appt-db-table-area,
+    #adoption .appt-db-table-area {
+      min-height:var(--staff-table-min-height);
+      border:1px solid #e4e4e7;
+      border-radius:8px;
+      background:#fff;
+    }
+
+    #appointments .appt-pagination,
+    #my-reports .appt-pagination,
+    #my-pets .appt-pagination,
+    #adoption .appt-pagination {
+      min-height:57px;
+      margin-top:0;
+      border-top:1px solid #e4e4e7;
+      background:#fff;
+    }
+
+    #appointments .resident-row-menu,
+    #my-reports .resident-row-menu,
+    #my-pets .resident-row-menu,
+    #adoption .resident-row-menu {
+      min-width:190px;
+    }
+
+    .resident-row-menu .row-menu-item.danger {
+      color:#dc2626;
+    }
+
+    #appointments .resident-row-menu .row-menu-item.danger,
+    #my-reports .resident-row-menu .row-menu-item.danger,
+    #my-pets .resident-row-menu .row-menu-item.danger,
+    #adoption .resident-row-menu .row-menu-item.danger {
+      color:#dc2626;
+    }
+
+    @media (max-width:768px) {
+      #appointments .appt-db-table-area,
+      #my-reports .appt-db-table-area,
+      #my-pets .appt-db-table-area,
+      #adoption .appt-db-table-area {
+        overflow-x:auto;
+        -webkit-overflow-scrolling:touch;
+      }
+
+      #appointments .appt-table,
+      #my-reports .appt-table,
+      #my-pets .appt-table,
+      #adoption .appt-table,
+      #adoption .cv-table {
+        min-width:760px;
+      }
+
+      #appointments .appt-pagination,
+      #my-reports .appt-pagination,
+      #my-pets .appt-pagination,
+      #adoption .appt-pagination {
+        align-items:stretch;
+        flex-direction:column;
+        gap:10px;
+      }
+
+      #appointments .dt-pagination-right,
+      #my-reports .dt-pagination-right,
+      #my-pets .dt-pagination-right,
+      #adoption .dt-pagination-right {
+        width:100%;
+        align-items:stretch;
+        flex-direction:column;
+        gap:10px;
+      }
+
+      #appointments .dt-rows,
+      #my-reports .dt-rows,
+      #my-pets .dt-rows,
+      #adoption .dt-rows,
+      #appointments .dt-page-label,
+      #my-reports .dt-page-label,
+      #my-pets .dt-page-label,
+      #adoption .dt-page-label,
+      #appointments .dt-page-btns,
+      #my-reports .dt-page-btns,
+      #my-pets .dt-page-btns,
+      #adoption .dt-page-btns {
+        width:100%;
+        justify-content:space-between;
+      }
     }
   </style>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? MY REPORTS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY REPORTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-reports" class="content-section">
     <!-- Overview KPIs -->
     <div class="rpt-kpis">
-      <div class="rpt-kpi-card">
-        <p class="rpt-kpi-label">Total Reports</p>
-        <div class="rpt-kpi-value" id="rptTotal">0</div>
-        <p class="rpt-kpi-sub">All submitted reports</p>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Total Reports</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="rptTotal">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">All submitted reports</p>
       </div>
-      <div class="rpt-kpi-card">
-        <p class="rpt-kpi-label">In Progress</p>
-        <div class="rpt-kpi-value" id="rptInProgress">0</div>
-        <p class="rpt-kpi-sub">Under review / handled</p>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Pending Review</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="rptPendingReview">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Awaiting validation</p>
       </div>
-      <div class="rpt-kpi-card">
-        <p class="rpt-kpi-label">Resolved</p>
-        <div class="rpt-kpi-value" id="rptResolved">0</div>
-        <p class="rpt-kpi-sub">Completed cases</p>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">In Progress</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="rptInProgress">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Under review / handled</p>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
+        <p style="font-size:14px;font-weight:500;color:#18181b;margin:0 0 6px;text-transform:uppercase;letter-spacing:0.03em;">Resolved</p>
+        <p style="font-size:26px;font-weight:600;color:#18181b;letter-spacing:-0.02em;line-height:1;margin:0 0 6px;" id="rptResolved">0</p>
+        <p style="font-size:14px;color:#71717a;margin:0;">Completed cases</p>
       </div>
     </div>
 
@@ -2167,33 +2896,33 @@ $annResult = $annStmt->get_result();
     $knownReportTypes = ['stray' => 'Stray Animal', 'rabies' => 'Rabies Case', 'injured' => 'Injured Animal', 'dead' => 'Dead Animal', 'other' => 'Other'];
     function rptStatusLabel($s) {
         switch ($s) {
-            case 'pending': return 'Pending';
-            case 'validated': return 'Under Review';
-            case 'confirmed': return 'Confirmed';
-            case 'scheduled': return 'Scheduled';
+        case 'pending': return 'Pending Barangay Review';
+        case 'validated': return 'Pending DCVS Review';
+        case 'confirmed':
+        case 'scheduled': return 'In Progress';
             case 'resolved': return 'Resolved';
-            case 'rejected': return 'Rejected';
+            case 'rejected': return 'Closed';
             default: return ucfirst(str_replace('_', ' ', $s));
         }
     }
     function rptStatusClass($s) {
         switch ($s) {
             case 'pending': return 'st-pending';
-            case 'validated':
-            case 'confirmed':
-            case 'scheduled': return 'st-review';
+          case 'validated': return 'st-awaiting';
+          case 'confirmed':
+          case 'scheduled': return 'st-review';
             case 'resolved': return 'st-resolved';
             case 'rejected': return 'st-rejected';
             default: return 'st-pending';
         }
     }
     $rptStatusColors = [
-        'pending'   => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
-        'validated' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
-        'confirmed' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
-        'scheduled' => ['bg' => '#dbeafe', 'color' => '#1d4ed8', 'border' => '#bfdbfe'],
-        'resolved'  => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
-        'rejected'  => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+      'pending'   => ['bg' => '#FEF3C7', 'color' => '#92400E', 'border' => '#FDE68A'],
+      'validated' => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
+      'confirmed' => ['bg' => '#EFF6FF', 'color' => '#1E40AF', 'border' => '#BFDBFE'],
+      'scheduled' => ['bg' => '#EFF6FF', 'color' => '#1E40AF', 'border' => '#BFDBFE'],
+      'resolved'  => ['bg' => '#0E8131', 'color' => '#ffffff', 'border' => '#0E8131'],
+      'rejected'  => ['bg' => '#FEE2E2', 'color' => '#991B1B', 'border' => '#FECACA'],
     ];
     ?>
     <?php if (empty($reports)): ?>
@@ -2201,7 +2930,7 @@ $annResult = $annStmt->get_result();
         <i class="fas fa-file-medical-alt"></i>
         <h3>No reports submitted yet</h3>
         <p>Submit your first report to help us keep the community safe.</p>
-        <button type="button" class="sd-btn sd-btn-default" onclick="openSubmitReportModal()"><i class="fas fa-plus"></i> Submit a Report</button>
+        <a href="submit-report-page.php" class="sd-btn sd-btn-default"><i class="fas fa-plus"></i> Submit a Report</a>
       </div>
     <?php else: ?>
     <div class="appt-card-header">
@@ -2218,9 +2947,9 @@ $annResult = $annStmt->get_result();
           <option value="rejected">Rejected</option>
         </select>
       </div>
-      <button type="button" class="sd-btn sd-btn-default" onclick="openSubmitReportModal()" style="margin-left:auto;">
+      <a href="submit-report-page.php" class="sd-btn sd-btn-default" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Submit a Report
-      </button>
+      </a>
     </div>
 
     <div class="appt-db-table-area dt-container">
@@ -2230,11 +2959,11 @@ $annResult = $annStmt->get_result();
             <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="RPT.sortBy('ref')">Report ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="type" onclick="RPT.sortBy('type')">Type<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="location" onclick="RPT.sortBy('location')">Location<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="RPT.sortBy('date')">Date Submitted<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="RPT.sortBy('date')">Incident Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="RPT.sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="category" onclick="RPT.sortBy('category')">Category<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="resolved" onclick="RPT.sortBy('resolved')">Date Resolved<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th sd-th-action">Actions</th>
+            <th class="sd-th" style="width:40px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -2246,46 +2975,35 @@ $annResult = $annStmt->get_result();
             $rStatusLabel = rptStatusLabel($rStatus);
             $rStatusClass = rptStatusClass($rStatus);
             $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
-            $rDate = date('M d, Y', strtotime($report['created_at']));
+            $incidentAt = !empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'];
+            $rDate = date('M d, Y', strtotime($incidentAt));
             $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
             $rResolvedRaw = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? $report['updated_at'] : '';
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['location_address'])); ?>" data-date="<?php echo (int)strtotime($report['created_at']); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['location_address'])); ?>" data-date="<?php echo (int)strtotime($incidentAt); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($rRef); ?></div></td>
-            <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($rTypeLabel); ?> Report</div></td>
-            <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
+            <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?> Report</div></td>
+            <td class="sd-td"><div class="contact-main contact-normal report-location-value"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rDate; ?></div></td>
-            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;border-color:<?php echo $rsc['border']; ?>;"><?php echo $rStatusLabel; ?></span></td>
-            <td class="sd-td"><span class="pet-cat-tag"><?php echo htmlspecialchars($rTypeLabel); ?></span></td>
+            <td class="sd-td"><span class="appt-status-pill<?php echo $rStatus === 'resolved' ? ' report-status-resolved' : ''; ?>" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;border-color:<?php echo $rsc['border']; ?>;"><?php echo $rStatusLabel; ?></span></td>
+            <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rResolvedDate; ?></div></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
-              <div class="pet-action-btns">
-                <button type="button" class="pet-action-btn" title="View Report" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                </button>
-                <button type="button" class="pet-action-btn" title="Archive Report" onclick="RPT.archive(<?php echo (int)$report['report_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                </button>
-              </div>
+              <button class="sd-row-actions" title="More options" onclick="event.stopPropagation();rptRowActions(event,<?php echo (int)$report['report_id']; ?>)"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             </td>
           </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
     </div>
-    <div id="reportPagination" class="appt-pagination"></div>
+    <div id="reportPagination" class="appt-pagination dt-pagination"></div>
     <?php endif; ?>
   </section>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? SUBMIT A REPORT �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? SUBMIT A REPORT ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <style>
-    /* �"?�"? My Reports (My Pets design) �"?�"? */
-    #my-reports { font-family:'Inter','Segoe UI',sans-serif; }
-    #my-reports .rpt-kpis{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-bottom:20px; }
-    #my-reports .rpt-kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:18px 20px; background:none; border:none; border-radius:0; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
-    #my-reports .rpt-kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
-    #my-reports .rpt-kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
-    #my-reports .rpt-kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
+    /* ï¿½"?ï¿½"? My Reports (My Pets design) ï¿½"?ï¿½"? */
+    #my-reports { font-family:'Inter',sans-serif; }
 
     .rpt-empty { text-align:center; padding:3.5rem 1.5rem; color:#64748b; border:2px dashed #e2e8f0; border-radius:16px; }
     .rpt-empty i { font-size:3rem; color:#94a3b8; display:block; margin-bottom:1rem; }
@@ -2293,64 +3011,101 @@ $annResult = $annStmt->get_result();
     .rpt-empty p { font-size:0.85rem; margin:0 0 1.25rem; }
     .rpt-empty .sd-btn { margin:0 auto; }
 
-    /* �"?�"? Report Details Drawer (shadcn right drawer) �"?�"? */
+    /* ï¿½"?ï¿½"? Report Details Drawer (shadcn right drawer) ï¿½"?ï¿½"? */
     .rpt-drawer-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:998; display:none; }
     .rpt-drawer-overlay.open { display:block; }
-    .rpt-drawer { position:fixed; top:0; right:0; bottom:0; width:min(480px,92vw); background:#fff; z-index:999; box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform 0.32s cubic-bezier(.32,.72,.25,1); display:flex; flex-direction:column; overflow:hidden; }
+    .rpt-drawer { position:fixed; top:0; right:0; bottom:0; width:min(480px,92vw); max-width:100vw; background:#fff; z-index:999; box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform 0.32s cubic-bezier(.32,.72,.25,1); display:flex; flex-direction:column; overflow:hidden; }
     .rpt-drawer.open { transform:translateX(0); }
-    .rpt-drawer-head { display:flex; align-items:flex-start; gap:14px; padding:22px 24px; border-bottom:1px solid #e4e4e7; }
-    .rpt-drawer-title { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-0.025em; margin:0; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .rpt-drawer-ref { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:3px 0 0; }
-    .rpt-drawer-close { margin-left:auto; width:32px; height:32px; border-radius:6px; background:transparent; border:none; color:#71717a; font-size:16px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s; flex-shrink:0; }
+    .rpt-drawer-head { display:flex; align-items:flex-start; gap:14px; padding:24px; border-bottom:1px solid #e4e4e7; }
+    #rptDrawer .rpt-drawer-head { border-bottom:none; padding-bottom:0; }
+    #rptDrawer .rpt-drawer-body { padding-top:18px; }
+    .rpt-drawer-title { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; color:#18181b; letter-spacing:-0.025em; margin:0; }
+    .rpt-drawer-ref { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; margin:0; }
+    .rpt-drawer-head > div { display:flex; flex-direction:column; gap:6px; }
+    #rptDrawer .rpt-tabs { display:flex; justify-content:center; gap:28px; border-bottom:1px solid #e6e9ee; margin-bottom:20px; }
+    #rptDrawer .rpt-tab { padding:0 0 12px; font-size:14px; font-weight:600; color:#94a3b8; cursor:pointer; border:none; border-bottom:2px solid transparent; border-top:0; border-left:0; border-right:0; background:none; font-family:inherit; }
+    #rptDrawer .rpt-tab:hover { color:#18181b; }
+    #rptDrawer .rpt-tab.active { color:#045e1f; border-bottom-color:#046b25; }
+    #rptDrawer .rpt-detail-body { display:none; }
+    #rptDrawer .rpt-detail-body.active { display:block; }
+    #rptDrawer .rpt-detail-body > .pet-drawer-section-title:first-child { margin-top:18px; }
+    #rptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
+    #rptDrawer .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin:0; }
+    #rptDrawer .rpt-photo-none { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:0; }
+    .rpt-drawer-close { margin-left:auto; width:24px; height:24px; border-radius:4px; background:transparent; border:none; color:#71717a; font-size:16px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s; flex-shrink:0; }
     .rpt-drawer-close:hover { background:#f4f4f5; color:#18181b; }
     .rpt-drawer-body { flex:1; overflow-y:auto; padding:24px; }
-    .rpt-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:600; color:#71717a; text-transform:uppercase; letter-spacing:.04em; margin:20px 0 12px; }
+    .rpt-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; line-height:1.4; margin:0 0 12px; }
     .rpt-drawer-section-title:first-child { margin-top:0; }
-    .rpt-detail-label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#71717a; margin-bottom:2px; }
-    .rpt-detail-value { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; line-height:1.45; word-break:break-word; }
+    .rpt-detail-label { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; color:#71717a; margin-bottom:2px; }
+    .rpt-detail-value { font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:400; color:#18181b; line-height:1.45; word-break:break-word; }
     .rpt-detail-block { margin-bottom:1rem; }
     .rpt-info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px 24px; }
     @media (max-width:560px){ .rpt-info-grid { grid-template-columns:1fr; } }
     .rpt-photos { display:flex; gap:12px; flex-wrap:wrap; }
     .rpt-photo-thumb { width:100%; height:220px; border-radius:8px; overflow:hidden; cursor:pointer; background:#f4f4f5; display:flex; align-items:center; justify-content:center; color:#71717a; border:1px solid #e4e4e7; }
     .rpt-photo-thumb img { width:100%; height:100%; object-fit:cover; }
-    .rpt-status-line { display:flex; align-items:center; gap:8px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    .rpt-photo-thumb video { width:100%; height:100%; object-fit:contain; background:#000; }
+    .rpt-video-thumb { background:#000; }
+    .rpt-status-line { display:flex; align-items:center; gap:8px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
     .rpt-status-line i { color:#057b2d; }
     /* appointment drawer sections */
+    #apptDrawer .rpt-drawer-head { border-bottom:none; padding-bottom:0; }
+    #apptDrawer .rpt-drawer-body { padding-top:18px; }
+    #apptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
     .rpt-divider { border:0; border-top:1px solid #e4e4e7; margin:20px 0; }
     #apptDrawer .rpt-drawer-foot { justify-content:center; }
     #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 0 auto; }
     /* drawer status badge + timeline */
-    .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border-radius:20px; white-space:nowrap; }
+    .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border:1px solid transparent; border-radius:20px; white-space:nowrap; }
     .rpt-status-badge .st-dot { width:7px; height:7px; border-radius:50%; }
-    .rpt-status-badge.st-pending { background:#fef3c7; color:#92400e; } .rpt-status-badge.st-pending .st-dot { background:#d97706; }
-    .rpt-status-badge.st-review { background:#dbeafe; color:#1d4ed8; } .rpt-status-badge.st-review .st-dot { background:#2563eb; }
-    .rpt-status-badge.st-resolved { background:#dcebe0; color:#045e1f; } .rpt-status-badge.st-resolved .st-dot { background:#057b2d; }
-    .rpt-status-badge.st-rejected { background:#fee2e2; color:#991b1b; } .rpt-status-badge.st-rejected .st-dot { background:#dc2626; }
+    .rpt-status-badge.st-pending { background:#FEF3C7; color:#92400E; border-color:#FDE68A; } .rpt-status-badge.st-pending .st-dot { background:#92400E; }
+    .rpt-status-badge.st-awaiting { background:#dcebe0; color:#045e1f; border-color:#bbf7d0; } .rpt-status-badge.st-awaiting .st-dot { background:#045e1f; }
+    .rpt-status-badge.st-review { background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; } .rpt-status-badge.st-review .st-dot { background:#1E40AF; }
+    .rpt-status-badge.st-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; } .rpt-status-badge.st-resolved .st-dot { background:#ffffff; }
+    .rpt-status-badge.st-rejected { background:#FEE2E2; color:#991B1B; border-color:#FECACA; } .rpt-status-badge.st-rejected .st-dot { background:#991B1B; }
+    #my-reports #reportTable .appt-status-pill.report-status-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; }
     .rpt-timeline { display:flex; align-items:center; gap:8px; }
-    .tl-step { display:inline-flex; align-items:center; gap:5px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#a1a1aa; }
+    .tl-step { display:inline-flex; align-items:center; gap:5px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#a1a1aa; }
     .tl-step i { font-size:12px; }
     .tl-step.done { color:#057b2d; }
     .tl-step.current { color:#2563eb; }
     .tl-sep { flex:0 0 28px; height:2px; background:#e4e4e7; border-radius:2px; }
     .rpt-timeline-rejected .tl-step.done { color:#991b1b; }
     .rpt-next { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; padding:16px 20px; }
-    .rpt-next-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:8px; }
+    .rpt-next-title { font-family:'Inter',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:8px; }
     .rpt-next ol { margin:0; padding-left:1.15rem; }
-    .rpt-next li { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
-    .rpt-drawer-foot { display:flex; gap:10px; padding:16px 24px; border-top:1px solid #e4e4e7; align-items:center; }
+    .rpt-next li { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    .rpt-drawer-foot { display:flex; gap:8px; padding:16px 24px; border-top:1px solid #e4e4e7; align-items:center; }
     .rpt-drawer-foot .sd-btn { flex:1; justify-content:center; }
     .rpt-more-wrap { position:relative; }
     .rpt-more-btn { width:32px; height:32px; border-radius:6px; border:none; background:transparent; color:#71717a; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; }
     .rpt-more-btn:hover { background:#f4f4f5; color:#18181b; }
     .rpt-more-pop { position:absolute; bottom:calc(100% + 6px); right:0; background:#fff; border:1px solid #e4e4e7; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.12); padding:6px; min-width:180px; display:none; z-index:30; }
     .rpt-more-pop.open { display:block; }
-    .rpt-more-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border:none; background:none; border-radius:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:500; color:#18181b; cursor:pointer; text-align:left; }
+    .rpt-more-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border:none; background:none; border-radius:6px; font-family:'Inter',sans-serif; font-size:13px; font-weight:500; color:#18181b; cursor:pointer; text-align:left; }
     .rpt-more-item:hover { background:#f4f4f5; color:#18181b; }
     .rpt-more-item.danger { color:#dc2626; } .rpt-more-item.danger:hover { background:#fef2f2; }
     .rpt-more-item i { width:16px; text-align:center; }
 
-    /* �"?�"? Submit Report wizard �"?�"? */
+    #apptDrawer .pet-drawer-info { gap:16px 20px; margin-bottom:24px; }
+    #apptDrawer .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin:0; }
+    #apptDrawer .pet-drawer-info-item .v { font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:400; line-height:1.4; color:#18181b; margin-top:2px; word-break:break-word; }
+    #rptDrawer .pet-drawer-info-item .v { font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:400; line-height:1.4; color:#18181b; margin-top:2px; word-break:break-word; }
+    #apptDrawer .pet-drawer-info-item-full { grid-column:1 / -1; }
+    #apptDrawer .appt-notes { background:#f8f9fa; border:1px solid #e4e4e7; border-radius:8px; padding:12px 14px; }
+    #apptDrawer .rpt-next { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; padding:16px 20px; }
+    #apptDrawer .rpt-next-title { font-size:14px; font-weight:600; color:#18181b; line-height:1.4; margin-bottom:8px; }
+    #apptDrawer .rpt-next li { font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    @media (max-width:560px){
+      .rpt-drawer-head, .rpt-drawer-body { padding-left:20px; padding-right:20px; }
+      .rpt-drawer-foot { padding-left:20px; padding-right:20px; }
+      #apptDrawer .pet-drawer-info { grid-template-columns:1fr; }
+      #apptDrawer .rpt-drawer-foot { flex-wrap:wrap; }
+      #apptDrawer .rpt-drawer-foot .sd-btn { flex:1 1 100%; }
+    }
+
+    /* ï¿½"?ï¿½"? Submit Report wizard ï¿½"?ï¿½"? */
     .rpt-step-indicator { display:flex; align-items:center; gap:8px; margin-bottom:1.5rem; }
     .rpt-step { display:flex; align-items:center; gap:6px; }
     .rpt-step-num { width:26px; height:26px; border-radius:50%; background:#e2e8f0; color:#64748b; display:inline-flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; transition:all 0.2s; }
@@ -2377,50 +3132,97 @@ $annResult = $annStmt->get_result();
     .rpt-upload-sub { font-size:0.78rem; color:#94a3b8; }
     .rpt-upload-area input[type="file"] { position:absolute; inset:0; opacity:0; cursor:pointer; }
 
-    /* Submit Report dialog (shadcn) */
-    #submitReportModal.modal { background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
-    #submitReportModal .sd-dialog { width:100%; display:flex; justify-content:center; }
-    #submitReportModal .sd-dialog-content { position:relative; width:100%; max-width:620px; background:#ffffff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; max-height:90vh; overflow-y:auto; }
-    #submitReportModal .sd-dialog-close { position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all 0.15s ease; }
-    #submitReportModal .sd-dialog-close:hover { background:#f4f4f5; color:#18181b; }
-    #submitReportModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
-    #submitReportModal .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
-    #submitReportModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
-    #submitReportModal .sd-dialog-footer { display:flex; align-items:center; gap:8px; }
-    #submitReportModal .modal-form-control { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
-    #submitReportModal textarea.modal-form-control { height:auto; min-height:90px; padding:8px 12px; resize:vertical; line-height:1.5; }
-    #submitReportModal select.modal-form-control { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
-    #submitReportModal .modal-form-control:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-    #submitReportModal .form-group label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; display:block; margin-bottom:6px; }
-    #submitReportModal .form-group label .req { color:#dc2626; }
-    #submitReportModal .rpt-type-card { border:1px solid #e4e4e7; border-radius:6px; }
-    #submitReportModal .rpt-type-card:hover { border-color:#18181b; background:#f4f4f5; }
-    #submitReportModal .rpt-type-card:has(input:checked) { border-color:#18181b; background:#f4f4f5; box-shadow:0 0 0 1px #18181b; }
-    #submitReportModal .rpt-upload-area { border:2px dashed #e4e4e7; border-radius:6px; background:#fafafa; }
-    #submitReportModal .rpt-upload-area:hover { border-color:#18181b; background:#f4f4f5; }
-    #submitReportModal .rpt-step-num { background:#e4e4e7; color:#71717a; }
-    #submitReportModal .rpt-step.active .rpt-step-num { background:#18181b; color:#fafafa; }
-    #submitReportModal .rpt-step.done .rpt-step-num { background:#18181b; color:#fafafa; }
-    #submitReportModal .rpt-step-line { background:#e4e4e7; }
-    #submitReportModal .modal-notice { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; color:#71717a; }
+    /* Submit Report removed — now uses submit-report-page.php */
     @media (max-width:560px){ .rpt-type-grid { grid-template-columns:1fr; } }
-    @media (max-width:1180px){ #my-reports .rpt-kpis{ grid-template-columns:repeat(2,1fr); } }
     @media (max-width:768px) {
-      #my-reports .rpt-kpis { grid-template-columns:1fr 1fr; }
       .appt-header-right { width:100%; }
       .appt-search-input { width:100%; }
     }
 
-    /* �"?�"? Appointments (My Reports design) �"?�"? */
-    #appointments { font-family:'Inter','Segoe UI',sans-serif; }
+    /* ï¿½"?ï¿½"? Appointments (My Reports design) ï¿½"?ï¿½"? */
+    #appointments { font-family:'Inter',sans-serif; }
     #appointments .appt-kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
-    #appointments .appt-kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:18px 20px; background:none; border:none; border-radius:0; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
-    #appointments .appt-kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
-    #appointments .appt-kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
-    #appointments .appt-kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
+    #appointments .appt-kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:20px; background:#fff; border:1px solid #e2e8f0; border-radius:12px; box-shadow:none; font-family:'Inter',sans-serif; }
+    #appointments .appt-kpi-label{ font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
+    #appointments .appt-kpi-value{ font-family:'Inter',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
+    #appointments .appt-kpi-sub{ font-family:'Inter',sans-serif; font-size:14px; color:#71717a; }
     @media (max-width:1180px){ #appointments .appt-kpis{ grid-template-columns:repeat(2,1fr); } }
     @media (max-width:768px){ #appointments .appt-kpis{ grid-template-columns:1fr 1fr; } }
     @media (max-width:480px){ #appointments .appt-kpis{ grid-template-columns:1fr; } }
+
+    /* My Waitlist follows the staff waitlist shadcn table layout. */
+    #my-waitlist { font-family:'Inter','Segoe UI',sans-serif; color:#18181b; }
+    #my-waitlist .resident-waitlist-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:20px; }
+    #my-waitlist .resident-waitlist-kpi { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:84px; padding:14px 16px; background:#fff; border:1px solid #e5e7eb; border-radius:14px; box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03); text-align:center; }
+    #my-waitlist .resident-waitlist-kpi-label { margin:0 0 6px; color:#18181b; font-size:14px; font-weight:500; text-transform:uppercase; }
+    #my-waitlist .resident-waitlist-kpi-value { margin:0 0 6px; color:#18181b; font-size:26px; font-weight:600; letter-spacing:-.02em; line-height:1; }
+    #my-waitlist .resident-waitlist-kpi-sub { margin:0; color:#71717a; font-size:14px; }
+    #my-waitlist .resident-waitlist-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+    #my-waitlist .resident-waitlist-toolbar input,
+    #my-waitlist .resident-waitlist-toolbar select { height:36px; box-sizing:border-box; padding:0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    #my-waitlist .resident-waitlist-toolbar input[type="search"] { flex:0 1 280px; width:280px; min-width:180px; }
+    #my-waitlist .resident-waitlist-toolbar select { min-width:150px; padding:0 26px 0 10px; appearance:none; -webkit-appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; font-family:inherit; cursor:pointer; }
+    #my-waitlist .resident-waitlist-toolbar input:focus,
+    #my-waitlist .resident-waitlist-toolbar select:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #my-waitlist .resident-waitlist-date-filter { position:relative; display:inline-flex; }
+    #my-waitlist .resident-waitlist-date-filter input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+    #my-waitlist .resident-waitlist-toolbar button { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    #my-waitlist .resident-waitlist-toolbar button[hidden] { display:none!important; }
+    #my-waitlist .resident-waitlist-date-button { width:36px; min-width:36px; padding:0!important; justify-content:center!important; }
+    #my-waitlist .resident-waitlist-date-button.has-date { border-color:#18181b; }
+    #my-waitlist .resident-waitlist-date-clear { width:30px; min-width:30px; padding:0!important; margin-left:-7px; }
+    #my-waitlist .resident-waitlist-card { overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #my-waitlist .resident-waitlist-table-wrap { min-height:560px; overflow-x:auto; }
+    #my-waitlist .resident-waitlist-table { width:100%; min-width:900px; border-collapse:collapse; table-layout:auto; }
+    #my-waitlist .resident-waitlist-table th { height:42px; padding:0 12px; border-bottom:1px solid #e4e4e7; background:#fafafa; color:#71717a; font-size:14px; font-weight:500; text-align:left; white-space:nowrap; }
+    #my-waitlist .resident-waitlist-table td { padding:12px; border-bottom:1px solid #e4e4e7; color:#18181b; font-size:14px; vertical-align:middle; }
+    #my-waitlist .resident-waitlist-table tr:last-child td { border-bottom:0; }
+    #my-waitlist .resident-waitlist-pet-cell { display:flex; align-items:center; gap:10px; min-width:0; }
+    #my-waitlist .resident-waitlist-pet-avatar { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 36px; overflow:hidden; border-radius:50%; background:#e4e4e7; color:#71717a; font-size:13px; }
+    #my-waitlist .resident-waitlist-pet-avatar img { width:100%; height:100%; object-fit:cover; }
+    #my-waitlist .resident-waitlist-pet-name { min-width:0; overflow-wrap:anywhere; }
+    #my-waitlist .resident-waitlist-subtext { margin-top:3px; color:#71717a; font-size:12px; }
+    #my-waitlist .resident-waitlist-pill { display:inline-flex; align-items:center; padding:4px 10px; border:1px solid transparent; border-radius:4px; font-size:12px; font-weight:400; line-height:1.2; background:#f4f4f5; color:#52525b; }
+    #my-waitlist .resident-waitlist-pill.waiting { background:#fff4cc; border-color:#ffda66; color:#a84b00; }
+    #my-waitlist .resident-waitlist-pill.notified { background:#dbeafe; color:#1e40af; }
+    #my-waitlist .resident-waitlist-pill.booked { background:#dcfce7; color:#166534; }
+    #my-waitlist .resident-waitlist-action { display:inline-flex; align-items:center; justify-content:center; height:34px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 13px 'Inter','Segoe UI',sans-serif; text-decoration:none; cursor:pointer; white-space:nowrap; }
+    #my-waitlist .resident-waitlist-action:hover { background:#f4f4f5; }
+    #my-waitlist .resident-waitlist-action.primary { border-color:#18181b; background:#18181b; color:#fff; }
+    #my-waitlist .resident-waitlist-action.primary:hover { background:#27272a; }
+    #my-waitlist .resident-waitlist-action:disabled { opacity:.55; cursor:not-allowed; }
+    #my-waitlist .resident-waitlist-row-actions { display:inline-flex; align-items:center; justify-content:center; width:32px; height:32px; border:0; border-radius:6px; background:transparent; color:#71717a; cursor:pointer; }
+    #my-waitlist .resident-waitlist-row-actions:hover,
+    #my-waitlist .resident-waitlist-row-actions[aria-expanded="true"] { background:#f4f4f5; color:#18181b; }
+    #my-waitlist .resident-waitlist-row-actions svg { width:16px; height:16px; }
+    #residentWaitlistRowMenu { position:fixed; z-index:1200; display:none; min-width:190px; padding:6px; border:1px solid #e6e9ee; border-radius:10px; background:#fff; box-shadow:0 4px 14px rgba(15,23,32,.06); font-family:'Inter','Segoe UI',sans-serif; }
+    #residentWaitlistRowMenu.open { display:block; }
+    #residentWaitlistRowMenu .resident-waitlist-menu-item { display:flex; align-items:center; gap:10px; width:100%; padding:9px 10px; border:0; border-radius:8px; background:none; color:#334155; font:500 13px/1.4 'Inter','Segoe UI',sans-serif; text-align:left; text-decoration:none; cursor:pointer; box-sizing:border-box; }
+    #residentWaitlistRowMenu .resident-waitlist-menu-item:hover { background:#f8fafc; }
+    #residentWaitlistRowMenu .resident-waitlist-menu-item.danger { color:#dc2626; }
+    #residentWaitlistRowMenu .resident-waitlist-menu-item.danger:hover { background:#fef2f2; }
+    #residentWaitlistRowMenu .resident-waitlist-menu-item svg { flex-shrink:0; width:15px; height:15px; }
+    #my-waitlist .resident-waitlist-empty { display:none; padding:42px 16px!important; color:#71717a!important; text-align:center; }
+    #my-waitlist .resident-waitlist-empty.visible { display:table-cell; }
+    #my-waitlist .resident-waitlist-pagination { display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; margin-top:8px; font-family:'Inter','Segoe UI',sans-serif; }
+    #my-waitlist .resident-waitlist-pagination-right { display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+    #my-waitlist .resident-waitlist-rows { display:flex; align-items:center; gap:8px; color:#71717a; font-size:14px; }
+    #my-waitlist .resident-waitlist-rows select { height:32px; width:70px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; padding:0 8px; font:14px 'Inter','Segoe UI',sans-serif; color:#18181b; }
+    #my-waitlist .resident-waitlist-page-label { width:110px; text-align:center; font-size:14px; font-weight:500; color:#18181b; white-space:nowrap; }
+    #my-waitlist .resident-waitlist-page-btns { display:flex; align-items:center; gap:4px; }
+    #my-waitlist .resident-waitlist-page-btn { height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; }
+    #my-waitlist .resident-waitlist-page-btn:hover:not(:disabled) { background:#f4f4f5; }
+    #my-waitlist .resident-waitlist-page-btn:disabled { opacity:.5; cursor:not-allowed; }
+    #residentWaitlistConfirm.modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.5); padding:1rem; z-index:1100; }
+    #residentWaitlistConfirm.modal.open { display:flex; }
+    #residentWaitlistConfirm .sd-dialog-content { width:100%; max-width:420px; padding:24px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; box-shadow:0 20px 25px rgba(15,23,32,.18); }
+    #residentWaitlistConfirm .sd-dialog-header { text-align:left; }
+    #residentWaitlistConfirm .sd-dialog-title { font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; color:#18181b; letter-spacing:-.025em; }
+    #residentWaitlistConfirm .sd-dialog-description { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; }
+    #residentWaitlistConfirm .sd-dialog-footer { display:flex; justify-content:flex-end; gap:8px; }
+    @media(max-width:1180px) { #my-waitlist .resident-waitlist-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media(max-width:800px) { #my-waitlist .resident-waitlist-kpis { grid-template-columns:1fr 1fr; gap:10px; } #my-waitlist .resident-waitlist-pagination-right { justify-content:center; gap:12px; } }
+    @media(max-width:480px) { #my-waitlist .resident-waitlist-kpis { grid-template-columns:1fr; } }
 
     /* Request Appointment dialog (shadcn) */
     /* Edit Appointment dialog (shadcn) */
@@ -2430,21 +3232,116 @@ $annResult = $annStmt->get_result();
     #editAppointmentModal .sd-dialog-close { position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all 0.15s ease; }
     #editAppointmentModal .sd-dialog-close:hover { background:#f4f4f5; color:#18181b; }
     #editAppointmentModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
-    #editAppointmentModal .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+    #editAppointmentModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #editAppointmentModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
     #editAppointmentModal .sd-dialog-footer { display:flex; justify-content:flex-end; gap:8px; }
-    #editAppointmentModal .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#18181b; background:#fff; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:border-color 0.15s, box-shadow 0.15s; box-sizing:border-box; }
+    #editAppointmentModal .sd-field-group { display:flex; flex-direction:column; gap:12px; }
+    #editAppointmentModal .sd-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+    #editAppointmentModal .sd-field { display:flex; flex-direction:column; gap:5px; }
+    #editAppointmentModal .sd-input { width:100%; height:36px; padding:0 12px; font-family:'Inter',sans-serif; font-size:14px; color:#18181b; background:#fff; border:1px solid #e4e4e7; border-radius:6px; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); outline:none; transition:border-color 0.15s, box-shadow 0.15s; box-sizing:border-box; }
     #editAppointmentModal select.sd-input { appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:36px; }
     #editAppointmentModal textarea.sd-input { height:auto; min-height:90px; padding:8px 12px; resize:vertical; line-height:1.5; }
     #editAppointmentModal .sd-input:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-    #editAppointmentModal .sd-label { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin-bottom:6px; display:block; }
+    #editAppointmentModal .sd-label { font-family:'Inter',sans-serif; font-size:14px; font-weight:500; line-height:1.25; color:#18181b; margin:0; display:block; }
     #editAppointmentModal .sd-label .req { color:#dc2626; }
     @media (max-width:560px){ #editAppointmentModal .sd-form-grid { grid-template-columns:1fr; } }
   </style>
 
-<!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? APPOINTMENTS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+<!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? APPOINTMENTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="calendar-booking" class="content-section">
     <?php include 'calendar-booking.php'; ?>
+  </section>
+  <section id="my-waitlist" class="content-section">
+    <section class="resident-waitlist-kpis" aria-label="My waitlist summary">
+      <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Total Entries</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['total']; ?></p><p class="resident-waitlist-kpi-sub">All your waitlist requests</p></article>
+      <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Pending</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['waiting']; ?></p><p class="resident-waitlist-kpi-sub">Waiting for an open slot</p></article>
+      <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Notified</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['notified']; ?></p><p class="resident-waitlist-kpi-sub">Slot available to claim</p></article>
+      <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Most Requested Date</p><p class="resident-waitlist-kpi-value" style="font-size:20px;"><?php echo $residentWaitlistDemandDate ? date('M d, Y', strtotime($residentWaitlistDemandDate)) : '--'; ?></p><p class="resident-waitlist-kpi-sub"><?php echo $residentWaitlistDemandCount; ?> of your waiting requests</p></article>
+    </section>
+    <form class="resident-waitlist-toolbar" id="residentWaitlistToolbar" onsubmit="return false;">
+      <input type="search" id="residentWaitlistSearch" placeholder="Search by pet or service" aria-label="Search waitlist">
+      <span class="resident-waitlist-date-filter">
+        <button type="button" class="resident-waitlist-date-button" id="residentWaitlistDateButton" aria-label="Filter by date" title="Filter by date"><i class="fas fa-filter" aria-hidden="true"></i></button>
+        <input type="date" id="residentWaitlistDate" aria-label="Filter by preferred date">
+      </span>
+      <button type="button" class="resident-waitlist-date-clear" id="residentWaitlistClearDate" aria-label="Clear date filter" hidden><i class="fas fa-times"></i></button>
+      <select id="residentWaitlistService" aria-label="Filter by service">
+        <option value="">All services</option>
+        <?php foreach (array_unique(array_column($residentWaitlist, 'appointment_type')) as $service): ?>
+          <option value="<?php echo htmlspecialchars($service); ?>"><?php echo htmlspecialchars(ucfirst($service)); ?></option>
+        <?php endforeach; ?>
+      </select>
+      <select id="residentWaitlistStatus" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        <option value="waiting">Waiting</option>
+        <option value="notified">Notified</option>
+        <option value="booked">Booked</option>
+        <option value="expired">Expired</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+    </form>
+    <section class="resident-waitlist-card">
+      <div class="resident-waitlist-table-wrap">
+        <table class="resident-waitlist-table">
+          <thead><tr><th>Pet Name</th><th>Service</th><th>Preferred date</th><th>Time</th><th>Urgency</th><th>Date joined</th><th>Status</th><th></th></tr></thead>
+          <tbody id="residentWaitlistRows">
+          <?php foreach ($residentWaitlist as $entry):
+            $petName = $entry['pet_name'] ?: '-';
+            $dateLabel = date('M d, Y', strtotime($entry['preferred_date']));
+            $timeLabel = $entry['preferred_time'] ? date('g:i A', strtotime($entry['preferred_time'])) : '';
+          ?>
+            <tr data-service="<?php echo htmlspecialchars(strtolower($entry['appointment_type'])); ?>"
+                data-pet="<?php echo htmlspecialchars(strtolower($petName)); ?>"
+                data-date="<?php echo htmlspecialchars($entry['preferred_date']); ?>"
+                data-status="<?php echo htmlspecialchars($entry['status']); ?>"
+                data-waitlist-id="<?php echo (int)$entry['waitlist_id']; ?>">
+              <td><div class="resident-waitlist-pet-cell"><span class="resident-waitlist-pet-avatar"><?php if (!empty($entry['pet_photo'])): ?><img src="<?php echo htmlspecialchars($entry['pet_photo']); ?>" alt=""><?php else: ?><i class="fas fa-paw" aria-hidden="true"></i><?php endif; ?></span><span class="resident-waitlist-pet-name"><?php echo htmlspecialchars($petName); ?></span></div></td>
+              <td><?php echo htmlspecialchars(ucfirst($entry['appointment_type'])); ?></td>
+              <td><?php echo htmlspecialchars($dateLabel); ?></td>
+              <td><?php echo $timeLabel ? htmlspecialchars($timeLabel) : '—'; ?></td>
+              <td><?php echo htmlspecialchars(ucfirst($entry['urgency_level'])); ?></td>
+              <td><?php echo date('M d, Y', strtotime($entry['created_at'])); ?></td>
+              <td><span class="resident-waitlist-pill <?php echo htmlspecialchars($entry['status']); ?>"><?php echo htmlspecialchars(ucfirst($entry['status'])); ?></span><?php if ($entry['status'] === 'notified' && $entry['claim_expires_at']): ?><div class="resident-waitlist-subtext">Claim by <?php echo date('M d, Y g:i A', strtotime($entry['claim_expires_at'])); ?></div><?php endif; ?></td>
+              <td style="text-align:right;white-space:nowrap;">
+                <button type="button" class="resident-waitlist-row-actions" title="More options" aria-label="More options" aria-haspopup="menu" aria-expanded="false"
+                  data-waitlist-id="<?php echo (int)$entry['waitlist_id']; ?>"
+                  data-waitlist-status="<?php echo htmlspecialchars($entry['status']); ?>"
+                  onclick="toggleResidentWaitlistMenu(event, <?php echo (int)$entry['waitlist_id']; ?>)">
+                  <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+                </button>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+            <tr id="residentWaitlistEmpty" style="<?php echo $residentWaitlist ? 'display:none;' : ''; ?>"><td class="resident-waitlist-empty <?php echo $residentWaitlist ? '' : 'visible'; ?>" colspan="8"><?php echo $residentWaitlist ? 'No waitlist entries match these filters.' : 'You have no waitlist entries.'; ?></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <div class="resident-waitlist-pagination">
+      <div class="resident-waitlist-pagination-right">
+        <div class="resident-waitlist-rows"><span>Rows per page</span><select id="residentWaitlistPerPage" aria-label="Rows per page"><option>10</option><option>15</option><option>20</option><option>30</option><option>50</option></select></div>
+        <div class="resident-waitlist-page-label" id="residentWaitlistPageLabel">Page 1 of 1</div>
+        <div class="resident-waitlist-page-btns">
+          <button type="button" class="resident-waitlist-page-btn" id="residentWaitlistFirst" aria-label="Go to first page"><i class="fas fa-angle-double-left"></i></button>
+          <button type="button" class="resident-waitlist-page-btn" id="residentWaitlistPrev" aria-label="Go to previous page"><i class="fas fa-angle-left"></i></button>
+          <button type="button" class="resident-waitlist-page-btn" id="residentWaitlistNext" aria-label="Go to next page"><i class="fas fa-angle-right"></i></button>
+          <button type="button" class="resident-waitlist-page-btn" id="residentWaitlistLast" aria-label="Go to last page"><i class="fas fa-angle-double-right"></i></button>
+        </div>
+      </div>
+    </div>
+    <div id="residentWaitlistRowMenu" role="menu" aria-label="Waitlist actions"></div>
+    <div class="modal" id="residentWaitlistConfirm">
+      <div class="sd-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="residentWaitlistConfirmTitle" aria-describedby="residentWaitlistConfirmMessage">
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title" id="residentWaitlistConfirmTitle">Cancel waitlist entry?</h2>
+          <p class="sd-dialog-description" id="residentWaitlistConfirmMessage">You will no longer receive a notification for this requested slot.</p>
+        </div>
+        <div class="sd-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-outline" id="residentWaitlistCancelConfirm">Keep entry</button>
+          <button type="button" class="sd-btn sd-btn-default" id="residentWaitlistConfirmAction">Cancel waitlist</button>
+        </div>
+      </div>
+    </div>
   </section>
   <section id="appointments" class="content-section">
     <!-- Overview KPIs -->
@@ -2474,9 +3371,9 @@ $annResult = $annStmt->get_result();
     <?php
     $apptStatusColors = [
         'pending'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
-        'scheduled'   => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
+        'scheduled'   => ['bg' => '#0E8131', 'color' => '#ffffff', 'border' => '#0E8131'],
         'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
-        'completed'   => ['bg' => '#e2e8f0', 'color' => '#475569', 'border' => '#cbd5e1'],
+        'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
         'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     ];
@@ -2521,7 +3418,7 @@ $annResult = $annStmt->get_result();
             <th class="sd-th"><button type="button" class="th-sort" data-col="submitted" onclick="APPT.sortBy('submitted')">Submitted Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="submittedtime" onclick="APPT.sortBy('submittedtime')">Submitted Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="APPT.sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th sd-th-action">Actions</th>
+            <th class="sd-th" style="width:40px;"></th>
           </tr>
         </thead>
         <tbody>
@@ -2537,41 +3434,42 @@ $annResult = $annStmt->get_result();
           ?>
           <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($ast); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($appt['preferred_date']); ?>" data-time="<?php echo (int)strtotime($appt['preferred_time']); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($aptRef); ?></div></td>
-            <td class="sd-td"><div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div></td>
-            <td class="sd-td"><div class="contact-main contact-normal"><?php echo htmlspecialchars($appt['pet_name'] ?? '-'); ?></div></td>
+            <td class="sd-td">
+              <div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div>
+              <?php if (($appt['urgency_level'] ?? 'routine') === 'urgent'): ?>
+                <span class="appt-status-pill" style="display:inline-block;margin-top:4px;background:#fee2e2;color:#991b1b;border-color:#fecaca;">Urgent</span>
+              <?php endif; ?>
+            </td>
+            <td class="sd-td">
+              <div class="client-cell">
+                <div class="appt-pet-avatar">
+                  <?php if (!empty($appt['pet_photo'])): ?>
+                    <img src="<?php echo htmlspecialchars($appt['pet_photo']); ?>" alt="">
+                  <?php else: ?>
+                    <i class="fas fa-paw" aria-hidden="true"></i>
+                  <?php endif; ?>
+                </div>
+                <div class="contact-main contact-normal"><?php echo htmlspecialchars($appt['pet_name'] ?? '-'); ?></div>
+              </div>
+            </td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aDate; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aTime; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedDate; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedTime; ?></div></td>
             <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
-              <div class="pet-action-btns">
-                <?php if ($appt['status'] === 'pending'): ?>
-                <button type="button" class="pet-action-btn" title="Edit Appointment" onclick="editAppointment(this)"
-                  data-appointment-id="<?php echo $appt['appointment_id']; ?>"
-                  data-appointment-type="<?php echo htmlspecialchars($appt['appointment_type']); ?>"
-                  data-pet-id="<?php echo htmlspecialchars($appt['pet_id'] ?? ''); ?>"
-                  data-preferred-date="<?php echo htmlspecialchars($appt['preferred_date']); ?>"
-                  data-preferred-time="<?php echo htmlspecialchars($appt['preferred_time']); ?>"
-                  data-notes="<?php echo htmlspecialchars($appt['notes'] ?? ''); ?>">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                </button>
-                <?php endif; ?>
-                <button type="button" class="pet-action-btn" title="Archive Appointment" onclick="APPT.archive(<?php echo (int)$appt['appointment_id']; ?>)">
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                </button>
-              </div>
+              <button class="sd-row-actions" title="More options" onclick="event.stopPropagation();apptRowActions(event,<?php echo (int)$appt['appointment_id']; ?>)"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             </td>
           </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
     </div>
-    <div id="apptPagination" class="appt-pagination"></div>
+    <div id="apptPagination" class="appt-pagination dt-pagination"></div>
     <?php endif; ?>
   </section>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? BOOK AN APPOINTMENT (page) �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? BOOK AN APPOINTMENT (page) ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="book-appt" class="content-section">
     <div class="bk-page">
         <div class="bk-heading">
@@ -2585,12 +3483,17 @@ $annResult = $annStmt->get_result();
             <div class="bk-cal-area">
               <div class="bk-cal">
                 <div class="bk-cal-nav">
-                  <button type="button" id="bkPrevBtn" class="bk-cal-btn" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
-                  <span class="bk-cal-title" id="bkMonthLabel"></span>
-                  <button type="button" id="bkNextBtn" class="bk-cal-btn" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+                  <div class="bk-month-nav">
+                    <button type="button" id="bkPrevBtn" class="bk-cal-btn" aria-label="Previous month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+                    <span class="bk-cal-title" id="bkMonthLabel"></span>
+                  </div>
+                  <div class="bk-cal-controls">
+                    <button type="button" id="bkTodayBtn" class="bk-cal-today">Today</button>
+                    <button type="button" id="bkNextBtn" class="bk-cal-btn" aria-label="Next month"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+                  </div>
                 </div>
                 <div class="bk-weekdays">
-                  <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+                  <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
                 <div class="bk-days" id="bkGridDates"></div>
               </div>
@@ -2624,10 +3527,28 @@ $annResult = $annStmt->get_result();
                     <option value="">Select service</option>
                     <option value="adoption">Adoption</option>
                     <option value="kapon">Kapon (Spay/Neuter)</option>
+                    <option value="checkup">Check-up</option>
+                    <option value="deworming">Deworming</option>
+                    <option value="vaccination">Vaccination</option>
                   </select>
                   <svg class="bk-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </div>
               </div>
+              <div class="bk-field">
+                <label class="bk-label" for="apptUrgencySelect">Appointment Priority <span class="req">*</span></label>
+                <div class="bk-select">
+                  <select id="apptUrgencySelect" name="urgency_level" required>
+                    <option value="routine">Routine</option>
+                    <option value="urgent">Urgent</option>
+                  </select>
+                  <svg class="bk-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </div>
+              </div>
+            </div>
+
+            <div id="bkUrgentCareNotice" hidden style="margin:12px 0;padding:12px 14px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.5;">
+              <strong>Urgent care:</strong> For an animal bite or possible rabies exposure, go to an animal bite center or hospital immediately. Do not wait for an appointment.
+              For other urgent help, call <a href="tel:+63464321234" style="color:inherit;font-weight:700;">(046) 432-1234</a> or visit the DCVS office.
             </div>
 
             <!-- Pet info (shown once a pet is selected) -->
@@ -2645,7 +3566,13 @@ $annResult = $annStmt->get_result();
             <!-- Available Time -->
             <div class="bk-slots-wrap">
               <div class="bk-slots-title">Available Time</div>
+              <div id="bkProgramNotice" hidden style="margin:0 0 10px;padding:11px 13px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5;"></div>
               <div class="bk-slot-grid" id="bkSlots"></div>
+              <div id="bkNearestSlotNotice" hidden role="status" aria-live="polite" style="margin-top:10px;font-size:13px;color:#52525b;"></div>
+              <div id="bkWaitlistWrap" hidden style="margin-top:10px;">
+                <button type="button" class="sd-btn sd-btn-outline" id="bkJoinWaitlist">Notify me if a slot opens</button>
+                <div id="bkWaitlistStatus" role="status" aria-live="polite" style="margin-top:6px;font-size:13px;"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -2664,6 +3591,7 @@ $annResult = $annStmt->get_result();
       <input type="hidden" name="return_section" value="appointments">
       <input type="hidden" name="pet" id="cfPet">
       <input type="hidden" name="appt_type" id="cfType">
+      <input type="hidden" name="urgency_level" id="cfUrgency">
       <input type="hidden" name="appt_date" id="apptDate">
       <input type="hidden" name="appt_time" id="apptTime">
       <div class="sd-dialog-content" role="dialog" aria-modal="true">
@@ -2677,7 +3605,6 @@ $annResult = $annStmt->get_result();
         <div class="sd-field-group">
           <!-- Pet -->
           <div class="bk-confirm-section">
-            <p class="sd-label">Pet</p>
             <div class="bk-confirm-summary">
               <div class="bk-confirm-avatar" id="bkConfirmAvatar"><i class="fas fa-paw"></i></div>
               <div>
@@ -2688,15 +3615,16 @@ $annResult = $annStmt->get_result();
           </div>
           <!-- Appointment Details -->
           <div class="bk-confirm-section">
-            <p class="sd-label">Appointment Details</p>
+            <p class="sd-label">Appointment Information</p>
             <div class="bk-confirm-details">
               <div class="bk-detail-row"><span>Date</span><strong id="bkDetailDate">-</strong></div>
               <div class="bk-detail-row"><span>Time</span><strong id="bkDetailTime">-</strong></div>
               <div class="bk-detail-row"><span>Service Type</span><strong id="bkDetailType">-</strong></div>
+              <div class="bk-detail-row"><span>Priority</span><strong id="bkDetailUrgency">Routine</strong></div>
               <div class="bk-detail-row"><span>Available For</span><strong id="bkDetailAvailableFor">-</strong></div>
               <div class="bk-detail-row"><span>Service Fee</span><strong>Free / No Fee</strong></div>
               <div class="bk-detail-row"><span>Estimated Duration</span><strong>30-60 minutes</strong></div>
-              <div class="bk-detail-row"><span>Service Location</span><strong>Dasmari�as City Veterinary Services</strong></div>
+              <div class="bk-detail-row"><span>Service Location</span><strong>Dasmari&ntilde;as City Veterinary Services</strong></div>
               <div class="bk-detail-row"><span>Appointment Required</span><strong>Yes</strong></div>
             </div>
           </div>
@@ -2718,22 +3646,84 @@ $annResult = $annStmt->get_result();
   <section id="archive" class="content-section">
 <!-- Archived Pets -->
     <div class="archive-header">
-      <div class="archive-heading">
-        <h2 class="archive-title" id="archiveSectionTitle">Archived Pets (<?php echo count($archivedPets); ?>)</h2>
-      </div>
-      <div class="filter-bar">
-        <div class="search-box">
-          <i class="fas fa-search"></i>
-          <input type="text" id="archiveSearch" placeholder="Search..." onkeyup="filterArchive()">
+      <div class="archive-toolbar">
+        <div class="search-grow-wrap">
+          <svg class="archive-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="archiveSearch" class="archive-search-input" placeholder="Search archived items..." onkeyup="filterArchive()">
         </div>
-        <select class="filter-select" id="archiveTypeFilter" onchange="filterArchive()">
-          <option value="">All Types</option>
-          <option value="pet">Pets</option>
-          <option value="report">Reports</option>
-          <option value="appointment">Appointments</option>
-        </select>
+        <select class="archive-filter-select archive-detail-filter" id="archiveDetailFilter" onchange="archiveDetailChanged()" aria-label="Archive type filter"></select>
       </div>
     </div>
+
+    <?php
+    $archiveRows = [];
+    foreach ($archivedPets as $pet) {
+        $archiveRows[] = [
+            'category' => 'pet',
+            'subtype' => strtolower($pet['pet_type'] ?? 'other'),
+            'id' => $pet['reference_id'] ?? '#',
+            'name' => $pet['pet_name'] ?? '-',
+            'type' => ucfirst($pet['pet_type'] ?? '-'),
+            'breed' => $pet['breed'] ?? '-',
+            'gender' => ucfirst($pet['gender'] ?? '-'),
+            'age' => (string)($pet['age'] ?? '-') . ' yrs',
+            'location' => '-',
+            'date' => !empty($pet['created_at']) ? date('M d, Y', strtotime($pet['created_at'])) : '-',
+            'status' => 'Archived',
+            'photo' => $pet['photo_url'] ?? '',
+            'archived' => !empty($pet['archived_at']) ? date('M d, Y', strtotime($pet['archived_at'])) : '-',
+        ];
+    }
+    foreach ($archivedReports as $report) {
+        $archiveRows[] = [
+            'category' => 'report',
+            'subtype' => strtolower($report['report_type'] ?? 'other'),
+            'id' => $report['reference_id'] ?? '#',
+            'name' => $report['report_type'] ?? '-',
+            'type' => $report['report_type'] ?? '-',
+            'breed' => '-',
+            'gender' => '-',
+            'age' => '-',
+            'location' => $report['location_address'] ?? '-',
+            'date' => !empty($report['created_at']) ? date('M d, Y', strtotime($report['created_at'])) : '-',
+            'status' => ucfirst($report['status'] ?? '-'),
+          'photo' => $report['photo_url'] ?? '',
+          'video' => $report['video_url'] ?? '',
+            'archived' => !empty($report['archived_at']) ? date('M d, Y', strtotime($report['archived_at'])) : '-',
+        ];
+    }
+    foreach ($archivedAppointments as $appt) {
+        $archiveRows[] = [
+            'category' => 'appointment',
+            'subtype' => strtolower($appt['appointment_type'] ?? 'other'),
+            'id' => $appt['reference_id'] ?? '#',
+            'name' => ucfirst($appt['appointment_type'] ?? '-'),
+            'type' => ucfirst($appt['appointment_type'] ?? '-'),
+            'breed' => '-',
+            'gender' => '-',
+            'age' => '-',
+            'location' => $appt['pet_name'] ?? '-',
+            'date' => !empty($appt['preferred_date']) ? date('M d, Y', strtotime($appt['preferred_date'])) : '-',
+            'status' => ucfirst($appt['status'] ?? '-'),
+            'photo' => '',
+            'archived' => !empty($appt['archived_at']) ? date('M d, Y', strtotime($appt['archived_at'])) : '-',
+            'time' => !empty($appt['preferred_time']) ? date('h:i A', strtotime($appt['preferred_time'])) : '-',
+        ];
+    }
+    ?>
+    <div class="archive-unified-table-area appt-db-table-area dt-container">
+      <table class="appt-table" id="archiveTable">
+        <thead><tr class="sd-tr" id="archiveTableHead"></tr></thead>
+        <tbody id="archiveTableBody"></tbody>
+      </table>
+    </div>
+    <div class="appt-pagination dt-pagination" id="archivePagination"></div>
+    <script>
+      window.__residentArchiveRows = <?php echo json_encode($archiveRows, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+    </script>
+
     <div class="archive-section" data-type="pet" data-count="<?php echo count($archivedPets); ?>">
       <?php if (empty($archivedPets)): ?>
         <div class="archive-empty">
@@ -2799,7 +3789,7 @@ $annResult = $annStmt->get_result();
                 <th class="sd-th">Location</th>
                 <th class="sd-th">Submitted</th>
                 <th class="sd-th">Status</th>
-                <th class="sd-th">Photo</th>
+                <th class="sd-th">Attachment</th>
                 <th class="sd-th">Archived</th>
               </tr>
             </thead>
@@ -2814,7 +3804,11 @@ $annResult = $annStmt->get_result();
                   <td class="sd-td">
                     <?php if (!empty($report['photo_url'])): ?>
                       <button type="button" class="sd-btn sd-btn-outline" onclick="viewReportImage('<?php echo htmlspecialchars($report['photo_url']); ?>')"><i class="fas fa-image"></i> View</button>
-                    <?php else: ?>
+                    <?php endif; ?>
+                    <?php if (!empty($report['video_url'])): ?>
+                      <button type="button" class="sd-btn sd-btn-outline" onclick="window.open('<?php echo htmlspecialchars($report['video_url']); ?>','_blank')"><i class="fas fa-video"></i> Video</button>
+                    <?php endif; ?>
+                    <?php if (empty($report['photo_url']) && empty($report['video_url'])): ?>
                       <span style="color:#9ca3af;font-size:0.85rem;">No photo</span>
                     <?php endif; ?>
                   </td>
@@ -2865,12 +3859,24 @@ $annResult = $annStmt->get_result();
     </div>
   </section>
 
-  <!-- �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? ADOPTION LISTINGS �"?�"?�"?�"?�"?�"?�"?�"?�"?�"? -->
+  <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? ADOPTION LISTINGS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   
 
 <?php
 // Adoption & Scheduling workspace data (actual database records)
 $vetPets = array();
+$applicationByListing = array();
+$applicationByResultPet = array();
+foreach ($residentAdoptionApplications as $application) {
+    $applicationListingId = (int)$application['pet_listing_id'];
+    $resultingPetId = (int)($application['resulting_pet_id'] ?? 0);
+    if ($applicationListingId > 0 && !isset($applicationByListing[$applicationListingId])) {
+        $applicationByListing[$applicationListingId] = $application;
+    }
+    if ($resultingPetId > 0 && !isset($applicationByResultPet[$resultingPetId])) {
+        $applicationByResultPet[$resultingPetId] = $application;
+    }
+}
 if (!empty($adoptionListings)) {
     $pids = array_unique(array_filter(array_map(function ($l) { return (int)$l['pet_id']; }, $adoptionListings)));
     $vaxMap = array();
@@ -2963,8 +3969,22 @@ if (!empty($adoptionListings)) {
         $photo = isset($l['photo_url']) ? (string)$l['photo_url'] : '';
         $weight = isset($l['weight']) && $l['weight'] !== null && $l['weight'] !== '' ? ((float)$l['weight'] > 0 ? rtrim(rtrim(number_format((float)$l['weight'], 1, '.', ''), '0'), '.') . ' kg' : $dash) : $dash;
         $fee = (isset($l['adoption_fee']) && $l['adoption_fee'] !== null && $l['adoption_fee'] !== '') ? ('PHP ' . number_format((float)$l['adoption_fee'], 2)) : $dash;
+        $adoptionDate = '';
+        if (isset($l['pl_status']) && $l['pl_status'] === 'adopted' && !empty($l['pl_adopted_at'])) {
+            $adoptionDate = $l['pl_adopted_at'];
+        } elseif (isset($l['pl_status']) && $l['pl_status'] === 'adopted' && !empty($l['pl_updated_at'])) {
+            $adoptionDate = $l['pl_updated_at'];
+        } elseif ($lStatus === 'adopted' && !empty($l['updated_at'])) {
+            $adoptionDate = $l['updated_at'];
+        }
+        $application = $applicationByResultPet[$pid] ?? $applicationByListing[(int)($l['source_listing_id'] ?? 0)] ?? null;
+        $applicationProgress = $application
+            ? ($application['status'] === 'adopted' ? 'Adopted' : 'Approved')
+            : '';
+        $applicationDate = $application ? date('M d, Y', strtotime($application['application_date'])) : '';
         $vetPets[] = array(
             'id' => $id,
+            'resultingPetId' => $pid,
             'name' => $pname,
             'species' => $species,
             'gender' => $gender,
@@ -2975,6 +3995,9 @@ if (!empty($adoptionListings)) {
             'color' => isset($l['color']) && $l['color'] !== '' ? $l['color'] : $dash,
             'photo' => $photo,
             'status' => $st,
+            'applicationProgress' => $applicationProgress,
+            'applicationDate' => $applicationDate,
+            'applicationPending' => false,
             'registered' => $regOn,
             'availableSince' => $dash,
             'added' => $regOn,
@@ -2997,17 +4020,106 @@ if (!empty($adoptionListings)) {
             'applications' => $appElem,
             'appointments' => $apptElem,
             'documents' => array(),
-            'timeline' => $tl
+            'timeline' => $tl,
+            'adoptedDate' => ($adoptionDate !== '') ? date('M d, Y', strtotime($adoptionDate)) : '',
+            'readiness' => array(
+                'vaccination' => 'Partially vaccinated',
+                'health' => 'Cleared',
+                'spayNeuter' => 'Completed',
+                'temperament' => 'Assessed',
+            ),
         );
     }
 }
+foreach ($residentAdoptionApplications as $application) {
+    $resultingPetId = (int)($application['resulting_pet_id'] ?? 0);
+    $hasResultingPet = false;
+    if ($resultingPetId > 0) {
+        foreach ($vetPets as $residentPet) {
+            if ((int)($residentPet['resultingPetId'] ?? 0) === $resultingPetId) {
+                $hasResultingPet = true;
+                break;
+            }
+        }
+    }
+    if ($hasResultingPet) {
+        continue;
+    }
+    $applicationStatus = strtolower(trim((string)$application['status']));
+    $statusMeta = array(
+        'pending' => array('key' => 'reserved', 'progress' => 'Pending Application'),
+        'under_review' => array('key' => 'reserved', 'progress' => 'In Progress'),
+        'needs_info' => array('key' => 'reserved', 'progress' => 'In Progress'),
+        'approved' => array('key' => 'reserved', 'progress' => 'In Progress'),
+        'expired' => array('key' => 'available', 'progress' => 'Expired / Unclaimed'),
+    );
+    if (!isset($statusMeta[$applicationStatus])) {
+        continue;
+    }
+    $ageText = trim((string)($application['age'] ?? ''));
+    preg_match('/\d+/', $ageText, $ageMatch);
+    $ageNum = isset($ageMatch[0]) ? (int)$ageMatch[0] : 0;
+    $species = ucfirst(strtolower(trim((string)($application['species'] ?? ''))));
+    $applicationName = trim((string)($application['pet_name'] ?? '')) ?: 'Pet';
+    $applicationDate = date('M d, Y', strtotime($application['application_date']));
+    $applicationId = (int)$application['application_id'];
+    $applicationListingId = (int)$application['pet_listing_id'];
+    if ($resultingPetId > 0) {
+        $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted');
+    }
+    $vetPets[] = array(
+        'id' => 'APP-' . str_pad((string)$applicationId, 4, '0', STR_PAD_LEFT),
+        'resultingPetId' => $resultingPetId,
+        'name' => $applicationName,
+        'species' => $species ?: 'Other',
+        'gender' => !empty($application['gender']) ? ucfirst($application['gender']) : "\u{2014}",
+        'age' => $ageText !== '' ? $ageText : "\u{2014}",
+        'ageNum' => $ageNum,
+        'breed' => trim((string)($application['breed'] ?? '')) ?: "\u{2014}",
+        'weight' => "\u{2014}",
+        'color' => "\u{2014}",
+        'photo' => (string)($application['photo_url'] ?? ''),
+        'status' => $statusMeta[$applicationStatus]['key'],
+        'applicationProgress' => $statusMeta[$applicationStatus]['progress'],
+        'applicationDate' => $applicationDate,
+        'applicationPending' => $resultingPetId <= 0,
+        'applicationId' => $applicationId,
+        'petListingId' => $applicationListingId,
+        'registered' => $applicationDate,
+        'availableSince' => "\u{2014}",
+        'added' => $applicationDate,
+        'fee' => "\u{2014}",
+        'location' => 'Dasmariñas City Veterinary Services',
+        'about' => 'Your adoption application is being processed. Track its progress here.',
+        'tags' => array(),
+        'requirements' => array(),
+        'temperament' => array(),
+        'behaviorNotes' => '',
+        'staffNotes' => '',
+        'healthStatus' => "\u{2014}",
+        'vaxNote' => '',
+        'lastExam' => "\u{2014}",
+        'vet' => "\u{2014}",
+        'nextCheckup' => "\u{2014}",
+        'vaccines' => array(),
+        'conditions' => "\u{2014}",
+        'medications' => "\u{2014}",
+        'applications' => array(),
+        'appointments' => array(),
+        'documents' => array(),
+        'timeline' => array(array('Adoption application submitted', $applicationDate, 'You', '')),
+        'adoptedDate' => '',
+        'readiness' => array(
+            'vaccination' => 'Partially vaccinated',
+            'health' => 'For review',
+            'spayNeuter' => 'Not assessed',
+            'temperament' => 'Not assessed',
+        ),
+    );
+}
 ?>
 <style>
-.cv-scope{--cv-green:#0E8131;--cv-green-dark:#0a6a28;--cv-green-soft:#eaf7ef;--cv-navy:#0f172a;--cv-slate:#475569;--cv-muted:#64748b;--cv-border:#e5e9f0;--cv-bg:#f4f6f9;--cv-card:#ffffff;--cv-ring:rgba(14,129,49,.14);--green-50:#eef6f0;--green-100:#dcebe0;--green-200:#b8d1c0;--green-500:#057b2d;--green-600:#046b25;--green-700:#045e1f;--ink-900:#0f1720;--ink-700:#334155;--ink-500:#64748b;--ink-400:#94a3b8;--ink-300:#cbd5e1;--ink-200:#e2e8f0;--ink-100:#f1f5f9;--ink-50:#f8fafc;font-family:'Inter','Segoe UI',sans-serif;color:#18181b;font-size:14px;line-height:1.5;max-width:1400px;margin:0 auto;}
-.cv-scope *{box-sizing:border-box;margin:0;padding:0;}
-.cv-scope svg{vertical-align:middle;}
-#adoption.content-section{background:#ffffff;}
-.cv-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;font-size:14px;font-weight:500;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;font-family:'Inter','Segoe UI',sans-serif;white-space:nowrap;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-btn{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;font-size:14px;font-weight:500;cursor:pointer;transition:background-color .15s ease,border-color .15s ease,color .15s ease;font-family:'Inter',sans-serif;white-space:nowrap;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
 .cv-btn svg{width:15px;height:15px;}
 .cv-btn-primary{background:#0E8131;color:#fff;}
 .cv-btn-primary:hover{background:#0a6a28;}
@@ -3016,59 +4128,16 @@ if (!empty($adoptionListings)) {
 .cv-btn-ghost{background:transparent;color:#475569;box-shadow:none;}
 .cv-btn-ghost:hover{background:#f1f5f9;}
 .cv-btn-sm{height:32px;padding:0 14px;font-size:13px;font-weight:500;}
-/* toolbar */
-.cv-toolbar{display:flex;gap:12px;align-items:center;margin-bottom:20px;flex-wrap:wrap;}
-.cv-search{width:280px;flex:none;position:relative;display:flex;align-items:center;background:#fff;border:1px solid #e4e4e7;border-radius:6px;height:36px;padding:0 12px;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
-.cv-search svg{width:15px;height:15px;color:#71717a;flex-shrink:0;}
-.cv-search input{flex:1;border:none;outline:none;font-size:14px;color:#18181b;background:transparent;padding-left:10px;font-family:'Inter','Segoe UI',sans-serif;}
-.cv-search input::placeholder{color:#a1a1aa;}
-.cv-toolbar-actions{margin-left:auto;display:flex;gap:10px;align-items:center;}
-'Inter','Segoe UI'.cv-field{display:flex;flex-direction:column;gap:6px;}
+.cv-field{display:flex;flex-direction:column;gap:6px;}
 .cv-field.full{grid-column:1/-1;}
 .cv-label{font-size:14px;font-weight:500;color:#18181b;}
-.cv-input,.cv-select{width:100%;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;background:#fff;outline:none;font-family:'Inter','Segoe UI',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s ease,box-shadow .15s ease;}
+.cv-input,.cv-select{width:100%;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;background:#fff;outline:none;font-family:'Inter',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s ease,box-shadow .15s ease;}
 .cv-input:focus,.cv-select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 .cv-select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:32px;}
-.cv-textarea{width:100%;min-height:86px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;resize:vertical;outline:none;font-family:'Inter','Segoe UI',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-textarea{width:100%;min-height:86px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;resize:vertical;outline:none;font-family:'Inter',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
 .cv-textarea:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
-/* workspace */
-.cv-workspace{display:grid;grid-template-columns:520px minmax(0,1fr);gap:18px;align-items:stretch;}
-.cv-list-col{display:flex;flex-direction:column;}
-.cv-list-col .cv-list-panel{flex:1;display:flex;flex-direction:column;}
-.cv-list-col .cv-list{flex:1;}
-.cv-list-foot{margin-top:auto;}
-/* list panel */
-.cv-list-panel{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;display:flex;flex-direction:column;}
-.cv-list-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 16px 14px;border-bottom:1px solid #e4e4e7;}
-.cv-list-title{font-size:14px;font-weight:600;color:#18181b;}
-.cv-list-title span{color:#71717a;font-weight:500;}
-.cv-list-tools{display:flex;align-items:center;gap:8px;}
-.cv-sort{font-size:14px;color:#18181b;border:1px solid #e4e4e7;border-radius:6px;height:36px;padding:0 8px 0 10px;background:#fff;outline:none;font-family:'Inter','Segoe UI',sans-serif;cursor:pointer;display:inline-flex;align-items:center;font-weight:500;appearance:none;-webkit-appearance:none;}
-.cv-list{flex:1;overflow-y:auto;max-height:760px;}
-.cv-row{display:flex;gap:0;align-items:stretch;padding:0;border-radius:0 8px 8px 0;cursor:pointer;border:1.5px solid transparent;transition:background .12s,border-color .12s;position:relative;overflow:hidden;height:80px;}
-.cv-row:hover{background:#f8fafc;}
-.cv-row.selected{background:#f8fafc;border-color:#e4e4e7;}
-.cv-row-thumb{width:80px;height:100%;object-fit:cover;background:#eef2f6;flex-shrink:0;display:block;}
-.cv-row-thumb-c{width:80px;height:100%;background:#eef2f6;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#71717a;font-weight:600;font-size:22px;}
-.cv-row-main{flex:1;min-width:0;padding:14px 16px;display:flex;flex-direction:column;justify-content:center;}
-.cv-row-right{padding:14px 16px;display:flex;flex-direction:column;justify-content:center;}
-.cv-row-main{flex:1;min-width:0;}
-.cv-row-name{font-size:14px;font-weight:600;color:#18181b;}
-.cv-row-meta{font-size:12px;color:#71717a;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.cv-row-right{text-align:right;flex-shrink:0;}
-.cv-row-ref{font-size:14px;font-weight:500;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;}
-.cv-row-added{font-size:12px;color:#a1a1aa;margin-top:4px;}
-.cv-row-tags{display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;}
-/* status pill — reuse pet list .status-pill styling */
-.cv-scope .status-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:700;white-space:nowrap;background:var(--green-100);color:var(--green-700);}
-.cv-scope .status-pill.ls-available{background:var(--green-100);color:var(--green-700);}
-.cv-scope .status-pill.ls-pending{background:#fffbeb;color:#b45309;}
-.cv-scope .status-pill.ls-review{background:#dbeafe;color:#1d4ed8;}
-.cv-scope .status-pill.ls-adopted{background:#eff6ff;color:#1d4ed8;}
-.cv-scope .status-pill.ls-withdrawn{background:var(--ink-100);color:var(--ink-500);}
-.cv-scope .status-pill.ls-unavailable{background:#fef2f2;color:#b91c1c;}
 /* pagination */
-.cv-list-foot{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;padding:12px 4px;margin-top:8px;}.cv-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}.cv-rows select{height:32px;padding:0 8px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-size:14px;font-family:inherit;cursor:pointer;outline:none;}
+.cv-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}.cv-rows select{height:32px;padding:0 8px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-size:14px;font-family:inherit;cursor:pointer;outline:none;}
 .cv-pagination{display:flex;align-items:center;gap:4px;}
 .cv-page-btn{height:32px;width:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid #e4e4e7;background:#fff;color:#18181b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}.cv-page-btn svg{width:14px;height:14px;}
 .cv-page-btn:hover:not(:disabled){background:#f4f4f5;}
@@ -3077,183 +4146,138 @@ if (!empty($adoptionListings)) {
 /* empty */
 .cv-empty{text-align:center;color:#71717a;padding:48px 20px;font-size:14px;}
 .cv-empty svg{width:34px;height:34px;margin:0 auto 10px;display:block;color:#cbd5e1;}
-/* detail panel */
-.cv-detail-panel{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:22px;min-width:0;font-family:'Inter','Segoe UI',sans-serif;}
-.cv-detail-top{display:grid;grid-template-columns:300px minmax(0,1fr);gap:24px;}
-.cv-detail-img{width:100%;height:220px;object-fit:cover;border-radius:8px;background:#eef2f6;}
-.cv-detail-img-c{width:100%;height:220px;border-radius:8px;background:#eef2f6;display:flex;align-items:center;justify-content:center;color:#71717a;font-weight:600;font-size:44px;}
-.cv-detail-main{display:flex;flex-direction:column;}
-.cv-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;}
-.cv-detail-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-0.025em;color:#18181b;display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:4px;}
-.cv-detail-sub{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;line-height:1.5;}
-.cv-detail-idrow{display:flex;align-items:center;gap:8px;margin-top:10px;}
-.cv-detail-id{font-size:14px;font-weight:500;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;}
-.cv-copy-btn{background:none;border:none;color:#71717a;cursor:pointer;padding:2px;}
-.cv-copy-btn:hover{color:#0E8131;}
-.cv-copy-btn svg{width:14px;height:14px;}
-.cv-detail-actions{display:flex;gap:8px;align-items:center;flex-shrink:0;}
-/* metadata */
-.cv-detail-meta{display:grid;grid-template-columns:1fr 1fr;gap:16px 28px;margin-top:22px;padding-top:20px;border-top:1px solid #e4e4e7;border-bottom:1px solid #e4e4e7;padding-bottom:20px;}
-.cv-meta-col{display:flex;flex-direction:column;gap:14px;}
-.cv-meta-item{display:flex;gap:11px;align-items:flex-start;}
-.cv-meta-icon{width:30px;height:30px;color:#18181b;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.cv-meta-icon svg{width:14px;height:14px;}
-.cv-meta-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;}
-.cv-meta-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;margin-top:1px;}
-.cv-meta-value-r{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;margin-top:1px;text-align:right;}
-/* tabs */
-.cv-tabs{display:flex;gap:6px;margin-top:22px;overflow-x:auto;border-bottom:1px solid #e4e4e7;}
-.cv-tab{position:relative;padding:12px 4px;font-size:13px;font-weight:600;color:#18181b;background:none;border:none;cursor:pointer;margin-right:14px;white-space:nowrap;font-family:'Inter','Segoe UI',sans-serif;transition:color .15s;padding-bottom:12px;}
-.cv-tab:hover{color:#18181b;}
-.cv-tab.active{color:#0E8131;font-weight:600;}
-.cv-tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:#0E8131;border-radius:2px;}
-.cv-tab-badge{background:#f4f4f5;color:#475569;font-size:11px;font-weight:600;padding:1px 7px;border-radius:6px;margin-left:5px;vertical-align:1px;}
-.cv-tab.active .cv-tab-badge{background:#eaf7ef;color:#0E8131;}
-/* panels */
-.cv-panel{display:none;padding-top:20px;animation:cvfade .18s ease;}
-.cv-panel.active{display:block;}
-@keyframes cvfade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
-.cv-grid2{display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:18px;align-items:start;}
-.cv-grid2-col{display:flex;flex-direction:column;gap:18px;}
-.cv-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:18px;font-family:'Inter','Segoe UI',sans-serif;}
-.cv-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
-.cv-card-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;line-height:1;letter-spacing:0.02em;text-transform:uppercase;color:#71717a;}
-.cv-about-text{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#71717a;line-height:1.5;}
-.cv-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
-.cv-chip{font-size:12px;font-weight:500;color:#475569;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:6px;padding:5px 12px;}
-.cv-req{display:flex;flex-direction:column;gap:12px;}
-.cv-req-item{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:#475569;}
-.cv-req-check{width:20px;height:20px;border-radius:50%;background:#eaf7ef;color:#0E8131;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
-.cv-req-check svg{width:11px;height:11px;}
-/* schedule */
-.cv-sched-head{display:flex;align-items:center;justify-content:space-between;gap:10px;}
-.cv-appt-item{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid #f4f4f5;}
-.cv-appt-icon{width:40px;height:40px;border-radius:8px;background:#fff;border:1px solid #e4e4e7;color:#0E8131;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.cv-appt-icon svg{width:17px;height:17px;}
-.cv-appt-main{flex:1;min-width:0;}
-.cv-appt-name{font-size:14px;font-weight:600;color:#18181b;}
-.cv-appt-client{font-size:12px;color:#71717a;margin-top:1px;}
-.cv-appt-dt{text-align:right;}
-.cv-appt-date{font-size:12.5px;font-weight:500;color:#18181b;}
-.cv-appt-time{font-size:12px;color:#71717a;margin-top:1px;}
-.cv-viewall{display:inline-flex;align-items:center;gap:5px;color:#0E8131;font-size:12.5px;font-weight:500;text-decoration:none;margin-top:12px;background:none;border:none;cursor:pointer;font-family:'Inter','Segoe UI',sans-serif;padding:0;}
-.cv-viewall:hover{color:#0a6a28;}
-.cv-viewall svg{width:13px;height:13px;}
-/* timeline */
-.cv-tl{display:flex;flex-direction:column;}
-.cv-tl-item{position:relative;padding-left:26px;padding-bottom:18px;}
-.cv-tl-item:last-child{padding-bottom:0;}
-.cv-tl-item::before{content:'';position:absolute;left:7px;top:16px;bottom:-2px;width:2px;background:#eef2f6;}
-.cv-tl-item:last-child::before{display:none;}
-.cv-tl-dot{position:absolute;left:0;top:5px;width:10px;height:10px;border-radius:50%;background:#0E8131;box-shadow:0 0 0 3px #eaf7ef;}
-.cv-tl-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;}
-.cv-tl-text{font-size:13px;font-weight:500;color:#18181b;}
-.cv-tl-date{font-size:12.5px;color:#71717a;white-space:nowrap;}
-.cv-tl-sub{font-size:12px;color:#71717a;margin-top:2px;}
-/* medical */
-.cv-med-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 24px;}
-.cv-med-field{display:flex;flex-direction:column;gap:5px;}
-.cv-med-label{font-size:14px;font-weight:500;color:#18181b;}
-.cv-med-value{font-size:14px;font-weight:400;color:#18181b;display:flex;align-items:center;gap:7px;flex-wrap:wrap;}
-.cv-health{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:3px 10px;border-radius:6px;background:#eaf7ef;color:#0E8131;width:fit-content;}
-.cv-health svg{width:11px;height:11px;}
-.cv-health.neutral{background:#f4f4f5;color:#475569;}
-.cv-health.neutral svg{display:none;}
 /* table */
 .cv-table{width:100%;border-collapse:collapse;}
 .cv-table th{text-align:left;font-size:12px;font-weight:500;color:#71717a;padding:8px 10px;border-bottom:1px solid #e4e4e7;}
 .cv-table td{padding:11px 10px;font-size:14px;color:#18181b;border-bottom:1px solid #f1f5f9;vertical-align:middle;}
 .cv-table tr:last-child td{border-bottom:none;}
-.cv-vax-done{display:inline-flex;align-items:center;gap:5px;color:#0E8131;font-size:12.5px;font-weight:500;}
-.cv-vax-done svg{width:12px;height:12px;}
-.cv-vax-pending{display:inline-flex;align-items:center;gap:5px;color:#b45309;font-size:12.5px;font-weight:500;}
-.cv-vax-pending svg{width:12px;height:12px;}
-.cv-appt-status{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-family:'Inter','Segoe UI',sans-serif;font-size:11.5px;font-weight:700;white-space:nowrap;}
-/* docs */
-.cv-doc{display:flex;align-items:center;gap:12px;padding:13px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;transition:background .12s;cursor:pointer;}
-.cv-doc:hover{background:#f8fafc;}
-.cv-doc-icon{width:42px;height:42px;border-radius:8px;background:#f4f4f5;color:#475569;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
-.cv-doc-icon svg{width:18px;height:18px;}
-.cv-doc-main{flex:1;min-width:0;}
-.cv-doc-name{font-size:14px;font-weight:500;color:#18181b;}
-.cv-doc-meta{font-size:12px;color:#71717a;margin-top:2px;}
-/* modal */
-.cv-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;display:none;align-items:center;justify-content:center;padding:20px;}
-.cv-overlay.open{display:flex;}
-.cv-modal{background:#fff;border-radius:8px;width:100%;max-width:640px;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);animation:cvpop .18s ease;}
-.cv-modal.lg{max-width:760px;}
-@keyframes cvpop{from{opacity:0;transform:translateY(8px) scale(0.98)}to{opacity:1;transform:none}}
-.cv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 22px;border-bottom:1px solid #e4e4e7;}
-.cv-modal-head h3{font-size:18px;font-weight:600;letter-spacing:-.025em;color:#18181b;}
-.cv-modal-x{width:32px;height:32px;border-radius:6px;border:none;background:#f4f4f5;color:#475569;font-size:15px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
-.cv-modal-x:hover{background:#e5e9ef;}
-.cv-modal-body{padding:20px 22px;overflow-y:auto;font-size:14px;}
-.cv-modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid #e4e4e7;}
+#adoption .appt-db-table-area{min-width:0;max-width:100%;}
+#adoption #cvTable th:first-child,
+#adoption #cvTable td:first-child{position:sticky;left:0;z-index:2;background:#fff;}
+#adoption #cvTable thead th:first-child{z-index:3;background:#fafafa;}
+#adoption #cvTable tbody tr:hover td:first-child{background:#fafafa;}
+#cvDrawer .cv-table th{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;}
+#cvDrawer .cv-table td{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;}
+/* form */
 .cv-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
-.cv-section{margin-bottom:22px;}
-.cv-section:last-child{margin-bottom:0;}
-.cv-section-title{font-size:14px;font-weight:600;color:#18181b;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #f1f5f9;}
-.cv-section-title span{color:#0E8131;}
-.cv-upload{min-height:96px;border:1.5px dashed #cbd5e1;border-radius:8px;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;color:#71717a;cursor:pointer;font-size:14px;font-weight:500;}
-.cv-upload svg{width:22px;height:22px;color:#71717a;}
-.cv-upload:hover{border-color:#0E8131;color:#0E8131;}
-.cv-upload:hover svg{color:#0E8131;}
+.cv-field{display:flex;flex-direction:column;gap:6px;}
+.cv-field.full{grid-column:1/-1;}
+.cv-label{font-size:14px;font-weight:500;color:#18181b;}
+.cv-input,.cv-select{width:100%;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;background:#fff;outline:none;font-family:'Inter',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:border-color .15s ease,box-shadow .15s ease;}
+.cv-input:focus,.cv-select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+.cv-select{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:32px;}
+.cv-textarea{width:100%;min-height:86px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:6px;font-size:14px;color:#18181b;resize:vertical;outline:none;font-family:'Inter',sans-serif;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);}
+.cv-textarea:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+.cv-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:998;display:none;}
+.cv-overlay.open{display:block;}
+.cv-drawer{position:fixed;top:0;right:0;bottom:0;width:min(480px,92vw);height:100vh;height:100dvh;background:#fff;z-index:999;box-shadow:-8px 0 40px rgba(15,23,32,.18);transform:translateX(105%);transition:transform .32s cubic-bezier(.32,.72,.25,1);display:flex;flex-direction:column;overflow:hidden;}
+.cv-drawer.open{transform:translateX(0);}
+.cv-drawer-head{display:flex;align-items:flex-start;gap:14px;padding:22px 24px;flex:0 0 auto;}
+.cv-drawer-title{font-family:'Inter',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;margin:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.cv-drawer-ref{font-family:'Inter',sans-serif;font-size:14px;font-weight:400;color:#71717a;margin:3px 0 0;}
+.cv-drawer-close{margin-left:auto;width:32px;height:32px;border-radius:6px;background:transparent;border:none;color:#71717a;font-size:16px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background .15s,color .15s;flex-shrink:0;}
+.cv-drawer-close:hover{background:#f4f4f5;color:#18181b;}
+.cv-drawer-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:24px;-webkit-overflow-scrolling:touch;}
+.cv-drawer-section-title{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;color:#18181b;text-transform:none;letter-spacing:0;margin:20px 0 12px;}
+.cv-drawer-section-title:first-child{margin-top:0;}
+.cv-drawer-info{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;margin-bottom:22px;}
+.cv-drawer-info-item .k{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;}
+.cv-drawer-info-item .v{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin-top:2px;word-break:break-word;}
+.cv-drawer-foot{display:flex;gap:10px;padding:16px 24px;align-items:center;flex:0 0 auto;border-top:1px solid #e4e4e7;background:#fff;}
+.cv-drawer-foot .sd-btn{flex:1;justify-content:center;}
 /* toast */
 .cv-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#18181b;color:#fff;font-size:14px;font-weight:500;padding:11px 18px;border-radius:8px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.3);z-index:400;opacity:0;transition:all .2s;pointer-events:none;display:flex;align-items:center;gap:9px;}
 .cv-toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 .cv-toast svg{width:15px;height:15px;color:#6ee7b7;}
-/* responsive */
-@media (max-width:1280px){.cv-workspace{grid-template-columns:minmax(340px,42%) minmax(0,1fr);}.cv-list{max-height:380px;}}
-@media (max-width:1024px){.cv-detail-top{grid-template-columns:1fr;}.cv-detail-img,.cv-detail-img-c{height:280px;}.cv-grid2{grid-template-columns:1fr;}.cv-fgrid{grid-template-columns:1fr;}}
-@media (max-width:760px){.cv-detail-meta{grid-template-columns:1fr;}.cv-form-grid{grid-template-columns:1fr;}.cv-list-panel{max-height:none;}.cv-workspace{grid-template-columns:1fr;}}
+@media (max-width:1024px){.cv-detail-top{grid-template-columns:1fr;}.cv-detail-img,.cv-detail-img-c{height:280px;}.cv-grid2{grid-template-columns:1fr;}}
+@media (max-width:760px){.cv-detail-meta{grid-template-columns:1fr;}.cv-form-grid{grid-template-columns:1fr;}}
 </style>
 
-<!-- cv-build: 2026-09-04T16:20Z --><section id="adoption" class="content-section">
-<div class="cv-scope">
+<!-- adoption table -->
+<section id="adoption" class="content-section">
 
-  <div class="cv-toolbar">
-    <label class="cv-search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-      <input type="text" id="cvSearch" placeholder="Search pet name, ID, species...">
-    </label>  </div>
-
-  <div class="cv-workspace">
-    <div class="cv-list-col">
-      <div class="cv-list-panel">
-        <div class="cv-list-head">
-          <div class="cv-list-title">Pet Listings <span id="cvCount"></span></div>
-          <div class="cv-list-tools">
-            <select class="cv-sort" id="cvSort">
-              <option value="recent">Sort by: Recently Added</option>
-              <option value="az">Name A&ndash;Z</option>
-              <option value="za">Name Z&ndash;A</option>
-              <option value="age">Age</option>
-              <option value="status">Status</option>
-            </select>
-          </div>
-        </div>
-        <div class="cv-list" id="cvList"></div>
+  <div class="appt-card-header">
+    <div class="appt-header-right">
+      <div class="appt-search-wrap">
+        <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="cvSearch" class="appt-search-input" placeholder="Search by name, ID, species...">
       </div>
-      <div class="cv-list-foot">
-        <div class="cv-rows"><span>Rows per page</span><select id="cvPerPage"><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="40">40</option><option value="50">50</option></select></div>
-        <div class="cv-page-label" id="cvPageLabel">Page 1 of 1</div>
-        <div class="cv-pagination" id="cvPagination"></div>
-      </div>
+      <select id="cvStatusFilter" class="appt-status-select">
+        <option value="all">All Status</option>
+        <option value="available">Available</option>
+        <option value="pending">Pending Application</option>
+        <option value="review">In Progress</option>
+        <option value="approved">Approved</option>
+        <option value="adopted">Adopted</option>
+        <option value="unavailable">Not Available</option>
+      </select>
+      <select id="cvSpeciesFilter" class="appt-status-select">
+        <option value="">All Species</option>
+        <option value="Dog">Dog</option>
+        <option value="Cat">Cat</option>
+      </select>
+      <select id="cvSort" class="appt-status-select">
+        <option value="recent">Recently Added</option>
+        <option value="az">Name A&ndash;Z</option>
+        <option value="za">Name Z&ndash;A</option>
+        <option value="age">Age</option>
+        <option value="status">Status</option>
+      </select>
     </div>
-    <div class="cv-detail-panel" id="cvDetail"></div>
   </div>
 
-</div>
+  <div class="appt-db-table-area dt-container">
+    <table class="appt-table" id="cvTable">
+      <thead>
+        <tr class="sd-tr">
+          <th class="sd-th">Pet</th>
+          <th class="sd-th">Pet / Application ID</th>
+          <th class="sd-th">Species</th>
+          <th class="sd-th">Breed</th>
+          <th class="sd-th">Gender</th>
+          <th class="sd-th">Age</th>
+          <th class="sd-th">Adoption Status</th>
+          <th class="sd-th">Application Progress</th>
+          <th class="sd-th">Submitted / Added</th>
+          <th class="sd-th" style="width:40px;"></th>
+        </tr>
+      </thead>
+      <tbody id="cvTableBody"></tbody>
+    </table>
+  </div>
+
+  <div class="appt-pagination dt-pagination">
+    <div class="dt-pagination-right">
+      <div class="cv-rows dt-rows"><span>Rows per page</span><select id="cvPerPage"><option value="5">5</option><option value="10" selected>10</option><option value="20">20</option><option value="50">50</option></select></div>
+      <div class="cv-page-label dt-page-label" id="cvPageLabel">Page 1 of 1</div>
+      <div class="cv-pagination dt-page-btns" id="cvPagination"></div>
+    </div>
+  </div>
+
 </section>
 
-<div class="cv-overlay" id="cvOverlay">
-  <div class="cv-modal" id="cvModal">
-    <div class="cv-modal-head">
-      <h3 id="cvModalTitle">Title</h3>
-      <button type="button" class="cv-modal-x" id="cvModalClose">&times;</button>
+<div class="cv-overlay" id="cvOverlay"></div>
+<aside class="cv-drawer" id="cvDrawer" aria-label="Pet profile">
+  <div class="cv-drawer-head">
+    <div style="min-width:0;">
+      <h2 class="cv-drawer-title" id="cvDrawerTitle">Pet Details</h2>
+      <p class="cv-drawer-ref" id="cvDrawerRef"></p>
     </div>
-    <div class="cv-modal-body" id="cvModalBody"></div>
-    <div class="cv-modal-foot" id="cvModalFoot"></div>
+    <button type="button" class="cv-drawer-close" id="cvDrawerClose" aria-label="Close"><i class="fas fa-times"></i></button>
+  </div>
+  <div class="cv-drawer-body" id="cvDrawerBody"></div>
+  <div class="cv-drawer-foot" id="cvDrawerFoot"></div>
+</aside>
+
+<!-- Archive Confirm Dialog -->
+<div class="sd-dialog-overlay" id="cvArchiveModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:none;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:8px;box-shadow:0 16px 48px rgba(0,0,0,0.15);width:100%;max-width:400px;padding:24px;">
+    <h3 style="font-size:16px;font-weight:600;color:#18181b;margin:0 0 8px;">Archive Pet</h3>
+    <p id="cvArchiveDesc" style="font-size:14px;color:#71717a;margin:0 0 20px;line-height:1.5;">Are you sure you want to archive this pet?</p>
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+      <button class="sd-btn sd-btn-outline" onclick="closeModal('cvArchiveModal')">Cancel</button>
+      <button class="sd-btn sd-btn-danger" id="cvArchiveSubmitBtn" onclick="window.__cvSubmitArchive()"><i class="fas fa-archive"></i> Archive</button>
+    </div>
   </div>
 </div>
 
@@ -3265,22 +4289,20 @@ if (!empty($adoptionListings)) {
 
   var PETS=<?php echo json_encode($vetPets, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
 
-  var STATUS_META={available:{label:'Available',icon:'check'},pending:{label:'Pending',icon:'hourglass'},review:{label:'Under Review',icon:'clipboard'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
-  var ICONS={edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>',paw:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 20.999 6 19a4 4 0 0 1-2-2.5"/><circle cx="4" cy="12" r="2"/></svg>',clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',cal:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',pin:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',weight:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L3 21h18L12 3z"/><path d="M12 3v6"/></svg>',cake:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8"/><path d="M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1"/><path d="M2 21h20"/><path d="M12 3v2"/><path d="M7 3v2"/><path d="M17 3v2"/></svg>',species:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 20.999 6 19a4 4 0 0 1-2-2.5"/><circle cx="4" cy="12" r="2"/></svg>',breed:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="3" x2="12" y2="21"/><line x1="4" y1="8" x2="20" y2="8"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="8" y1="16" x2="16" y2="16"/></svg>',gender:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="7" r="4"/><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="16" cy="11" r="3"/></svg>',download:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',file:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',img:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>',search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>'};
+  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Reserved',icon:'hourglass'},pending:{label:'Pending Application',icon:'hourglass'},review:{label:'In Progress',icon:'clipboard'},approved:{label:'Approved',icon:'check'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
+  var ICONS={edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',search:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',cal:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',clock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',weight:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.5L6 21h12l-4-10.5c1.2-.7 2-2 2-3.5a4 4 0 0 0-4-4z"/></svg>',pin:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',species:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.172C10 3.782 8.423 2.679 6.5 3c-2.823.47-4.113 6.006-4 7 .08.703 1.725 1.722 3.656 1 1.261-.472 1.96-1.45 2.344-2.5M14 5.172c0-1.39 1.577-2.493 3.5-2.172 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.344-2.5M8 14v.5M16 14v.5M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444c0-1.061-.162-2.2-.493-3.309m-9.243-6.082A8.801 8.801 0 0 1 12 5c.78 0 1.5.108 2.161.306"/></svg>',breed:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',plus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',doc:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',download:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
 
-  var state={selected:(PETS[0]&&PETS[0].id)||'',status:'all',search:'',sort:'recent',species:'',gender:'',age:'',breed:'',elig:'',page:1,perPage:10,grid:false,activeTab:'overview'};
+  var state={status:'all',search:'',sort:'recent',species:'',page:1,perPage:10,activeTab:'overview'};
   var els={};
 
   function filtered(){
     var q=state.search.toLowerCase();
+    var statusFilter=els.statusFilter? els.statusFilter.value:'all';
+    var speciesFilter=els.speciesFilter? els.speciesFilter.value:'';
     return PETS.filter(function(p){
-      if(state.status!=='all' && p.status!==state.status) return false;
-      if(state.species && p.species!==state.species) return false;
-      if(state.gender && p.gender!==state.gender) return false;
-      if(state.age){ var n=p.ageNum; if(state.age==='1'){ if(!(n>0 && n<1)) return false;} else if(state.age==='3'){ if(!(n>=1 && n<=3)) return false;} else if(state.age==='6'){ if(!(n>=4)) return false;} }
-      if(state.breed && p.breed!==state.breed) return false;
-      if(state.elig){ var elig=(p.status==='available'); if(state.elig==='eligible' && !elig) return false; if(state.elig==='not' && elig) return false; }
-      if(q){ var hay=(p.name+' '+p.id+' '+p.species+' '+p.breed).toLowerCase(); if(!hay.includes(q)) return false; }
+      if(statusFilter!=='all' && p.status!==statusFilter) return false;
+      if(speciesFilter && p.species!==speciesFilter) return false;
+      if(q){ var hay=(p.name+' '+p.id+' '+p.species+' '+p.breed+' '+(p.applicationProgress||'')).toLowerCase(); if(!hay.includes(q)) return false; }
       return true;
     });
   }
@@ -3290,44 +4312,49 @@ if (!empty($adoptionListings)) {
     if(state.sort==='az') a.sort(function(x,y){return x.name.localeCompare(y.name);});
     else if(state.sort==='za') a.sort(function(x,y){return y.name.localeCompare(x.name);});
     else if(state.sort==='age') a.sort(function(x,y){return x.ageNum-y.ageNum;});
-    else if(state.sort==='status') a.sort(function(x,y){return STATUS_META[x.status].label.localeCompare(STATUS_META[y.status].label);});
+    else if(state.sort==='status') a.sort(function(x,y){return (STATUS_META[x.status]||{label:x.status}).label.localeCompare((STATUS_META[y.status]||{label:y.status}).label);});
     return a;
   }
 
-  function statusPill(p){
-    var m=STATUS_META[p.status];
-    var cls='ls-'+p.status;
-    if(p.status==='review') cls='ls-review';
-    if(p.status==='unavailable') cls='ls-unavailable';
-    if(p.status==='pending') cls='ls-pending';
-    return '<span class="status-pill '+cls+'">'+esc(m.label)+'</span>';
-  }
-  function thumb(p){
-    return p.photo? '<img class="cv-row-thumb" src="'+esc(p.photo)+'" alt="">' : '<span class="cv-row-thumb-c">'+esc((p.name||'P').charAt(0).toUpperCase())+'</span>';
+  function statusPillHTML(status){
+    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var c=colors[status]||['#f4f4f5','#71717a','#e4e4e7'];
+    var m=STATUS_META[status]||{label:status||'Unknown'};
+    return '<span class="appt-status-pill" style="background:'+c[0]+';color:'+c[1]+';border-color:'+c[2]+';">'+esc(m.label)+'</span>';
   }
 
   function renderList(){
     var list=filtered(); var total=list.length;
     var sortable=sorted(list);
+    var tableArea=document.getElementById('cvTable')?.closest('.appt-db-table-area');
+    if(tableArea) tableArea.style.minHeight=Math.max(480,40+(state.perPage*56))+'px';
     var pages=Math.max(1,Math.ceil(total/state.perPage));
     if(state.page>pages) state.page=pages;
     var start=(state.page-1)*state.perPage; var rows=sortable.slice(start,start+state.perPage);
-    els.count.textContent='('+total+')';
-    if(!rows.length){ els.list.innerHTML='<div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div>'; renderPagination(total,pages);  return; }
-    els.list.innerHTML=rows.map(function(p){
-      return '<div class="cv-row'+(p.id===state.selected?' selected':'')+'" data-id="'+esc(p.id)+'">'+thumb(p)+'<div class="cv-row-main"><div class="cv-row-name">'+esc(p.name)+'</div><div class="cv-row-meta">'+esc(p.species)+' &middot; '+esc(p.gender)+' &middot; '+esc(p.age)+'</div><div class="cv-row-tags">'+statusPill(p)+'</div></div><div class="cv-row-right"><div class="cv-row-ref">ID: '+esc(p.id)+'</div><div class="cv-row-added">Added: '+esc(p.added)+'</div></div></div>';
+    if(!rows.length){ els.tableBody.innerHTML='<tr><td colspan="10"><div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div></td></tr>'; renderPagination(total,pages); return; }
+    els.tableBody.innerHTML=rows.map(function(p){
+      var photoHtml=p.photo? '<img src="'+esc(p.photo)+'" alt="">': esc((p.name||'P').charAt(0).toUpperCase());
+      return '<tr class="sd-tr" onclick="window.__cvOpenDetail(\''+esc(p.id)+'\')">'+
+        '<td class="sd-td"><div class="client-cell"><div class="pet-avatar-box">'+photoHtml+'</div><div class="pet-cell-main"><div class="client-name">'+esc(p.name)+'</div></div></div></td>'+
+        '<td class="sd-td"><div class="pet-id-label">'+esc(p.id)+'</div></td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.species)+'</div></td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
+        '<td class="sd-td">'+statusPillHTML(p.status)+'</td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+'</div></td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
+        '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
+      '</tr>';
     }).join('');
-    els.list.querySelectorAll('.cv-row').forEach(function(r){
-      r.addEventListener('click',function(){ state.selected=r.getAttribute('data-id'); state.activeTab='overview'; renderList(); renderDetail(); });
-    });
     renderPagination(total,pages);
   }
   function renderPagination(total,pages){
     if(els.pageLabel) els.pageLabel.textContent='Page '+state.page+' of '+pages;
-    var h='<button type="button" class="cv-page-btn" data-p="first" '+(state.page<=1?'disabled':'')+' title="Go to first page">'+ICONS.dblChevL+'</button>';
-    h+='<button type="button" class="cv-page-btn" data-p="prev" '+(state.page<=1?'disabled':'')+' title="Go to previous page">'+ICONS.chevL+'</button>';
-    h+='<button type="button" class="cv-page-btn" data-p="next" '+(state.page>=pages?'disabled':'')+' title="Go to next page">'+ICONS.chevR+'</button>';
-    h+='<button type="button" class="cv-page-btn" data-p="last" '+(state.page>=pages?'disabled':'')+' title="Go to last page">'+ICONS.dblChevR+'</button>';
+    var h='<button type="button" class="cv-page-btn dt-page-btn" data-p="first" '+(state.page<=1?'disabled':'')+' title="Go to first page">'+ICONS.dblChevL+'</button>';
+    h+='<button type="button" class="cv-page-btn dt-page-btn" data-p="prev" '+(state.page<=1?'disabled':'')+' title="Go to previous page">'+ICONS.chevL+'</button>';
+    h+='<button type="button" class="cv-page-btn dt-page-btn" data-p="next" '+(state.page>=pages?'disabled':'')+' title="Go to next page">'+ICONS.chevR+'</button>';
+    h+='<button type="button" class="cv-page-btn dt-page-btn" data-p="last" '+(state.page>=pages?'disabled':'')+' title="Go to last page">'+ICONS.dblChevR+'</button>';
     els.pagination.innerHTML=h;
     els.pagination.querySelectorAll('.cv-page-btn:not([disabled])').forEach(function(b){
       var p=b.getAttribute('data-p');
@@ -3341,176 +4368,260 @@ if (!empty($adoptionListings)) {
     });
   }
 
-  function detailPhoto(p){
-    return p.photo? '<img class="cv-detail-img" src="'+esc(p.photo)+'" alt="">':'<div class="cv-detail-img-c">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
+  function openDetailModal(id){
+    var p=PETS.find(function(x){return x.id===id;});
+    if(!p) return;
+    state.activeTab='overview';
+    showDetailModal(p);
   }
 
-  function renderDetail(){
-    var p=PETS.find(function(x){return x.id===state.selected;});
-    if(!p){ els.detail.innerHTML='<div class="cv-empty">'+ICONS.search+'<div>Select a pet to see its profile.</div></div>'; return; }
-    var m=STATUS_META[p.status];
-    els.detail.innerHTML=
-      '<div class="cv-detail-top">'+detailPhoto(p)+
-        '<div class="cv-detail-main">'+
-          '<div class="cv-detail-head">'+
-            '<div><div class="cv-detail-title">'+esc(p.name)+' '+statusPill(p)+'</div>'+
-            '<div class="cv-detail-sub">'+esc(p.species)+' &middot; '+esc(p.gender)+' &middot; '+esc(p.age)+'</div>'+
-            '<div class="cv-detail-idrow"><span class="cv-detail-id">ID: '+esc(p.id)+'</span><button type="button" class="cv-copy-btn" id="cvCopy" title="Copy ID"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>'+
-            '</div>'+
-          '</div>'+
-        '</div>'+
+  function showDetailModal(p){
+    var _lbl='font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;';
+    var _val='font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;';
+    var _sec='font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;';
+    function ir(label,value){return '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;margin-bottom:12px;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="'+_lbl+'">'+esc(label)+'</p><p class="info-row-value" style="'+_val+'">'+value+'</p></div></div>';}
+    function sec(title){return '<div class="rpt-section-title" style="'+_sec+'">'+title+'</div>';}
+    var rd=p.readiness||{};
+    function rdOk(v){return !!v && v!=='Not specified' && v!=='Not assessed' && v!=='Not vaccinated';}
+    var ready=rdOk(rd.vaccination) && rd.health==='Cleared' && rdOk(rd.spayNeuter) && rdOk(rd.temperament);
+    function rdRow(label,val){var v=val||'Not specified';return '<tr><td>'+esc(label)+'</td><td>'+esc(v)+(rdOk(v)?' \u2713':'')+'</td></tr>';}
+    var body=
+      sec('Pet Information')+
+      '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
+        ir('Species',esc(p.species))+
+        ir('Breed',esc(p.breed))+
+        ir('Gender',esc(p.gender))+
+        ir('Age',esc(p.age))+
+        ir('Status',esc(STATUS_META[p.status] ? STATUS_META[p.status].label : p.status))+
+        ir('Pet ID',esc(p.id))+
+        ir('Registered',esc(p.registered))+
       '</div>'+
-      '<div class="cv-detail-meta">'+
-        '<div class="cv-meta-col">'+metaItem(ICONS.cal,'Registered',p.registered)+metaItem(ICONS.clock,'Available Since',p.availableSince)+metaItem(ICONS.weight,'Weight',p.weight)+'</div>'+
-        '<div class="cv-meta-col">'+metaItem(ICONS.pin,'Location',p.location,true)+metaItem(ICONS.species,'Species',p.species)+metaItem(ICONS.breed,'Breed',p.breed)+'</div>'+
+      sec('Details')+
+      '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
+        ir(p.applicationPending?'Application Submitted':'Adoption Progress',esc(p.applicationPending?(p.applicationDate||'\u2014'):(p.applicationProgress||p.adoptedDate||'\u2014')))+
+        ir('Location',esc(p.location))+
+        ir('Health Status',esc(ready?'Cleared':'For review'))+
       '</div>'+
-      '<div class="cv-tabs" id="cvTabs">'+tabsHtml(p)+'</div>'+
-      '<div class="cv-panels">'+panelsHtml(p)+'</div>';
+      sec('About')+
+      '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:400;color:#71717a;line-height:1.6;margin:0 0 20px;">'+esc(p.about||'No description available.')+'</p>'+
+      sec('Vaccination Records')+
+      '<table class="cv-table"><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>'+
+        rdRow('Vaccination Status',rd.vaccination)+
+        rdRow('Health / Medical Status',rd.health)+
+        rdRow('Spay / Neuter',rd.spayNeuter)+
+        rdRow('Temperament',rd.temperament)+
+      '</tbody></table>'+
+      sec('Activity Timeline')+
+      (p.timeline.length? p.timeline.map(function(x){return '<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;"><div style="width:8px;height:8px;border-radius:50%;background:#0E8131;margin-top:6px;flex-shrink:0;"></div><div style="flex:1;min-width:0;"><div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;">'+esc(x[0])+'</div><div style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;color:#71717a;margin-top:2px;">by '+esc(x[2])+(x[3]?' \u00b7 '+esc(x[3]):'')+' \u00b7 '+esc(x[1])+'</div></div></div>';}).join('') : '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:400;color:#71717a;margin:0;">No activity recorded.</p>');
 
-    var cop=document.getElementById('cvCopy'); if(cop) cop.addEventListener('click',function(){ if(navigator.clipboard){navigator.clipboard.writeText(p.id);} toast('Pet ID copied to clipboard'); });
-    document.getElementById('cvTabs').querySelectorAll('.cv-tab').forEach(function(t){ t.addEventListener('click',function(){ state.activeTab=t.getAttribute('data-tab'); renderDetail(); }); });
-    bindPanelActions(p);
+    els.drawerTitle.textContent='Pet Details';
+    els.drawerRef.textContent='View and review this pet\u2019s adoption information, care history, and current records.';
+    var petPhoto=p.photo? '<img src="'+esc(p.photo)+'" alt="" style="width:85px;height:85px;border-radius:8px;object-fit:cover;">' : '<div style="width:85px;height:85px;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
+    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],approved:['#dcebe0','#045e1f','#bbf7d0'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var adoptColors=statusColors[p.status]||['#f4f4f5','#71717a','#e4e4e7'];
+    var statusLabel=STATUS_META[p.status]?STATUS_META[p.status].label:p.status;
+    var adoptPill='<span style="font-size:13px;font-weight:500;color:'+adoptColors[1]+';background:'+adoptColors[0]+';border:1px solid '+adoptColors[2]+';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">'+esc(statusLabel)+'</span>';
+    var header='<div class="cv-pet-summary" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">'+
+      '<div class="cv-pet-summary-photo" style="flex-shrink:0;">'+petPhoto+'</div>'+
+      '<div class="cv-pet-summary-content" style="display:flex;flex-direction:column;gap:2px;min-width:0;">'+
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">'+(p.applicationPending?'Adoption application':'Adoption status')+'</span>'+
+        '<span class="cv-pet-summary-name" style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(p.name)+'</span>'+
+        (p.status==='adopted'&&p.adoptedDate? '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#71717a;margin-top:2px;">Adopted on '+esc(p.adoptedDate)+'</span>':'')+
+      '</div>'+
+      '<span class="cv-pet-summary-status">'+adoptPill+'</span>'+
+    '</div>';
+    els.drawerBody.innerHTML=header+body;
+    els.drawerFoot.innerHTML='<button type="button" class="sd-btn sd-btn-outline" onclick="window.__cvCloseDrawer()">Close</button>'+
+      (p.applicationPending?'':'<button type="button" class="sd-btn sd-btn-danger" onclick="window.__cvArchive(\''+esc(p.id)+'\',\''+esc(p.name)+'\')"><i class="fas fa-archive"></i> Archive</button>');
+    openDrawer();
   }
+
   function metaItem(icon,label,val,html){
-    return '<div class="cv-meta-item"><div class="cv-meta-icon">'+icon+'</div><div><div class="cv-meta-label">'+esc(label)+'</div><div class="cv-meta-value'+(html?' cv-meta-value-r':'')+'">'+(html?val:esc(val))+'</div></div></div>';
-  }
-  var TABS=[['overview','Overview'],['medical','Medical &amp; Vaccines'],['behavior','Behavior &amp; Notes'],['applications','Applications'],['documents','Documents']];
-  function tabsHtml(p){
-    var counts={applications:p.applications.length,appointments:p.appointments.length};
-    return TABS.map(function(t){var badge=counts[t[0]]?'<span class="cv-tab-badge">'+counts[t[0]]+'</span>':''; return '<button type="button" class="cv-tab'+(state.activeTab===t[0]?' active':'')+'" data-tab="'+t[0]+'">'+t[1]+badge+'</button>';}).join('');
-  }
-  function panelsHtml(p){
-    var html='<div class="cv-panel'+(state.activeTab==='overview'?' active':'')+'">'+overviewPanel(p)+'</div>';
-    html+='<div class="cv-panel'+(state.activeTab==='medical'?' active':'')+'">'+medicalPanel(p)+'</div>';
-    html+='<div class="cv-panel'+(state.activeTab==='behavior'?' active':'')+'">'+behaviorPanel(p)+'</div>';
-    html+='<div class="cv-panel'+(state.activeTab==='applications'?' active':'')+'">'+applicationsPanel(p)+'</div>';
-    html+='<div class="cv-panel'+(state.activeTab==='documents'?' active':'')+'">'+documentsPanel(p)+'</div>';
-    return html;
-  }
-  function overviewPanel(p){
-    var reqs=p.requirements.length? p.requirements.map(function(r){return '<div class="cv-req-item"><span>'+esc(r)+'</span></div>';}).join('') : '<div class="cv-req-item"><span>No special requirements noted.</span></div>';
-    var appts=p.appointments.length? p.appointments.map(function(a){return '<div class="cv-appt-item"><div class="cv-appt-main"><div class="cv-appt-name">'+esc(a[0])+'</div><div class="cv-appt-client">with '+esc(a[1])+'</div></div><div class="cv-appt-dt"><div class="cv-appt-date">'+esc(a[2])+'</div><div class="cv-appt-time">'+esc(a[3])+'</div></div></div>';}).join('') : '<div class="cv-about-text" style="margin-bottom:10px">No upcoming appointments.</div>';
-    var tl=p.timeline.length? p.timeline.map(function(x){return '<div class="cv-tl-item"><span class="cv-tl-dot"></span><div class="cv-tl-head"><span class="cv-tl-text">'+esc(x[0])+'</span><span class="cv-tl-date">'+esc(x[1])+'</span></div><div class="cv-tl-sub">by '+esc(x[2])+(x[3]?' &middot; '+esc(x[3]):'')+'</div></div>';}).join('') : '<div class="cv-about-text">No activity recorded.</div>';
-    var chips=p.tags.length? p.tags.map(function(t){return '<span class="cv-chip">'+esc(t)+'</span>';}).join('') : '';
-    return '<div class="cv-grid2">'+
-      '<div class="cv-grid2-col">'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">About '+esc(p.name)+'</div></div><p class="cv-about-text">'+esc(p.about||'No description available.')+'</p>'+ (chips?'<div class="cv-chips">'+chips+'</div>':'') +'</div>'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Adoption Requirements</div></div><div class="cv-req">'+reqs+'</div></div>'+
-      '</div>'+
-      '<div class="cv-grid2-col">'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Schedule &amp; Appointments</div></div>'+appts+(p.appointments.length?'<button type="button" class="cv-viewall" data-tab="appointments">View all appointments '+ICONS.chev+'</button>':'')+'</div>'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Activity Timeline</div></div><div class="cv-tl">'+tl+'</div></div>'+
-      '</div>'+
-    '</div>';
-  }
-  function medicalPanel(p){
-    var vax=p.vaccines.length? '<table class="cv-table"><thead><tr><th>Vaccine</th><th>Date</th><th>Status</th></tr></thead><tbody>'+p.vaccines.map(function(v){var st=v[2]==='done'?'done':'pending';var ic=v[2]==='done'?ICONS.check:ICONS.clock;return '<tr><td>'+esc(v[0])+'</td><td>'+esc(v[1])+'</td><td><span class="cv-vax-'+st+'">'+ic+' '+(st==='done'?'Complete':'Pending')+'</span></td></tr>';}).join('')+'</tbody></table>' : '<div class="cv-about-text">No vaccination records on file.'+(p.vaxNote?'<br><br>On record: '+esc(p.vaxNote)+'.':'')+'</div>';
-    var health=(p.healthStatus && p.healthStatus!=='\u2014')? '<span class="cv-health">'+ICONS.check+' '+esc(p.healthStatus)+'</span>' : '<span class="cv-health neutral">'+esc(p.healthStatus||'\u2014')+'</span>';
-    return '<div class="cv-grid2">'+
-      '<div class="cv-grid2-col">'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medical Summary</div></div><div class="cv-med-grid">'+
-          medField('Health Status',health)+medField('Age',p.age)+medField('Weight',p.weight)+medField('Vaccination Status',p.vaxNote?esc(p.vaxNote):'\u2014')+medField('Microchip / ID',p.id)+medField('Adoption Fee',p.fee)+'</div></div>'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medical Conditions</div></div><div class="cv-about-text">'+esc(p.conditions)+'</div></div>'+
-      '</div>'+
-      '<div class="cv-grid2-col">'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Vaccination Records</div></div>'+vax+'</div>'+
-        '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Medications</div></div><div class="cv-about-text">'+esc(p.medications)+'</div></div>'+
-      '</div>'+
-    '</div>';
-  }
-  function medField(label,val){ return '<div class="cv-med-field"><span class="cv-med-label">'+esc(label)+'</span><div class="cv-med-value">'+val+'</div></div>'; }
-  function behaviorPanel(p){
-    var chips=p.temperament.length? p.temperament.map(function(t){return '<span class="cv-chip">'+esc(t)+'</span>';}).join('') : '';
-    return '<div class="cv-grid2"><div class="cv-grid2-col">'+
-      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Temperament</div></div>'+ (chips? '<div class="cv-chips" style="margin-top:0">'+chips+'</div>':'<div class="cv-about-text">No temperament tags recorded.</div>') +'</div>'+
-      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Behavior Notes</div></div><p class="cv-about-text">'+esc(p.behaviorNotes||'No behavior notes.')+'</p></div>'+
-      '</div><div class="cv-grid2-col">'+
-      '<div class="cv-card"><div class="cv-card-head"><div class="cv-card-title">Staff Notes</div><button type="button" class="cv-btn cv-btn-outline cv-btn-sm" data-note>'+ICONS.plus+' Add Note</button></div><div class="cv-about-text">'+esc(p.staffNotes||'No staff notes yet.')+'</div></div>'+
-      '</div></div>';
-  }
-  function appClsFor(status){
-    if(status==='Approved') return 'available';
-    if(status==='Under Review'||status==='Review') return 'review';
-    if(status==='Rejected') return 'unavailable';
-    return 'pending';
-  }
-  function applicationsPanel(p){
-    if(!p.applications.length) return '<div class="cv-about-text">No adoption applications yet.</div>';
-    return '<div class="cv-card" style="padding:4px 0"><table class="cv-table"><thead><tr><th>Applicant</th><th>Status</th><th>Date</th><th></th></tr></thead><tbody>'+p.applications.map(function(a){var ac='ls-'+appClsFor(a[1]);return '<tr><td>'+esc(a[0])+'</td><td><span class="status-pill '+ac+'">'+esc(a[1])+'</span></td><td>'+esc(a[2])+'</td><td style="text-align:right"><button type="button" class="cv-viewall" style="margin-top:0">View Application '+ICONS.chev+'</button></td></tr>';}).join('')+'</tbody></table></div>';
+    return '<div style="display:flex;gap:11px;align-items:flex-start;"><div style="width:30px;height:30px;color:#18181b;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+icon+'</div><div><div style="font-family:Inter,sans-serif;font-size:13px;font-weight:500;color:#18181b;">'+esc(label)+'</div><div style="font-family:Inter,sans-serif;font-size:14px;font-weight:400;color:#18181b;margin-top:1px;">'+(html?val:esc(val))+'</div></div></div>';
   }
 
-  function documentsPanel(p){
-    var docs=p.documents.length? p.documents.map(function(d){return '<div class="cv-doc"><div class="cv-doc-icon">'+ICONS.doc+'</div><div class="cv-doc-main"><div class="cv-doc-name">'+esc(d[0])+'</div><div class="cv-doc-meta">'+esc(d[1])+' &middot; '+esc(d[2])+'</div></div>'+ICONS.download+'</div>';}).join('') : '<div class="cv-about-text">No documents uploaded.</div>';
-    return '<div class="cv-grid2-col">'+docs+'</div>';
-  }
-
-  function bindPanelActions(p){
-    document.querySelectorAll('[data-book]').forEach(function(b){ b.addEventListener('click',function(){openBook(p);}); });
-    document.querySelectorAll('[data-note]').forEach(function(b){ b.addEventListener('click',function(){toast('Note composer opened');}); });
-  }
-
-  function previewMedFile(input){}
-
-  function openTab(p,tab){ state.selected=p.id; state.activeTab=tab; renderList(); renderDetail(); }
-
-  function setStatus(p,status){ p.status=status; renderList(); renderDetail(); toast('Marked as '+STATUS_META[status].label); }
+  function setStatus(p,status){ p.status=status; renderList(); toast('Marked as '+STATUS_META[status].label); }
 
   function openBook(p){
     var types=['Meet & Greet','Adoption Consultation','Home Visit','Medical Check','Vaccination','Follow-up','Adoption Finalization'];
-    openModal('Book Appointment',
-      '<div class="cv-form-grid">'+
-      '<div class="cv-field"><label class="cv-label">Pet</label><input class="cv-input" value="'+esc(p.name)+'" disabled></div>'+
-      '<div class="cv-field"><label class="cv-label">Appointment Type</label><select class="cv-select">'+types.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></div>'+
-      '<div class="cv-field"><label class="cv-label">Client</label><select class="cv-select"><option>Select Client</option><option>'+esc(p.name)+' &ndash; Owner</option></select></div>'+
-      '<div class="cv-field"><label class="cv-label">Date</label><input class="cv-input" type="date" value="2026-09-08"></div>'+
-      '<div class="cv-field"><label class="cv-label">Time</label><select class="cv-select"><option>10:00 AM</option><option>11:00 AM</option><option>02:00 PM</option><option>04:00 PM</option></select></div>'+
-      '<div class="cv-field"><label class="cv-label">Veterinarian / Staff</label><select class="cv-select"><option>Select Staff</option><option>Dr. Santos</option><option>Dr. Cruz</option><option>Clinic Staff</option></select></div>'+
-      '<div class="cv-field full"><label class="cv-label">Notes</label><textarea class="cv-textarea" placeholder="Add any notes..."></textarea></div>'+
-      '</div>',
-      [{label:'Cancel',cls:'cv-btn-outline',fn:closeModal},{label:'Schedule Appointment',cls:'cv-btn-primary',fn:function(){ closeModal(); toast('Appointment scheduled for '+p.name); }}]);
+    var body=
+      '<div class="cv-drawer-section-title">Book Appointment</div>'+
+      '<div class="cv-drawer-info">'+
+        '<div class="cv-drawer-info-item" style="grid-column:1/-1;"><div class="k">Pet</div><div class="v">'+esc(p.name)+'</div></div>'+
+        '<div class="cv-drawer-info-item" style="grid-column:1/-1;"><div class="k">Appointment Type</div><div class="v"><select class="cv-select" style="width:100%;">'+types.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></div></div>'+
+        '<div class="cv-drawer-info-item"><div class="k">Date</div><div class="v"><input class="cv-input" type="date" value="2026-09-08" style="width:100%;"></div></div>'+
+        '<div class="cv-drawer-info-item"><div class="k">Time</div><div class="v"><select class="cv-select" style="width:100%;"><option>10:00 AM</option><option>11:00 AM</option><option>02:00 PM</option><option>04:00 PM</option></select></div></div>'+
+        '<div class="cv-drawer-info-item" style="grid-column:1/-1;"><div class="k">Notes</div><div class="v"><textarea class="cv-textarea" placeholder="Add any notes..." style="width:100%;min-height:80px;"></textarea></div></div>'+
+      '</div>';
+    els.drawerTitle.textContent='Book Appointment';
+    els.drawerRef.textContent='';
+    els.drawerBody.innerHTML=body;
+    els.drawerFoot.innerHTML='<button type="button" class="sd-btn sd-btn-default" onclick="window.__cvCloseDrawer()">Cancel</button><button type="button" class="sd-btn sd-btn-primary" onclick="window.__cvCloseDrawer();window.__cvToast(\'Appointment scheduled for '+esc(p.name)+'\')">Schedule</button>';
+    openDrawer();
   }
-  function openEdit(p){
-    openModal('Edit Pet',
-      '<div class="cv-form-grid">'+
-      '<div class="cv-field"><label class="cv-label">Pet Name</label><input class="cv-input" id="ep_name" value="'+esc(p.name)+'"></div>'+
-      '<div class="cv-field"><label class="cv-label">Species</label><input class="cv-input" id="ep_species" value="'+esc(p.species)+'"></div>'+
-      '<div class="cv-field"><label class="cv-label">Gender</label><select class="cv-select" id="ep_gender">'+['Male','Female'].map(function(g){return '<option'+(p.gender===g?' selected':'')+'>'+g+'</option>';}).join('')+'</select></div>'+
-      '<div class="cv-field"><label class="cv-label">Status</label><select class="cv-select" id="ep_status">'+Object.keys(STATUS_META).map(function(s){return '<option value="'+s+'"'+(p.status===s?' selected':'')+'>'+esc(STATUS_META[s].label)+'</option>';}).join('')+'</select></div>'+
-      '<div class="cv-field full"><label class="cv-label">About</label><textarea class="cv-textarea" id="ep_about">'+esc(p.about)+'</textarea></div>'+
-      '</div>',
-      [{label:'Cancel',cls:'cv-btn-outline',fn:closeModal},{label:'Save Changes',cls:'cv-btn-primary',fn:function(){ saveEdit(p); }}]);
+  var bodyOverflowBeforeDrawer = null;
+  function openDrawer(){
+    if (!els.drawer.classList.contains('open')) bodyOverflowBeforeDrawer = document.body.style.overflow;
+    els.overlay.classList.add('open');
+    els.drawer.classList.add('open');
+    document.body.style.overflow='hidden';
+    document.addEventListener('keydown',window.__cvEscHandler);
   }
-  function saveEdit(p){
-    var on=document.getElementById('ep_name'), oc=document.getElementById('ep_about');
-    if(on) p.name=on.value; if(oc) p.about=oc.value;
-    var os=document.getElementById('ep_status'); if(os) p.status=os.value;
-    closeModal(); renderList(); renderDetail(); toast('Pet profile updated');
+  function closeDrawer(){
+    els.overlay.classList.remove('open');
+    els.drawer.classList.remove('open');
+    document.body.style.overflow = bodyOverflowBeforeDrawer === null ? '' : bodyOverflowBeforeDrawer;
+    bodyOverflowBeforeDrawer = null;
+    document.removeEventListener('keydown',window.__cvEscHandler);
   }
 
-  function openModal(title,body,footButtons){
-    els.overlay.classList.add('open'); els.modal.className='cv-modal'+(title==='Add New Pet'?' lg':'');
-    els.modalHead.textContent=title; els.modalBody.innerHTML=body;
-    els.modalFoot.innerHTML=footButtons.map(function(b){return '<button type="button" class="cv-btn '+b.cls+'" data-foot="'+b.label+'">'+b.label+'</button>';}).join('');
-    els.modalFoot.querySelectorAll('[data-foot]').forEach(function(b){ b.addEventListener('click',function(){ var l=b.getAttribute('data-foot'); var f=footButtons.find(function(x){return x.label===l;}); if(f&&f.fn) f.fn(); }); });
-  }
-  function closeModal(){ els.overlay.classList.remove('open'); }
+  window.__cvCloseDrawer=function(){ closeDrawer(); };
+  window.__cvEscHandler=function(e){ if(e.key==='Escape') closeDrawer(); };
+
+  var _archiveId='';
+  window.__cvArchive=function(id,name){
+    _archiveId=id;
+    document.getElementById('cvArchiveDesc').textContent='Are you sure you want to archive "'+name+'"? This pet will be removed from your active listings.';
+    openModal('cvArchiveModal');
+  };
+  window.__cvSubmitArchive=function(){
+    var p=PETS.find(function(x){return x.id===_archiveId;});
+    if(p) p.status='archived';
+    closeModal('cvArchiveModal');
+    closeDrawer();
+    renderList();
+    toast('Pet archived successfully');
+  };
+
+  window.__cvEdit=function(id){
+    var p=PETS.find(function(x){return x.id===id;});
+    if(!p) return;
+    document.getElementById('editPetId').value=id;
+    document.getElementById('editPetName').value=p.name||'';
+    document.getElementById('editPetSpecies').value=p.speciesRaw||'';
+    document.getElementById('editPetBreed').value=(p.breed==='\u2014'?'':p.breed)||'';
+    document.getElementById('editPetGender').value=p.genderRaw||'male';
+    document.getElementById('editPetAge').value=p.ageNum||'';
+    document.getElementById('editPetWeight').value=p.weightNum||'';
+    document.getElementById('editPetColor').value=(p.color==='\u2014'?'':p.color)||'';
+    document.getElementById('editPetVaccinated').value=p.vaccinated||'no';
+    var photoDiv=document.getElementById('editPetCurrentPhoto');
+    if(p.photo){photoDiv.style.display='flex';document.getElementById('editPetCurrentPhotoImg').src=p.photo;}else{photoDiv.style.display='none';}
+    var speciesCustom=document.getElementById('editPetSpeciesCustom');
+    if(speciesCustom) speciesCustom.style.display='none';
+    openModal('editPetModal');
+  };
 
   function toast(msg){ els.toast.innerHTML=ICONS.check+' '+esc(msg); els.toast.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(function(){els.toast.classList.remove('show');},2200); }
 
+  window.__cvOpenDetail=function(id){ openDetailModal(id); };
+
+  var _activeCvMenu=null;
+  function closeCvMenu(){if(_activeCvMenu){_activeCvMenu.remove();_activeCvMenu=null;}document.removeEventListener('click',closeCvMenu);}
+  window.closeCvMenu=closeCvMenu;
+  window.cvRowActions=function(ev,id){
+    closeCvMenu();ev.stopPropagation();
+    var p=PETS.find(function(x){return x.id===id;});if(!p)return;
+    var btn=ev.currentTarget;var r=btn.getBoundingClientRect();
+    var eye='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+    var items=[];
+    items.push(_mi(eye,'View Details','','window.__cvOpenDetail(\''+esc(id)+'\');closeCvMenu()'));
+    if(!p.applicationPending){
+      items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
+      items.push(_mi(trash,'Archive','#b91c1c','window.__cvArchive(\''+esc(id)+'\',\''+esc(p.name)+'\');closeCvMenu()'));
+    }
+    var menu=_buildRowMenu(items);
+    _positionMenu(menu,btn);
+  };
+
+  function _buildRowMenu(items){
+    var menu=document.createElement('div');
+    menu.className='row-menu-pop resident-row-menu';
+    menu.innerHTML=items.join('');
+    return menu;
+  }
+  function _positionMenu(menu,btn){
+    var r=btn.getBoundingClientRect();
+    document.body.appendChild(menu);
+    var menuWidth=menu.offsetWidth||190;
+    var menuHeight=menu.offsetHeight||180;
+    var left=Math.max(8,Math.min(r.right-menuWidth,window.innerWidth-menuWidth-8));
+    var top=r.bottom+4;
+    if(top+menuHeight>window.innerHeight-8 && r.top-menuHeight-4>=8) top=r.top-menuHeight-4;
+    menu.style.left=left+'px';
+    menu.style.top=top+'px';
+    _activeCvMenu=menu;
+    setTimeout(function(){document.addEventListener('click',closeCvMenu);},0);
+  }
+  function _mi(icon,label,color,onclick){
+    var danger=color==='red'?' danger':'';
+    return '<button class="row-menu-item'+danger+'" onclick="'+onclick+'">'+icon+' '+label+'</button>';
+  }
+
+  window.petRowActions=function(ev,id){
+    closeCvMenu();ev.stopPropagation();
+    var tr=document.querySelector('#petTable tr[data-id="'+id+'"]');
+    var isAdopted=tr?tr.getAttribute('data-cat')==='adopted':false;
+    var pName=tr?tr.querySelector('.client-name'):null;
+    var name=pName?pName.textContent.trim():'this pet';
+    var eye='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var doc='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>';
+    var edit='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+    var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+    var items=[];
+    items.push(_mi(eye,'View Profile','','PET.view('+id+');closeCvMenu()'));
+    items.push(_mi(doc,'Pet Resume','','window.open(\'pet-profile.php?id='+id+'&ref=resident\',\'_blank\');closeCvMenu()'));
+    if(!isAdopted) items.push(_mi(edit,'Edit','','PET.edit('+id+');closeCvMenu()'));
+    items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
+    items.push(_mi(trash,'Archive','#b91c1c','PET.archive('+id+');closeCvMenu()'));
+    var menu=_buildRowMenu(items);
+    _positionMenu(menu,ev.currentTarget);
+  };
+
+  window.rptRowActions=function(ev,id){
+    closeCvMenu();ev.stopPropagation();
+    var tr=document.querySelector('#reportTable tr[data-id="'+id+'"]');
+    var eye='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+    var items=[];
+items.push(_mi(eye,'View Report','','RPT.view('+id+');closeCvMenu()'));
+items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
+    var menu=_buildRowMenu(items);
+    _positionMenu(menu,ev.currentTarget);
+  };
+
+  window.apptRowActions=function(ev,id){
+    closeCvMenu();ev.stopPropagation();
+    var tr=document.querySelector('#apptTable tr[data-id="'+id+'"]');
+    var status=tr?tr.getAttribute('data-status'):'';
+    var edit='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+    var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+    var items=[];
+    if (status === 'pending') items.push(_mi(edit,'Edit','','APPT.editById('+id+');closeCvMenu()'));
+    items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
+    var archiveLabel = status === 'scheduled' || status === 'completed' ? 'Archive' : 'Cancel';
+    items.push(_mi(trash,archiveLabel,'red','APPT.archive('+id+');closeCvMenu()'));
+    var menu=_buildRowMenu(items);
+    _positionMenu(menu,ev.currentTarget);
+  };
 
   function init(){
-    els.count=document.getElementById('cvCount'); els.list=document.getElementById('cvList');
-    els.pagination=document.getElementById('cvPagination'); els.pageLabel=document.getElementById('cvPageLabel'); els.perPage=document.getElementById('cvPerPage'); els.detail=document.getElementById('cvDetail');
+    els.tableBody=document.getElementById('cvTableBody');
+    els.pagination=document.getElementById('cvPagination'); els.pageLabel=document.getElementById('cvPageLabel'); els.perPage=document.getElementById('cvPerPage');
     els.search=document.getElementById('cvSearch'); els.sort=document.getElementById('cvSort'); els.overlay=document.getElementById('cvOverlay');
-    els.modal=document.getElementById('cvModal'); els.modalHead=document.getElementById('cvModalTitle'); els.modalBody=document.getElementById('cvModalBody'); els.modalFoot=document.getElementById('cvModalFoot');
+    els.statusFilter=document.getElementById('cvStatusFilter'); els.speciesFilter=document.getElementById('cvSpeciesFilter');
+    els.drawer=document.getElementById('cvDrawer'); els.drawerTitle=document.getElementById('cvDrawerTitle'); els.drawerRef=document.getElementById('cvDrawerRef'); els.drawerBody=document.getElementById('cvDrawerBody'); els.drawerFoot=document.getElementById('cvDrawerFoot');
     els.toast=document.getElementById('cvToast');
-    els.modalClose=document.getElementById('cvModalClose');
-    els.modalClose.addEventListener('click',closeModal);
-    els.overlay.addEventListener('click',function(e){ if(e.target===els.overlay) closeModal(); });
+    els.drawerClose=document.getElementById('cvDrawerClose');
+    els.drawerClose.addEventListener('click',closeDrawer);
+    els.overlay.addEventListener('click',function(e){ if(e.target===els.overlay) closeDrawer(); });
     els.search.addEventListener('input',function(){ state.search=els.search.value; state.page=1; renderList(); });
-    els.sort.addEventListener('change',function(){ state.sort=els.sort.value; renderList(); });
+    els.sort.addEventListener('change',function(){ state.sort=els.sort.value; state.page=1; renderList(); });
     els.perPage.addEventListener('change',function(){ state.perPage=parseInt(els.perPage.value,10)||10; state.page=1; renderList(); });
-    renderList(); renderDetail();
+    if(els.statusFilter) els.statusFilter.addEventListener('change',function(){ state.page=1; renderList(); });
+    if(els.speciesFilter) els.speciesFilter.addEventListener('change',function(){ state.page=1; renderList(); });
+    renderList();
   }
   if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',init); else init();
 })();
@@ -3520,9 +4631,6 @@ if (!empty($adoptionListings)) {
 
     <?php if (!empty($profileError)): ?>
       <div id="profileError" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#991b1b;"><?php echo htmlspecialchars($profileError); ?></div>
-    <?php endif; ?>
-    <?php if (!empty($profileSuccess)): ?>
-      <div id="profileSuccess" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#065f46;"><?php echo htmlspecialchars($profileSuccess); ?></div>
     <?php endif; ?>
 
     <div class="profile-settings-wrapper">
@@ -3640,9 +4748,9 @@ if (!empty($adoptionListings)) {
 
 </main>
 
-<!-- �.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.�
+<!-- ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½
      MODALS
-�.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.��.� -->
+ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ï¿½.ï¿½ -->
 
 <!-- Register Pet Modal -->
 <div class="modal" id="addPetModal">
@@ -3663,6 +4771,7 @@ if (!empty($adoptionListings)) {
           You're adopting <strong><?php echo htmlspecialchars($adoptData['name']); ?></strong> from the pet list. Pet info is managed by DCVS staff.
         </div>
         <input type="hidden" name="from_adoption" value="1" />
+        <input type="hidden" name="adopt_listing_id" value="<?php echo (int)($adoptListingId ?? 0); ?>" />
         <input type="hidden" name="photo_url" value="<?php echo htmlspecialchars($adoptData['photo'] ?? ''); ?>" />
         <input type="hidden" name="pet_name" value="<?php echo htmlspecialchars($adoptData['name'] ?? ''); ?>" />
         <input type="hidden" name="species" value="<?php echo htmlspecialchars($adoptData['species'] ?? ''); ?>" />
@@ -3676,7 +4785,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Pet Name <span class="req">*</span></label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo htmlspecialchars($adoptData['name'] ?? ''); ?></p>
+            <p class="adoption-readonly-value"><?php echo htmlspecialchars($adoptData['name'] ?? ''); ?></p>
           <?php else: ?>
             <input type="text" name="pet_name" class="sd-input" placeholder="e.g. Max" required />
           <?php endif; ?>
@@ -3684,7 +4793,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Species <span class="req">*</span></label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo ucfirst(htmlspecialchars($adoptData['species'] ?? '')); ?></p>
+            <p class="adoption-readonly-value"><?php echo ucfirst(htmlspecialchars($adoptData['species'] ?? '')); ?></p>
           <?php else: ?>
             <select name="species" id="addPetSpecies" class="sd-input" required onchange="toggleCustomSpecies('addPetSpecies','addPetSpeciesCustom')">
               <option value="">Select</option>
@@ -3698,7 +4807,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Breed</label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo htmlspecialchars($adoptData['breed'] ?? '-'); ?></p>
+            <p class="adoption-readonly-value"><?php echo htmlspecialchars($adoptData['breed'] ?? '-'); ?></p>
           <?php else: ?>
             <input type="text" name="breed" class="sd-input" placeholder="e.g. Aspin" />
           <?php endif; ?>
@@ -3706,7 +4815,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Gender <span class="req">*</span></label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo ucfirst(htmlspecialchars($adoptData['gender'] ?? '')); ?></p>
+            <p class="adoption-readonly-value"><?php echo ucfirst(htmlspecialchars($adoptData['gender'] ?? '')); ?></p>
           <?php else: ?>
             <select name="gender" class="sd-input" required>
               <option value="">Select</option>
@@ -3718,7 +4827,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Age (years)</label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo htmlspecialchars((string)($adoptData['age'] ?? '')); ?> yr<?php echo ($adoptData['age'] ?? 0) > 1 ? 's' : ''; ?></p>
+            <p class="adoption-readonly-value"><?php echo htmlspecialchars((string)($adoptData['age'] ?? '')); ?> yr<?php echo ($adoptData['age'] ?? 0) > 1 ? 's' : ''; ?></p>
           <?php else: ?>
             <input type="number" name="age" min="0" class="sd-input" placeholder="e.g. 2" />
           <?php endif; ?>
@@ -3726,7 +4835,7 @@ if (!empty($adoptionListings)) {
         <div class="sd-field">
           <label class="sd-label">Weight (kg)</label>
           <?php if ($showAdoptModal): ?>
-            <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo htmlspecialchars((string)($adoptData['weight'] ?? '')); ?> kg</p>
+            <p class="adoption-readonly-value"><?php echo htmlspecialchars((string)($adoptData['weight'] ?? '')); ?> kg</p>
           <?php else: ?>
             <input type="number" name="weight" step="0.1" class="sd-input" placeholder="e.g. 5.5" />
           <?php endif; ?>
@@ -3735,7 +4844,7 @@ if (!empty($adoptionListings)) {
       <div class="sd-field sd-field-full">
         <label class="sd-label">Color / Markings</label>
         <?php if ($showAdoptModal): ?>
-          <p style="padding:8px 0;color:#18181b;font-weight:500;font-size:14px;"><?php echo htmlspecialchars($adoptData['color'] ?? '-'); ?></p>
+          <p class="adoption-readonly-value"><?php echo htmlspecialchars($adoptData['color'] ?? '-'); ?></p>
         <?php else: ?>
           <input type="text" name="color" class="sd-input" placeholder="e.g. brown with white spots" />
         <?php endif; ?>
@@ -3751,7 +4860,9 @@ if (!empty($adoptionListings)) {
       <?php if ($showAdoptModal && !empty($adoptData['photo'])): ?>
         <div class="sd-field sd-field-full">
           <label class="sd-label">Pet Photo</label>
-          <p style="margin:0;font-size:0.8rem;color:#71717a;">Photo from pet listing will be used.</p>
+          <div class="adoption-readonly-photo">
+            <img src="<?php echo htmlspecialchars($adoptData['photo']); ?>" alt="<?php echo htmlspecialchars($adoptData['name'] ?? 'Pet'); ?>">
+          </div>
         </div>
       <?php else: ?>
       <div class="sd-field sd-field-full">
@@ -3762,7 +4873,7 @@ if (!empty($adoptionListings)) {
             <span>Upload a photo of your pet</span>
           </div>
           <img id="addPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
-          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
+          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onclick="event.stopPropagation()" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
         </div>
       </div>
       <?php endif; ?>
@@ -3802,7 +4913,7 @@ if (!empty($adoptionListings)) {
               <span>Upload a new photo</span>
             </div>
             <img id="editPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
-            <input type="file" name="photo" accept="image/*" id="editPetPhoto" onchange="previewPetImage(this, 'editPetPhotoBox', 'editPetPhotoImg')" />
+            <input type="file" name="photo" accept="image/*" id="editPetPhoto" onclick="event.stopPropagation()" onchange="previewPetImage(this, 'editPetPhotoBox', 'editPetPhotoImg')" />
           </div>
         </div>
       </div>
@@ -4116,6 +5227,8 @@ window.__petList = <?php
 
     function renderPagination(total) {
       if (!pag) return;
+      var tableArea = document.getElementById('reportTable')?.closest('.appt-db-table-area');
+      if (tableArea) tableArea.style.minHeight = Math.max(480, 40 + (PER_PAGE * 56)) + 'px';
       var tp = Math.max(1, Math.ceil(total / PER_PAGE));
       if (currentPage > tp) currentPage = tp;
       if (currentPage < 1) currentPage = 1;
@@ -4225,35 +5338,61 @@ window.__petList = <?php
   <div class="rpt-drawer-head">
     <div style="min-width:0;">
       <h2 class="rpt-drawer-title">Report Details</h2>
-      <p class="rpt-drawer-ref" id="rdHeadType"></p>
+      <p class="rpt-drawer-ref" id="rdHeadType">Review report information and case details.</p>
     </div>
     <button type="button" class="rpt-drawer-close" onclick="closeReportDrawer()" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
   <div class="rpt-drawer-body">
 
-    <p class="pet-drawer-section-title">Report Information</p>
-    <div class="pet-drawer-info rpt-info-3col">
-      <div class="pet-drawer-info-item"><div class="k">Date Submitted</div><div class="v" id="rdDate"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Location</div><div class="v" id="rdLocation"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Description</div><div class="v" id="rdDescription"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full" id="rdPhotoBlock" style="display:none;"><div class="k">Attached Photos</div><div class="v"><div class="rpt-photos" id="rdPhotos"></div></div></div>
+    <div class="rpt-tabs">
+      <button type="button" class="rpt-tab active" data-tab="details" onclick="rdDetailGo('details')">Details</button>
+      <button type="button" class="rpt-tab" data-tab="attachments" onclick="rdDetailGo('attachments')">Attachments</button>
     </div>
 
-    <p class="pet-drawer-section-title">Status</p>
-    <div id="rdTimeline" style="margin-bottom:1rem;"></div>
-    <div class="rpt-detail-block" id="rdResolution" style="display:none;margin-top:0.75rem;">
-      <div class="pet-drawer-info-item"><div class="k">Resolution</div><div class="v" id="rdResolutionText"></div></div>
+    <div class="rpt-detail-body active" data-tab="details">
+      <p class="pet-drawer-section-title">Report Information</p>
+      <div class="pet-drawer-info">
+        <div class="pet-drawer-info-item"><div class="k">Date Submitted</div><div class="v" id="rdDate"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Incident Date</div><div class="v" id="rdIncidentDate"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Location</div><div class="v" id="rdLocation"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Report Type</div><div class="v" id="rdReportType"></div></div>
+      </div>
+
+      <p class="pet-drawer-section-title">Animal Information</p>
+      <div class="pet-drawer-info">
+        <div class="pet-drawer-info-item"><div class="k">Animal Type</div><div class="v" id="rdAnimalType"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Breed / Appearance</div><div class="v" id="rdAnimalBreed"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Estimated Number of Animals</div><div class="v" id="rdAnimalCount"></div></div>
+        <div class="pet-drawer-info-item"><div class="k">Animal Behavior</div><div class="v" id="rdAnimalBehavior"></div></div>
+      </div>
+
+      <p class="pet-drawer-section-title">Incident Details</p>
+      <div class="pet-drawer-info">
+        <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Description</div><div class="v" id="rdIncident"></div></div>
+      </div>
+
+      <p class="pet-drawer-section-title">Status</p>
+      <div id="rdTimeline" style="margin-bottom:1rem;"></div>
+      <div class="rpt-detail-block" id="rdResolution" style="display:none;margin-top:0.75rem;">
+        <div class="pet-drawer-info-item"><div class="k">Resolution</div><div class="v" id="rdResolutionText"></div></div>
+      </div>
+
+      <div class="rpt-next">
+        <div class="rpt-next-title" id="rdNextTitle"><i class="fas fa-info-circle"></i> What happens next?</div>
+        <ol id="rdNextList">
+          <li>Your report is submitted to your barangay for review.</li>
+          <li>DCVS reviews the report and validates the case.</li>
+          <li>The case is handled or scheduled for action.</li>
+          <li>You receive an update when the report is resolved.</li>
+        </ol>
+      </div>
     </div>
 
-    <p class="pet-drawer-section-title" id="rdNextSection">What happens next?</p>
-    <div class="rpt-next">
-      <div class="rpt-next-title" id="rdNextTitle"><i class="fas fa-info-circle"></i> What happens next?</div>
-      <ol id="rdNextList">
-        <li>Your report is submitted to your barangay for review.</li>
-        <li>DCVS reviews the report and validates the case.</li>
-        <li>The case is handled or scheduled for action.</li>
-        <li>You receive an update when the report is resolved.</li>
-      </ol>
+    <div class="rpt-detail-body" data-tab="attachments">
+      <p class="pet-drawer-section-title">Attached Photos & Videos</p>
+      <div class="pet-drawer-info">
+        <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="v"><div class="rpt-photos" id="rdPhotos"></div></div></div>
+      </div>
     </div>
   </div>
   <div class="rpt-drawer-foot">
@@ -4266,23 +5405,64 @@ window.__petList = <?php
 <script>
 window.__reportList = <?php
   $jsonReports = [];
+  // Animal values submitted by the multi-step form (see submit-report-page.php)
+  $knownAnimalTypes = ['dog', 'cat', 'bird', 'horse', 'goat', 'other'];
   foreach ($reports as $report) {
+      $rawDescription = trim((string)($report['description'] ?? ''));
+      $hasStructuredFields = ($report['animal_type'] ?? '') !== '';
+      // Legacy reports stored the animal fields in one description string.
+      $animalType = (string)($report['animal_type'] ?? '');
+      $animalBreed = (string)($report['animal_breed'] ?? '');
+      $animalCount = (string)($report['animal_count'] ?? '');
+      $animalBehavior = (string)($report['animal_behavior'] ?? '');
+      $incidentDescription = $rawDescription;
+      if (!$hasStructuredFields && $rawDescription !== '') {
+          $segments = preg_split('/\s+-\s+/', $rawDescription, 5);
+          if (count($segments) === 5
+              && in_array(strtolower(trim($segments[0])), $knownAnimalTypes, true)
+              && preg_match('/^(\d+|\d+\s*-\s*\d+|\d+\+)$/', trim($segments[2]))) {
+              $animalType = trim($segments[0]);
+              $animalBreed = trim($segments[1]);
+              $animalCount = trim($segments[2]);
+              $animalBehavior = trim($segments[3]);
+              $incidentDescription = trim($segments[4]);
+          }
+      }
       $rt = strtolower($report['report_type']);
       $jsonReports[] = [
           'id' => (int)$report['report_id'],
           'ref' => $report['reference_id'] ?? '#RPT-' . str_pad($report['report_id'], 4, '0', STR_PAD_LEFT),
           'type' => ($knownReportTypes[$rt] ?? ucfirst($report['report_type'])) . ' Report',
+          'typeLabel' => $knownReportTypes[$rt] ?? ucfirst($report['report_type']),
           'typeKey' => $rt,
           'urgency' => $report['urgency_level'] ?? 'medium',
           'createdRaw' => date('Y-m-d\TH:i', strtotime($report['created_at'])),
+          'incidentRaw' => !empty($report['incident_at']) ? date('Y-m-d\TH:i', strtotime($report['incident_at'])) : date('Y-m-d\TH:i', strtotime($report['created_at'])),
           'location' => $report['location_address'] ?? '-',
           'date' => date('F d, Y', strtotime($report['created_at'])),
-          'description' => $report['description'] ?? '',
+          'incidentDate' => date('F d, Y', strtotime(!empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'])),
+          'description' => $rawDescription,
+          'animalType' => $animalType,
+          'animalBreed' => $animalBreed,
+          'animalCount' => $animalCount,
+          'animalBehavior' => $animalBehavior,
+          'incidentDescription' => $incidentDescription,
           'photo' => $report['photo_url'] ?? '',
+          'video' => $report['video_url'] ?? '',
           'status' => $report['status'],
           'statusLabel' => rptStatusLabel($report['status']),
           'statusClass' => rptStatusClass($report['status']),
-          'resolution' => $report['status'] === 'resolved' ? 'This report has been resolved by DCVS.' : '',
+          'resolution' => (string)($report['resolution_details'] ?? ''),
+          'responseState' => (string)($report['response_state'] ?? ''),
+          'responseMode' => (string)($report['response_mode'] ?? ''),
+          'responseDeadline' => (string)($report['response_deadline'] ?? ''),
+          'progressDeadline' => (string)($report['progress_deadline'] ?? ''),
+          'turnoverDeadline' => (string)($report['turnover_deadline'] ?? ''),
+          'holdingLocation' => (string)($report['holding_location'] ?? ''),
+          'animalDisposition' => (string)($report['animal_disposition'] ?? ''),
+          'turnoverStatus' => (string)($report['turnover_status'] ?? ''),
+          'turnoverDueAt' => (string)($report['turnover_due_at'] ?? ''),
+          'turnoverReceivedAt' => (string)($report['turnover_received_at'] ?? ''),
       ];
   }
   echo json_encode($jsonReports);
@@ -4312,10 +5492,9 @@ window.__reportList = <?php
   }
 
   function applyNextSteps(status) {
-    var section = document.getElementById('rdNextSection');
     var title = document.getElementById('rdNextTitle');
     var list = document.getElementById('rdNextList');
-    if (!section || !title || !list) return;
+    if (!title || !list) return;
     var items = [];
     var titleText = 'What happens next?';
     if (status === 'resolved') {
@@ -4349,24 +5528,68 @@ window.__reportList = <?php
         'You\u2019ll receive an update when the case moves to the next stage.'
       ];
     }
-    section.textContent = titleText;
     title.innerHTML = '<i class="fas fa-info-circle"></i> ' + titleText;
     list.innerHTML = items.map(function(t) { return '<li>' + t + '</li>'; }).join('');
   }
+
+  var rdTab = 'details';
+  function rdRefreshTabs() {
+    document.querySelectorAll('#rptDrawer .rpt-tab').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-tab') === rdTab);
+    });
+    document.querySelectorAll('#rptDrawer .rpt-detail-body').forEach(function(b) {
+      b.classList.toggle('active', b.getAttribute('data-tab') === rdTab);
+    });
+  }
+  window.rdDetailGo = function(t) { rdTab = t; rdRefreshTabs(); };
 
   window.openReportDetails = function(id) {
     var r = reportIndex[id];
     if (!r) return;
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
-    set('rdHeadType', r.type);
-    set('rdDate', r.date);
-    set('rdLocation', r.location);
-    set('rdDescription', r.description);
+    var orDash = function(val) {
+      var s = (val === null || val === undefined) ? '' : String(val).trim();
+      return s === '' ? '-' : s;
+    };
+    set('rdDate', orDash(r.date));
+    set('rdIncidentDate', orDash(r.incidentDate || r.date));
+    set('rdLocation', orDash(r.location));
+    set('rdReportType', orDash(r.typeLabel));
+    set('rdAnimalType', orDash(r.animalType));
+    set('rdAnimalBreed', orDash(r.animalBreed));
+    set('rdAnimalCount', orDash(r.animalCount));
+    set('rdAnimalBehavior', orDash(r.animalBehavior));
+    set('rdIncident', orDash(r.incidentDescription));
     var badge = document.getElementById('rdBadge');
     if (badge) badge.className = 'rpt-status-badge ' + r.statusClass;
     set('rdBadgeText', r.statusLabel);
     var tlEl = document.getElementById('rdTimeline');
-    if (tlEl) tlEl.innerHTML = buildTimeline(r.status);
+    if (tlEl) {
+      var responseLabels = {
+        awaiting_dcvs_decision:'Pending DCVS review', dcvs_dispatch:'DCVS team assigned',
+        barangay_response_approved:'Barangay response approved', barangay_responding:'Barangay is responding',
+        animal_secured:'Animal secured by barangay', awaiting_turnover:'Awaiting turnover to DCVS',
+        turned_over:'Turned over to DCVS', dcvs_processing:'DCVS processing',
+        unable_to_locate:'Unable to locate', escalated_to_dcvs:'Escalated to DCVS',
+        returned_to_barangay:'Returned to barangay', closed_not_actionable:'Closed — not actionable',
+        resolved:'Incident resolved'
+      };
+      var responseLabel = responseLabels[r.responseState];
+      var turnoverLabels = { pending:'For Turnover — awaiting DCVS receipt', receipt_confirmed:'Turnover Completed', cancelled:'Turnover Cancelled' };
+      var turnoverLabel = turnoverLabels[r.turnoverStatus] || '';
+      var nextDeadline = r.responseDeadline || r.progressDeadline || '';
+      var deadlineOverdue = nextDeadline && new Date(nextDeadline.replace(' ', 'T')).getTime() < Date.now();
+      tlEl.innerHTML = buildTimeline(r.status) + (responseLabel
+        ? '<div class="rpt-response-tracker" role="status" style="margin-top:12px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:14px;font-weight:500;">' +
+          '<strong>Case update:</strong> ' + responseLabel +
+          (r.status === 'resolved' && turnoverLabel ? '<br><span style="font-weight:500;">' + turnoverLabel + '</span>' : '') +
+          (r.status !== 'resolved' && nextDeadline ? '<br><span style="font-weight:400;' + (deadlineOverdue ? 'color:#b91c1c;' : '') + '">' +
+            (deadlineOverdue ? 'Response deadline overdue: ' : 'Response target: ') + nextDeadline + '</span>' : '') +
+          (r.holdingLocation && ['animal_secured','awaiting_turnover','turned_over'].indexOf(r.responseState) !== -1
+            ? '<br><span style="font-weight:400;">Holding location: ' + r.holdingLocation.replace(/[&<>"']/g, function (character) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]); }) + '</span>' : '') +
+          (r.turnoverReceivedAt ? '<br><span style="font-weight:400;">DCVS receipt confirmed: ' + r.turnoverReceivedAt + '</span>' : '') +
+          '</div>' : '');
+    }
     var resolved = r.status === 'resolved';
     var res = document.getElementById('rdResolution');
     if (resolved) {
@@ -4376,13 +5599,16 @@ window.__reportList = <?php
       res.style.display = 'none';
     }
     applyNextSteps(r.status);
-    var pb = document.getElementById('rdPhotoBlock');
+    var attachmentHtml = '';
     if (r.photo) {
-      pb.style.display = '';
-      document.getElementById('rdPhotos').innerHTML = '<div class="rpt-photo-thumb"><img src="' + r.photo + '" alt="Report photo" onclick="viewReportImage(\'' + r.photo + '\')"></div>';
-    } else {
-      pb.style.display = 'none';
+      attachmentHtml += '<div class="rpt-photo-thumb"><img src="' + r.photo + '" alt="Report photo" onclick="viewReportImage(\'' + r.photo + '\')"></div>';
     }
+    if (r.video) {
+      attachmentHtml += '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + r.video + '" controls playsinline preload="metadata"></video></div>';
+    }
+    document.getElementById('rdPhotos').innerHTML = attachmentHtml || '<p class="rpt-photo-none">No attachments.</p>';
+    rdTab = 'details';
+    rdRefreshTabs();
     document.getElementById('rptDrawer').classList.add('open');
     document.getElementById('rptDrawerOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -4476,6 +5702,8 @@ window.__reportList = <?php
 
     function renderPagination(total) {
       if (!pag) return;
+      var tableArea = document.getElementById('petTable')?.closest('.appt-db-table-area');
+      if (tableArea) tableArea.style.minHeight = Math.max(480, 40 + (PER_PAGE * 56)) + 'px';
       var tp = Math.max(1, Math.ceil(total / PER_PAGE));
       if (currentPage > tp) currentPage = tp;
       if (currentPage < 1) currentPage = 1;
@@ -4510,46 +5738,14 @@ window.__reportList = <?php
     window.RPT.view = function(id) { openReportDetails(id); };
     window.RPT.archive = function(id) { archiveReport(id); };
     window.RPT.resubmit = function() {
-      var id = window.__currentReportId;
-      var r = reportIndex[id];
-      if (!r) return;
-      closeReportDrawer();
-      openSubmitReportModal();
-      var title = document.getElementById('submitReportTitle');
-      if (title) title.textContent = 'Resubmit a Report';
-      var desc = document.getElementById('submitReportDesc');
-      if (desc) desc.textContent = 'Review your details and resubmit the report to DCVS.';
-      var form = document.getElementById('submitReportForm');
-      if (!form) return;
-      rptShowStep(1);
-      var typeEl = form.querySelector('input[name="report_type"][value="' + (r.typeKey || '') + '"]');
-      if (typeEl) typeEl.checked = true;
-      var urg = form.querySelector('select[name="urgency"]');
-      if (urg) urg.value = r.urgency || 'medium';
-      var loc = form.querySelector('input[name="location"]');
-      if (loc) loc.value = (r.location && r.location !== '-') ? r.location : '';
-      var dt = form.querySelector('input[name="report_datetime"]');
-      if (dt) dt.value = r.createdRaw || '';
-      var rdesc = r.description || '';
-      var sepIdx = rdesc.indexOf(' - ');
-      var animalDesc = sepIdx !== -1 ? rdesc.substring(0, sepIdx) : rdesc;
-      var detailDesc = sepIdx !== -1 ? rdesc.substring(sepIdx + 3) : '';
-      var ad = form.querySelector('input[name="animal_desc"]');
-      if (ad) ad.value = animalDesc;
-      var dd = form.querySelector('textarea[name="description"]');
-      if (dd) dd.value = detailDesc;
-      var ph = form.querySelector('input[name="photo_url"]');
-      if (!ph) { ph = document.createElement('input'); ph.type = 'hidden'; ph.name = 'photo_url'; form.appendChild(ph); }
-      ph.value = r.photo || '';
-      var preview = document.getElementById('reportPhotoPreview');
-      if (preview) {
-        if (r.photo) {
-          preview.style.display = 'block';
-          preview.querySelector('img').src = r.photo;
-        } else {
-          preview.style.display = 'none';
-        }
+      var report = reportIndex[window.__currentReportId];
+      if (report) {
+        try {
+          sessionStorage.setItem('dcvsResubmitReport', JSON.stringify(report));
+        } catch (e) {}
       }
+      closeReportDrawer();
+      window.location.href = 'submit-report-page.php?resubmit=1';
     };
     window.RPT.refresh = function() {
       var t2 = document.getElementById('reportTable');
@@ -4598,139 +5794,14 @@ window.__reportList = <?php
     el = document.getElementById('rptInProgress'); if (el) el.textContent = inProg;
     el = document.getElementById('rptResolved'); if (el) el.textContent = res;
   }
+  window.RPT.refreshSummary = computeSummary;
   computeSummary();
 })();
 </script>
 
 <script>
-// �"?�"? Submit Report wizard �"?�"?
-var __rptCurrentStep = 1;
-function rptShowStep(n) {
-  var form = document.getElementById('submitReportForm');
-  if (!form) return;
-  var total = 4;
-  __rptCurrentStep = n;
-  form.querySelectorAll('.rpt-form-step').forEach(function(s) {
-    s.style.display = (parseInt(s.getAttribute('data-step')) === n) ? '' : 'none';
-  });
-  form.querySelectorAll('.rpt-step-indicator .rpt-step').forEach(function(s) {
-    var sn = parseInt(s.getAttribute('data-step'));
-    s.classList.toggle('active', sn === n);
-    s.classList.toggle('done', sn < n);
-  });
-  var backBtn = document.getElementById('rptStepBack');
-  var nextBtn = document.getElementById('rptStepNext');
-  var submitBtn = document.getElementById('rptStepSubmit');
-  if (backBtn) backBtn.style.display = n > 1 ? '' : 'none';
-  if (nextBtn) nextBtn.style.display = n < total ? '' : 'none';
-  if (submitBtn) submitBtn.style.display = n === total ? '' : 'none';
-}
-function openSubmitReportModal() {
-  var form = document.getElementById('submitReportForm');
-  if (form) form.reset();
-  rptShowStep(1);
-  var preview = document.getElementById('reportPhotoPreview');
-  if (preview) preview.style.display = 'none';
-  var title = document.getElementById('submitReportTitle');
-  if (title) title.textContent = 'Submit a Report';
-  var desc = document.getElementById('submitReportDesc');
-  if (desc) desc.textContent = 'Report stray, rabies or animal welfare concerns to DCVS.';
-  openModal('submitReportModal');
-}
-function rptStep(dir) {
-  var form = document.getElementById('submitReportForm');
-  var next = __rptCurrentStep + dir;
-  var total = 4;
-  if (next < 1 || next > total) return;
-  if (dir > 0) {
-    var stepEl = form.querySelector('.rpt-form-step[data-step="' + __rptCurrentStep + '"]');
-    var inputs = stepEl ? stepEl.querySelectorAll('input, select, textarea') : [];
-    var valid = true;
-    inputs.forEach(function(inp) {
-      if (inp.hasAttribute('required') && !inp.value.trim()) valid = false;
-      if (inp.type === 'radio' && inp.name) {
-        var group = form.querySelectorAll('input[name="' + inp.name + '"]');
-        var checked = Array.prototype.some.call(group, function(r) { return r.checked; });
-        if (!checked) valid = false;
-      }
-    });
-    if (!valid) {
-      showToast('Please complete the required fields before continuing.', 'error');
-      return;
-    }
-  }
-  rptShowStep(next);
-}
-function previewPetImage(input, boxId, imgId) {
-  var box = document.getElementById(boxId);
-  var img = document.getElementById(imgId);
-  if (!img) return;
-  if (input.files && input.files[0]) {
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      img.src = e.target.result;
-      img.style.display = 'block';
-      if (box) {
-        box.classList.add('has-image');
-        var ph = box.querySelector('.upload-placeholder');
-        if (ph) ph.style.display = 'none';
-      }
-      input.style.display = 'none';
-    };
-    reader.readAsDataURL(input.files[0]);
-  } else {
-    img.style.display = 'none';
-    if (box) {
-      box.classList.remove('has-image');
-      var ph = box.querySelector('.upload-placeholder');
-      if (ph) ph.style.display = '';
-    }
-    input.style.display = '';
-  }
-}
-function previewReportPhoto(input, previewId, imgId) {
-  var area = input.closest('.rpt-upload-area') || document.getElementById(previewId);
-  var img = document.getElementById(imgId || (previewId || 'reportPhotoPreview'));
-  if (!img) return;
-  if (input.files && input.files[0]) {
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      img.src = e.target.result;
-      img.style.display = 'block';
-      if (area) {
-        var ph = area.querySelectorAll('i, span');
-        ph.forEach(function(el) { if (el !== img) el.style.display = 'none'; });
-        area.style.border = 'none';
-        area.style.background = 'transparent';
-        area.style.padding = '0';
-      }
-      input.style.display = 'none';
-    };
-    reader.readAsDataURL(input.files[0]);
-  } else {
-    img.style.display = 'none';
-    if (area) {
-      var ph = area.querySelectorAll('i, span');
-      ph.forEach(function(el) { if (el !== img) el.style.display = ''; });
-      area.style.border = '';
-      area.style.background = '';
-      input.style.display = '';
-    }
-  }
-}
-document.addEventListener('DOMContentLoaded', function() {
-  var form = document.getElementById('submitReportForm');
-  if (form) {
-    form.addEventListener('submit', function() {
-      var typeEl = form.querySelector('input[name="report_type"]:checked');
-      if (!typeEl) { showToast('Please select a report type.', 'error'); return false; }
-    });
-  }
-});
-</script>
 
-<script>
-// �"?�"? Appointments table (search/filter/sort/paginate) �"?�"?
+// ï¿½"?ï¿½"? Appointments table (search/filter/sort/paginate) ï¿½"?ï¿½"?
 window.APPT = window.APPT || {};
 
 (function() {
@@ -4805,6 +5876,8 @@ window.APPT = window.APPT || {};
 
   function renderPagination(total) {
     if (!pag) return;
+    var tableArea = document.getElementById('apptTable')?.closest('.appt-db-table-area');
+    if (tableArea) tableArea.style.minHeight = Math.max(480, 40 + (PER_PAGE * 56)) + 'px';
     var tp = Math.max(1, Math.ceil(total / PER_PAGE));
     if (currentPage > tp) currentPage = tp;
     if (currentPage < 1) currentPage = 1;
@@ -4845,11 +5918,61 @@ window.APPT = window.APPT || {};
     }
     return apptIndex[id];
   }
+  window.fillAppointmentEditForm = function(a) {
+    a = a || {};
+    var set = function(id, v) { var el = document.getElementById(id); if (el) el.value = (v == null ? '' : v); };
+    var ensureOption = function(selId, value, label) {
+      var sel = document.getElementById(selId);
+      if (!sel || !value) return;
+      if (!sel.querySelector('option[value="' + value + '"]')) {
+        var o = document.createElement('option');
+        o.value = value;
+        o.textContent = label || value;
+        sel.appendChild(o);
+      }
+    };
+    var type = String(a.service || '').toLowerCase();
+    var time = String(a.timeRaw || '').substring(0, 5);
+    ensureOption('editAppointmentType', type, a.service || type);
+    ensureOption('editAppointmentTime', time, time);
+    set('editAppointmentId', a.id != null ? a.id : '');
+    set('editAppointmentType', type);
+    set('editAppointmentUrgency', a.urgency || 'routine');
+    set('editAppointmentPet', a.petId != null ? a.petId : '');
+    set('editAppointmentDate', a.dateRaw || '');
+    set('editAppointmentTime', time);
+    set('editAppointmentNotes', (a.notes && a.notes !== '-') ? a.notes : '');
+  };
+  window.APPT.editById = function(id) {
+    var a = getAppt(id);
+    if (!a || a.status !== 'pending') return;
+    window.openAppointmentForm(a, 'edit');
+  };
+  window.APPT.rescheduleById = function(id) {
+    var a = getAppt(id);
+    if (!a || (a.status !== 'scheduled' && a.status !== 'rescheduled')) return;
+    window.openAppointmentForm(a, 'reschedule');
+  };
+  window.openAppointmentForm = function(a, action) {
+    window.fillAppointmentEditForm(a);
+    var title = document.querySelector('#editAppointmentModal .sd-dialog-title');
+    var description = document.querySelector('#editAppointmentModal .sd-dialog-description');
+    var submit = document.querySelector('#editAppointmentForm button[type="submit"]');
+    var isReschedule = action === 'reschedule';
+    if (title) title.textContent = isReschedule ? 'Reschedule Appointment' : 'Edit Appointment';
+    if (description) description.textContent = isReschedule
+      ? 'Choose a new date and time for your scheduled appointment.'
+      : 'Update your pending appointment request details below.';
+    if (submit) submit.innerHTML = isReschedule
+      ? '<i class="fas fa-calendar-alt"></i> Reschedule Appointment'
+      : '<i class="fas fa-save"></i> Update Appointment';
+    openModal('editAppointmentModal');
+  };
   var apptColors = {
     'pending': ['#fef3c7', '#92400e'],
-    'scheduled': ['#dcebe0', '#045e1f'],
+    'scheduled': ['#0E8131', '#ffffff', '#0E8131'],
     'rescheduled': ['#ede9fe', '#6d28d9'],
-    'completed': ['#e2e8f0', '#475569'],
+    'completed': ['#dbeafe', '#1e40af', '#bfdbfe'],
     'cancelled': ['#fee2e2', '#991b1b'],
     'no_show': ['#fef3c7', '#92400e']
   };
@@ -4859,8 +5982,15 @@ window.APPT = window.APPT || {};
     if (!a) return;
     window.__currentApptId = a.id;
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
-    set('adHeadService', a.service);
-    set('adHeadRef', a.ref);
+    set('adHeadPet', a.pet);
+    var avEl = document.getElementById('adAvatar');
+    if (avEl) {
+      if (a.petPhoto) {
+        avEl.innerHTML = '<img src="' + String(a.petPhoto).replace(/"/g, '&quot;') + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
+      } else {
+        avEl.textContent = (String(a.pet || '?').replace(/[^A-Za-z0-9]/g, '').substring(0, 2) || '?').toUpperCase();
+      }
+    }
     set('adRef', a.ref);
     set('adService', a.service);
     set('adPet', a.pet);
@@ -4872,15 +6002,31 @@ window.APPT = window.APPT || {};
     var pill = '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';border-color:' + (c[2] || '#e4e4e7') + ';">' + a.statusLabel + '</span>';
     var stEl = document.getElementById('adStatus');
     if (stEl) stEl.innerHTML = pill;
+    var hp = document.getElementById('adHeadStatus');
+    if (hp) {
+      hp.textContent = a.statusLabel;
+      hp.style.background = c[0];
+      hp.style.color = c[1];
+      hp.style.borderColor = c[2] || '#e4e4e7';
+    }
     var nextEl = document.getElementById('adNextList');
     if (nextEl) {
       var steps = apptNextSteps(a.status);
       nextEl.innerHTML = steps.map(function(t) { return '<li>' + t + '</li>'; }).join('');
     }
-    var changeable = ['pending', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
-    document.querySelectorAll('#apptDrawer .appt-change-btn').forEach(function(b) {
-      b.style.display = changeable ? '' : 'none';
-    });
+    var changeButton = document.getElementById('apptChangeBtn');
+    if (changeButton) {
+      var canEdit = a.status === 'pending';
+      changeButton.style.display = canEdit ? '' : 'none';
+      changeButton.textContent = 'Edit Appointment';
+      changeButton.setAttribute('data-action', 'edit');
+    }
+    var archiveButton = document.getElementById('apptArchiveBtn');
+    if (archiveButton) {
+      var canArchiveOrCancel = ['pending', 'scheduled', 'rescheduled', 'completed'].indexOf(a.status) !== -1;
+      archiveButton.style.display = canArchiveOrCancel ? '' : 'none';
+      archiveButton.textContent = a.status === 'scheduled' || a.status === 'completed' ? 'Archive Appointment' : 'Cancel Appointment';
+    }
     document.getElementById('apptDrawer').classList.add('open');
     document.getElementById('apptDrawerOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
@@ -4911,15 +6057,9 @@ window.APPT = window.APPT || {};
   window.APPT.editFromDrawer = function() {
     var id = window.__currentApptId;
     var a = getAppt(id);
-    if (!a) return;
-    document.getElementById('editAppointmentId').value = a.id;
-    document.getElementById('editAppointmentType').value = (a.service || '').toLowerCase();
-    document.getElementById('editAppointmentPet').value = a.petId || '';
-    document.getElementById('editAppointmentDate').value = a.dateRaw || '';
-    document.getElementById('editAppointmentTime').value = a.timeRaw || '';
-    document.getElementById('editAppointmentNotes').value = (a.notes && a.notes !== '-') ? a.notes : '';
+    if (!a || a.status !== 'pending') return;
     closeApptDrawer();
-    openModal('editAppointmentModal');
+    window.openAppointmentForm(a, 'edit');
   };
 
   window.closeApptDrawer = function() {
@@ -4937,9 +6077,177 @@ window.APPT = window.APPT || {};
   window.APPT.refresh = function() {
     var t2 = document.getElementById('apptTable');
     var tb2 = t2 ? t2.querySelector('tbody') : null;
-    if (tb2) { tbody = tb2; allRows = Array.prototype.slice.call(tbody.querySelectorAll('tr')); }
+    if (tb2) { table = t2; tbody = tb2; allRows = Array.prototype.slice.call(tbody.querySelectorAll('tr')); }
+    apptIndex = null;
     currentPage = 1;
     renderTable();
+    computeSummary();
+  };
+  function createPetCell(petName, photo) {
+    var cell = document.createElement('td');
+    cell.className = 'sd-td';
+    var wrapper = document.createElement('div');
+    wrapper.className = 'client-cell';
+    var avatar = document.createElement('div');
+    avatar.className = 'appt-pet-avatar';
+    if (photo) {
+      var image = document.createElement('img');
+      image.src = photo;
+      image.alt = '';
+      image.addEventListener('error', function() {
+        avatar.innerHTML = '<i class="fas fa-paw" aria-hidden="true"></i>';
+      });
+      avatar.appendChild(image);
+    } else {
+      avatar.innerHTML = '<i class="fas fa-paw" aria-hidden="true"></i>';
+    }
+    var name = document.createElement('div');
+    name.className = 'contact-main contact-normal';
+    name.textContent = petName || '-';
+    wrapper.append(avatar, name);
+    cell.appendChild(wrapper);
+    return cell;
+  }
+  window.APPT.addRequest = function(appt) {
+    var section = document.getElementById('appointments');
+    if (!section || !appt) return;
+    var tableEl = document.getElementById('apptTable');
+    if (!tableEl) {
+      var empty = section.querySelector('.rpt-empty');
+      if (empty) empty.remove();
+      var area = document.createElement('div');
+      area.className = 'appt-db-table-area dt-container';
+      area.innerHTML = '<table class="appt-table" id="apptTable"><thead><tr class="sd-tr"><th class="sd-th">Request ID</th><th class="sd-th">Service</th><th class="sd-th">Pet</th><th class="sd-th">Preferred Date</th><th class="sd-th">Preferred Time</th><th class="sd-th">Submitted Date</th><th class="sd-th">Submitted Time</th><th class="sd-th">Status</th><th class="sd-th"></th></tr></thead><tbody></tbody></table><div id="apptPagination" class="dt-pagination"></div>';
+      section.appendChild(area);
+      tableEl = document.getElementById('apptTable');
+      tbody = tableEl.querySelector('tbody');
+    }
+
+    var id = Number(appt.appointment_id);
+    if (!id || tableEl.querySelector('tr[data-id="' + id + '"]')) return;
+    var row = document.createElement('tr');
+    row.className = 'sd-tr';
+    row.setAttribute('data-id', String(id));
+    row.setAttribute('data-status', appt.status || 'pending');
+    row.setAttribute('data-service', (appt.appointment_type || '').toLowerCase());
+    row.setAttribute('data-pet', (appt.pet_name || '-').toLowerCase());
+    row.setAttribute('data-date', String(Math.floor(new Date(appt.preferred_date).getTime() / 1000)));
+    row.setAttribute('data-time', String(Math.floor(new Date('1970-01-01T' + appt.preferred_time).getTime() / 1000)));
+    row.setAttribute('data-submitted', String(Math.floor(new Date(String(appt.created_at).replace(' ', 'T')).getTime() / 1000)));
+    row.onclick = function() { window.APPT.view(id); };
+    var type = (appt.appointment_type || '').charAt(0).toUpperCase() + (appt.appointment_type || '').slice(1);
+    var when = new Date(appt.preferred_date + 'T' + appt.preferred_time);
+    var submitted = new Date(String(appt.created_at).replace(' ', 'T'));
+    var dateText = when.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    var timeText = when.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    var submittedDate = submitted.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    var submittedTime = submitted.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    var cells = [
+      appt.reference_id || ('#APT-' + String(id).padStart(4, '0')),
+      type
+    ];
+    cells.forEach(function(value) {
+      var td = document.createElement('td');
+      td.className = 'sd-td';
+      var text = document.createElement('div');
+      text.className = 'contact-main contact-normal';
+      text.textContent = value;
+      td.appendChild(text);
+      row.appendChild(td);
+    });
+    row.appendChild(createPetCell(appt.pet_name, appt.pet_photo));
+    var trailingCells = [
+      dateText,
+      timeText,
+      submittedDate,
+      submittedTime
+    ];
+    trailingCells.forEach(function(value) {
+      var td = document.createElement('td');
+      td.className = 'sd-td';
+      var text = document.createElement('div');
+      text.className = 'contact-main contact-normal';
+      text.textContent = value;
+      td.appendChild(text);
+      row.appendChild(td);
+    });
+    var statusCell = document.createElement('td');
+    statusCell.className = 'sd-td';
+    var badge = document.createElement('span');
+    badge.className = 'appt-status-pill';
+    badge.textContent = 'Pending';
+    badge.style.cssText = 'background:#fef3c7;color:#92400e;border-color:#fde68a;';
+    statusCell.appendChild(badge);
+    row.appendChild(statusCell);
+    var actionCell = document.createElement('td');
+    actionCell.className = 'sd-td sd-td-action';
+    var action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'sd-row-actions';
+    action.title = 'More options';
+    action.textContent = '...';
+    action.onclick = function(event) { event.stopPropagation(); window.APPT.view(id); };
+    actionCell.appendChild(action);
+    row.appendChild(actionCell);
+    tbody.insertBefore(row, tbody.firstChild);
+
+    window.__apptList = window.__apptList || [];
+    window.__apptList.unshift({
+      id: id,
+      ref: appt.reference_id || ('#APT-' + String(id).padStart(4, '0')),
+      service: type,
+      pet: appt.pet_name || '-',
+      petId: appt.pet_id || '',
+      petPhoto: appt.pet_photo || '',
+      date: dateText,
+      time: timeText,
+      dateRaw: appt.preferred_date,
+      timeRaw: appt.preferred_time,
+      created: submittedDate,
+      createdTime: submittedTime,
+      status: 'pending',
+      statusLabel: 'Pending',
+      notes: appt.notes || '-'
+    });
+    window.APPT.refresh();
+  };
+
+  window.APPT.updateFromRealtime = function(appt) {
+    if (!appt || !appt.appointment_id) return;
+    var id = Number(appt.appointment_id);
+    var row = document.querySelector('#apptTable tr[data-id="' + id + '"]');
+    if (!row) {
+      window.APPT.addRequest(appt);
+      return;
+    }
+    var status = appt.status || 'pending';
+    var type = (appt.appointment_type || '').charAt(0).toUpperCase() + (appt.appointment_type || '').slice(1);
+    var dt = new Date(appt.preferred_date + 'T' + appt.preferred_time);
+    var dateText = dt.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+    var timeText = dt.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+    row.setAttribute('data-status', status);
+    row.setAttribute('data-service', (appt.appointment_type || '').toLowerCase());
+    row.setAttribute('data-pet', (appt.pet_name || '-').toLowerCase());
+    row.setAttribute('data-date', String(Math.floor(dt.getTime() / 1000)));
+    var cells = row.querySelectorAll('td');
+    if (cells[1]) cells[1].textContent = type;
+    var currentAppt = (window.__apptList || []).find(function(entry) { return Number(entry.id) === id; });
+    if (cells[2]) cells[2].replaceWith(createPetCell(appt.pet_name, appt.pet_photo || (currentAppt && currentAppt.petPhoto) || ''));
+    if (cells[3]) cells[3].textContent = dateText;
+    if (cells[4]) cells[4].textContent = timeText;
+    var badge = row.querySelector('.appt-status-pill');
+    var colors = { pending:['#fef3c7','#92400e','#fde68a'], scheduled:['#0E8131','#ffffff','#0E8131'], rescheduled:['#ede9fe','#6d28d9','#ddd6fe'], completed:['#dbeafe','#1e40af','#bfdbfe'], cancelled:['#fee2e2','#991b1b','#fecaca'], no_show:['#fef3c7','#92400e','#fde68a'] };
+    var style = colors[status] || ['#f1f5f9','#64748b','#e4e4e7'];
+    if (badge) {
+      badge.textContent = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+      badge.style.background = style[0];
+      badge.style.color = style[1];
+      badge.style.borderColor = style[2];
+    }
+    var list = window.__apptList || [];
+    var item = list.find(function(entry) { return Number(entry.id) === id; });
+    if (item) Object.assign(item, { service:type, pet:appt.pet_name || '-', petPhoto:appt.pet_photo || item.petPhoto || '', date:dateText, time:timeText, dateRaw:appt.preferred_date, timeRaw:appt.preferred_time, status:status, statusLabel:badge ? badge.textContent : status });
+    window.APPT.refresh();
   };
 
   function computeSummary() {
@@ -4980,108 +6288,7 @@ window.APPT = window.APPT || {};
 })();
 </script>
 
-<!-- Submit Report Modal -->
-<div class="modal" id="submitReportModal">
-  <form class="modal-form sd-dialog" id="submitReportForm" action="submit-report.php" method="POST" enctype="multipart/form-data">
-    <input type="hidden" name="return_section" value="my-reports">
-    <div class="sd-dialog-content" role="dialog" aria-modal="true" style="max-width:620px;">
-      <button type="button" class="sd-dialog-close" onclick="closeModal('submitReportModal')" aria-label="Close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
-      <div class="sd-dialog-header">
-        <h2 class="sd-dialog-title" id="submitReportTitle">Submit a Report</h2>
-        <p class="sd-dialog-description" id="submitReportDesc">Report stray, rabies or animal welfare concerns to DCVS.</p>
-      </div>
-      <div class="sd-field-group">
-        <div class="rpt-step-indicator">
-          <div class="rpt-step active" data-step="1"><span class="rpt-step-num">1</span><span class="rpt-step-label">What?</span></div>
-          <div class="rpt-step-line"></div>
-          <div class="rpt-step" data-step="2"><span class="rpt-step-num">2</span><span class="rpt-step-label">Where?</span></div>
-          <div class="rpt-step-line"></div>
-          <div class="rpt-step" data-step="3"><span class="rpt-step-num">3</span><span class="rpt-step-label">Details</span></div>
-          <div class="rpt-step-line"></div>
-          <div class="rpt-step" data-step="4"><span class="rpt-step-num">4</span><span class="rpt-step-label">Photos</span></div>
-        </div>
-
-        <!-- Step 1: What happened? -->
-        <div class="rpt-form-step" data-step="1">
-          <p class="rpt-step-heading">What would you like to report?</p>
-          <div class="rpt-type-grid">
-            <?php
-            $typeOpts = ['stray' => ['Stray Animal', 'fas fa-paw'], 'injured' => ['Injured Animal', 'fas fa-heart-broken'], 'rabies' => ['Rabies Concern', 'fas fa-exclamation-triangle'], 'dead' => ['Dead Animal', 'fas fa-skull']];
-            foreach ($typeOpts as $val => $t):
-            ?>
-            <label class="rpt-type-card">
-              <input type="radio" name="report_type" value="<?php echo $val; ?>" required>
-              <span class="rpt-type-icon"><i class="<?php echo $t[1]; ?>"></i></span>
-              <span class="rpt-type-text"><?php echo $t[0]; ?></span>
-            </label>
-            <?php endforeach; ?>
-          </div>
-          <div class="form-group" style="margin-top:1rem;">
-            <label>How urgent is this? <span class="req">*</span></label>
-            <select name="urgency" class="modal-form-control">
-              <option value="low">Low - Not urgent</option>
-              <option value="medium" selected>Medium - Needs attention within 24 hours</option>
-              <option value="high">High - Immediate attention required</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Step 2: Where? -->
-        <div class="rpt-form-step" data-step="2" style="display:none;">
-          <p class="rpt-step-heading">Where did it happen?</p>
-          <div class="form-group">
-            <label>Location (Barangay / Street) <span class="req">*</span></label>
-            <input type="text" name="location" class="modal-form-control" placeholder="e.g. Brgy. <?php echo htmlspecialchars($barangayName); ?>, near the market" required />
-          </div>
-          <div class="form-group">
-            <label>When did it happen? <span class="req">*</span></label>
-            <input type="datetime-local" name="report_datetime" id="reportDatetime" class="modal-form-control" min="<?php echo date('Y-m-d\TH:i'); ?>" required />
-          </div>
-        </div>
-
-        <!-- Step 3: Details -->
-        <div class="rpt-form-step" data-step="3" style="display:none;">
-          <p class="rpt-step-heading">Describe the situation</p>
-          <div class="form-group">
-            <label>Animal Description <span class="req">*</span></label>
-            <input type="text" name="animal_desc" class="modal-form-control" placeholder="e.g. medium-sized brown dog, no collar" required />
-          </div>
-          <div class="form-group">
-            <label>Detailed Description <span class="req">*</span></label>
-            <textarea name="description" rows="4" class="modal-form-control" placeholder="Describe what you observed, including the animal's condition, behavior, and any immediate actions taken..." required></textarea>
-          </div>
-        </div>
-
-        <!-- Step 4: Photos -->
-        <div class="rpt-form-step" data-step="4" style="display:none;">
-          <p class="rpt-step-heading">Attach photo evidence (optional)</p>
-          <div class="rpt-upload-area" onclick="document.getElementById('reportPhotoInput').click()">
-            <i class="fas fa-cloud-upload-alt"></i>
-            <span class="rpt-upload-title">Upload photos</span>
-            <span class="rpt-upload-sub">PNG / JPG supported &#8212; max 5MB</span>
-            <input type="file" id="reportPhotoInput" name="photo" accept="image/*" onchange="previewReportPhoto(this)" style="display:none;" />
-            <img id="reportPhotoPreview" src="" alt="Photo preview &#8212; click to change photo" onclick="event.stopPropagation();document.getElementById('reportPhotoInput').click()" style="display:none;max-width:200px;max-height:200px;border-radius:8px;cursor:pointer;margin-top:8px;" title="Click to change photo" />
-          </div>
-   
-        </div>
-
-        <div class="modal-notice" style="margin-top:1rem;">
-          <i class="fas fa-info-circle"></i>
-          Your report will be sent to your <strong>barangay officer</strong> for validation before being forwarded to DCVS.
-        </div>
-      </div>
-      <div class="sd-dialog-footer">
-        <button type="button" class="sd-btn sd-btn-outline" id="rptStepBack" onclick="rptStep(-1)" style="display:none;"><i class="fas fa-arrow-left"></i> Back</button>
-        <span style="flex:1;"></span>
-        <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('submitReportModal')">Cancel</button>
-        <button type="button" class="sd-btn sd-btn-default" id="rptStepNext" onclick="rptStep(1)">Continue <i class="fas fa-arrow-right"></i></button>
-        <button type="submit" class="sd-btn sd-btn-default" id="rptStepSubmit" style="display:none;"><i class="fas fa-paper-plane"></i> Submit Report</button>
-      </div>
-    </div>
-  </form>
-</div>
+<!-- Submit Report Modal (removed â€” now uses submit-report-page.php) -->
 
 <!-- Report Image Preview Modal -->
 <div class="modal" id="reportImageModal">
@@ -5125,7 +6332,7 @@ window.APPT = window.APPT || {};
           <label>Report Type <span class="req">*</span></label>
           <select name="report_type" id="editReportType" required>
             <option value="">Select type</option>
-            <?php foreach ($knownTypes as $val => $label): ?>
+            <?php foreach (array_diff_key($knownReportTypes, ['other' => 1]) as $val => $label): ?>
             <option value="<?php echo $val; ?>"><?php echo $label; ?></option>
             <?php endforeach; ?>
           </select>
@@ -5183,12 +6390,21 @@ window.APPT = window.APPT || {};
   <div class="rpt-drawer-head">
     <div style="min-width:0;">
       <h2 class="rpt-drawer-title">Appointment Details</h2>
-      <p class="rpt-drawer-ref" id="adHeadService"></p>
-      <p class="rpt-drawer-ref" id="adHeadRef"></p>
+      <p class="rpt-drawer-ref">Review details of this appointment request.</p>
     </div>
     <button type="button" class="rpt-drawer-close" onclick="closeApptDrawer()" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
   <div class="rpt-drawer-body">
+    <div style="margin-bottom:24px;display:flex;align-items:center;gap:12px;">
+      <div id="adAvatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-family:Inter,Segoe UI,sans-serif;font-weight:600;font-size:28px;color:#64748b;">
+        <i class="fas fa-paw"></i>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+        <span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Appointed for</span>
+        <span id="adHeadPet" style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</span>
+      </div>
+      <span id="adHeadStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;border:1px solid #e4e4e7;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
+    </div>
     <p class="pet-drawer-section-title">Appointment Information</p>
     <div class="pet-drawer-info">
       <div class="pet-drawer-info-item"><div class="k">Request ID</div><div class="v" id="adRef"></div></div>
@@ -5198,10 +6414,8 @@ window.APPT = window.APPT || {};
       <div class="pet-drawer-info-item"><div class="k">Appointment Date</div><div class="v" id="adDate"></div></div>
       <div class="pet-drawer-info-item"><div class="k">Appointment Time</div><div class="v" id="adTime"></div></div>
       <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Submitted</div><div class="v" id="adCreated"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Notes</div><div class="v" id="adNotes"></div></div>
+      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Notes</div><div class="v appt-notes" id="adNotes"></div></div>
     </div>
-
-    <hr class="rpt-divider" />
 
     <div class="rpt-next">
       <div class="rpt-next-title"><i class="fas fa-info-circle"></i> What Happens Next?</div>
@@ -5209,8 +6423,8 @@ window.APPT = window.APPT || {};
     </div>
   </div>
   <div class="rpt-drawer-foot">
-    <button type="button" class="sd-btn sd-btn-outline appt-change-btn" onclick="APPT.editFromDrawer()">Reschedule Appointment</button>
-    <button type="button" class="sd-btn sd-btn-outline appt-change-btn" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel Appointment</button>
+    <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit Appointment</button>
+    <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel Appointment</button>
     <button type="button" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
   </div>
 </aside>
@@ -5223,8 +6437,10 @@ window.__apptList = <?php
           'id' => (int)$appt['appointment_id'],
           'ref' => $appt['reference_id'] ?? '#APT-' . str_pad($appt['appointment_id'], 4, '0', STR_PAD_LEFT),
           'service' => ucfirst($appt['appointment_type']),
+          'urgency' => $appt['urgency_level'] ?? 'routine',
           'pet' => $appt['pet_name'] ?? '-',
           'petId' => $appt['pet_id'] ?? '',
+          'petPhoto' => $appt['pet_photo'] ?? '',
           'date' => date('M d, Y', strtotime($appt['preferred_date'])),
           'time' => date('g:i A', strtotime($appt['preferred_time'])),
           'dateRaw' => $appt['preferred_date'],
@@ -5260,6 +6476,16 @@ window.__apptList = <?php
             <option value="">Select type</option>
             <option value="adoption">Adoption</option>
             <option value="kapon">Kapon (Spay/Neuter)</option>
+            <option value="checkup">Check-up</option>
+            <option value="deworming">Deworming</option>
+            <option value="vaccination">Vaccination</option>
+          </select>
+        </div>
+        <div class="sd-field">
+          <label class="sd-label">Priority</label>
+          <select name="urgency_level" id="editAppointmentUrgency" class="sd-input">
+            <option value="routine">Routine</option>
+            <option value="urgent">Urgent</option>
           </select>
         </div>
         <div class="sd-field">
@@ -5394,8 +6620,8 @@ window.__apptList = <?php
   #confirmModal .sd-dialog { width:100%; display:flex; justify-content:center; }
   #confirmModal .sd-dialog-content { position:relative; width:100%; max-width:400px; background:#ffffff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; }
   #confirmModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:center; align-items:center; }
-  #confirmModal .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
-  #confirmModal .sd-dialog-description { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; line-height:1.5; }
+  #confirmModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
+  #confirmModal .sd-dialog-description { margin:0; font-family:'Inter',sans-serif; font-size:14px; color:#71717a; line-height:1.5; }
   #confirmModal .sd-dialog-footer { display:flex; justify-content:center; gap:8px; }
   #confirmModal .sd-btn-danger { background:#dc2626; border-color:#dc2626; color:#fff; }
   #confirmModal .sd-btn-danger:hover { background:#b91c1c; border-color:#b91c1c; }
@@ -5413,12 +6639,6 @@ window.__apptList = <?php
       </div>
     </div>
   </div>
-</div>
-
-<!-- Toast Notification -->
-<div class="toast" id="toast">
-  <i class="fas fa-check-circle toast-icon"></i>
-  <span class="toast-msg" id="toastMsg">Action successful!</span>
 </div>
 
 <script>
@@ -5439,6 +6659,21 @@ document.addEventListener('DOMContentLoaded', function() {
 function viewPetImage(url) {
     document.getElementById('petImagePreview').src = url;
     openModal('petImageModal');
+}
+
+function previewPetImage(input, previewId, imageId) {
+  var preview = document.getElementById(previewId);
+  var image = document.getElementById(imageId);
+  if (!preview || !image || !input.files || !input.files[0]) return;
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    image.src = e.target.result;
+    image.style.display = 'block';
+    preview.classList.add('has-image');
+    var placeholder = preview.querySelector('.upload-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+  };
+  reader.readAsDataURL(input.files[0]);
 }
 
 function editPet(btn) {
@@ -5501,14 +6736,14 @@ function archiveReport(id) {
 }
 
 function editAppointment(btn) {
-    var id = btn.getAttribute('data-appointment-id');
-    document.getElementById('editAppointmentId').value = id;
-    document.getElementById('editAppointmentType').value = btn.dataset.appointmentType || '';
-    document.getElementById('editAppointmentPet').value = btn.dataset.petId || '';
-    document.getElementById('editAppointmentDate').value = btn.dataset.preferredDate || '';
-    document.getElementById('editAppointmentTime').value = btn.dataset.preferredTime || '';
-    document.getElementById('editAppointmentNotes').value = btn.dataset.notes || '';
-    openModal('editAppointmentModal');
+    window.openAppointmentForm({
+        id: btn.getAttribute('data-appointment-id'),
+        service: btn.dataset.appointmentType || '',
+        petId: btn.dataset.petId || '',
+        dateRaw: btn.dataset.preferredDate || '',
+        timeRaw: btn.dataset.preferredTime || '',
+        notes: btn.dataset.notes || ''
+    }, 'edit');
 }
 
 function archiveAppointment(id) {
@@ -5544,33 +6779,187 @@ function toggleCustomSpecies(selectId, inputId) {
     }
 }
 
-function filterArchive() {
-  var q = (document.getElementById('archiveSearch')?.value || '').toLowerCase();
-  var t = document.getElementById('archiveTypeFilter')?.value || '';
-  var counts = {
-    pet: (document.querySelector('#archive .archive-section[data-type="pet"]')?.getAttribute('data-count')) || 0,
-    report: (document.querySelector('#archive .archive-section[data-type="report"]')?.getAttribute('data-count')) || 0,
-    appointment: (document.querySelector('#archive .archive-section[data-type="appointment"]')?.getAttribute('data-count')) || 0
-  };
-  var titles = { pet: 'Archived Pets', report: 'Archived Reports', appointment: 'Archived Appointments' };
-  var title = document.getElementById('archiveSectionTitle');
-  document.querySelectorAll('#archive .archive-section').forEach(function(s) {
-    var st = s.getAttribute('data-type');
-    s.style.display = (!t || st === t) ? '' : 'none';
-  });
-  if (title) {
-    if (t && titles[t]) { title.textContent = titles[t] + ' (' + counts[t] + ')'; }
-    else { title.textContent = 'Archived Items'; }
-  }
-  document.querySelectorAll('#archive .appt-table tbody tr').forEach(function(r) {
-    var hay = (r.textContent || '').toLowerCase();
-    r.style.display = (!q || hay.includes(q)) ? '' : 'none';
+var archivePage = 1;
+var archivePerPage = 10;
+var archiveCategory = 'pet';
+
+function archiveEscape(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
 
+function archiveStatusPill(status) {
+  var key = String(status || '').toLowerCase().replace(/\s+/g, '_');
+  var colors = {
+    archived: ['#f1f5f9', '#475569', '#e2e8f0'],
+    resolved: ['#0E8131', '#ffffff', '#0E8131'],
+    scheduled: ['#0E8131', '#ffffff', '#0E8131'],
+    completed: ['#dbeafe', '#1e40af', '#bfdbfe'],
+    pending: ['#fef3c7', '#92400e', '#fde68a'],
+    cancelled: ['#fee2e2', '#991b1b', '#fecaca']
+  };
+  var c = colors[key] || ['#f4f4f5', '#52525b', '#e4e4e7'];
+  return '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';border-color:' + c[2] + ';">' + archiveEscape(status || '-') + '</span>';
+}
+
+function archivePhotoCell(row) {
+  var html = '';
+  if (row.photo) html += '<button type="button" class="sd-btn sd-btn-outline" data-archive-photo="' + archiveEscape(row.photo) + '" data-archive-category="' + row.category + '"><i class="fas fa-image"></i> View</button>';
+  if (row.video) html += (html ? ' ' : '') + '<button type="button" class="sd-btn sd-btn-outline" data-archive-video="' + archiveEscape(row.video) + '" data-archive-category="' + row.category + '"><i class="fas fa-video"></i> Video</button>';
+  if (!html) return '<span style="color:#9ca3af;font-size:0.85rem;">No photo</span>';
+  return html;
+}
+
+function archiveColumns(category) {
+  if (category === 'pet') return ['ID', 'Name', 'Species', 'Breed', 'Gender', 'Age', 'Registered', 'Archived', 'Photo'];
+  if (category === 'report') return ['ID', 'Type', 'Location', 'Submitted', 'Status', 'Attachment', 'Archived'];
+  if (category === 'appointment') return ['ID', 'Type', 'Appointment Date', 'Time', 'Status', 'Archived'];
+  return ['Category', 'ID', 'Type', 'Details', 'Date', 'Status', 'Archived'];
+}
+
+function archiveRowCells(row, category) {
+  if (category === 'pet') return [row.id, row.name, row.type, row.breed, row.gender, row.age, row.date, row.archived, archivePhotoCell(row)];
+  if (category === 'report') return [row.id, row.type, row.location, row.date, archiveStatusPill(row.status), archivePhotoCell(row), row.archived];
+  if (category === 'appointment') return [row.id, row.type, row.date, row.time || '-', archiveStatusPill(row.status), row.archived];
+  return [category === 'all' ? (row.category === 'pet' ? 'Pets' : row.category === 'report' ? 'Reports' : 'Appointments') : row.category, row.id, row.type, row.location || row.name, row.date, archiveStatusPill(row.status), row.archived];
+}
+
+function renderArchiveTable(rows, category) {
+  var tableArea = document.querySelector('#archive .archive-unified-table-area');
+  var head = document.getElementById('archiveTableHead');
+  var body = document.getElementById('archiveTableBody');
+  var pagination = document.getElementById('archivePagination');
+  if (!tableArea || !head || !body || !pagination) return;
+  tableArea.style.minHeight = Math.max(480, 40 + (archivePerPage * 56)) + 'px';
+  head.innerHTML = archiveColumns(category).map(function(label) { return '<th class="sd-th">' + label + '</th>'; }).join('');
+  var pages = Math.max(1, Math.ceil(rows.length / archivePerPage));
+  if (archivePage > pages) archivePage = pages;
+  var pageRows = rows.slice((archivePage - 1) * archivePerPage, archivePage * archivePerPage);
+  if (!pageRows.length) {
+    body.innerHTML = '<tr class="archive-empty-row"><td colspan="' + archiveColumns(category).length + '"><i class="fas fa-archive"></i>No archived ' + (category === 'all' ? 'records' : category + ' records') + '.</td></tr>';
+  } else {
+    body.innerHTML = pageRows.map(function(row) {
+      return '<tr class="sd-tr">' + archiveRowCells(row, category).map(function(cell) { return '<td class="sd-td">' + (cell && String(cell).indexOf('<') === 0 ? cell : archiveEscape(cell)); }).join('') + '</tr>';
+    }).join('');
+  }
+  body.querySelectorAll('[data-archive-photo]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      var url = button.getAttribute('data-archive-photo');
+      if (button.getAttribute('data-archive-category') === 'pet' && typeof viewPetImage === 'function') viewPetImage(url);
+      else if (typeof viewReportImage === 'function') viewReportImage(url);
+    });
+  });
+  body.querySelectorAll('[data-archive-video]').forEach(function(button) {
+    button.addEventListener('click', function() {
+      window.open(button.getAttribute('data-archive-video'), '_blank');
+    });
+  });
+  pagination.innerHTML = '<div class="dt-pagination-right">' +
+    '<div class="dt-rows"><span>Rows per page</span><select onchange="setArchivePerPage(this.value)">' +
+    [10,15,20,30,50].map(function(n) { return '<option value="' + n + '"' + (archivePerPage === n ? ' selected' : '') + '>' + n + '</option>'; }).join('') +
+    '</select></div><div class="dt-page-label">Page ' + archivePage + ' of ' + pages + '</div><div class="dt-page-btns">' +
+    '<button type="button" class="dt-page-btn" onclick="archiveGoTo(1)"' + (archivePage <= 1 ? ' disabled' : '') + ' title="Go to first page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>' +
+    '<button type="button" class="dt-page-btn" onclick="archiveGoTo(' + (archivePage - 1) + ')"' + (archivePage <= 1 ? ' disabled' : '') + ' title="Go to previous page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>' +
+    '<button type="button" class="dt-page-btn" onclick="archiveGoTo(' + (archivePage + 1) + ')"' + (archivePage >= pages ? ' disabled' : '') + ' title="Go to next page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>' +
+    '<button type="button" class="dt-page-btn" onclick="archiveGoTo(' + pages + ')"' + (archivePage >= pages ? ' disabled' : '') + ' title="Go to last page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>' +
+    '</div></div>';
+}
+
+var archiveSubtypeOptions = {
+  all: [
+    ['all', 'All Types']
+  ],
+  pet: [
+    ['all', 'All Species'], ['dog', 'Dog'], ['cat', 'Cat'], ['bird', 'Bird'], ['other', 'Other']
+  ],
+  report: [
+    ['all', 'All Types'], ['stray', 'Stray Animal'], ['cruelty', 'Animal Cruelty'], ['injury', 'Injured Animal'], ['rabies', 'Rabies Suspect']
+  ],
+  appointment: [
+    ['all', 'All Types'], ['vaccination', 'Vaccination'], ['checkup', 'Check-up'], ['sterilization', 'Sterilization']
+  ]
+};
+
+function archiveNormalizeType(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+}
+
+function archiveSubtypeMatches(row, category, subtype) {
+  if (!subtype || subtype === 'all') return true;
+  var value = archiveNormalizeType(row.subtype);
+  if (category === 'report') {
+    var reportAliases = {
+      stray: ['stray', 'stray_animal'], cruelty: ['cruelty', 'animal_cruelty'], injury: ['injury', 'injured', 'injured_animal'],
+      rabies: ['rabies', 'rabies_suspect']
+    };
+    return (reportAliases[subtype] || [subtype]).indexOf(value) !== -1;
+  }
+  if (category === 'appointment') {
+    var appointmentAliases = { checkup: ['checkup', 'check_up'], sterilization: ['sterilization', 'kapon'] };
+    return (appointmentAliases[subtype] || [subtype]).indexOf(value) !== -1;
+  }
+  return value === subtype || (subtype === 'other' && !['dog', 'cat', 'bird', 'rabbit'].includes(value));
+}
+
+function updateArchiveDetailOptions() {
+  var category = archiveCategory;
+  var select = document.getElementById('archiveDetailFilter');
+  if (!select) return;
+  select.innerHTML = (archiveSubtypeOptions[category || 'all'] || archiveSubtypeOptions.all).map(function(option) {
+    return '<option value="' + option[0] + '">' + option[1] + '</option>';
+  }).join('');
+}
+
+function archiveCategoryChanged() {
+  updateArchiveDetailOptions();
+  archivePage = 1;
+  filterArchive();
+}
+
+function archiveDetailChanged() {
+  var category = archiveCategory;
+  var detail = document.getElementById('archiveDetailFilter')?.value || 'all';
+  archivePage = 1;
+  filterArchive();
+}
+
+function getFilteredArchiveRows() {
+  var q = (document.getElementById('archiveSearch')?.value || '').toLowerCase().trim();
+  var category = archiveCategory;
+  var subtype = document.getElementById('archiveDetailFilter')?.value || 'all';
+  return (window.__residentArchiveRows || []).filter(function(row) {
+    var categoryMatch = !category || row.category === category;
+    var subtypeMatch = archiveSubtypeMatches(row, category, subtype);
+    var searchMatch = !q || Object.keys(row).some(function(key) { return String(row[key] || '').toLowerCase().includes(q); });
+    return categoryMatch && subtypeMatch && searchMatch;
+  });
+}
+
+function filterArchive() {
+  var category = archiveCategory;
+  var rows = getFilteredArchiveRows();
+  archivePage = 1;
+  renderArchiveTable(rows, category || 'all');
+}
+
+function setArchivePerPage(value) {
+  archivePerPage = parseInt(value, 10) || 10;
+  archivePage = 1;
+  filterArchive();
+}
+
+function archiveGoTo(page) {
+  var category = archiveCategory;
+  var rows = getFilteredArchiveRows();
+  var pages = Math.max(1, Math.ceil(rows.length / archivePerPage));
+  archivePage = Math.max(1, Math.min(page, pages));
+  renderArchiveTable(rows, category || 'all');
+}
+
 function setArchiveType(type) {
-  var sel = document.getElementById('archiveTypeFilter');
-  if (sel) sel.value = type || '';
+  archiveCategory = type || '';
+  updateArchiveDetailOptions();
   var q = document.getElementById('archiveSearch');
   if (q) q.value = '';
   var counts = {
@@ -5590,6 +6979,9 @@ function setArchiveType(type) {
   if (typeof filterArchive === 'function') filterArchive();
 }
 
+updateArchiveDetailOptions();
+filterArchive();
+
 function checkSlot() {
     var id = this ? this.id || '' : '';
     var prefix = id.startsWith('edit') ? 'edit' : '';
@@ -5607,6 +6999,8 @@ function checkSlot() {
     }
     var date = dateEl?.value;
     var time = timeEl?.value;
+    var urgencyEl = prefix ? document.getElementById('editAppointmentUrgency') : document.getElementById('apptUrgencySelect');
+    var urgency = urgencyEl ? urgencyEl.value : 'routine';
     if (!date || !time || !status) {
         var btn = form ? form.querySelector('button[type="submit"]') : null;
         if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
@@ -5620,10 +7014,17 @@ function checkSlot() {
     status.style.color = '#92400e';
     status.textContent = 'Checking availability...';
     var exclude = prefix ? (document.getElementById('editAppointmentId')?.value || 0) : 0;
-    fetch('includes/check_slot.php?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude)
+    fetch('includes/check_slot.php?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude + '&urgency=' + encodeURIComponent(urgency))
         .then(function(r) { return r.json(); })
         .then(function(d) {
             var submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+            if (d.error) {
+                status.style.background = '#fef2f2';
+                status.style.color = '#991b1b';
+                status.textContent = d.error;
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.5'; }
+                return;
+            }
             if (d.available) {
                 status.style.background = '#f0fdf4';
                 status.style.color = '#065f46';
@@ -5632,19 +7033,27 @@ function checkSlot() {
             } else {
                 status.style.background = '#fef2f2';
                 status.style.color = '#991b1b';
-                var msg = d.blocked ? 'This time slot is closed by the clinic schedule.'
+                var msg = d.program_blocked ? 'All clinic staff are assigned to a program during this time.'
+                                    : (d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
                                     : (d.held ? 'This time slot is already reserved by another resident.'
-                                              : 'This slot is no longer available.');
+                                              : 'This slot is no longer available.'));
                 if (d.nearest_slot) {
-                    var nearTime = d.nearest_slot.length > 5 ? d.nearest_slot.slice(-5) : d.nearest_slot;
-                    msg += ' Nearest free: ' + nearTime;
+                    var nearest = d.nearest_slot.split(' ');
+                    var nearDate = new Date(nearest[0] + 'T00:00:00');
+                    msg += ' Nearest available: ' + nearDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' at ' + nearest[1];
                 }
                 status.textContent = msg;
                 if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.5'; }
             }
         })
-        .catch(function() {
-            status.style.display = 'none';
+        .catch(function(error) {
+            console.error('Appointment slot availability check failed:', error);
+            status.style.display = 'block';
+            status.style.background = '#fef2f2';
+            status.style.color = '#991b1b';
+            status.textContent = 'Could not verify this appointment slot. Please try again.';
+            var submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+            if (submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.5'; }
         });
 }
 document.addEventListener('DOMContentLoaded', function() {
@@ -5658,15 +7067,20 @@ document.addEventListener('DOMContentLoaded', function() {
         if (d) d.addEventListener('change', checkSlot);
         if (t) t.addEventListener('change', checkSlot);
     });
+    ['apptUrgencySelect', 'editAppointmentUrgency'].forEach(function(id) {
+        var urgency = document.getElementById(id);
+        if (urgency) urgency.addEventListener('change', checkSlot);
+    });
 });
 
-// �"?�"? Booking card (Coach Scheduling Card style) inside Request Appointment modal �"?�"?
+// ï¿½"?ï¿½"? Booking card (Coach Scheduling Card style) inside Request Appointment modal ï¿½"?ï¿½"?
 (function() {
     var BK_SLOTS = ['09:00', '10:00', '11:00', '14:00', '15:00'];
     var bkMonthLabel = document.getElementById('bkMonthLabel');
     var bkGrid = document.getElementById('bkGridDates');
     var bkPrev = document.getElementById('bkPrevBtn');
     var bkNext = document.getElementById('bkNextBtn');
+    var bkToday = document.getElementById('bkTodayBtn');
     var bkSlots = document.getElementById('bkSlots');
     var bkSlotsHint = document.getElementById('bkSlotsHint');
     var bkNextStep = document.getElementById('bkNextStep');
@@ -5677,9 +7091,26 @@ document.addEventListener('DOMContentLoaded', function() {
     var selStart = null;      // ISO 'YYYY-MM-DD' (selected calendar date)
     var chosenDate = null;    // ISO 'YYYY-MM-DD' of the picked time slot
     var selectedTime = null;  // 'HH:MM'
-    var availability = {};    // { 'YYYY-MM-DD': { 'HH:MM': count } }
-    var blockedSlots = {};    // staff-managed closed slots
-    var heldSlots = {};       // slots with an active appointment
+    var routineSlots = {};
+    var urgentSlots = {};
+    var routineCapacity = {};
+    var urgentCapacity = {};
+    var blockedSlots = {};
+    var urgentBlockedSlots = {};
+    var programEvents = {};
+    var dateOverrides = {};
+    var maxAppointmentsPerDay = 3;
+    var maxUrgentPerDay = 2;
+    var availabilityError = '';
+    var waitlistWrap = document.getElementById('bkWaitlistWrap');
+    var waitlistButton = document.getElementById('bkJoinWaitlist');
+    var waitlistStatus = document.getElementById('bkWaitlistStatus');
+    var nearestSlotNotice = document.getElementById('bkNearestSlotNotice');
+    var residentWaitlistEntries = <?php echo json_encode($residentWaitlist, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var bookingPrefill = <?php echo json_encode($residentWaitlistBooking, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var urgencySelect = document.getElementById('apptUrgencySelect');
+    var typeSelect = document.getElementById('apptTypeSelect');
+    var nearestRequestId = 0;
 
     function isoDate(year, month, day) {
         return year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
@@ -5693,11 +7124,29 @@ document.addEventListener('DOMContentLoaded', function() {
         return hh + ':' + m + ' ' + ap;
     }
 
-    function isBlocked(dateKey, time) {
-        return !!(blockedSlots[dateKey] && blockedSlots[dateKey][time]);
+    function selectedUrgency() {
+        return urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
     }
-    function isHeld(dateKey, time) {
-        return !!(heldSlots[dateKey] && heldSlots[dateKey][time]);
+    function getSlotCounts(dateKey) {
+        return selectedUrgency() === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+    }
+    function getSlotCapacities(dateKey) {
+        return selectedUrgency() === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
+    }
+    function isBlocked(dateKey, time) {
+        var map = selectedUrgency() === 'urgent' ? urgentBlockedSlots : blockedSlots;
+        return !!(map[dateKey] && map[dateKey][time]);
+    }
+    function matchingWaitlistEntry(dateKey) {
+        var pet = document.getElementById('petSelect');
+        var type = document.getElementById('apptTypeSelect');
+        return residentWaitlistEntries.find(function(entry) {
+            return ['waiting', 'notified'].indexOf(entry.status) !== -1
+                && entry.preferred_date === dateKey
+                && entry.appointment_type === (type ? type.value : '')
+                && entry.urgency_level === selectedUrgency()
+                && (!pet || !pet.value || String(entry.pet_id) === String(pet.value));
+        }) || null;
     }
 
     function fetchAvailability() {
@@ -5706,22 +7155,50 @@ document.addEventListener('DOMContentLoaded', function() {
         return fetch('appointment-availability.php?year=' + y + '&month=' + m)
             .then(function(r) { return r.json(); })
             .then(function(d) {
-                availability = d.slots || {};
+                if (!d.ok) throw new Error(d.error || 'Could not load appointment availability.');
+                routineSlots = d.routineSlots || {};
+                urgentSlots = d.urgentSlots || {};
+                routineCapacity = d.routineCapacity || {};
+                urgentCapacity = d.urgentCapacity || {};
                 blockedSlots = d.blocked || {};
-                heldSlots = d.held || {};
+                urgentBlockedSlots = d.urgentBlocked || {};
+                programEvents = d.programs || {};
+                dateOverrides = d.overrides || {};
+                maxAppointmentsPerDay = parseInt(d.maxPerDay, 10) || 3;
+                maxUrgentPerDay = parseInt(d.maxUrgentPerDay, 10) || 2;
+                availabilityError = '';
             })
-            .catch(function() { availability = {}; blockedSlots = {}; heldSlots = {}; });
+            .catch(function(error) {
+                availabilityError = error.message || 'Could not load appointment availability.';
+                console.error('Appointment availability request failed:', error);
+                routineSlots = {}; urgentSlots = {}; routineCapacity = {}; urgentCapacity = {};
+                blockedSlots = {}; urgentBlockedSlots = {}; programEvents = {}; dateOverrides = {};
+            });
+    }
+
+    function dayAppointmentCount(dateKey) {
+        var counts = getSlotCounts(dateKey);
+        return Object.keys(counts).reduce(function(total, time) { return total + (parseInt(counts[time], 10) || 0); }, 0);
     }
 
     function dayOpenCount(dateKey) {
-        var counts = availability[dateKey];
+        var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
+        if (dayAppointmentCount(dateKey) >= dayLimit) return 0;
+        var counts = getSlotCounts(dateKey);
+        var capacities = getSlotCapacities(dateKey);
         var open = 0;
         BK_SLOTS.forEach(function(s) {
-            if (isBlocked(dateKey, s) || isHeld(dateKey, s)) return;
-            var booked = counts ? (counts[s] || 0) : 0;
-            if (booked < 1) open++;
+            if (isBlocked(dateKey, s)) return;
+            var booked = counts[s] || 0;
+            if (booked < (capacities[s] || 0)) open++;
         });
         return open;
+    }
+
+    function isClinicClosed(dateKey) {
+        return BK_SLOTS.every(function(time) {
+            return !!(urgentBlockedSlots[dateKey] && urgentBlockedSlots[dateKey][time]);
+        });
     }
 
     function hideConfirm() {
@@ -5734,6 +7211,7 @@ document.addEventListener('DOMContentLoaded', function() {
         selectedTime = null;
         document.getElementById('apptDate').value = '';
         document.getElementById('apptTime').value = '';
+        if (waitlistStatus) waitlistStatus.textContent = '';
         updateNextState();
     }
 
@@ -5742,7 +7220,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!bkNextStep) return;
         var petSel = document.getElementById('petSelect');
         var typeSel = document.getElementById('apptTypeSelect');
-        var ready = !!(chosenDate && selectedTime && petSel && petSel.value && typeSel && typeSel.value);
+        var ready = !!(!availabilityError && chosenDate && selectedTime && petSel && petSel.value && typeSel && typeSel.value);
         bkNextStep.disabled = !ready;
     }
 
@@ -5784,15 +7262,15 @@ document.addEventListener('DOMContentLoaded', function() {
         if (bkMonthLabel) bkMonthLabel.textContent = monthNames[month] + ' ' + year;
 
         bkGrid.innerHTML = '';
-        var firstDay = new Date(year, month, 1).getDay();
-        var startDay = firstDay === 0 ? 6 : firstDay - 1; // Mon=0
+        var firstDay = new Date(year, month, 1).getDay(); // Sun=0, matching Schedule Preview
         var daysInMonth = new Date(year, month + 1, 0).getDate();
+        var daysInPrevMonth = new Date(year, month, 0).getDate();
         var todayIso = isoDate(today.getFullYear(), today.getMonth(), today.getDate());
 
-        for (var i = 0; i < startDay; i++) {
+        for (var i = 0; i < firstDay; i++) {
             var pad = document.createElement('div');
-            pad.className = 'bk-day';
-            pad.style.visibility = 'hidden';
+          pad.className = 'bk-day bk-day-dim';
+          pad.textContent = daysInPrevMonth - firstDay + i + 1;
             bkGrid.appendChild(pad);
         }
 
@@ -5807,12 +7285,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
             var isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
             var openCount = dayOpenCount(key);
-            if (isPast || openCount === 0) {
+            var bookedCount = dayAppointmentCount(key);
+            if (isPast) {
                 div.classList.add('bk-day-disabled');
                 div.disabled = true;
             }
+            var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
+            if (!isPast && openCount === 0) {
+              div.classList.add('bk-day-full');
+              div.title = bookedCount >= dayLimit
+                ? 'No ' + selectedUrgency() + ' slots available (' + bookedCount + '/' + dayLimit + ' daily limit)'
+                : 'No appointment times available';
+            }
+            if (!isPast && isClinicClosed(key)) {
+              div.classList.add('bk-day-disabled');
+              div.disabled = true;
+              div.title = 'The clinic is closed on this date';
+            }
             if (key === todayIso) div.classList.add('bk-day-today');
             if (selStart !== null && key === selStart) div.classList.add('bk-day-selected');
+            var override = dateOverrides[key];
+            if (override && Object.keys(override).some(function(time) { return override[time] === true; })) div.classList.add('bk-day-custom');
 
             if (!div.disabled) {
                 div.addEventListener('click', function() {
@@ -5821,6 +7314,16 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             bkGrid.appendChild(div);
         }
+
+          var remaining = (firstDay + daysInMonth) % 7;
+          if (remaining > 0) {
+            for (var nextDay = 1; nextDay <= 7 - remaining; nextDay++) {
+              var nextPad = document.createElement('div');
+              nextPad.className = 'bk-day bk-day-dim';
+              nextPad.textContent = nextDay;
+              bkGrid.appendChild(nextPad);
+            }
+          }
 
         renderSlots();
     }
@@ -5838,32 +7341,42 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function renderSlots() {
         bkSlots.innerHTML = '';
+        waitlistWrap.hidden = true;
+        nearestSlotNotice.hidden = true;
+        nearestSlotNotice.textContent = '';
+        document.getElementById('bkProgramNotice').hidden = true;
+        document.getElementById('bkUrgentCareNotice').hidden = selectedUrgency() !== 'urgent';
         if (selStart === null) {
             bkSlotsHint.textContent = 'Select your preferred appointment date.';
+            return;
+        }
+        if (availabilityError) {
+            bkSlotsHint.textContent = availabilityError + ' Please refresh the page and try again.';
             return;
         }
         var dd = new Date(selStart + 'T00:00:00');
         bkSlotsHint.textContent = 'Available times on ' + dd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
 
-        var counts = availability[selStart] || {};
+        var counts = getSlotCounts(selStart);
+        var capacities = getSlotCapacities(selStart);
         var anyOpen = false;
         BK_SLOTS.forEach(function(s) {
             var blocked = isBlocked(selStart, s);
-            var held = isHeld(selStart, s);
             var booked = counts[s] || 0;
+            var capacity = capacities[s] || 0;
             var btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'bk-slot-btn';
             btn.setAttribute('data-date', selStart);
             btn.setAttribute('data-time', s);
-            if (blocked || held || booked >= 1) {
+            if (blocked || booked >= capacity) {
                 btn.classList.add('bk-slot-unavailable');
                 btn.textContent = fmtTime(s);
                 btn.disabled = true;
-                btn.title = 'Unavailable';
+                btn.title = blocked ? 'Clinic closed' : 'No remaining capacity';
             } else {
                 anyOpen = true;
-                btn.textContent = fmtTime(s);
+                btn.textContent = fmtTime(s) + (capacity > 1 ? ' · ' + (capacity - booked) + ' left' : '');
                 btn.addEventListener('click', function() {
                     selectTime(this.getAttribute('data-date'), this.getAttribute('data-time'));
                 });
@@ -5875,8 +7388,50 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!anyOpen) {
             var none = document.createElement('div');
             none.className = 'bk-slot-none';
-            none.textContent = 'No available slots on this day. Please pick another date.';
+            none.textContent = 'No ' + selectedUrgency() + ' slots are available on this day.';
             bkSlots.appendChild(none);
+            var requestId = ++nearestRequestId;
+            fetch('includes/check_slot.php?date=' + encodeURIComponent(selStart) + '&time=15%3A00&urgency=' + encodeURIComponent(selectedUrgency()))
+                .then(function(response) {
+                    if (!response.ok) throw new Error('Could not find the nearest available appointment.');
+                    return response.json();
+                })
+                .then(function(data) {
+                    if (requestId !== nearestRequestId || selStart === null) return;
+                    if (data.nearest_slot) {
+                        var nearest = data.nearest_slot.split(' ');
+                        var nearestDate = new Date(nearest[0] + 'T00:00:00');
+                        nearestSlotNotice.textContent = 'Nearest available ' + selectedUrgency() + ' appointment: ' + nearestDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + fmtTime(nearest[1]) + '.';
+                    } else {
+                        nearestSlotNotice.textContent = 'No available appointment found in the next 90 days. ' + (selectedUrgency() === 'urgent' ? 'Call (046) 432-1234 or visit the DCVS office for urgent assistance.' : 'Please join the waitlist or contact the DCVS office.');
+                    }
+                    nearestSlotNotice.hidden = false;
+                })
+                .catch(function(error) {
+                    if (requestId !== nearestRequestId) return;
+                    console.error('Nearest appointment lookup failed:', error);
+                    nearestSlotNotice.textContent = 'Could not check the nearest available date. Please try again or contact the DCVS office.';
+                    nearestSlotNotice.hidden = false;
+                });
+        }
+        var events = programEvents[selStart] || [];
+        if (events.length && typeSelect && typeSelect.value === 'vaccination') {
+            var notice = document.getElementById('bkProgramNotice');
+            notice.textContent = events.map(function(event) {
+                var location = event.venue || event.barangay_names || 'Location to be announced';
+                return 'Free Vaccination Drive: ' + event.program_name + ' at ' + location + ', ' + fmtTime(event.start_time) + '–' + fmtTime(event.end_time) + '. Walk-in; no appointment is needed for the drive.';
+            }).join(' ');
+            notice.hidden = false;
+        }
+        if (!anyOpen && typeSelect && typeSelect.value && document.getElementById('petSelect').value
+            && (selectedUrgency() === 'routine' || ['vaccination', 'checkup', 'deworming'].indexOf(typeSelect.value) !== -1)) {
+            waitlistWrap.hidden = false;
+            var existingEntry = matchingWaitlistEntry(selStart);
+            waitlistButton.disabled = !!existingEntry;
+            waitlistButton.textContent = existingEntry ? 'You are on the waitlist' : 'Notify me if a slot opens';
+            waitlistStatus.textContent = existingEntry && existingEntry.status === 'notified'
+                ? 'A slot opened for you. Please book it before the claim expires.'
+                : existingEntry ? 'We will notify you if a matching slot opens.' : '';
         }
     }
 
@@ -5899,7 +7454,8 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('bkDetailTime').textContent = fmtTime(selectedTime);
         var typeSel = document.getElementById('apptTypeSelect');
         var typeVal = typeSel ? typeSel.value : '';
-        document.getElementById('bkDetailType').textContent = typeVal === 'adoption' ? 'Pet Adoption' : (typeVal === 'kapon' ? 'Pet Neutering / Castration' : '-');
+        var typeLabel = typeSel && typeSel.selectedIndex > -1 ? typeSel.options[typeSel.selectedIndex].textContent : '-';
+        document.getElementById('bkDetailType').textContent = typeVal === 'adoption' ? 'Pet Adoption' : (typeVal === 'kapon' ? 'Pet Neutering / Castration' : typeLabel);
         var petSel = document.getElementById('petSelect');
         var opt = petSel && petSel.selectedIndex > -1 ? petSel.options[petSel.selectedIndex] : null;
         var petName = 'Your Pet';
@@ -5921,6 +7477,8 @@ document.addEventListener('DOMContentLoaded', function() {
         // Sync hidden form fields for submission
         document.getElementById('cfPet').value = petSel ? petSel.value : '';
         document.getElementById('cfType').value = typeVal;
+        document.getElementById('cfUrgency').value = selectedUrgency();
+        document.getElementById('bkDetailUrgency').textContent = selectedUrgency() === 'urgent' ? 'Urgent' : 'Routine';
         document.getElementById('apptDate').value = chosenDate;
         document.getElementById('apptTime').value = selectedTime;
         // Open the Confirm Booking dialog
@@ -5946,8 +7504,69 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     var typeSel = document.getElementById('apptTypeSelect');
     if (typeSel) {
-        typeSel.addEventListener('change', updateNextState);
+        typeSel.addEventListener('change', function() {
+            var urgentOption = urgencySelect && urgencySelect.querySelector('option[value="urgent"]');
+            var urgentTypeAllowed = ['vaccination', 'checkup', 'deworming'].indexOf(typeSel.value) !== -1;
+            if (urgentOption) urgentOption.disabled = !urgentTypeAllowed;
+            if (!urgentTypeAllowed && urgencySelect && urgencySelect.value === 'urgent') urgencySelect.value = 'routine';
+            clearBooking();
+            renderCalendar();
+        });
         updateNextState();
+    }
+    if (urgencySelect) {
+        urgencySelect.addEventListener('change', function() {
+            clearBooking();
+            renderCalendar();
+        });
+    }
+    if (waitlistButton) {
+        waitlistButton.addEventListener('click', function() {
+            var pet = document.getElementById('petSelect');
+            var type = document.getElementById('apptTypeSelect');
+            if (!selStart || !pet.value || !type.value) return;
+            waitlistButton.disabled = true;
+            waitlistStatus.textContent = 'Adding you to the waitlist...';
+            var params = new URLSearchParams({
+                pet_id: pet.value,
+                appointment_type: type.value,
+                urgency_level: selectedUrgency(),
+                preferred_date: selStart
+            });
+            fetch('appointment-waitlist.php', { method: 'POST', body: params })
+                .then(function(response) { return response.json(); })
+                .then(function(data) {
+                    waitlistStatus.textContent = data.message || 'Could not add you to the waitlist.';
+                    waitlistStatus.style.color = data.success ? '#166534' : '#991b1b';
+                    if (data.success) {
+                        waitlistButton.textContent = 'You are on the waitlist';
+                        waitlistButton.disabled = true;
+                        var newEntry = {
+                            waitlist_id: data.waitlist_id,
+                            pet_id: parseInt(pet.value, 10),
+                            appointment_type: type.value,
+                            urgency_level: selectedUrgency(),
+                            preferred_date: selStart,
+                            preferred_time: null,
+                            status: data.status || 'waiting'
+                        };
+                        residentWaitlistEntries = residentWaitlistEntries.filter(function(entry) {
+                            return !(entry.preferred_date === selStart && entry.appointment_type === type.value
+                                && entry.urgency_level === selectedUrgency() && String(entry.pet_id) === String(pet.value)
+                                && ['waiting', 'notified'].indexOf(entry.status) !== -1);
+                        });
+                        residentWaitlistEntries.push(newEntry);
+                    }
+                })
+                .catch(function(error) {
+                    console.error('Appointment waitlist request failed:', error);
+                    waitlistStatus.textContent = 'Could not add you to the waitlist. Please try again.';
+                    waitlistStatus.style.color = '#991b1b';
+                })
+                .finally(function() {
+                    if (!matchingWaitlistEntry(selStart)) waitlistButton.disabled = false;
+                });
+        });
     }
 
     function resetSelection() {
@@ -5958,13 +7577,49 @@ document.addEventListener('DOMContentLoaded', function() {
     bkPrev.addEventListener('click', function() {
         viewDate.setMonth(viewDate.getMonth() - 1);
         resetSelection();
-        fetchAvailability().then(renderCalendar);
+        if (bookingPrefill) {
+            var prefillDate = new Date(bookingPrefill.preferred_date + 'T00:00:00');
+            if (!isNaN(prefillDate.getTime())) {
+                selStart = bookingPrefill.preferred_date;
+                viewDate = new Date(prefillDate.getFullYear(), prefillDate.getMonth(), 1);
+                if (petSel) petSel.value = String(bookingPrefill.pet_id);
+                if (typeSel) typeSel.value = bookingPrefill.appointment_type;
+                if (urgencySelect) urgencySelect.value = bookingPrefill.urgency_level;
+                updatePetProfile();
+                fetchAvailability().then(function() {
+                    renderCalendar();
+                    if (bookingPrefill.preferred_time) {
+                        var counts = getSlotCounts(bookingPrefill.preferred_date);
+                        var capacities = getSlotCapacities(bookingPrefill.preferred_date);
+                        var time = bookingPrefill.preferred_time;
+                        if (!isBlocked(bookingPrefill.preferred_date, time) && (counts[time] || 0) < (capacities[time] || 0)) {
+                            selectTime(bookingPrefill.preferred_date, time);
+                        } else if (nearestSlotNotice) {
+                            nearestSlotNotice.textContent = 'The notified time is no longer available. Please choose another open time on this date.';
+                            nearestSlotNotice.hidden = false;
+                        }
+                    }
+                    if (typeof switchSection === 'function') switchSection('calendar-booking');
+                });
+            } else {
+                fetchAvailability().then(renderCalendar);
+            }
+        } else {
+            fetchAvailability().then(renderCalendar);
+        }
     });
     bkNext.addEventListener('click', function() {
         viewDate.setMonth(viewDate.getMonth() + 1);
         resetSelection();
         fetchAvailability().then(renderCalendar);
     });
+    if (bkToday) {
+      bkToday.addEventListener('click', function() {
+        viewDate = new Date(today.getFullYear(), today.getMonth(), 1);
+        resetSelection();
+        fetchAvailability().then(renderCalendar);
+      });
+    }
 
     fetchAvailability().then(renderCalendar);
 
@@ -5976,6 +7631,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (p) { p.value = ''; }
         var t = document.getElementById('apptTypeSelect');
         if (t) { t.value = ''; }
+        if (urgencySelect) urgencySelect.value = 'routine';
         updatePetProfile();
         fetchAvailability().then(renderCalendar);
     };
@@ -5998,36 +7654,87 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!d || !t) {
                 e.preventDefault();
                 alert('Please select a date and an available time.');
+              return;
             }
+            e.preventDefault();
+            var submit = this.querySelector('button[type="submit"]');
+            var originalText = submit ? submit.textContent : '';
+            if (submit) { submit.disabled = true; submit.textContent = 'Submitting...'; }
+            var formData = new FormData(this);
+            formData.set('ajax', '1');
+            var form = this;
+            fetch(this.action, { method: 'POST', body: formData })
+              .then(function(response) { return response.json(); })
+              .then(function(data) {
+                if (!data || !data.success) {
+                  if (submit) { submit.disabled = false; submit.textContent = originalText; }
+                  if (window.portalToast) portalToast('Unable to submit request', (data && data.message) || 'Please try again.');
+                  else alert((data && data.message) || 'Unable to submit appointment request.');
+                  return;
+                }
+                try {
+                  var petSelect = document.getElementById('cfPet');
+                  var petOption = petSelect && petSelect.selectedOptions.length ? petSelect.selectedOptions[0] : null;
+                  var petName = petOption ? petOption.textContent.trim().replace(/\s*\(.*\)$/, '') : '-';
+                  if (window.APPT && typeof window.APPT.addRequest === 'function') {
+                    window.APPT.addRequest(Object.assign({
+                      appointment_type: ty,
+                      pet_name: petName,
+                      pet_photo: petOption ? petOption.getAttribute('data-photo') || '' : '',
+                      preferred_date: d,
+                      preferred_time: t,
+                      status: 'pending',
+                      notes: (form.querySelector('[name="notes"]') || {}).value || ''
+                    }, data));
+                  }
+                  var overviewList = document.getElementById('rework-appointments-container');
+                  if (overviewList && !overviewList.querySelector('[data-live-appt-id="' + data.appointment_id + '"]')) {
+                    var empty = overviewList.querySelector('.rework-empty');
+                    if (empty) empty.remove();
+                    var item = document.createElement('div');
+                    item.className = 'appointment-item-row';
+                    item.setAttribute('data-live-appt-id', data.appointment_id);
+                    var dateTime = new Date(d + 'T' + t);
+                    var timeColumn = document.createElement('div');
+                    timeColumn.className = 'appointment-time-col';
+                    var timeLabel = document.createElement('span');
+                    timeLabel.textContent = dateTime.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+                    var dot = document.createElement('span');
+                    dot.className = 'status-dot-indicator dot-amber';
+                    timeColumn.append(timeLabel, dot);
+                    var detailColumn = document.createElement('div');
+                    detailColumn.className = 'appointment-details-col';
+                    var petLabel = document.createElement('span');
+                    petLabel.className = 'appointment-pet-name';
+                    petLabel.textContent = petName;
+                    var serviceLabel = document.createElement('span');
+                    serviceLabel.className = 'appointment-reason-meta';
+                    var serviceNames = { adoption:'Adoption', kapon:'Kapon', vaccination:'Vaccination', checkup:'Check-up' };
+                    serviceLabel.textContent = (serviceNames[ty] || ty) + ' · Awaiting confirmation';
+                    detailColumn.append(petLabel, serviceLabel);
+                    var badge = document.createElement('span');
+                    badge.className = 'status-pill-badge badge-pending';
+                    badge.textContent = 'Pending';
+                    item.append(timeColumn, detailColumn, badge);
+                    overviewList.prepend(item);
+                  }
+                  if (typeof window.resetBookingForm === 'function') window.resetBookingForm();
+                } catch (uiError) {
+                  console.error('Appointment was saved, but the page could not refresh its booking details.', uiError);
+                }
+                closeModal('confirmBookingModal');
+                if (window.portalToast) portalToast('Appointment request sent', data.message || 'Your request is pending staff confirmation.');
+                if (submit) { submit.disabled = false; submit.textContent = originalText; }
+              }, function() {
+                if (submit) { submit.disabled = false; submit.textContent = originalText; }
+                if (window.portalToast) portalToast('Network error', 'Could not submit appointment request. Please try again.');
+                else alert('Network error. Please try again.');
+              });
         });
     }
 });
 
-function openAdoptionModal(listingId, petName) {
-    openModal('adoptionModal');
-}
-
-// �"?�"? Adoption listings: filter / search / sort / more-menu �"?�"?
-var _adoptCurrentFilter = 'all';
-function setAdoptFilter(cat, btn) {
-    _adoptCurrentFilter = cat;
-    document.querySelectorAll('#adoptPills .adopt-pill').forEach(function(p) { p.classList.toggle('active', p === btn); });
-    filterAdopt();
-}
-function filterAdopt() {
-    var q = (document.getElementById('adoptSearch')?.value || '').toLowerCase();
-    var grid = document.getElementById('adoptGrid');
-    if (!grid) return;
-    var cards = Array.prototype.slice.call(grid.querySelectorAll('.adopt-card'));
-    cards.forEach(function(c) {
-        var ref = (c.querySelector('.adopt-ref-badge')?.textContent || '').toLowerCase();
-        var okCat = _adoptCurrentFilter === 'all' || c.dataset.cat === _adoptCurrentFilter;
-        var okQ = !q || (c.dataset.name || '').includes(q) || (c.dataset.type || '').includes(q) || ref.includes(q);
-        c.style.display = okCat && okQ ? '' : 'none';
-    });
-}
-
-// �"?�"? Profile Settings Edit Toggle �"?�"?
+// ï¿½"?ï¿½"? Profile Settings Edit Toggle ï¿½"?ï¿½"?
 function toggleEdit(group) {
     var wrapper = document.querySelector('.profile-settings-wrapper');
     if (!wrapper) return;
@@ -6068,9 +7775,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     setTimeout(function() {
         var err = document.getElementById('profileError');
-        var suc = document.getElementById('profileSuccess');
         if (err) { err.style.transition = 'opacity 0.5s'; err.style.opacity = '0'; setTimeout(function() { err.style.display = 'none'; }, 500); }
-        if (suc) { suc.style.transition = 'opacity 0.5s'; suc.style.opacity = '0'; setTimeout(function() { suc.style.display = 'none'; }, 500); }
     }, 3000);
 });
 
@@ -6096,6 +7801,198 @@ function confirmRemoveAvatar() {
         window.location.href = 'remove-photo.php';
     }
 }
+
+var residentWaitlistCancelTarget = null;
+var activeResidentWaitlistMenuButton = null;
+
+function toggleResidentWaitlistMenu(event, waitlistId) {
+  event.stopPropagation();
+  var menu = document.getElementById('residentWaitlistRowMenu');
+  var button = event.currentTarget;
+  if (activeResidentWaitlistMenuButton === button && menu.classList.contains('open')) {
+    closeResidentWaitlistMenu();
+    return;
+  }
+
+  closeResidentWaitlistMenu();
+  activeResidentWaitlistMenuButton = button;
+  var status = button.getAttribute('data-waitlist-status');
+  var items = [];
+  if (status === 'notified') {
+    items.push('<a class="resident-waitlist-menu-item" role="menuitem" href="dashboard-resident.php?waitlist_booking=' + waitlistId + '#calendar-booking"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Book now</a>');
+  }
+  if (status === 'waiting' || status === 'notified') {
+    items.push('<button type="button" class="resident-waitlist-menu-item danger" role="menuitem" data-action="cancel" data-waitlist-id="' + waitlistId + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="m19 6-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>Cancel waitlist</button>');
+  }
+  if (!items.length) items.push('<span class="resident-waitlist-menu-item" aria-disabled="true">No actions available</span>');
+  menu.innerHTML = items.join('');
+  menu.classList.add('open');
+  button.setAttribute('aria-expanded', 'true');
+  var rect = button.getBoundingClientRect();
+  var menuWidth = menu.offsetWidth;
+  var menuHeight = menu.offsetHeight;
+  var left = Math.max(8, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 8));
+  var top = rect.bottom + menuHeight > window.innerHeight - 8 ? rect.top - menuHeight - 4 : rect.bottom + 4;
+  menu.style.left = left + 'px';
+  menu.style.top = Math.max(8, top) + 'px';
+}
+
+function closeResidentWaitlistMenu() {
+  var menu = document.getElementById('residentWaitlistRowMenu');
+  if (menu) menu.classList.remove('open');
+  if (activeResidentWaitlistMenuButton) activeResidentWaitlistMenuButton.setAttribute('aria-expanded', 'false');
+  activeResidentWaitlistMenuButton = null;
+}
+
+function confirmResidentWaitlistCancel(waitlistId, button) {
+  residentWaitlistCancelTarget = {id: waitlistId, button: button};
+  var dialog = document.getElementById('residentWaitlistConfirm');
+  if (!dialog) return;
+  dialog.classList.add('open');
+  document.getElementById('residentWaitlistConfirmAction').focus();
+}
+
+function closeResidentWaitlistConfirm() {
+  var dialog = document.getElementById('residentWaitlistConfirm');
+  if (dialog) dialog.classList.remove('open');
+  residentWaitlistCancelTarget = null;
+}
+
+function cancelWaitlistEntry(waitlistId, button) {
+  button.disabled = true;
+  fetch('appointment-waitlist-action.php', {
+    method: 'POST',
+    body: new URLSearchParams({waitlist_id: String(waitlistId), action: 'cancel'})
+  }).then(function(response) {
+    return response.json().then(function(result) {
+      if (!response.ok || !result.success) throw new Error(result.message || 'Could not cancel this waitlist entry.');
+      window.location.href = 'dashboard-resident.php#my-waitlist';
+    });
+  }).catch(function(error) {
+    closeResidentWaitlistConfirm();
+    window.alert(error.message);
+    button.disabled = false;
+  });
+}
+
+function initResidentWaitlistTable() {
+  var section = document.getElementById('my-waitlist');
+  if (!section) return;
+
+  var tableRows = Array.prototype.slice.call(section.querySelectorAll('#residentWaitlistRows tr[data-waitlist-id]'));
+  var search = document.getElementById('residentWaitlistSearch');
+  var dateInput = document.getElementById('residentWaitlistDate');
+  var dateButton = document.getElementById('residentWaitlistDateButton');
+  var clearDate = document.getElementById('residentWaitlistClearDate');
+  var serviceFilter = document.getElementById('residentWaitlistService');
+  var statusFilter = document.getElementById('residentWaitlistStatus');
+  var perPageSelect = document.getElementById('residentWaitlistPerPage');
+  var pageLabel = document.getElementById('residentWaitlistPageLabel');
+  var emptyRow = document.getElementById('residentWaitlistEmpty');
+  var page = 1;
+
+  function filteredRows() {
+    var query = search.value.trim().toLowerCase();
+    return tableRows.filter(function(row) {
+    var searchText = row.dataset.pet + ' ' + row.dataset.service;
+    return (!query || searchText.indexOf(query) !== -1)
+      && (!dateInput.value || row.dataset.date === dateInput.value)
+      && (!serviceFilter.value || row.dataset.service === serviceFilter.value)
+      && (!statusFilter.value || row.dataset.status === statusFilter.value);
+    });
+  }
+
+  function render() {
+    var matchingRows = filteredRows();
+    var pageSize = parseInt(perPageSelect.value, 10) || 10;
+    var pageCount = Math.max(1, Math.ceil(matchingRows.length / pageSize));
+    page = Math.min(page, pageCount);
+    var start = (page - 1) * pageSize;
+    var end = start + pageSize;
+
+    tableRows.forEach(function(row) { row.style.display = 'none'; });
+    matchingRows.slice(start, end).forEach(function(row) { row.style.display = ''; });
+
+    var noRows = matchingRows.length === 0;
+    emptyRow.style.display = noRows ? '' : 'none';
+    var emptyCell = emptyRow.querySelector('td');
+    emptyCell.classList.toggle('visible', noRows);
+    emptyCell.textContent = tableRows.length && noRows
+    ? 'No waitlist entries match these filters.'
+    : 'You have no waitlist entries.';
+    pageLabel.textContent = 'Page ' + page + ' of ' + pageCount;
+    document.getElementById('residentWaitlistFirst').disabled = page <= 1;
+    document.getElementById('residentWaitlistPrev').disabled = page <= 1;
+    document.getElementById('residentWaitlistNext').disabled = page >= pageCount;
+    document.getElementById('residentWaitlistLast').disabled = page >= pageCount;
+  }
+
+  function resetAndRender() {
+    page = 1;
+    render();
+  }
+
+  search.addEventListener('input', resetAndRender);
+  dateInput.addEventListener('change', function() {
+    var selected = dateInput.value;
+    dateButton.classList.toggle('has-date', !!selected);
+    clearDate.hidden = !selected;
+    resetAndRender();
+  });
+  dateButton.addEventListener('click', function() {
+    if (typeof dateInput.showPicker === 'function') dateInput.showPicker();
+    else dateInput.click();
+  });
+  clearDate.addEventListener('click', function() {
+    dateInput.value = '';
+    dateInput.dispatchEvent(new Event('change'));
+  });
+  serviceFilter.addEventListener('change', resetAndRender);
+  statusFilter.addEventListener('change', resetAndRender);
+  perPageSelect.addEventListener('change', resetAndRender);
+  document.getElementById('residentWaitlistFirst').addEventListener('click', function() { page = 1; render(); });
+  document.getElementById('residentWaitlistPrev').addEventListener('click', function() { page--; render(); });
+  document.getElementById('residentWaitlistNext').addEventListener('click', function() { page++; render(); });
+  document.getElementById('residentWaitlistLast').addEventListener('click', function() {
+    page = Math.ceil(filteredRows().length / (parseInt(perPageSelect.value, 10) || 10));
+    render();
+  });
+
+  document.getElementById('residentWaitlistCancelConfirm').addEventListener('click', closeResidentWaitlistConfirm);
+  document.getElementById('residentWaitlistRowMenu').addEventListener('click', function(event) {
+    var actionItem = event.target.closest('[data-action="cancel"][data-waitlist-id]');
+    if (!actionItem) return;
+    event.preventDefault();
+    var waitlistId = parseInt(actionItem.getAttribute('data-waitlist-id'), 10);
+    var trigger = activeResidentWaitlistMenuButton;
+    closeResidentWaitlistMenu();
+    if (trigger && waitlistId) confirmResidentWaitlistCancel(waitlistId, trigger);
+  });
+  document.getElementById('residentWaitlistConfirmAction').addEventListener('click', function() {
+    if (!residentWaitlistCancelTarget) return;
+    var target = residentWaitlistCancelTarget;
+    closeResidentWaitlistConfirm();
+    cancelWaitlistEntry(target.id, target.button);
+  });
+  document.getElementById('residentWaitlistConfirm').addEventListener('click', function(event) {
+    if (event.target === this) closeResidentWaitlistConfirm();
+  });
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+      closeResidentWaitlistConfirm();
+      closeResidentWaitlistMenu();
+    }
+  });
+  document.addEventListener('click', function(event) {
+    if (!event.target.closest('#residentWaitlistRowMenu') && !event.target.closest('.resident-waitlist-row-actions')) closeResidentWaitlistMenu();
+  });
+  window.addEventListener('resize', closeResidentWaitlistMenu);
+  window.addEventListener('scroll', closeResidentWaitlistMenu, true);
+
+  render();
+}
+
+initResidentWaitlistTable();
 
 function switchSection(sectionId) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
@@ -6161,84 +8058,65 @@ document.addEventListener('DOMContentLoaded', function() {
 document.addEventListener('dcvs:realtime', function(e) {
     var data = e.detail;
     // Appointments rows
-    if (data.appointments && data.appointments.length) {
-        var atable = document.querySelector('#apptTable');
-        if (atable) {
-            var atbody = atable.querySelector('tbody');
-            var aColors = {
-                'pending': ['#fef3c7', '#92400e'],
-                'scheduled': ['#dcebe0', '#045e1f'],
-                'rescheduled': ['#ede9fe', '#6d28d9'],
-                'completed': ['#e2e8f0', '#475569'],
-                'cancelled': ['#fee2e2', '#991b1b'],
-                'no_show': ['#fef3c7', '#92400e']
-            };
-            data.appointments.forEach(function(appt) {
-                if (atable.querySelector('tr[data-id="' + appt.appointment_id + '"]')) return;
-                var ref = appt.reference_id || '#APT-' + String(appt.appointment_id).padStart(4, '0');
-                var type = appt.appointment_type ? appt.appointment_type.charAt(0).toUpperCase() + appt.appointment_type.slice(1) : '';
-                var dt = new Date(appt.preferred_date + 'T' + appt.preferred_time);
-                var ds = dt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
-                var ts = dt.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'});
-                var st = appt.status.replace(/_/g, ' '); st = st.charAt(0).toUpperCase() + st.slice(1);
-                var ac = aColors[appt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var cdt = appt.created_at ? new Date(appt.created_at.replace(' ', 'T')) : null;
-                var cds = cdt ? cdt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'}) : '-';
-                var cts = cdt ? cdt.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit'}) : '-';
-                var atr = document.createElement('tr');
-                atr.className = 'sd-tr';
-                atr.setAttribute('data-id', appt.appointment_id);
-                atr.setAttribute('data-status', appt.status || '');
-                atr.setAttribute('data-service', (appt.appointment_type || '').toLowerCase());
-                atr.setAttribute('data-pet', (appt.pet_name || '').toLowerCase());
-                atr.setAttribute('data-date', appt.preferred_date ? String(Math.floor(new Date(appt.preferred_date).getTime() / 1000)) : '0');
-                atr.setAttribute('data-time', appt.preferred_time ? String(Math.floor(new Date('1970-01-01T' + appt.preferred_time).getTime() / 1000)) : '0');
-                atr.setAttribute('data-submitted', appt.created_at ? String(Math.floor(new Date(appt.created_at.replace(' ', 'T')).getTime() / 1000)) : '0');
-                atr.setAttribute('onclick', 'APPT.view(' + appt.appointment_id + ')');
-                atr.innerHTML =
-                    '<td class="sd-td"><div class="client-name">' + ref + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + type + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + (appt.pet_name || '-') + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + ds + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + ts + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + cds + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + cts + '</div></td>' +
-                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + ac[0] + ';color:' + ac[1] + ';border-color:' + (ac[2] || '#e4e4e7') + ';">' + st + '</span></td>' +
-                    '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
-                    (appt.status === 'pending' ? '<button type="button" class="pet-action-btn" title="Edit Appointment"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>' : '') +
-                    '<button type="button" class="pet-action-btn" title="Archive Appointment" onclick="APPT.archive(' + appt.appointment_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>' +
-                    '</div></td>';
-                atbody.appendChild(atr);
-                if (window.APPT && typeof window.APPT.refresh === 'function') window.APPT.refresh();
-            });
-        }
-    }
+  if (data.appointments && data.appointments.length && window.APPT && typeof window.APPT.updateFromRealtime === 'function') {
+    data.appointments.forEach(function(appt) { window.APPT.updateFromRealtime(appt); });
+  }
     // Reports rows
     if (data.reports && data.reports.length) {
         var rtable = document.querySelector('#reportTable');
         if (rtable) {
             var rtbody = rtable.querySelector('tbody');
             var rColors = {
-                'pending':   ['#fef3c7', '#92400e'],
-                'validated': ['#dbeafe', '#1d4ed8'],
-                'confirmed': ['#dbeafe', '#1d4ed8'],
-                'scheduled': ['#dbeafe', '#1d4ed8'],
-                'resolved':  ['#dcebe0', '#045e1f'],
-                'rejected':  ['#fee2e2', '#991b1b']
+              'pending':   ['#FEF3C7', '#92400E', '#FDE68A'],
+              'validated': ['#dcebe0', '#045e1f', '#bbf7d0'],
+              'confirmed': ['#EFF6FF', '#1E40AF', '#BFDBFE'],
+              'scheduled': ['#EFF6FF', '#1E40AF', '#BFDBFE'],
+              'resolved':  ['#0E8131', '#ffffff', '#0E8131'],
+              'rejected':  ['#FEE2E2', '#991B1B', '#FECACA']
             };
             var rLabels = {
-                'pending': 'Pending', 'validated': 'Under Review', 'confirmed': 'Confirmed',
-                'scheduled': 'Scheduled', 'resolved': 'Resolved', 'rejected': 'Rejected'
+              'pending': 'Pending Barangay Review', 'validated': 'Pending DCVS Review', 'confirmed': 'In Progress',
+              'scheduled': 'In Progress', 'resolved': 'Resolved', 'rejected': 'Closed'
             };
             var rKnownTypes = {'stray':'Stray Animal','rabies':'Rabies Case','injured':'Injured Animal','dead':'Dead Animal','other':'Other'};
             data.reports.forEach(function(rpt) {
-                if (rtable.querySelector('tr[data-id="' + rpt.report_id + '"]')) return;
+              var existing = rtable.querySelector('tr[data-id="' + rpt.report_id + '"]');
+              if (existing) {
+                var existingStatus = existing.querySelector('.appt-status-pill');
+                var existingColor = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+                var existingLabel = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
+                existing.setAttribute('data-status', rpt.status);
+                if (existingStatus) {
+                  existingStatus.classList.toggle('report-status-resolved', rpt.status === 'resolved');
+                  existingStatus.textContent = existingLabel;
+                  existingStatus.style.background = existingColor[0];
+                  existingStatus.style.color = existingColor[1];
+                  existingStatus.style.borderColor = existingColor[2] || '#e4e4e7';
+                }
+                var existingCells = existing.querySelectorAll('td');
+                if (existingCells[6]) existingCells[6].textContent = rpt.status === 'resolved' && rpt.updated_at
+                  ? new Date(rpt.updated_at.replace(' ', 'T')).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'})
+                  : '-';
+                var reportItem = (window.__reportList || []).find(function(item) { return Number(item.id) === Number(rpt.report_id); });
+                if (reportItem) {
+                  reportItem.status = rpt.status;
+                  reportItem.statusLabel = existingLabel;
+                  var reportStatusClasses = { pending:'st-pending', validated:'st-awaiting', confirmed:'st-review', scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected' };
+                  reportItem.statusClass = reportStatusClasses[rpt.status] || 'st-pending';
+                  if (rpt.status === 'resolved') reportItem.resolution = 'This report has been resolved by DCVS.';
+                }
+                if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
+                if (window.RPT && typeof window.RPT.refreshSummary === 'function') window.RPT.refreshSummary();
+                if (Number(window.__currentReportId) === Number(rpt.report_id) && window.RPT && typeof window.RPT.view === 'function') window.RPT.view(rpt.report_id);
+                return;
+              }
                 var ref = rpt.reference_id || '#RPT-' + String(rpt.report_id).padStart(4, '0');
                 var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
                 var rlab = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
                 var typeLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report') + ' Report';
                 var catLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report');
-                var dt = new Date((rpt.created_at || '').replace(' ', 'T'));
+                var incidentAt = rpt.incident_at || rpt.created_at || '';
+                var dt = new Date(incidentAt.replace(' ', 'T'));
                 var ds = dt.toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
                 var resolvedDate = '-';
                 var resolvedRaw = '';
@@ -6252,21 +8130,18 @@ document.addEventListener('dcvs:realtime', function(e) {
                 rtr.setAttribute('data-status', rpt.status);
                 rtr.setAttribute('data-type', typeLabel.toLowerCase());
                 rtr.setAttribute('data-location', (rpt.location_address || '').toLowerCase());
-                rtr.setAttribute('data-date', String(rpt.created_at ? Math.floor(new Date(rpt.created_at.replace(' ', 'T')).getTime() / 1000) : '0'));
+                rtr.setAttribute('data-date', String(incidentAt ? Math.floor(new Date(incidentAt.replace(' ', 'T')).getTime() / 1000) : '0'));
                 rtr.setAttribute('data-resolved', resolvedRaw);
                 rtr.setAttribute('onclick', 'RPT.view(' + rpt.report_id + ')');
                 rtr.innerHTML =
                     '<td class="sd-td"><div class="client-name">' + ref + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + typeLabel + '</div></td>' +
-                    '<td class="sd-td"><div class="contact-main contact-normal">' + (rpt.location_address || '-') + '</div></td>' +
+                    '<td class="sd-td"><div class="contact-main contact-normal report-type-value">' + typeLabel + '</div></td>' +
+                    '<td class="sd-td"><div class="contact-main contact-normal report-location-value">' + (rpt.location_address || '-') + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + ds + '</div></td>' +
-                    '<td class="sd-td"><span class="appt-status-pill" style="background:' + rc[0] + ';color:' + rc[1] + ';border-color:' + (rc[2] || '#e4e4e7') + ';">' + rlab + '</span></td>' +
-                    '<td class="sd-td"><span class="pet-cat-tag">' + catLabel + '</span></td>' +
+                    '<td class="sd-td"><span class="appt-status-pill' + (rpt.status === 'resolved' ? ' report-status-resolved' : '') + '" style="background:' + rc[0] + ';color:' + rc[1] + ';border-color:' + (rc[2] || '#e4e4e7') + ';">' + rlab + '</span></td>' +
+                    '<td class="sd-td"><div class="contact-main contact-normal report-type-value">' + catLabel + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + resolvedDate + '</div></td>' +
-                    '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
-                    '<button type="button" class="pet-action-btn" title="View Report" onclick="RPT.view(' + rpt.report_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
-                    '<button type="button" class="pet-action-btn" title="Archive Report" onclick="RPT.archive(' + rpt.report_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>' +
-                    '</div></td>';
+                    '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();rptRowActions(event,' + rpt.report_id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>';
                 rtbody.appendChild(rtr);
                 if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
             });
@@ -6322,12 +8197,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                     '<td class="sd-td"><span class="pet-cat-tag ' + cat + '">' + catLabel + '</span></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + (adoptedDate || '-') + '</div></td>' +
                     '<td class="sd-td"><div class="contact-main contact-normal">' + registeredDate + '</div></td>' +
-                    '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><div class="pet-action-btns">' +
-                    '<a href="pet-profile.php?id=' + pet.pet_id + '&ref=resident" class="pet-action-btn" title="Pet Resume"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></a>' +
-                    '<button type="button" class="pet-action-btn" title="View Profile" onclick="PET.view(' + pet.pet_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>' +
-                    (cat !== 'adopted' ? '<button type="button" class="pet-action-btn" title="Edit Pet" onclick="PET.edit(' + pet.pet_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg></button>' : '') +
-                    '<button type="button" class="pet-action-btn" title="Archive Pet" onclick="PET.archive(' + pet.pet_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></button>' +
-                    '</div></td>';
+                    '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();petRowActions(event,' + pet.pet_id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>';
                 tbody.appendChild(tr);
                 if (window.PET && typeof window.PET.refresh === 'function') window.PET.refresh();
             });
@@ -6335,21 +8205,100 @@ document.addEventListener('dcvs:realtime', function(e) {
     }
 });
 </script>
+<script>
+/* ========== RESIDENT DASHBOARD REWORK - INTERACTIVE JS ========== */
+function reworkToggleDropdown(e) {
+  e.stopPropagation();
+  var menu = document.getElementById('rework-action-menu');
+  if (menu) menu.classList.toggle('show');
+}
+function reworkCloseDropdown() {
+  var menu = document.getElementById('rework-action-menu');
+  if (menu) menu.classList.remove('show');
+}
+document.addEventListener('click', function() { reworkCloseDropdown(); });
+
+function reworkOpenModal(id) {
+  if (typeof openModal === 'function') {
+    openModal(id);
+  } else {
+    var el = document.getElementById(id);
+    if (el) { el.classList.add('active'); el.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+  }
+}
+
+function reworkSelectVisit(el, data) {
+  document.querySelectorAll('.appointment-item-row').forEach(function(row) { row.classList.remove('active-visit'); });
+  if (el) el.classList.add('active-visit');
+  var dayEl = document.getElementById('rework-visit-day');
+  var monthEl = document.getElementById('rework-visit-month');
+  var statusEl = document.getElementById('rework-visit-status');
+  var titleEl = document.getElementById('rework-visit-title');
+  var petEl = document.getElementById('rework-visit-pet');
+  var timeEl = document.getElementById('rework-visit-time');
+  var instrEl = document.getElementById('rework-visit-instruction');
+  if (dayEl && data.day) dayEl.textContent = data.day;
+  if (monthEl && data.month) monthEl.textContent = data.month;
+  if (titleEl) titleEl.textContent = data.service;
+  if (petEl) petEl.textContent = 'For ' + data.pet;
+  if (timeEl) timeEl.textContent = data.time;
+  if (instrEl) instrEl.textContent = data.nextStep || 'Bring your pet records';
+  if (statusEl) {
+    statusEl.textContent = data.status;
+    statusEl.className = 'status-pill-badge ' + (data.status.toLowerCase() === 'confirmed' ? 'badge-confirmed' : 'badge-pending');
+  }
+  if (data && data.apptId) {
+    ['rework-reschedule-btn', 'rework-view-btn'].forEach(function(btnId) {
+      var el = document.getElementById(btnId);
+      if (el) el.setAttribute('data-appt-id', data.apptId);
+    });
+    var rsBtn = document.getElementById('rework-reschedule-btn');
+    if (rsBtn) {
+      rsBtn.setAttribute('data-appt-type', data.type || '');
+      rsBtn.setAttribute('data-appt-pet', data.petId != null ? data.petId : '');
+      rsBtn.setAttribute('data-appt-date', data.date || '');
+      rsBtn.setAttribute('data-appt-time', data.timeRaw || '');
+      rsBtn.setAttribute('data-appt-notes', data.notes || '');
+    }
+  }
+}
+
+function reworkViewAppointment() {
+  var btn = document.getElementById('rework-view-btn');
+  var id = btn ? parseInt(btn.getAttribute('data-appt-id'), 10) : 0;
+  if (typeof switchSection === 'function') switchSection('appointments');
+  if (id && window.APPT && typeof APPT.view === 'function') APPT.view(id);
+}
+
+function reworkRescheduleVisit() {
+  var btn = document.getElementById('rework-reschedule-btn');
+  if (!btn) return;
+  var d = btn.dataset;
+  if (typeof window.openAppointmentForm === 'function') {
+    window.openAppointmentForm({
+      id: d.apptId || '',
+      service: d.apptType || '',
+      petId: d.apptPet || '',
+      dateRaw: d.apptDate || '',
+      timeRaw: d.apptTime || '',
+      notes: d.apptNotes || ''
+    }, 'reschedule');
+    return;
+  }
+  reworkOpenModal('editAppointmentModal');
+}
+
+function reworkUpdateGreetingDate() {
+  var el = document.getElementById('rework-live-date');
+  if (el) {
+    var now = new Date();
+    var days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    var months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    el.textContent = days[now.getDay()] + ', ' + months[now.getMonth()] + ' ' + now.getDate() + ', ' + now.getFullYear();
+  }
+}
+reworkUpdateGreetingDate();
+setInterval(reworkUpdateGreetingDate, 60000);
+</script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

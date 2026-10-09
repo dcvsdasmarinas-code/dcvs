@@ -41,6 +41,7 @@ $apptsQuery = $conn->query("
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
     WHERE a.archived_at IS NULL
+      AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
 ");
 if ($apptsQuery) {
     while ($row = $apptsQuery->fetch_assoc()) {
@@ -75,7 +76,7 @@ if ($apptsQuery) {
 $weeklyTemplate = dcvsWeeklyTemplate($conn);
 $blockedDays = [];
 $overrideDays = [];
-$calStart = date('Y-m-01');
+$calStart = date('Y-m-d');
 $calEnd = date('Y-m-d', strtotime('+3 months'));
 $ovrSet = $conn->query("SELECT DISTINCT slot_date FROM appointment_slots WHERE slot_date >= '$calStart' AND slot_date <= '$calEnd'");
 if ($ovrSet) { while ($r = $ovrSet->fetch_assoc()) $overrideDays[$r['slot_date']] = true; }

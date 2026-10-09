@@ -23,23 +23,25 @@ require_once __DIR__ . '/mailer.php';
 
 function workerProcessQueue($conn) {
     $batchSize = 20;
+    $workerToken = bin2hex(random_bytes(16));
 
     // Claim a batch of pending jobs (mark as processing so concurrent workers skip them)
-    $claim = $conn->prepare("UPDATE email_queue SET status='processing' WHERE status='pending' ORDER BY id ASC LIMIT ?");
-    $claim->bind_param("i", $batchSize);
+    $claim = $conn->prepare("UPDATE email_queue SET status='processing', worker_token=? WHERE status='pending' ORDER BY id ASC LIMIT ?");
+    $claim->bind_param("si", $workerToken, $batchSize);
     $claim->execute();
     $claim->close();
 
-    $stmt = $conn->prepare("SELECT id, recipient_email, recipient_name, subject, body, sent_by, sent_to_role, message_type, portal_delivered FROM email_queue WHERE status='processing' AND attempts <= 3 ORDER BY id ASC LIMIT ?");
-    $stmt->bind_param("i", $batchSize);
+    $stmt = $conn->prepare("SELECT id, recipient_email, recipient_name, subject, body, sent_by, sent_to_role, message_type, portal_delivered FROM email_queue WHERE status='processing' AND worker_token=? AND attempts <= 3 ORDER BY id ASC LIMIT ?");
+    $stmt->bind_param("si", $workerToken, $batchSize);
     $stmt->execute();
     $jobs = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 
     if (empty($jobs)) return 0;
 
-    $sent = 0;
+    $processed = 0;
     foreach ($jobs as $job) {
+        $processed++;
         $id = (int)$job['id'];
         $success = false;
         $errorMsg = null;
@@ -69,18 +71,29 @@ function workerProcessQueue($conn) {
         }
 
         $status = $success ? 'sent' : 'failed';
-        $upd = $conn->prepare("UPDATE email_queue SET status=?, attempts=attempts+1, error_message=?, processed_at=NOW() WHERE id=?");
-        $upd->bind_param("ssi", $status, $errorMsg, $id);
+        $upd = $conn->prepare("UPDATE email_queue SET status=?, attempts=attempts+1, error_message=?, worker_token=NULL, processed_at=NOW() WHERE id=? AND worker_token=?");
+        $upd->bind_param("ssis", $status, $errorMsg, $id, $workerToken);
         $upd->execute();
         $upd->close();
 
         if ($success) $sent++;
     }
 
-    return $sent;
+    return $processed;
 }
 
-$count = workerProcessQueue($conn);
+$count = 0;
+$emptyPolls = 0;
+while ($emptyPolls < 12) {
+    $processed = workerProcessQueue($conn);
+    if ($processed > 0) {
+        $count += $processed;
+        continue;
+    }
+    if ($count > 0) break;
+    $emptyPolls++;
+    usleep(100000);
+}
 
 if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
 if (PHP_SAPI === 'cli') {

@@ -28,8 +28,8 @@
 *{box-sizing:border-box;}
 body{
   margin:0;
-  font-family:"Plus Jakarta Sans","Segoe UI",sans-serif;
-  color:var(--ink);
+  font-family:'Inter','Segoe UI',sans-serif;
+  color:#18181b;
   background:#ffffff;
   min-height:100vh;
   line-height:1.6;
@@ -42,7 +42,7 @@ a{text-decoration:none;color:inherit;}
 }
 .navbar{
   display:flex;align-items:center;gap:2rem;
-  font-family:"Plus Jakarta Sans","Segoe UI",sans-serif!important;
+  font-family:'Inter','Segoe UI',sans-serif!important;
   width:min(1200px,92vw);margin:0 auto;padding:0.85rem 1.5rem;
   border-radius:999px;
   background:rgba(255,255,255,0.82);
@@ -113,14 +113,14 @@ a{text-decoration:none;color:inherit;}
 @media(max-width:600px){
   .container{width:95vw;}
 }
-h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section-title, .hero-title, .page-title { font-family:"Khteka","Segoe UI",sans-serif !important; font-size:clamp(5rem,4.75rem + 1.25vw,6rem) !important; line-height:0.85 !important; font-weight:500 !important; letter-spacing:-0.03em !important; color:#080807 !important; }
+h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section-title, .hero-title, .page-title { font-family:'Inter','Segoe UI',sans-serif !important; font-size:clamp(2rem,1.75rem + 1.25vw,2.5rem) !important; line-height:1 !important; font-weight:600 !important; letter-spacing:-0.025em !important; color:#18181b !important; }
 </style>
 <link rel="stylesheet" href="assets/css/responsive.css">
 </head>
 <body>
 <header class="site-header">
   <nav class="navbar">
-    <a href="landing-page.php"><img src="uploads/site/logo.png" alt="DCVS Logo" class="brand-logo" style="height:50px;width:auto;"></a>
+    <a href="landing-page.php"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height:50px;width:auto;"></a>
     <button class="nav-toggle" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
     <ul class="nav-links">
       <li><a href="landing-page.php" class="<?php echo $activePage === 'home' ? 'active' : ''; ?>">Home</a></li>
@@ -140,13 +140,6 @@ h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section
         </div>
       </li>
       <li><a href="adoption.php">Adoption</a></li>
-      <li class="nav-item">
-        <a href="javascript:void(0)" class="dropdown-toggle <?php echo in_array($activePage, ['knowledge','philippine-initiatives']) ? 'active' : ''; ?>">Insights <span class="arrow">▾</span></a>
-        <div class="dropdown-menu">
-          <a href="Knowledge-Hub.php">Knowledge Hub</a>
-          <a href="Philippine-Initiatives.php">Philippine Initiatives</a>
-        </div>
-      </li>
     </ul>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>

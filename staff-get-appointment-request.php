@@ -35,7 +35,7 @@ if (ctype_alnum($id_input) && strlen($id_input) >= 6) {
     // Search by reference_id
     $refId = '#APT-' . strtoupper($id_input);
     $stmt = $conn->prepare("
-        SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
+        SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
 JOIN users u ON a.user_id = u.user_id
@@ -55,7 +55,7 @@ if (!$row) {
     $appointment_id = (int)$id_input;
     if ($appointment_id > 0) {
         $stmt = $conn->prepare("
-            SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
+            SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
 JOIN users u ON a.user_id = u.user_id
@@ -84,7 +84,7 @@ if (!$row) {
         while ($emptyRef = $result->fetch_assoc()) {
             if (fallbackRefId('#APT-', $emptyRef['appointment_id']) === '#APT-' . $searchCode) {
                 $fullStmt = $conn->prepare("
-                    SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
+                    SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
 JOIN users u ON a.user_id = u.user_id

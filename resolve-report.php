@@ -13,6 +13,19 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
+require_once __DIR__ . '/includes/reports/response-workflow.php';
+
+function resolveReportRespond($success, $message, $data = []) {
+    if (($_POST['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        echo json_encode(array_merge(['success' => (bool)$success, 'message' => $message], $data));
+        exit;
+    }
+    $_SESSION[$success ? 'report_success' : 'report_error'] = $message;
+    header('Location: dashboard-staff.php#' . ($success ? 'reports-resolved' : 'reports-active'));
+    exit;
+}
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -20,26 +33,37 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        resolveReportRespond(false, 'Your session could not be verified. Refresh and try again.');
+    }
     $caseId = intval($_POST['case_id'] ?? 0);
-    $resolutionNotes = htmlspecialchars(trim($_POST['notes'] ?? ''), ENT_QUOTES, 'UTF-8');
+    $resolutionNotes = trim($_POST['notes'] ?? '');
+    $resolvedDate = trim($_POST['resolved_date'] ?? '');
+    $resolvedTime = trim($_POST['resolved_time'] ?? '');
 
     if ($caseId === 0) {
-        $_SESSION['report_error'] = "Invalid case ID.";
-        header('Location: dashboard-staff.php#reports-active');
-        exit;
+        resolveReportRespond(false, 'Invalid case ID.');
     }
+    $resolvedDateTime = DateTime::createFromFormat('!Y-m-d H:i', $resolvedDate . ' ' . $resolvedTime);
+    $dateTimeErrors = DateTime::getLastErrors();
+    if (!$resolvedDateTime
+        || ($dateTimeErrors && ($dateTimeErrors['warning_count'] > 0 || $dateTimeErrors['error_count'] > 0))
+        || $resolvedDateTime->format('Y-m-d H:i') !== $resolvedDate . ' ' . $resolvedTime) {
+        http_response_code(400);
+        resolveReportRespond(false, 'Enter a valid resolution date and time.');
+    }
+    $resolvedAt = $resolvedDateTime->format('Y-m-d H:i:s');
 
     // Fetch confirmed case details
-    $stmt = $conn->prepare("SELECT cc.*, r.report_id, r.reporter_id, r.barangay_id FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id WHERE cc.case_id = ? AND cc.status = 'active'");
+    $stmt = $conn->prepare("SELECT cc.*, r.report_id, r.reporter_id, r.barangay_id, r.report_type, u.full_name AS reporter_name FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id LEFT JOIN users u ON u.user_id = r.reporter_id WHERE cc.case_id = ? AND cc.status = 'active'");
     $stmt->bind_param("i", $caseId);
     $stmt->execute();
     $case = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if (!$case) {
-        $_SESSION['report_error'] = "Case not found or already resolved.";
-        header('Location: dashboard-staff.php#reports-active');
-        exit;
+        resolveReportRespond(false, 'Case not found or already resolved.');
     }
 
     $reportId = $case['report_id'];
@@ -47,17 +71,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $conn->begin_transaction();
 
     try {
+        loadDcvsEnv();
+        if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
+            $workflowStateQuery = $conn->prepare("SELECT state FROM report_response_workflow WHERE report_id = ? FOR UPDATE");
+            if (!$workflowStateQuery) throw new RuntimeException('Could not load response workflow.');
+            $workflowStateQuery->bind_param('i', $reportId);
+            if (!$workflowStateQuery->execute()) throw new RuntimeException('Could not load response workflow.');
+            $workflowStateRow = $workflowStateQuery->get_result()->fetch_assoc();
+            $workflowStateQuery->close();
+            $workflowState = (string)($workflowStateRow['state'] ?? '');
+            if (!dcvsResponseCanResolveCase('staff', $workflowState)) {
+                $conn->rollback();
+                http_response_code(409);
+                resolveReportRespond(false, 'Complete DCVS dispatch or processing before resolving this response-workflow case.');
+            }
+        }
+
         // Update confirmed_cases status to resolved
-        $updateCaseStmt = $conn->prepare("UPDATE confirmed_cases SET status = 'resolved', resolved_at = NOW(), notes = ? WHERE case_id = ?");
-        $updateCaseStmt->bind_param("si", $resolutionNotes, $caseId);
-        $updateCaseStmt->execute();
+        $updateCaseStmt = $conn->prepare("UPDATE confirmed_cases SET status = 'resolved', resolved_at = ?, notes = ? WHERE case_id = ?");
+        if (!$updateCaseStmt) throw new RuntimeException('Could not update the case.');
+        $updateCaseStmt->bind_param("ssi", $resolvedAt, $resolutionNotes, $caseId);
+        if (!$updateCaseStmt->execute() || $updateCaseStmt->affected_rows !== 1) throw new RuntimeException('Case was already updated.');
         $updateCaseStmt->close();
 
         // Update report status to resolved
         $updateReportStmt = $conn->prepare("UPDATE reports SET status = 'resolved' WHERE report_id = ?");
+        if (!$updateReportStmt) throw new RuntimeException('Could not update the report status.');
         $updateReportStmt->bind_param("i", $reportId);
-        $updateReportStmt->execute();
+        if (!$updateReportStmt->execute()) throw new RuntimeException('Could not update the report status.');
         $updateReportStmt->close();
+        if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
+            $workflowStmt = $conn->prepare("UPDATE report_response_workflow SET state = 'resolved' WHERE report_id = ? AND state NOT IN ('resolved', 'closed_not_actionable')");
+            if (!$workflowStmt) throw new RuntimeException('Could not update response workflow.');
+            $workflowStmt->bind_param('i', $reportId);
+            if (!$workflowStmt->execute() || $workflowStmt->affected_rows !== 1) throw new RuntimeException('Could not update response workflow.');
+            $workflowStmt->close();
+            $fromState = $workflowState;
+            $history = $conn->prepare("INSERT INTO report_response_history (report_id, actor_id, actor_role, action, from_state, to_state, reason) VALUES (?, ?, 'staff', 'resolve_case', ?, 'resolved', ?)");
+            if (!$history) throw new RuntimeException('Could not prepare response history.');
+            $staffId = (int)$_SESSION['user_id'];
+            $history->bind_param('iiss', $reportId, $staffId, $fromState, $resolutionNotes);
+            if (!$history->execute()) throw new RuntimeException('Could not save response history.');
+            $history->close();
+        }
 
         // Notify resident
         createNotification($conn, $case['reporter_id'], 'report_resolved',
@@ -66,6 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'report', $reportId);
         $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
         sendReportEmail($conn, $reportId, 'resolved', $resolutionNotes, $staffName);
+        sendReportSms($conn, $reportId, 'resolved', $staffName, $resolutionNotes);
 
         // Notify barangay officers
         if ($case['barangay_id']) {
@@ -84,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Log activity
         $action = "Case Resolved";
-        $details = "Case #$caseId resolved successfully.";
+        $details = "Resolved the " . ucfirst($case['report_type']) . " case reported by " . ($case['reporter_name'] ?: 'a resident') . ".";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
@@ -93,14 +150,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $conn->commit();
 
-        $_SESSION['report_success'] = "Case marked as resolved successfully. Resident and barangay have been notified.";
-        header('Location: dashboard-staff.php#reports-resolved');
-        exit;
-    } catch (Exception $e) {
+        resolveReportRespond(true, 'Case marked as resolved successfully.', [
+            'report_id' => (int)$reportId,
+            'case_id' => (int)$caseId,
+            'resolved_at' => $resolvedDateTime->format('M d, Y h:i A'),
+            'resolved_at_raw' => $resolvedAt,
+        ]);
+    } catch (Throwable $e) {
         $conn->rollback();
-        $_SESSION['report_error'] = "Failed to resolve case: " . $e->getMessage();
-        header('Location: dashboard-staff.php#reports-active');
-        exit;
+        resolveReportRespond(false, 'Failed to resolve case: ' . $e->getMessage());
     }
 }
 

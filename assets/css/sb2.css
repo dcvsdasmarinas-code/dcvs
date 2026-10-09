@@ -62,10 +62,10 @@ body.sb2-active .staff-main { margin-left: var(--sidebar-w) !important; }
 .sb2-brand-text { min-width: 0; }
 .sb2-brand-name {
   display: block;
-  font-family: 'Montserrat', sans-serif;
-  font-size: 0.95rem; font-weight: 800;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem; font-weight: 600;
   color: var(--sb2-accent-fg);
-  line-height: 1.15; letter-spacing: -0.01em;
+  line-height: 1.15; letter-spacing: -0.025em;
 }
 .sb2-brand-sub {
   display: block;
@@ -119,6 +119,8 @@ body.sb2-active .staff-main { margin-left: var(--sidebar-w) !important; }
   color: var(--sb2-muted);
 }
 .sb2-menu-button > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sb2-menu-button .sb2-badge,
+.sb2-menu-sub-button .sb2-badge { flex: 0 0 auto; border-radius: 999px; background: #18181b; color: #fff; padding: 1px 7px; font-size: 11px; font-weight: 600; line-height: 18px; }
 .sb2-menu-button:hover { background: var(--sb2-accent); color: var(--sb2-accent-fg); }
 .sb2-menu-button.active { background: var(--sb2-accent); color: var(--sb2-accent-fg); font-weight: 600; }
 .sb2-menu-button:hover > i,
@@ -159,6 +161,10 @@ body.sb2-active .staff-main { margin-left: var(--sidebar-w) !important; }
 .sb2-menu-sub-button.active { background: var(--sb2-accent); color: var(--sb2-accent-fg); font-weight: 600; }
 .sb2-menu-sub-button:hover > i,
 .sb2-menu-sub-button.active > i { color: var(--sb2-accent-fg); }
+
+/* ── Nested Sub-Collapsible ── */
+.sb2-sub-collapsible .sb2-caret { width: 14px; height: 14px; }
+.sb2-sub-collapsible.open + .sb2-menu-sub { display: flex; flex-direction: column; gap: 2px; margin-left: 0; padding-left: 8px; border-left-color: var(--sb2-border); }
 
 /* ── Collapsed (icons) state ── */
 .sb2[data-state="collapsed"] .sb2-brand { padding: 0; justify-content: center; }

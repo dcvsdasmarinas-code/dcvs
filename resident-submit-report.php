@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         // Log activity
         $action = "Submitted a Report";
-        $details = ucfirst($report_type) . " report submitted (ID: " . $refId . ")";
+        $details = ($_SESSION['full_name'] ?? 'A resident') . " submitted a " . ucfirst($report_type) . " report.";
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details) VALUES (?, ?, ?)");
         $logStmt->bind_param("iss", $reporter_id, $action, $details);
         $logStmt->execute();

@@ -11,6 +11,7 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/activity-log-format.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     header('Location: login-admin.php');
@@ -114,6 +115,7 @@ if ($actTypes) $actQ->bind_param($actTypes, ...$actParams);
 $actQ->execute();
 $allActivity = $actQ->get_result()->fetch_all(MYSQLI_ASSOC);
 $actQ->close();
+$activityEntityMaps = dcvsActivityLogEntityMaps($conn, $allActivity);
 
 $allActUsers = [];
 $auResult = $conn->query("SELECT DISTINCT u.user_id, u.full_name FROM activity_logs a LEFT JOIN users u ON a.user_id = u.user_id WHERE a.user_id IS NOT NULL ORDER BY u.full_name ASC");
@@ -158,7 +160,7 @@ $activePage = 'users';
 
     .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:2rem; flex-wrap:wrap; gap:1rem; }
     .page-header-left { }
-    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Montserrat',sans-serif; letter-spacing:-0.02em; }
+    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.02em; }
     .page-subtitle { font-size:0.85rem; color:#64748b; margin:4px 0 0; line-height:1.5; }
     .page-actions { display:flex; gap:8px; align-items:center; }
 
@@ -217,7 +219,7 @@ $activePage = 'users';
     .kpi-icon.dark-green-bg { background:#f0fdf4; color:#045e1f; }
 
     .kpi-number {
-      font-family:'Montserrat',sans-serif; font-size:1.65rem;
+      font-family:'Inter',sans-serif; font-size:1.65rem;
       font-weight:800; color:#0f172a; line-height:1; display:block;
     }
     .kpi-label { font-size:0.72rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.04em; display:block; margin-top:2px; }
@@ -361,6 +363,9 @@ $activePage = 'users';
     .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 
     .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
+    #users .appt-table{font-family:'Inter','Segoe UI',sans-serif;}
+    #users .user-reference{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;}
+    #users .client-name.user-full-name{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;}
     .appt-table{width:100%;border-collapse:collapse;color:#18181b;font-size:14px;}
     .appt-table thead th{background:#fafafa;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#71717a;height:40px;padding:0 12px;border-bottom:1px solid #e4e4e7;text-align:left;vertical-align:middle;white-space:nowrap;user-select:none;}
     .appt-table thead th.sd-th-action{text-align:right;}
@@ -370,6 +375,10 @@ $activePage = 'users';
     .appt-table tbody tr.selected{background:#f4f4f5;}
     .appt-table tbody td{padding:10px 12px;font-size:14px;color:#18181b;vertical-align:middle;}
     .appt-table tbody td.sd-td-action{text-align:right;}
+    #activity .appt-table tbody td{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;line-height:1.6;}
+    #activity .appt-table tbody td .client-name,
+    #activity .appt-table tbody td .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;line-height:1.6;}
+    #activity .appt-table tbody td .appt-status-pill{font-family:'Inter',sans-serif;font-size:13px;font-weight:500;line-height:1.4;}
 
     /* ── Sort buttons ── */
     .sd-th{position:relative;}
@@ -430,6 +439,16 @@ $activePage = 'users';
     .sd-profile-head{display:flex;align-items:flex-start;gap:14px;padding-bottom:16px;border-bottom:1px solid #e4e4e7;}
     .sd-profile-name{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;margin:0;}
     .sd-profile-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#71717a;margin:2px 0 0;}
+    #viewProfileModal{font-family:'Inter','Segoe UI',sans-serif;}
+    #viewProfileModal .sd-dialog-title,
+    #viewProfileModal .sd-dialog-description,
+    #viewProfileModal .sd-profile-name,
+    #viewProfileModal .sd-profile-sub,
+    #viewProfileModal .sd-section-title,
+    #viewProfileModal .sd-info-item .sd-info-label,
+    #viewProfileModal .sd-info-item .sd-info-value{font-family:'Inter','Segoe UI',sans-serif;}
+    #viewProfileModal .sd-profile-head,
+    #viewProfileModal .sd-section-title{border-bottom:0;}
     @keyframes modalIn{from{opacity:0;transform:scale(0.95);}to{opacity:1;transform:scale(1);}}
 
     .table-container {
@@ -529,6 +548,14 @@ $activePage = 'users';
   .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   #settings.content-section { background:#fff; }
   </style>
+  <script>
+    (function() {
+      var target = window.location.hash.replace('#', '') || localStorage.getItem('adminActiveSection') || 'users';
+      if (target !== 'activity' && target !== 'settings') {
+        window.location.replace('role-management.php');
+      }
+    })();
+  </script>
 </head>
 <body>
 
@@ -581,8 +608,8 @@ $activePage = 'users';
           <tbody id="adminUserBody">
             <?php foreach ($allUsers as $u): ?>
               <tr>
-                <td><span style="font-size:12px;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
-                <td><div class="client-cell"><span class="client-name"><?php echo htmlspecialchars($u['full_name']); ?></span></div></td>
+                <td><span class="user-reference"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
+                <td><div class="client-cell"><span class="client-name user-full-name"><?php echo htmlspecialchars($u['full_name']); ?></span></div></td>
                 <td><span class="contact-main"><?php echo htmlspecialchars($u['email']); ?></span></td>
                 <td><?php
                   $roleTag = 'tag-resident';
@@ -646,7 +673,7 @@ $activePage = 'users';
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
         <div style="position:relative;display:inline-block;">
-          <button class="pet-action-btn" id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg></button>
+          <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
               <button onclick="actCalPrev()" style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;font-size:16px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
@@ -700,7 +727,7 @@ $activePage = 'users';
                 </td>
                 <td><span class="contact-main"><?php echo date('M d, Y', strtotime($act['created_at'])); ?></span></td>
                 <td><span class="contact-main"><?php echo date('h:i A', strtotime($act['created_at'])); ?></span></td>
-                <td><span class="contact-main"><?php echo htmlspecialchars($act['details'] ?? ''); ?></span></td>
+                <td><span class="contact-main"><?php echo htmlspecialchars(dcvsFormatActivityLogDetails($act['details'] ?? '', $activityEntityMaps)); ?></span></td>
                 <td><?php
                   $src = $act['action'] ?? '';
                   $srcLower = strtolower($src);
@@ -1246,8 +1273,16 @@ function viewUserProfile(u) {
   else { statusEl.textContent = u.status || '—'; }
   document.getElementById('vpRegistered').textContent = u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', {year:'numeric',month:'long',day:'numeric'}) : '—';
   var avatarEl = document.getElementById('vpAvatar');
-  if (u.avatar_url) { avatarEl.innerHTML = '<img src="'+u.avatar_url+'" alt="Avatar" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">'; }
-  else { var initials = (u.full_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2) || '?'; avatarEl.textContent = initials; }
+  avatarEl.textContent = '';
+  if (u.avatar_url) {
+    var avatarImage = document.createElement('img');
+    avatarImage.src = u.avatar_url;
+    avatarImage.alt = 'Avatar';
+    avatarEl.appendChild(avatarImage);
+  } else {
+    var initials = (u.full_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2) || '?';
+    avatarEl.textContent = initials;
+  }
   openModal('viewProfileModal');
 }
 
@@ -1291,7 +1326,7 @@ function confirmRemoveAvatar() {
 </div>
 
 <!-- View User Profile Modal -->
-<div class="modal" id="viewProfileModal">
+<div class="modal user-profile-drawer" id="viewProfileModal">
   <div class="sd-dialog">
     <div class="sd-dialog-content" role="dialog" aria-modal="true">
       <button type="button" class="sd-dialog-close" onclick="closeModal('viewProfileModal')" aria-label="Close">

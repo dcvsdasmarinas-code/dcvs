@@ -38,7 +38,7 @@ html {
 }
 
 body {
-  font-family: 'Open Sans', sans-serif;
+  font-family: 'Inter','Segoe UI',sans-serif;
   color: var(--akf-dark);
   background: #ffffff;
   -webkit-font-smoothing: antialiased;
@@ -51,7 +51,7 @@ html, body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-  font-family: 'Montserrat', sans-serif;
+  font-family: 'Inter',sans-serif;
 }
 
 a {
@@ -84,7 +84,7 @@ img {
   display: flex;
   align-items: center;
   gap: 2rem;
-  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif !important;
+  font-family: 'Inter',"Segoe UI",sans-serif !important;
   width: min(1200px, 92vw);
   margin: 0 auto;
   padding: 0.85rem 1.5rem;
@@ -223,19 +223,19 @@ img {
 .adoption-hero-section .right-col{display:flex;flex-direction:column;}
 .adoption-hero-section .top-photos{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:32px;}
 .adoption-hero-section .top-photos img{width:100%;aspect-ratio:1/1.2;object-fit:cover;border-radius:14px;display:block;background:#e4e1db;}
-.adoption-hero-section h1{font-weight:800;font-size:3rem;color:var(--akf-red);margin:0 0 1.5rem;font-family:'Montserrat',sans-serif;line-height:1.15;}
+.adoption-hero-section h1{font-weight:800;font-size:3rem;color:var(--akf-red);margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.15;letter-spacing:-0.025em;}
 .adoption-hero-section .desc{font-size:1.125rem;color:var(--akf-dark);max-width:480px;margin:0 0 26px;line-height:1.7;}
 .adoption-hero-section .cta-row{display:flex;gap:14px;flex-wrap:wrap;}
-.adoption-hero-section .cta-btn{display:inline-flex;align-items:center;gap:12px;padding:14px 24px;border-radius:32px;border:none;cursor:pointer;font-weight:600;font-size:15px;color:#fff;background:#000;text-decoration:none;transition:background .2s;}
-.adoption-hero-section .cta-btn:hover{background:#333;}
-.adoption-hero-section .cta-btn .icon{width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.adoption-hero-section .cta-btn{display:inline-flex;align-items:center;gap:10px;padding:0 24px;height:44px;border-radius:6px;border:1px solid transparent;cursor:pointer;font-family:'Inter',sans-serif;font-weight:500;font-size:16px;color:#fafafa;background:#18181b;text-decoration:none;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background .15s;}
+.adoption-hero-section .cta-btn:hover{background:#27272a;}
+.adoption-hero-section .cta-btn .icon{width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 @media(max-width:520px){.adoption-hero-section h1{font-size:38px;}}
 
 /* ---------- Meet The Hearts ---------- */
 .adoption-hearts-section{background:#fff;padding:60px 0;}
 .adoption-hearts-section .about-grid{display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:center;}
 @media(max-width:860px){.adoption-hearts-section .about-grid{grid-template-columns:1fr;}}
-.adoption-hearts-section .about-col h1{font-size:3rem;font-weight:800;color:var(--akf-red);margin:0 0 1.5rem;font-family:'Montserrat',sans-serif;line-height:1.15;}
+.adoption-hearts-section .about-col h1{font-size:3rem;font-weight:800;color:var(--akf-red);margin:0 0 1.5rem;font-family:'Inter',sans-serif;line-height:1.15;letter-spacing:-0.025em;}
 .adoption-hearts-section .about-col .desc{font-size:1.125rem;color:var(--akf-dark);max-width:460px;margin:0 0 24px;line-height:1.7;}
 .adoption-hearts-section .about-col blockquote{margin:0 0 30px;padding-left:18px;border-left:3px solid #cfcac0;font-style:italic;font-size:1.125rem;color:var(--akf-dark);line-height:1.7;}
 .adoption-hearts-section .about-photos{display:grid;grid-template-columns:1.3fr 1fr;gap:24px;align-items:end;}
@@ -318,7 +318,7 @@ img {
 
 .adopt-label {
   display: block;
-  font-family: 'Montserrat', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-weight: 800;
   font-size: 1.25rem;
   color: var(--akf-red);
@@ -572,23 +572,37 @@ img {
 }
 
 .meet-rescues-link {
-  display: inline-block;
-  background: var(--akf-red);
-  padding: 1.5rem 3rem;
-  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 36px;
+  border-radius: 6px;
+  background: #18181b;
+  color: #fafafa;
   text-decoration: none;
-  transition: background 0.3s, transform 0.2s;
+  font-family: 'Inter',sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+  transition: background-color 0.15s ease;
 }
 
 .meet-rescues-link:hover {
-  background: #0a6020;
-  transform: translateY(-2px);
+  background: #27272a;
+  transform: none;
 }
 
 .meet-rescues-link h3 {
-  font-weight: 800;
-  font-size: 1.5rem;
-  color: var(--akf-white);
+  font-family: 'Inter',sans-serif;
+  font-weight: 500;
+  font-size: 16px;
+  color: #fafafa;
   margin: 0;
 }
 
@@ -1031,7 +1045,7 @@ img {
   .rescues-carousel-next { right: 5px; }
   .gallery-section h2 { font-size: 1.5rem; }
 }
-h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:"Khteka","Segoe UI",sans-serif !important; font-size:clamp(5rem,4.75rem + 1.25vw,6rem) !important; line-height:0.85 !important; font-weight:500 !important; letter-spacing:-0.03em !important; color:#080807 !important; }
+h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:'Inter',sans-serif !important; font-size:clamp(3rem,2.6rem + 1vw,3.5rem) !important; line-height:1.1 !important; font-weight:800 !important; letter-spacing:-0.025em !important; color:var(--akf-dark) !important; }
 .adopt-label { color:#000 !important; }
 .carousel-btn { background:#000 !important; color:#fff !important; }
 .parallax-content h2 { color:#fff !important; }
@@ -1044,7 +1058,7 @@ h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:"Khteka
 
  <header class="site-header">
   <nav class="navbar">
-    <a href="landing-page.php"><img src="uploads/site/logo.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
+    <a href="landing-page.php"><img src="uploads/site/DCVS LOGO.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span>
       <span></span>
@@ -1068,13 +1082,6 @@ h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:"Khteka
         </div>
       </li>
       <li><a href="#adopt" class="active">Adoption</a></li>
-      <li class="nav-item">
-        <a href="javascript:void(0)" class="dropdown-toggle">Insights <span class="arrow">▾</span></a>
-        <div class="dropdown-menu">
-          <a href="Knowledge-Hub.php">Knowledge Hub</a>
-          <a href="Philippine-Initiatives.php">Philippine Initiatives</a>
-        </div>
-      </li>
     </ul>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>

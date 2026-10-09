@@ -6,92 +6,140 @@ require_once __DIR__ . '/availability.php';
 header('Content-Type: application/json');
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+    http_response_code(401);
     echo json_encode(['available' => false, 'error' => 'Unauthorized']);
     exit;
 }
 
 $date = $_GET['date'] ?? '';
-$time = $_GET['time'] ?? '';
+$rawTime = (string)($_GET['time'] ?? '');
+$time = substr($rawTime, 0, 5);
 $excludeId = isset($_GET['exclude']) ? (int)$_GET['exclude'] : 0;
+$urgency = $_GET['urgency'] ?? 'routine';
+if (!in_array($urgency, ['routine', 'urgent'], true)) $urgency = 'routine';
 
-if (empty($date)) {
-    echo json_encode(['available' => false, 'error' => 'Date required']);
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+    || !checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4))
+    || ($rawTime !== '' && (!preg_match('/^\d{2}:\d{2}(:\d{2})?$/', $rawTime) || !in_array($time, DCVS_STANDARD_TIMES, true)))) {
+    http_response_code(400);
+    echo json_encode(['available' => false, 'error' => 'A valid date and time are required.']);
     exit;
 }
 
-$maxPerSlot = 1;
-$maxPerDay = 5;
-
-// Staff-managed schedule: weekly template + per-date overrides
 $weeklyTemplate = dcvsWeeklyTemplate($conn);
-$blocked = false;
-if ($time && !dcvsSlotAvailable($conn, $date, $time, $weeklyTemplate)) {
-    $blocked = true;
+$firstDay = $date;
+$lastDay = date('Y-m-d', strtotime($date . ' +90 days'));
+$staffCount = dcvsActiveStaffCount($conn);
+$programStaffing = dcvsProgramStaffingMap($conn, $firstDay, $lastDay);
+$counts = [];
+$countStmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level, COUNT(*) AS appointment_count
+    FROM appointments
+    WHERE preferred_date BETWEEN ? AND ?
+      AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+      AND archived_at IS NULL" . ($excludeId ? " AND appointment_id != ?" : "") . "
+    GROUP BY preferred_date, preferred_time, urgency_level");
+if (!$countStmt) {
+    error_log('Failed to prepare slot availability count: ' . $conn->error);
+    http_response_code(500);
+    echo json_encode(['available' => false, 'error' => 'Could not check appointment availability.']);
+    exit;
 }
-
-// Held by an active appointment (any resident)
-$held = $time ? dcvsSlotHeld($conn, $date, $time, $excludeId) : false;
-
-// Per-slot count
-$slotCount = 0;
-$scStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND preferred_time = ? AND status IN ('pending','approved','scheduled') AND archived_at IS NULL" . ($excludeId ? " AND appointment_id != ?" : ""));
-if ($time) {
-    if ($excludeId) { $scStmt->bind_param("ssi", $date, $time, $excludeId); }
-    else { $scStmt->bind_param("ss", $date, $time); }
-    $scStmt->execute();
-    $slotCount = (int)$scStmt->get_result()->fetch_row()[0];
-    $scStmt->close();
+if ($excludeId) $countStmt->bind_param('ssi', $firstDay, $lastDay, $excludeId);
+else $countStmt->bind_param('ss', $firstDay, $lastDay);
+if (!$countStmt->execute()) {
+    error_log('Failed to query slot availability counts: ' . $countStmt->error);
+    $countStmt->close();
+    http_response_code(500);
+    echo json_encode(['available' => false, 'error' => 'Could not check appointment availability.']);
+    exit;
 }
+$countResult = $countStmt->get_result();
+$dayCounts = [];
+while ($row = $countResult->fetch_assoc()) {
+    $slotDate = $row['preferred_date'];
+    $slotTime = substr($row['preferred_time'], 0, 5);
+    $level = $row['urgency_level'] ?? 'routine';
+    $count = (int)$row['appointment_count'];
+    $counts[$slotDate][$slotTime][$level] = $count;
+    $dayCounts[$slotDate][$level] = ($dayCounts[$slotDate][$level] ?? 0) + $count;
+}
+$countStmt->close();
 
-// Daily count
-$dayCount = 0;
-$dcStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status IN ('pending','approved','scheduled') AND archived_at IS NULL" . ($excludeId ? " AND appointment_id != ?" : ""));
-if ($excludeId) { $dcStmt->bind_param("si", $date, $excludeId); }
-else { $dcStmt->bind_param("s", $date); }
-$dcStmt->execute();
-$dayCount = (int)$dcStmt->get_result()->fetch_row()[0];
-$dcStmt->close();
+$overrideStmt = $conn->prepare("SELECT slot_date, slot_time, status FROM appointment_slots WHERE slot_date BETWEEN ? AND ?");
+if (!$overrideStmt) {
+    error_log('Failed to prepare date availability lookup: ' . $conn->error);
+    http_response_code(500);
+    echo json_encode(['available' => false, 'error' => 'Could not check clinic availability.']);
+    exit;
+}
+$overrideStmt->bind_param('ss', $firstDay, $lastDay);
+if (!$overrideStmt->execute()) {
+    error_log('Failed to query date availability: ' . $overrideStmt->error);
+    $overrideStmt->close();
+    http_response_code(500);
+    echo json_encode(['available' => false, 'error' => 'Could not check clinic availability.']);
+    exit;
+}
+$overrideResult = $overrideStmt->get_result();
+$overrides = [];
+while ($row = $overrideResult->fetch_assoc()) {
+    $overrides[$row['slot_date']][substr($row['slot_time'], 0, 5)] = $row['status'] === 'available';
+}
+$overrideStmt->close();
 
-// Find nearest free slot if current is unavailable
+$maxPerDay = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
+$slotCapacity = static function ($slotDate, $slotTime) use ($urgency, $staffCount, $programStaffing) {
+    if ($urgency === 'urgent') return $staffCount > 0 ? 1 : 0;
+    return max(0, $staffCount - (int)($programStaffing[$slotDate][$slotTime] ?? 0));
+};
+$slotIsOpen = static function ($slotDate, $slotTime) use ($conn, $weeklyTemplate, $overrides, $slotCapacity, $counts, $dayCounts, $urgency, $maxPerDay) {
+    if (!dcvsClinicSlotAvailable($conn, $slotDate, $slotTime, $weeklyTemplate, $overrides[$slotDate] ?? [])) return false;
+    $capacity = $slotCapacity($slotDate, $slotTime);
+    return $capacity > 0
+        && (int)($counts[$slotDate][$slotTime][$urgency] ?? 0) < $capacity
+        && (int)($dayCounts[$slotDate][$urgency] ?? 0) < $maxPerDay;
+};
+
+$clinicOpen = $time === '' || dcvsClinicSlotAvailable($conn, $date, $time, $weeklyTemplate, $overrides[$date] ?? []);
+$capacity = $time === '' ? 0 : $slotCapacity($date, $time);
+$slotCount = $time === '' ? 0 : (int)($counts[$date][$time][$urgency] ?? 0);
+$dayCount = (int)($dayCounts[$date][$urgency] ?? 0);
+$clinicBlocked = !$clinicOpen;
+$programBlocked = $time !== '' && $urgency === 'routine' && $clinicOpen && $capacity === 0;
+$blocked = $clinicBlocked || $programBlocked;
+$held = $time !== '' && $capacity > 0 && $slotCount >= $capacity;
+$available = $time === ''
+    ? $clinicOpen
+    : ($clinicOpen && $capacity > 0 && $slotCount < $capacity && $dayCount < $maxPerDay);
+
 $nearestSlot = null;
-if ($time && ($blocked || $held || $slotCount >= $maxPerSlot || $dayCount >= $maxPerDay)) {
-    foreach (DCVS_STANDARD_TIMES as $t) {
-        if ($t === $time) continue;
-        // Skip staff-closed slots (weekly template + per-date overrides)
-        if (!dcvsSlotAvailable($conn, $date, $t, $weeklyTemplate)) continue;
-        if (dcvsSlotHeld($conn, $date, $t, $excludeId)) continue;
-        $tStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND preferred_time = ? AND status IN ('pending','approved','scheduled') AND archived_at IS NULL");
-        $tStmt->bind_param("ss", $date, $t);
-        $tStmt->execute();
-        $tCount = (int)$tStmt->get_result()->fetch_row()[0];
-        $tStmt->close();
-        if ($tCount < $maxPerSlot) {
-            $nearestSlot = $t;
-            break;
-        }
-    }
-    // Try next day if no slot today
-    if (!$nearestSlot) {
-        $nextDate = date('Y-m-d', strtotime($date . ' +1 day'));
-        $nextStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status IN ('pending','approved','scheduled') AND archived_at IS NULL");
-        $nextStmt->bind_param("s", $nextDate);
-        $nextStmt->execute();
-        $nextCount = (int)$nextStmt->get_result()->fetch_row()[0];
-        $nextStmt->close();
-        if ($nextCount < $maxPerDay) {
-            $nearestSlot = $nextDate . ' 09:00';
+if ($time !== '' && !$available) {
+    $requestedTimestamp = strtotime($date . ' ' . $time);
+    for ($offset = 0; $offset <= 90 && $nearestSlot === null; $offset++) {
+        $candidateDate = date('Y-m-d', strtotime($date . ' +' . $offset . ' days'));
+        foreach (DCVS_STANDARD_TIMES as $candidateTime) {
+            if ($candidateDate === $date && strtotime($candidateDate . ' ' . $candidateTime) < $requestedTimestamp) continue;
+            if ($slotIsOpen($candidateDate, $candidateTime)) {
+                $nearestSlot = $candidateDate . ' ' . $candidateTime;
+                break;
+            }
         }
     }
 }
 
 echo json_encode([
-    'available' => !$blocked && !$held && (!$time || ($slotCount < $maxPerSlot && $dayCount < $maxPerDay)),
+    'available' => $available,
     'blocked' => $blocked,
+    'clinic_blocked' => $clinicBlocked,
+    'program_blocked' => $programBlocked,
     'held' => $held,
+    'date_full' => $dayCount >= $maxPerDay,
     'slot_count' => $slotCount,
+    'slot_capacity' => $capacity,
     'day_count' => $dayCount,
-    'max_per_slot' => $maxPerSlot,
+    'max_per_slot' => $capacity,
     'max_per_day' => $maxPerDay,
     'nearest_slot' => $nearestSlot,
-    'error' => null
+    'urgency' => $urgency,
+    'error' => null,
 ]);

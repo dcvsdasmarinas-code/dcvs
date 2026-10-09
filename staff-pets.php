@@ -12,6 +12,7 @@ session_set_cookie_params([
 session_start();
 
 require_once 'db.php';
+require_once 'includes/adoption-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -21,8 +22,24 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 $pageTitle = 'Pet Listings';
 $activePage = 'pet-listings';
 
+adoptionReleaseExpiredReservations($conn);
+
 $listings = [];
-$lq = $conn->query("SELECT * FROM pet_listings ORDER BY created_at DESC");
+$lq = $conn->query(
+    "SELECT p.*,
+            application.approved_pickup_at AS adoption_approved_pickup_at,
+            application.status AS adoption_application_status
+     FROM pet_listings p
+     LEFT JOIN adoption_applications application
+       ON application.application_id = (
+           SELECT latest.application_id
+           FROM adoption_applications latest
+           WHERE latest.pet_listing_id = p.listing_id
+           ORDER BY latest.application_date DESC, latest.application_id DESC
+           LIMIT 1
+       )
+     ORDER BY p.created_at DESC"
+);
 if ($lq) {
     while ($row = $lq->fetch_assoc()) $listings[] = $row;
 }
@@ -74,6 +91,9 @@ foreach ($listings as $row) {
         'description'  => $row['description'] ?? '',
         'photo_url'    => $row['photo_url'] ?? '',
         'status'       => $row['status'] ?? 'available',
+        'adopted_at'   => $row['adopted_at'] ?? '',
+        'approved_pickup_at' => $row['adoption_approved_pickup_at'] ?? '',
+        'adoption_application_status' => $row['adoption_application_status'] ?? '',
         'vaccination'  => $vaccination,
         'owner'        => $owner,
         'created_at'   => $row['created_at'] ?? '',
@@ -116,7 +136,7 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     }
     .cpd *{ box-sizing:border-box; }
     .cpd-app{ width:100%; padding:8px 0 40px; }
-    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Montserrat',sans-serif; }
+    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Inter',sans-serif; }
     .page-subtitle { font-size:0.88rem; color:#64748b; margin:4px 0 0; }
 
     .pets-cms{ padding:0 !important; background:#f8fafc; }
@@ -136,7 +156,8 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
 
     /* KPI cards */
     .cpd .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
-    .cpd .kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:18px 20px; background:none; border:none; border-radius:0; box-shadow:none; }
+    .cpd .kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:14px 16px; background:#fff; border:1px solid #E5E7EB; border-radius:14px; box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03); transition:all .2s cubic-bezier(.4,0,.2,1); }
+    .cpd .kpi-card:hover{ border-color:#D1D5DB; box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03); }
     .cpd .kpi-label{ font-size:12.5px; color:#000; font-weight:600; margin:0 0 8px; }
     .cpd .kpi-value{ font-size:26px; font-weight:700; color:var(--ink-900); letter-spacing:-.02em; line-height:1; margin-bottom:8px; }
     .cpd .kpi-sub{ font-size:12px; color:var(--ink-400); }
@@ -253,7 +274,7 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .cpd .profile-avatar{ width:56px;height:56px; border-radius:50%; background:var(--green-100); color:var(--green-700); font-weight:700; font-size:18px; display:flex;align-items:center;justify-content:center; flex-shrink:0; overflow:hidden; }
     .cpd .profile-avatar img{ width:100%; height:100%; object-fit:cover; }
     .cpd .profile-name-row{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    .cpd .profile-name-row h2{ font-size:20px; font-weight:700; margin:0; color:var(--ink-900); font-family:'Montserrat',sans-serif; }
+    .cpd .profile-name-row h2{ font-size:20px; font-weight:700; margin:0; color:var(--ink-900); font-family:'Inter',sans-serif; }
     .cpd .profile-id{ font-size:13px; font-weight:400; color:var(--ink-500); margin-top:3px; }
     .cpd .close-x{ margin-left:auto; color:var(--ink-400); cursor:pointer; background:none;border:none; padding:4px; }
     .cpd .close-x:hover{ color:var(--ink-700); }
@@ -261,12 +282,12 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .cpd .tab{ padding:0 0 12px; font-size:14px; font-weight:600; color:var(--ink-400); cursor:pointer; border-bottom:2px solid transparent; background:none;border:none; font-family:inherit; }
     .cpd .tab.active{ color:var(--green-700); border-bottom-color:var(--green-600); }
     .cpd .info-card-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
-    .cpd .info-card-head h3{ font-size:13.5px; font-weight:700; margin:0; color:var(--ink-900); }
+    .cpd .info-card-head h3{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; margin:0; color:#71717a; }
     .cpd .info-rows{ display:flex; flex-direction:column; gap:14px; margin-bottom:22px; }
     .cpd .info-row{ display:flex; align-items:flex-start; gap:11px; }
     .cpd .info-row-icon{ width:36px;height:36px; border-radius:9px; background:var(--ink-100); color:#000; display:flex;align-items:center;justify-content:center; flex-shrink:0; }
-    .cpd .info-row-label{ font-size:12px; color:var(--ink-400); margin-bottom:2px; }
-    .cpd .info-row-value{ font-size:14px; font-weight:600; color:var(--ink-900); word-break:break-word; }
+    .cpd .info-row-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:400; color:#71717a; margin-bottom:2px; }
+    .cpd .info-row-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:600; color:#18181b; word-break:break-word; }
     .cpd .profile-empty{ text-align:center; padding:48px 12px; color:var(--ink-400); }
     .cpd .profile-empty p{ margin:0; font-size:13px; }
     .cpd .pet-empty{ border:1.5px dashed var(--ink-200); border-radius:var(--radius); padding:44px 16px; }
@@ -274,7 +295,10 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .cpd .pet-empty p{ margin:0; font-size:12.5px; line-height:1.5; }
     .cpd .profile-footer{ display:flex; align-items:center; justify-content:flex-end; gap:10px; margin-top:auto; padding-top:16px; border-top:1px solid var(--border); }
 
-    .cpd .rpt-section-title{ font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-400); margin:18px 0 10px; }
+    .cpd .rpt-tabs{ display:flex; justify-content:center; gap:28px; border-bottom:1px solid var(--border); margin-bottom:20px; }
+    .cpd .rpt-tab{ padding:0 0 12px; font-size:14px; font-weight:600; color:var(--ink-400); cursor:pointer; border-bottom:2px solid transparent; background:none;border:none; font-family:inherit; }
+    .cpd .rpt-tab.active{ color:var(--green-700); border-bottom-color:var(--green-600); }
+    .cpd .rpt-section-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; text-transform:none; letter-spacing:0; color:#71717a; margin:18px 0 10px; }
     .cpd .rpt-desc-box{ background:var(--ink-50); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px; font-size:13px; color:var(--ink-700); line-height:1.55; white-space:pre-wrap; }
     .cpd .listing-tab .rpt-desc-box{ background:transparent; border:none; border-radius:0; padding:0; }
     .cpd .listing-tab .info-row-icon{ background:transparent; }
@@ -354,16 +378,16 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .cpd .pet-detail-badges{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:8px; }
     .cpd .pet-detail-meta{ font-size:14px; color:var(--ink-500); margin-top:6px; }
     .cpd .info-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px 14px; margin-bottom:20px; }
-    .cpd .info-cell-label{ font-size:11px; color:var(--ink-400); margin-bottom:2px; }
-    .cpd .info-cell-value{ font-size:13.5px; font-weight:600; color:var(--ink-900); }
+    .cpd .info-cell-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:400; color:#71717a; margin-bottom:2px; }
+    .cpd .info-cell-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:600; color:#18181b; }
     .cpd .readiness-table{ width:100%; border-collapse:collapse; margin-bottom:22px; }
-    .cpd .readiness-table th{ text-align:left; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-400); padding:6px 8px; border-bottom:1px solid var(--border); }
-    .cpd .readiness-table td{ padding:9px 8px; font-size:13px; color:var(--ink-700); border-bottom:1px solid var(--ink-100); }
+    .cpd .readiness-table th{ text-align:left; font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:400; color:#71717a; padding:6px 8px; border-bottom:1px solid var(--border); background:transparent; text-transform:none; }
+    .cpd .readiness-table td{ padding:9px 8px; font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:600; color:#18181b; border-bottom:1px solid var(--ink-100); }
     .cpd .custodian-card{ display:flex; align-items:center; gap:12px; padding:14px 0; margin-bottom:6px; }
     .cpd .custodian-avatar{ width:56px;height:56px; border-radius:50%; background:var(--green-100); color:var(--green-700); font-weight:700; font-size:18px; display:flex;align-items:center;justify-content:center; flex-shrink:0; overflow:hidden; }
     .cpd .custodian-avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
-    .cpd .custodian-name{ font-size:14px; font-weight:700; color:var(--ink-900); }
-    .cpd .custodian-sub{ font-size:12px; color:var(--ink-500); }
+    .cpd .custodian-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:2px; }
+    .cpd .custodian-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:400; color:#71717a; }
 
     .cpd-form-grid input[type="text"], .cpd-form-grid input[type="url"], .cpd-form-grid input[type="datetime-local"],
     .cpd-form-grid select, .cpd-form-grid textarea{ width:100%; padding:0.62rem 0.8rem; border:1.5px solid var(--ink-200); border-radius:9px; font-size:0.88rem; font-family:inherit; color:var(--ink-900); transition:border .15s, box-shadow .15s; box-sizing:border-box; background:#fff; }
@@ -497,14 +521,14 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
     .pets-cms .avatar{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:14px; color:var(--green-700); background:var(--green-100); flex-shrink:0; overflow:hidden; }
     .pets-cms .avatar img{ width:100%; height:100%; object-fit:cover; }
     .pets-cms .client-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; }
-    .pets-cms .client-id{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
-    .pets-cms .contact-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    .pets-cms .client-id{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; margin-top:0; }
+    .pets-cms .contact-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
     .pets-cms .contact-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; color:#71717a; margin-top:2px; }
-    .pets-cms .vax-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:11.5px; font-weight:700; white-space:nowrap; }
-    .pets-cms .vacc-ok{ background:var(--green-100); color:var(--green-700); }
-    .pets-cms .vacc-no{ background:#fef2f2; color:#b91c1c; }
-    .pets-cms .vacc-unknown{ background:var(--ink-100); color:var(--ink-500); }
-    .pets-cms .status-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:4px; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
+    .pets-cms .vax-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:4px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
+    .pets-cms .vacc-ok{ background:#ECFDF3; color:#027A48; border-color:#D1FADF; }
+    .pets-cms .vacc-no{ background:#FEE2E2; color:#991B1B; border-color:#FECACA; }
+    .pets-cms .vacc-unknown{ background:#F4F4F5; color:#71717A; border-color:#E4E4E7; }
+    .pets-cms .status-pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:4px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
     .pets-cms .ls-available{ background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
     .pets-cms .ls-adopted{ background:#eff6ff; color:#1e40af; border-color:#bfdbfe; }
     .pets-cms .ls-withdrawn{ background:#f4f4f5; color:#52525b; border-color:#e4e4e7; }
@@ -649,13 +673,13 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
             <button type="button" class="sd-dialog-close" onclick="closeModal('petProfileModal')" aria-label="Close">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
             </button>
-            <div class="sd-dialog-header">
+            <div class="sd-dialog-header" style="padding-bottom:4px;">
               <h2 class="sd-dialog-title">Pet Details</h2>
               <p class="sd-dialog-description">Review pet profile, listing, and adoption history.</p>
             </div>
-            <div class="sd-field-group">
-              <div id="profileContent"></div>
-            </div>
+            <div id="petProfileTabs" class="rpt-tabs" style="margin-bottom:4px;"></div>
+            <div id="petProfileHeader"></div>
+            <div id="profileContent"></div>
             <div class="sd-dialog-footer" id="petProfileFooter"></div>
           </div>
         </div>
@@ -994,6 +1018,9 @@ const DATA = PL_DATA.map(function(p){
     description: p.description || '',
     photo_url: p.photo_url || '',
     status: p.status || 'available',
+    adopted_at: p.adopted_at || '',
+    approved_pickup_at: p.approved_pickup_at || '',
+    adoption_application_status: p.adoption_application_status || '',
     vaccination: vaccination,
     owner: p.owner || null,
     created_at: p.created_at || '',
@@ -1007,6 +1034,16 @@ function fmtDate(iso){
   const d = new Date(iso);
   if(isNaN(d)) return iso;
   return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+}
+function pickupPeriodLabel(p){
+  if(p.adoption_application_status === 'expired') return 'Expired / Unclaimed';
+  if(p.adoption_application_status !== 'approved' || !p.approved_pickup_at) return '—';
+  const scheduledAt = new Date(String(p.approved_pickup_at).replace(' ', 'T'));
+  if(Number.isNaN(scheduledAt.getTime())) return '—';
+  const remaining = scheduledAt.getTime() + 3 * 24 * 60 * 60 * 1000 - Date.now();
+  if(remaining <= 0) return 'Pickup period expired';
+  const daysRemaining = Math.min(3, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
+  return daysRemaining + (daysRemaining === 1 ? ' day remaining' : (daysRemaining === 3 ? ' days allotted' : ' days remaining'));
 }
 function fmtDateTime(iso){
   if(!iso) return '—';
@@ -1050,7 +1087,7 @@ function infoRow(icon, label, value, raw){
   return '<div class="info-row"><div class="info-row-icon"><i class="fas ' + (icons[icon] || 'fa-info') + '"></i></div><div><p class="info-row-label">' + label + '</p><p class="info-row-value">' + (raw ? value : esc(value)) + '</p></div></div>';
 }
 function infoCell(label, value){
-  return '<div><p class="info-cell-label">' + label + '</p><p class="info-cell-value">' + esc(value) + '</p></div>';
+  return '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-cell-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:400;color:#71717a;margin:0;">' + label + '</p><p class="info-cell-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:600;color:#18181b;margin:0;">' + esc(value) + '</p></div></div>';
 }
 
 /* ───────────────────────── Filtering / sort ───────────────────────── */
@@ -1121,7 +1158,7 @@ function render(){
   renderTableHead();
   const tbody = document.getElementById('dataRows');
   if(total === 0){
-    tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="9" style="text-align:center; padding:48px 12px; color:#71717a;"><i class="fas fa-paw" style="font-size:34px; display:block; margin-bottom:10px; color:#d4d4d8;"></i><p style="margin:0; font-size:13px;">No pets found.</p></td></tr>';
+    tbody.innerHTML = '<tr class="sd-tr"><td class="sd-td" colspan="11" style="text-align:center; padding:48px 12px; color:#71717a;"><i class="fas fa-paw" style="font-size:34px; display:block; margin-bottom:10px; color:#d4d4d8;"></i><p style="margin:0; font-size:13px;">No pets found.</p></td></tr>';
   } else {
     tbody.innerHTML = slice.map(rowHtml).join('');
   }
@@ -1137,7 +1174,9 @@ const COLS = [
   { id: 'age', label: 'Age' },
   { id: 'vaccination', label: 'Vaccination' },
   { id: 'owner', label: 'Owner' },
-  { id: 'status', label: 'Status' }
+  { id: 'status', label: 'Status' },
+  { id: 'adopted_at', label: 'Confirmed/Adopted Date' },
+  { id: 'approved_pickup_at', label: 'Pickup Period' }
 ];
 
 function sortHeaderHtml(col){
@@ -1178,8 +1217,10 @@ function rowHtml(p){
     '<td class="sd-td"><span class="contact-main">' + esc(p.gender || '—') + '</span></td>' +
     '<td class="sd-td"><span class="contact-main">' + ageLabel(p.age) + '</span></td>' +
     '<td class="sd-td"><span class="vax-pill ' + vm.cls + '">' + esc(vm.label) + '</span></td>' +
-    '<td class="sd-td"><span class="contact-main">' + ownerName + '</span></td>' +
+    '<td class="sd-td"><div class="client-name">' + ownerName + '</div></td>' +
     '<td class="sd-td"><span class="status-pill ' + lm.cls + '">' + esc(lm.label) + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + (p.adopted_at ? fmtDate(p.adopted_at) : '—') + '</span></td>' +
+    '<td class="sd-td"><span class="contact-main">' + esc(pickupPeriodLabel(p)) + '</span></td>' +
     '<td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();openRowMenu(event,' + p.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
     '</tr>';
 }
@@ -1294,22 +1335,21 @@ function renderDetail(){
   const img = p.photo_url
     ? '<img src="' + esc(p.photo_url) + '" alt="">'
     : '<i class="fas fa-paw"></i>';
-  box.innerHTML =
-    '<div class="pet-detail-head">' +
-      '<div class="pet-detail-img">' + img + '</div>' +
-      '<div style="min-width:0;flex:1;">' +
-        '<div class="profile-name-row"><h2>' + esc(p.name) + '</h2></div>' +
-        '<div class="profile-id">' + p.ref + '</div>' +
-        '<div class="pet-detail-meta">' + esc(p.species || '—') + ' • ' + esc(p.gender || '—') + ' • ' + ageLabel(p.age) + '</div>' +
+  box.innerHTML = '<div id="tabBody"></div>';
+
+  document.getElementById('petProfileHeader').innerHTML =
+    '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
+      '<div class="pet-detail-img" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;">' + img + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<span style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:12px;font-weight:400;color:#71717a;">For pet adoption</span>' +
+        '<span style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(p.name) + '</span>' +
       '</div>' +
-      '<button class="close-x" onclick="closeProfile()"><i class="fas fa-times"></i></button>' +
-    '</div>' +
-    '<div class="tabs">' +
-      '<button class="tab active" data-tab="profile" onclick="setTab(\'profile\')">Profile</button>' +
-      '<button class="tab" data-tab="listing" onclick="setTab(\'listing\')">Listing</button>' +
-      '<button class="tab" data-tab="history" onclick="setTab(\'history\')">History</button>' +
-    '</div>' +
-    '<div id="tabBody"></div>';
+      '<span class="status-pill ' + listingMeta(p.status).cls + '" style="margin-left:auto;font-size:12px;font-weight:500;padding:3px 10px;border-radius:4px;font-family:\'Inter\',sans-serif;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7;">' + esc(listingMeta(p.status).label) + '</span>' +
+    '</div>';
+
+  document.getElementById('petProfileTabs').innerHTML =
+    '<button class="rpt-tab' + (state.tab==='profile'?' active':'') + '" data-tab="profile" onclick="setTab(\'profile\')">Profile</button>' +
+    '<button class="rpt-tab' + (state.tab==='history'?' active':'') + '" data-tab="history" onclick="setTab(\'history\')">History</button>';
   var footer = document.getElementById('petProfileFooter');
   if (footer) {
     var unpublishBtn = p.status === 'withdrawn'
@@ -1323,7 +1363,7 @@ function renderDetail(){
 }
 function setTab(t){
   state.tab = t;
-  document.querySelectorAll('#profileContent .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
+  document.querySelectorAll('#petProfileTabs .rpt-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === t));
   renderTab();
 }
 function renderTab(){
@@ -1331,7 +1371,6 @@ function renderTab(){
   const body = document.getElementById('tabBody');
   if(!p) return;
   if(state.tab === 'profile') body.innerHTML = profileTabHtml(p);
-  else if(state.tab === 'listing') body.innerHTML = listingTabHtml(p);
   else body.innerHTML = historyTabHtml(p);
 }
 
@@ -1343,22 +1382,26 @@ function profileTabHtml(p){
   const cust = p.owner
     ? '<div class="custodian-card"><div class="custodian-avatar">' + (p.owner.avatar ? '<img src="' + esc(p.owner.avatar) + '" alt="">' : initials(p.owner.name)) + '</div><div style="min-width:0;flex:1;"><div class="custodian-name">' + esc(p.owner.name) + '</div><div class="custodian-sub">' + esc(p.owner.ref) + ' • ' + esc(p.owner.address) + '</div></div><a class="btn btn-sm" href="dashboard-staff.php#client-pets">View Client</a></div>'
     : '<div class="rpt-desc-box">No custodian on file for this listing yet.</div>';
-  return '<div class="info-card-head"><h3>Pet Information</h3></div>' +
+  return     '<div class="info-card-head"><h3>Pet information</h3></div>' +
     '<div class="info-grid">' +
+      infoCell('Pet ID', p.ref || '—') +
       infoCell('Species', p.species || '—') +
+      infoCell('Breed', p.breed || '—') +
       infoCell('Sex', p.gender || '—') +
       infoCell('Age', ageLabel(p.age)) +
-      infoCell('Breed', p.breed || '—') +
       infoCell('Color / Markings', p.color || '—') +
       infoCell('Weight', p.weight || '—') +
+      infoCell('Published', fmtDate(p.created_at)) +
+      infoCell('Last Updated', p.updated_at ? fmtDateTime(p.updated_at) : '—') +
+      infoCell('Public Visibility', p.status === 'withdrawn' ? 'Hidden' : 'Public') +
     '</div>' +
-    '<div class="rpt-section-title">Adoption Readiness</div>' +
+    '<div style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;">Adoption readiness</div>' +
     '<table class="readiness-table"><thead><tr><th>Check</th><th>Status</th></tr></thead><tbody>' +
       '<tr><td>Vaccination Status</td><td>' + esc(vm.label) + '</td></tr>' +
       '<tr><td>Health Status</td><td>' + health + '</td></tr>' +
       '<tr><td>Ready for Adoption</td><td>' + (ready ? 'Yes' : 'No') + '</td></tr>' +
     '</tbody></table>' +
-    '<div class="rpt-section-title">Current Custodian</div>' + cust;
+    '<div style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;">Current Custodian</div>' + cust;
 }
 
 function listingTabHtml(p){
@@ -1395,7 +1438,7 @@ function buildHistory(p){
   if(p.created_at) evts.push({ text: 'Listed for adoption', at: p.created_at });
   if(p.updated_at && p.updated_at !== p.created_at) evts.push({ text: 'Listing details updated', at: p.updated_at });
   if(/vaccinated/i.test(p.vaccination) && !/not/i.test(p.vaccination)) evts.push({ text: 'Vaccination recorded — ' + p.vaccination, at: lastAt });
-  if(p.status === 'adopted') evts.push({ text: 'Marked as adopted', at: lastAt });
+  if(p.adopted_at) evts.push({ text: 'Marked as adopted', at: p.adopted_at });
   if(p.status === 'withdrawn') evts.push({ text: 'Listing withdrawn', at: lastAt });
   evts.sort(function(a,b){ return new Date(b.at) - new Date(a.at); });
   return evts;

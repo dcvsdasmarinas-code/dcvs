@@ -179,9 +179,11 @@ body.dashboard { overflow-x: hidden; }
   .topbar { padding: 0 0.5rem !important; gap: 0.4rem !important; }
   .topbar-breadcrumb { font-size: 0.7rem !important; }
   .topbar-time { display: none !important; }
-  .topbar-user-name { display: none !important; }
-  .topbar-avatar { width: 24px !important; height: 24px !important; font-size: 0.65rem !important; }
-  .topbar-right .topbar-user { padding: 2px 8px 2px 4px !important; gap: 4px !important; }
+  .user-name { display: none !important; }
+  .user-role { display: none !important; }
+  .user-avatar { width: 28px !important; height: 28px !important; font-size: 0.65rem !important; }
+  .topbar-right .user-profile { padding: 2px 8px 2px 4px !important; gap: 4px !important; }
+  .search-container { width: 220px !important; }
 
   /* Dashboard tables */
   .data-table { font-size: 0.75rem !important; }
@@ -437,7 +439,8 @@ body.dashboard { overflow-x: hidden; }
   .kpi-value { font-size: 1rem !important; }
 
   /* Dashboard topbar - hide user badge, show only bell */
-  .topbar-right .topbar-user { display: none !important; }
+  .topbar-right .user-profile { display: none !important; }
+  .topbar-right .search-container { display: none !important; }
   .topbar-right { gap: 0.25rem !important; }
   .topbar { padding: 0 0.35rem !important; height: 50px !important; }
 
@@ -546,11 +549,1397 @@ body.dashboard { overflow-x: hidden; }
   .adopt-img { height: 180px !important; }
 }
 
+/* ── Resident Portal shell and shared components ── */
+html.resident-portal,
+body.resident-portal,
+body.dashboard.resident-portal {
+  max-width: 100%;
+  overflow-x: clip;
+}
+.resident-portal *,
+.resident-portal *::before,
+.resident-portal *::after { box-sizing: border-box; }
+.resident-portal img,
+.resident-portal video,
+.resident-portal svg,
+.resident-portal canvas,
+.resident-portal iframe { max-width: 100%; height: auto; }
+.resident-portal .main-content {
+  min-width: 0;
+  max-width: 100%;
+  padding: clamp(12px, 3vw, 32px);
+}
+.resident-portal .content-section,
+.resident-portal .main-content > *,
+.resident-portal .resident-rework,
+.resident-portal .resident-rework > * { min-width: 0; }
+.resident-portal .resident-rework { max-width: 100%; }
+.resident-portal .topbar-breadcrumb { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.resident-portal .breadcrumb-root,
+.resident-portal .breadcrumb-current { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resident-portal #my-reports .rpt-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.resident-portal .rpt-kpis > div { min-width: 0; overflow-wrap: anywhere; }
+.resident-portal .table-responsive,
+.resident-portal .appt-db-table-area,
+.resident-portal .act-table-wrap { min-width: 0; max-width: 100%; }
+.resident-portal .pet-drawer,
+.resident-portal .rpt-drawer,
+.resident-portal .cv-drawer {
+  visibility: hidden;
+  transition: transform 0.32s cubic-bezier(.32,.72,.25,1), visibility 0s linear 0.32s;
+}
+.resident-portal .pet-drawer.open,
+.resident-portal .rpt-drawer.open,
+.resident-portal .cv-drawer.open {
+  visibility: visible;
+  transition: transform 0.32s cubic-bezier(.32,.72,.25,1), visibility 0s;
+}
+.resident-portal .rpt-drawer {
+  width: min(480px, 100%);
+  max-width: 100%;
+}
+
+@media (max-width: 1024px) {
+  body.resident-portal.sb2-active { --sidebar-w: 0px; }
+  .resident-portal .sb2 {
+    width: min(var(--sb2-w-mobile), 94vw);
+    transform: translateX(-100%);
+    visibility: hidden;
+    transition: transform 0.3s ease, visibility 0s linear 0.3s;
+  }
+  .resident-portal .sb2.collapsed {
+    transform: translateX(0);
+    visibility: visible;
+    transition: transform 0.3s ease, visibility 0s;
+  }
+  body.resident-portal.sb2-active .topbar { left: 0 !important; }
+  body.resident-portal.sb2-active .main-content {
+    box-sizing: border-box;
+    margin-left: 0 !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .resident-portal .topbar-toggle { display: flex !important; }
+  .resident-portal .sidebar-overlay.active { display: block !important; }
+  .resident-portal .resident-rework .metrics-grid,
+  .resident-portal #my-pets .pets-kpi-grid,
+  .resident-portal #my-reports .rpt-kpis,
+  .resident-portal #appointments .appt-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .resident-portal .metric-card,
+  .resident-portal .rpt-kpis > div,
+  .resident-portal .pets-kpi-card,
+  .resident-portal .appt-kpi-card { min-width: 0; overflow-wrap: anywhere; }
+  .resident-portal .table-responsive,
+  .resident-portal .appt-db-table-area,
+  .resident-portal .act-table-wrap,
+  .resident-portal #archive .archive-unified-table-area {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal .table-responsive > table,
+  .resident-portal .appt-db-table-area > table { min-width: 760px; }
+  .resident-portal .act-table-wrap > table { min-width: 640px; }
+  .resident-portal table.claims-table {
+    display: table !important;
+    overflow: visible !important;
+    white-space: normal !important;
+  }
+  .resident-portal .appt-pagination,
+  .resident-portal .dt-pagination,
+  .resident-portal .act-pagination { flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+  .resident-portal .dt-pagination-right { min-width: 0; flex-wrap: wrap; }
+}
+
+@media (max-width: 768px) {
+  .resident-portal .appt-card-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .resident-portal .appt-header-right {
+    width: 100%;
+    min-width: 0;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+  .resident-portal .appt-search-wrap,
+  .resident-portal .appt-search-input,
+  .resident-portal .appt-status-select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .resident-portal .appt-card-header > .sd-btn { width: 100%; margin-left: 0 !important; justify-content: center; }
+  .resident-portal .appt-table,
+  .resident-portal .cv-table { min-width: 760px; }
+  .resident-portal table.appt-table,
+  .resident-portal table.cv-table,
+  .resident-portal table.claims-table {
+    display: table !important;
+    overflow: visible !important;
+    white-space: normal !important;
+  }
+  .resident-portal .appt-pagination,
+  .resident-portal .dt-pagination,
+  .resident-portal .act-pagination { flex-wrap: wrap; }
+}
+
+@media (max-width: 480px) {
+  /* Keep fixed drawers from being clipped by the main-content overflow guard. */
+  .resident-portal .main-content { overflow: visible; }
+  .resident-portal .topbar-right { flex-shrink: 0; }
+  .resident-portal .topbar-right .user-profile { display: flex !important; }
+  .resident-portal .topbar-right .user-meta { display: none !important; }
+  .resident-portal .rpt-kpis > div,
+  .resident-portal .pets-kpi-card,
+  .resident-portal .appt-kpi-card { padding: 14px 10px; }
+  .resident-portal .appt-search-input,
+  .resident-portal .appt-status-select,
+  .resident-portal .appt-card-header > .sd-btn { min-height: 44px; height: 44px; }
+  .resident-portal .dt-page-btn,
+  .resident-portal .pag-btn { min-width: 44px; width: 44px; height: 44px; }
+  .resident-portal .modal-content,
+  .resident-portal .sd-dialog-content {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .resident-portal .cv-drawer {
+    width: min(100%, 440px);
+    max-width: 100%;
+    height: 100vh;
+    height: 100dvh;
+  }
+  .resident-portal .cv-drawer-head { padding: 16px; }
+  .resident-portal .cv-drawer-body {
+    min-height: 0;
+    padding: 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal .cv-drawer-foot {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+  .resident-portal .cv-drawer-foot .sd-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    padding: 10px 8px;
+    white-space: normal;
+  }
+  .resident-portal .cv-pet-summary { flex-wrap: wrap; }
+  .resident-portal .cv-pet-summary-photo img,
+  .resident-portal .cv-pet-summary-photo > div {
+    width: 72px !important;
+    height: 72px !important;
+  }
+  .resident-portal .cv-pet-summary-content { flex: 1 1 140px; }
+  .resident-portal .cv-pet-summary-name {
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal .cv-pet-summary-status { margin-left: auto; }
+  body.resident-portal.dashboard { overflow-x: visible; }
+  .resident-portal #mainContent {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .resident-portal #my-pets {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .resident-portal #my-pets > * { min-width: 0; }
+  .resident-portal #my-pets .appt-card-header,
+  .resident-portal #my-pets .appt-header-right { width: 100%; min-width: 0; }
+  .resident-portal #my-pets .appt-db-table-area {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal #my-pets #petTable {
+    width: 760px;
+    min-width: 760px;
+  }
+  .resident-portal .cv-drawer-body .rpt-detail-grid,
+  .resident-portal .cv-drawer-info { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 12px; }
+  .resident-portal #adoption .appt-db-table-area {
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  .resident-portal #adoption #cvTable { min-width: 760px; }
+}
+
+@media (max-width: 340px) {
+  .resident-portal .cv-drawer-body .rpt-detail-grid,
+  .resident-portal .cv-drawer-info { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 360px) {
+  .resident-portal .resident-rework .metrics-grid,
+  .resident-portal #my-pets .pets-kpi-grid,
+  .resident-portal #my-reports .rpt-kpis,
+  .resident-portal #appointments .appt-kpis { grid-template-columns: 1fr !important; }
+  .resident-portal #my-waitlist .resident-waitlist-kpis { grid-template-columns: 1fr !important; }
+}
+
+@media (max-width: 768px) {
+  body.resident-portal #mainContent {
+    overflow: visible !important;
+  }
+  body.resident-portal #petDrawer,
+  body.resident-portal #rptDrawer,
+  body.resident-portal #apptDrawer,
+  body.resident-portal #cvDrawer {
+    position: fixed !important;
+    inset: 50% auto auto 50% !important;
+    width: min(560px, calc(100vw - 32px)) !important;
+    max-width: calc(100vw - 32px) !important;
+    height: min(90vh, 760px) !important;
+    height: min(90dvh, 760px) !important;
+    max-height: calc(100dvh - 32px) !important;
+    border-radius: 16px !important;
+    box-shadow: 0 24px 64px rgba(15, 23, 32, 0.24) !important;
+    transform: translateX(100%) !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transition: transform 0.32s cubic-bezier(.32,.72,.25,1), visibility 0s linear 0.32s !important;
+  }
+  body.resident-portal #petDrawer.open,
+  body.resident-portal #rptDrawer.open,
+  body.resident-portal #apptDrawer.open,
+  body.resident-portal #cvDrawer.open {
+    transform: translate(-50%, -50%) !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    transition: transform 0.32s cubic-bezier(.32,.72,.25,1), visibility 0s !important;
+  }
+  body.resident-portal #cvDrawer {
+    width: min(520px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    height: min(86vh, 720px) !important;
+    height: min(86dvh, 720px) !important;
+    max-height: calc(100dvh - 24px) !important;
+    transform: translate(-50%, -50%) scale(.98) !important;
+    border-radius: 14px !important;
+  }
+  body.resident-portal #cvDrawer.open {
+    transform: translate(-50%, -50%) scale(1) !important;
+  }
+  .resident-portal #cvDrawer .cv-drawer-head {
+    gap: 10px;
+    padding: 14px 16px;
+  }
+  .resident-portal #cvDrawer .cv-drawer-title { font-size: 16px; }
+  .resident-portal #cvDrawer .cv-drawer-ref { font-size: 12px; line-height: 1.4; }
+  .resident-portal #cvDrawer .cv-drawer-body {
+    padding: 14px 16px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary { gap: 10px !important; }
+  .resident-portal #cvDrawer .cv-pet-summary-photo img,
+  .resident-portal #cvDrawer .cv-pet-summary-photo > div {
+    width: 64px !important;
+    height: 64px !important;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary-name { font-size: 16px !important; }
+  .resident-portal #cvDrawer .cv-drawer-section-title { font-size: 13px; margin: 16px 0 9px; }
+  .resident-portal #cvDrawer .cv-drawer-info { gap: 10px 14px; margin-bottom: 16px; }
+  .resident-portal #cvDrawer .cv-drawer-info-item .k { font-size: 11px; }
+  .resident-portal #cvDrawer .cv-drawer-info-item .v { font-size: 13px; line-height: 1.4; }
+  .resident-portal #cvDrawer .cv-table th { padding: 7px 8px; font-size: 11px !important; }
+  .resident-portal #cvDrawer .cv-table td { padding: 8px; font-size: 12px !important; }
+  .resident-portal #cvDrawer .cv-drawer-foot {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  }
+  .resident-portal #cvDrawer .cv-drawer-foot .sd-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 40px;
+    height: auto;
+    padding: 8px 10px;
+    font-size: 13px;
+    white-space: normal;
+  }
+  body.resident-portal .pet-drawer-overlay,
+  body.resident-portal .rpt-drawer-overlay,
+  body.resident-portal .cv-overlay {
+    display: block !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    transition: opacity 0.2s ease, visibility 0s linear 0.2s !important;
+  }
+  body.resident-portal .pet-drawer-overlay.open,
+  body.resident-portal .rpt-drawer-overlay.open,
+  body.resident-portal .cv-overlay.open {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: auto !important;
+    transition: opacity 0.2s ease, visibility 0s !important;
+  }
+  .resident-portal .cv-drawer-head,
+  #rptDrawer .rpt-drawer-head,
+  #apptDrawer .rpt-drawer-head {
+    flex: 0 0 auto;
+    padding: 16px;
+  }
+  .resident-portal .cv-drawer-body,
+  #rptDrawer .rpt-drawer-body,
+  #apptDrawer .rpt-drawer-body {
+    min-height: 0;
+    padding: 16px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal .cv-drawer-foot,
+  .resident-portal .rpt-drawer-foot {
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+  .resident-portal .rpt-drawer-foot .sd-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    padding-right: 8px;
+    white-space: normal;
+  }
+  .resident-portal #apptDrawer .rpt-drawer-foot .sd-btn {
+    flex: 1 1 0;
+  }
+
+  .resident-portal #appointments .appt-db-table-area {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal #appointments #apptTable {
+    width: 760px;
+    min-width: 760px;
+  }
+  .resident-portal #appointments #apptTable th:first-child,
+  .resident-portal #appointments #apptTable td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #fff;
+  }
+  .resident-portal #appointments #apptTable thead th:first-child {
+    z-index: 3;
+    background: #fafafa;
+  }
+  .resident-portal #appointments #apptTable tbody tr:hover td:first-child {
+    background: #fafafa;
+  }
+  .resident-portal #adoption .appt-db-table-area {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .resident-portal #adoption #cvTable {
+    width: 700px !important;
+    min-width: 700px !important;
+  }
+  .resident-portal #adoption #cvTable th,
+  .resident-portal #adoption #cvTable td {
+    padding: 8px 7px !important;
+    font-size: 12px !important;
+    white-space: nowrap;
+  }
+  .resident-portal #adoption #cvTable th { font-size: 11px !important; }
+  .resident-portal #adoption #cvTable th:first-child,
+  .resident-portal #adoption #cvTable td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #fff;
+  }
+  .resident-portal #adoption #cvTable thead th:first-child {
+    z-index: 3;
+    background: #fafafa;
+  }
+  .resident-portal #adoption #cvTable tbody tr:hover td:first-child { background: #fafafa; }
+}
+
+/* Keep resident tables native; their surrounding wrappers own horizontal scrolling. */
+@media (max-width: 768px) {
+  .resident-portal table:not(.no-responsive) {
+    display: table !important;
+    overflow: visible !important;
+    white-space: normal !important;
+  }
+}
+
+@media (max-width: 768px) {
+  body.resident-portal #cvDrawer {
+    width: min(520px, calc(100vw - 28px)) !important;
+    max-width: calc(100vw - 28px) !important;
+    height: min(86dvh, 720px) !important;
+    max-height: calc(100dvh - 28px) !important;
+    border-radius: 14px !important;
+  }
+  .resident-portal #cvDrawer .cv-drawer-head {
+    position: relative;
+    z-index: 1;
+    gap: 8px;
+    padding: 12px 14px;
+    background: #fff;
+  }
+  .resident-portal #cvDrawer .cv-drawer-title { font-size: 15px; }
+  .resident-portal #cvDrawer .cv-drawer-ref {
+    font-size: 11px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #cvDrawer .cv-drawer-close {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+  }
+  .resident-portal #cvDrawer .cv-drawer-body {
+    padding: 12px 14px;
+    overflow-x: hidden;
+  }
+  .resident-portal #cvDrawer .cv-drawer-section-title {
+    margin: 14px 0 8px;
+    font-size: 12px;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary {
+    gap: 9px !important;
+    margin-bottom: 10px !important;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary-photo img,
+  .resident-portal #cvDrawer .cv-pet-summary-photo > div {
+    width: 56px !important;
+    height: 56px !important;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary-content { flex-basis: 120px; }
+  .resident-portal #cvDrawer .cv-pet-summary-name {
+    font-size: 14px !important;
+    line-height: 1.3;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #cvDrawer .cv-pet-summary-status span {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+  .resident-portal #cvDrawer .cv-drawer-body .rpt-detail-grid,
+  .resident-portal #cvDrawer .cv-drawer-info {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 9px 12px !important;
+  }
+  .resident-portal #cvDrawer .rpt-detail-grid > *,
+  .resident-portal #cvDrawer .cv-drawer-info-item,
+  .resident-portal #cvDrawer .info-row {
+    min-width: 0;
+  }
+  .resident-portal #cvDrawer .info-row-label,
+  .resident-portal #cvDrawer .cv-drawer-info-item .k { font-size: 11px !important; }
+  .resident-portal #cvDrawer .info-row-value,
+  .resident-portal #cvDrawer .cv-drawer-info-item .v {
+    font-size: 13px !important;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+    word-break: normal;
+  }
+  .resident-portal #cvDrawer .cv-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+  .resident-portal #cvDrawer .cv-table th,
+  .resident-portal #cvDrawer .cv-table td {
+    padding: 6px 7px;
+    font-size: 11px !important;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .resident-portal #cvDrawer .cv-drawer-foot {
+    gap: 7px;
+    padding: 9px 14px calc(9px + env(safe-area-inset-bottom));
+  }
+  .resident-portal #cvDrawer .cv-drawer-foot .sd-btn {
+    min-height: 38px;
+    padding: 7px 8px;
+    font-size: 12px;
+  }
+
+  .resident-portal #adoption .appt-db-table-area {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden !important;
+  }
+  .resident-portal #adoption #cvTable {
+    display: table !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+  .resident-portal #adoption #cvTable thead { display: table-header-group !important; }
+  .resident-portal #adoption #cvTable tbody {
+    display: table-row-group !important;
+    padding: 0 !important;
+  }
+  .resident-portal #adoption #cvTable tbody tr {
+    display: table-row !important;
+    padding: 0;
+    border: 0;
+    border-bottom: 1px solid #f4f4f5;
+    border-radius: 0;
+  }
+  .resident-portal #adoption #cvTable th,
+  .resident-portal #adoption #cvTable td {
+    padding: 5px 2px !important;
+    font-size: 10px !important;
+    line-height: 1.3;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    vertical-align: middle;
+  }
+  .resident-portal #adoption #cvTable th {
+    font-size: 9px !important;
+    font-weight: 600;
+  }
+  .resident-portal #adoption #cvTable th:nth-child(1),
+  .resident-portal #adoption #cvTable td:nth-child(1) { width: 20%; }
+  .resident-portal #adoption #cvTable th:nth-child(2),
+  .resident-portal #adoption #cvTable td:nth-child(2) { width: 11%; }
+  .resident-portal #adoption #cvTable th:nth-child(3),
+  .resident-portal #adoption #cvTable td:nth-child(3) { width: 8%; }
+  .resident-portal #adoption #cvTable th:nth-child(4),
+  .resident-portal #adoption #cvTable td:nth-child(4) { width: 11%; }
+  .resident-portal #adoption #cvTable th:nth-child(5),
+  .resident-portal #adoption #cvTable td:nth-child(5) { width: 7%; }
+  .resident-portal #adoption #cvTable th:nth-child(6),
+  .resident-portal #adoption #cvTable td:nth-child(6) { width: 6%; }
+  .resident-portal #adoption #cvTable th:nth-child(7),
+  .resident-portal #adoption #cvTable td:nth-child(7) { width: 11%; }
+  .resident-portal #adoption #cvTable th:nth-child(8),
+  .resident-portal #adoption #cvTable td:nth-child(8) { width: 15%; }
+  .resident-portal #adoption #cvTable th:nth-child(9),
+  .resident-portal #adoption #cvTable td:nth-child(9) { width: 11%; }
+  .resident-portal #adoption #cvTable td::before { content: none !important; }
+  .resident-portal #adoption #cvTable th:first-child,
+  .resident-portal #adoption #cvTable td:first-child {
+    position: static !important;
+    z-index: auto;
+    background: transparent;
+  }
+  .resident-portal #adoption #cvTable .client-cell {
+    gap: 3px;
+    align-items: center;
+  }
+  .resident-portal #adoption #cvTable .pet-avatar-box {
+    width: 24px;
+    height: 24px;
+    font-size: 10px;
+  }
+  .resident-portal #adoption #cvTable .pet-cell-main { min-width: 0; }
+  .resident-portal #adoption #cvTable .client-name,
+  .resident-portal #adoption #cvTable .contact-main,
+  .resident-portal #adoption #cvTable .pet-id-label {
+    min-width: 0;
+    font-size: 10px !important;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #adoption #cvTable .appt-status-pill {
+    max-width: 100%;
+    padding: 1px 3px;
+    font-size: 9px;
+    white-space: normal;
+  }
+  .resident-portal #adoption #cvTable .sd-row-actions {
+    width: 28px;
+    height: 32px;
+    padding: 0;
+  }
+
+  .resident-portal #my-reports .appt-db-table-area,
+  .resident-portal #appointments .appt-db-table-area,
+  .resident-portal #my-pets .appt-db-table-area {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden !important;
+    overflow-y: hidden;
+  }
+  .resident-portal #my-reports #reportTable,
+  .resident-portal #appointments #apptTable,
+  .resident-portal #my-pets #petTable {
+    display: table !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+  .resident-portal #my-reports #reportTable th,
+  .resident-portal #my-reports #reportTable td,
+  .resident-portal #appointments #apptTable th,
+  .resident-portal #appointments #apptTable td,
+  .resident-portal #my-pets #petTable th,
+  .resident-portal #my-pets #petTable td {
+    padding: 5px 2px !important;
+    font-size: 10px !important;
+    line-height: 1.3;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    vertical-align: middle;
+  }
+  .resident-portal #my-reports #reportTable th,
+  .resident-portal #appointments #apptTable th,
+  .resident-portal #my-pets #petTable th {
+    font-size: 9px !important;
+    font-weight: 600;
+  }
+  .resident-portal #my-reports #reportTable th:nth-child(1),
+  .resident-portal #my-reports #reportTable td:nth-child(1) { width: 14%; }
+  .resident-portal #my-reports #reportTable th:nth-child(2),
+  .resident-portal #my-reports #reportTable td:nth-child(2) { width: 14%; }
+  .resident-portal #my-reports #reportTable th:nth-child(3),
+  .resident-portal #my-reports #reportTable td:nth-child(3) { width: 19%; }
+  .resident-portal #my-reports #reportTable th:nth-child(4),
+  .resident-portal #my-reports #reportTable td:nth-child(4) { width: 13%; }
+  .resident-portal #my-reports #reportTable th:nth-child(5),
+  .resident-portal #my-reports #reportTable td:nth-child(5) { width: 11%; }
+  .resident-portal #my-reports #reportTable th:nth-child(6),
+  .resident-portal #my-reports #reportTable td:nth-child(6) { width: 10%; }
+  .resident-portal #my-reports #reportTable th:nth-child(7),
+  .resident-portal #my-reports #reportTable td:nth-child(7) { width: 13%; }
+  .resident-portal #my-reports #reportTable th:nth-child(8),
+  .resident-portal #my-reports #reportTable td:nth-child(8) { width: 6%; }
+
+  .resident-portal #appointments #apptTable th:nth-child(1),
+  .resident-portal #appointments #apptTable td:nth-child(1) { width: 12%; }
+  .resident-portal #appointments #apptTable th:nth-child(2),
+  .resident-portal #appointments #apptTable td:nth-child(2) { width: 12%; }
+  .resident-portal #appointments #apptTable th:nth-child(3),
+  .resident-portal #appointments #apptTable td:nth-child(3) { width: 14%; }
+  .resident-portal #appointments #apptTable th:nth-child(4),
+  .resident-portal #appointments #apptTable td:nth-child(4) { width: 13%; }
+  .resident-portal #appointments #apptTable th:nth-child(5),
+  .resident-portal #appointments #apptTable td:nth-child(5) { width: 11%; }
+  .resident-portal #appointments #apptTable th:nth-child(6),
+  .resident-portal #appointments #apptTable td:nth-child(6) { width: 13%; }
+  .resident-portal #appointments #apptTable th:nth-child(7),
+  .resident-portal #appointments #apptTable td:nth-child(7) { width: 11%; }
+  .resident-portal #appointments #apptTable th:nth-child(8),
+  .resident-portal #appointments #apptTable td:nth-child(8) { width: 9%; }
+  .resident-portal #appointments #apptTable th:nth-child(9),
+  .resident-portal #appointments #apptTable td:nth-child(9) { width: 5%; }
+  .resident-portal #my-pets #petTable th:nth-child(1),
+  .resident-portal #my-pets #petTable td:nth-child(1) { width: 18%; }
+  .resident-portal #my-pets #petTable th:nth-child(2),
+  .resident-portal #my-pets #petTable td:nth-child(2) { width: 12%; }
+  .resident-portal #my-pets #petTable th:nth-child(3),
+  .resident-portal #my-pets #petTable td:nth-child(3) { width: 8%; }
+  .resident-portal #my-pets #petTable th:nth-child(4),
+  .resident-portal #my-pets #petTable td:nth-child(4) { width: 10%; }
+  .resident-portal #my-pets #petTable th:nth-child(5),
+  .resident-portal #my-pets #petTable td:nth-child(5) { width: 14%; }
+  .resident-portal #my-pets #petTable th:nth-child(6),
+  .resident-portal #my-pets #petTable td:nth-child(6) { width: 8%; }
+  .resident-portal #my-pets #petTable th:nth-child(7),
+  .resident-portal #my-pets #petTable td:nth-child(7) { width: 10%; }
+  .resident-portal #my-pets #petTable th:nth-child(8),
+  .resident-portal #my-pets #petTable td:nth-child(8) { width: 10%; }
+  .resident-portal #my-pets #petTable th:nth-child(9),
+  .resident-portal #my-pets #petTable td:nth-child(9) { width: 10%; }
+
+  .resident-portal #my-reports #reportTable .th-sort,
+  .resident-portal #appointments #apptTable .th-sort,
+  .resident-portal #my-pets #petTable .th-sort {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 1px;
+    width: 100%;
+    height: auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    font-size: 9px;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  .resident-portal #my-reports #reportTable .th-sort-icon,
+  .resident-portal #appointments #apptTable .th-sort-icon,
+  .resident-portal #my-pets #petTable .th-sort-icon {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 9px;
+  }
+  .resident-portal #my-reports #reportTable th:first-child,
+  .resident-portal #my-reports #reportTable td:first-child,
+  .resident-portal #appointments #apptTable th:first-child,
+  .resident-portal #appointments #apptTable td:first-child,
+  .resident-portal #my-pets #petTable th:first-child,
+  .resident-portal #my-pets #petTable td:first-child {
+    position: static !important;
+    z-index: auto;
+    background: transparent;
+  }
+  .resident-portal #my-reports #reportTable .client-name,
+  .resident-portal #my-reports #reportTable .contact-main,
+  .resident-portal #my-reports #reportTable .report-type-value,
+  .resident-portal #my-reports #reportTable .report-location-value,
+  .resident-portal #appointments #apptTable .client-name,
+  .resident-portal #appointments #apptTable .contact-main,
+  .resident-portal #my-pets #petTable .client-name,
+  .resident-portal #my-pets #petTable .pet-id-label,
+  .resident-portal #my-pets #petTable .contact-main {
+    min-width: 0;
+    font-size: 10px !important;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #my-reports #reportTable .appt-status-pill,
+  .resident-portal #appointments #apptTable .appt-status-pill,
+  .resident-portal #my-pets #petTable .appt-status-pill {
+    max-width: 100%;
+    padding: 1px 3px;
+    font-size: 9px;
+    white-space: normal;
+  }
+  .resident-portal #my-pets #petTable .client-cell {
+    min-width: 0;
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+  .resident-portal #my-pets #petTable .pet-avatar-box {
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+    font-size: 10px;
+  }
+  .resident-portal #my-pets #petTable .pet-cell-main {
+    min-width: 0;
+    flex: 1 1 100%;
+  }
+  .resident-portal #my-pets #petTable .sd-row-actions {
+    width: 24px;
+    height: 30px;
+    padding: 0;
+  }
+  .resident-portal #appointments #apptTable .client-cell {
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+  .resident-portal #appointments #apptTable .appt-pet-avatar {
+    width: 24px;
+    height: 24px;
+    font-size: 11px;
+  }
+  .resident-portal #my-reports #reportTable .sd-row-actions,
+  .resident-portal #appointments #apptTable .sd-row-actions {
+    width: 28px;
+    height: 32px;
+    padding: 0;
+  }
+
+  .resident-portal #my-waitlist .resident-waitlist-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-kpi {
+    min-width: 0;
+    padding: 14px 10px;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-kpi-label,
+  .resident-portal #my-waitlist .resident-waitlist-kpi-sub {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-kpi-value {
+    font-size: 22px;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-toolbar input[type="search"] {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-date-filter {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-date-clear {
+    grid-column: 2;
+    grid-row: 2;
+    width: 36px;
+    min-width: 36px;
+    margin-left: 0;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-toolbar select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    grid-column: 1 / -1;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-table-wrap {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    overflow-x: hidden !important;
+    overflow-y: hidden;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-table {
+    display: table !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-table th,
+  .resident-portal #my-waitlist .resident-waitlist-table td {
+    padding: 5px 2px !important;
+    font-size: 10px !important;
+    line-height: 1.3;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    word-break: normal;
+    vertical-align: middle;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-table th {
+    font-size: 9px !important;
+    font-weight: 600;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(1),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(1) { width: 18%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(2),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(2) { width: 12%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(3),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(3) { width: 14%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(4),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(4) { width: 8%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(5),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(5) { width: 10%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(6),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(6) { width: 14%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(7),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(7) { width: 16%; }
+  .resident-portal #my-waitlist .resident-waitlist-table th:nth-child(8),
+  .resident-portal #my-waitlist .resident-waitlist-table td:nth-child(8) { width: 8%; }
+  .resident-portal #my-waitlist .resident-waitlist-pet-cell {
+    flex-wrap: wrap;
+    gap: 3px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-pet-avatar {
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+    font-size: 10px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-pet-name,
+  .resident-portal #my-waitlist .resident-waitlist-subtext {
+    min-width: 0;
+    font-size: 10px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-pill {
+    max-width: 100%;
+    padding: 1px 3px;
+    font-size: 9px;
+    white-space: normal;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-row-actions {
+    width: 24px;
+    height: 30px;
+    padding: 0;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-pagination {
+    justify-content: center;
+    padding: 10px 0;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-pagination-right {
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-rows {
+    gap: 5px;
+    font-size: 12px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-rows select {
+    width: 58px;
+    height: 40px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-page-label {
+    width: auto;
+    font-size: 12px;
+  }
+  .resident-portal #my-waitlist .resident-waitlist-page-btn {
+    width: 36px;
+    height: 40px;
+  }
+}
+
+@media (max-width: 360px) {
+  .resident-portal #cvDrawer .cv-drawer-body .rpt-detail-grid,
+  .resident-portal #cvDrawer .cv-drawer-info {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  body.resident-portal #logoutModal.modal {
+    position: fixed;
+    inset: 0;
+    box-sizing: border-box;
+    align-items: center !important;
+    justify-content: center;
+    padding: 12px !important;
+  }
+  body.resident-portal #logoutModal .sd-logout-dialog {
+    box-sizing: border-box;
+    width: min(340px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    margin: auto;
+    padding: 18px;
+    overflow-y: auto;
+  }
+  body.resident-portal #logoutModal .sd-logout-title { font-size: 16px; }
+  body.resident-portal #logoutModal .sd-logout-description { font-size: 13px; }
+  body.resident-portal #logoutModal .sd-logout-actions { margin-top: 16px; }
+  body.resident-portal #logoutModal .sd-logout-actions a,
+  body.resident-portal #logoutModal .sd-logout-actions button {
+    height: 34px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+  body.resident-portal #addPetModal.modal {
+    position: fixed;
+    inset: 0;
+    box-sizing: border-box;
+    align-items: center !important;
+    justify-content: center;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 12px !important;
+  }
+  body.resident-portal #addPetModal .sd-dialog {
+    position: relative;
+    width: min(520px, calc(100vw - 24px)) !important;
+    max-width: calc(100vw - 24px) !important;
+    min-width: 0;
+    max-height: calc(100dvh - 24px);
+    margin: auto;
+    align-items: center;
+  }
+  body.resident-portal #addPetModal .sd-dialog-content {
+    box-sizing: border-box;
+    position: relative;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0;
+    max-height: min(86vh, 720px) !important;
+    max-height: min(86dvh, 720px) !important;
+    margin: 0;
+    gap: 12px;
+    padding: 14px 16px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 14px !important;
+    box-shadow: 0 24px 64px rgba(15, 23, 32, 0.24) !important;
+  }
+  body.resident-portal #addPetModal .sd-dialog-close {
+    top: 10px;
+    right: 10px;
+    width: 32px;
+    height: 32px;
+  }
+  body.resident-portal #addPetModal .sd-dialog-header {
+    gap: 6px;
+    padding-right: 30px;
+    min-width: 0;
+  }
+  body.resident-portal #addPetModal .sd-dialog-title {
+    font-size: 15px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  body.resident-portal #addPetModal .sd-dialog-description {
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  body.resident-portal #addPetModal .sd-field-group { gap: 12px; }
+  body.resident-portal #addPetModal .sd-form-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px;
+  }
+  body.resident-portal #addPetModal .sd-field {
+    min-width: 0;
+    gap: 6px;
+  }
+  body.resident-portal #addPetModal .sd-field > * { max-width: 100%; }
+  body.resident-portal #addPetModal .sd-label {
+    font-size: 13px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  body.resident-portal #addPetModal .sd-input {
+    min-width: 0;
+    height: 36px;
+    padding-right: 12px;
+    padding-left: 12px;
+    font-size: 14px;
+  }
+  body.resident-portal #addPetModal select.sd-input { padding-right: 36px; }
+  body.resident-portal #addPetModal .adoption-readonly-value {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 14px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  body.resident-portal #addPetModal .adoption-info-card,
+  body.resident-portal #addPetModal [role="alert"],
+  body.resident-portal #addPetModal .field-error,
+  body.resident-portal #addPetModal .error-message {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+  body.resident-portal #addPetModal .sd-photo-upload { min-height: 72px; }
+  body.resident-portal #addPetModal .sd-photo-upload img,
+  body.resident-portal #addPetModal .adoption-readonly-photo img { max-height: 140px; }
+  body.resident-portal #addPetModal .adoption-readonly-photo {
+    min-height: 84px;
+    padding: 6px;
+  }
+  body.resident-portal #addPetModal .sd-dialog-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 7px;
+  }
+  body.resident-portal #addPetModal .sd-dialog-footer .sd-btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    height: auto;
+    padding: 10px;
+    font-size: 13px;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 768px) {
+  body.staff-theme #reports-all {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+  body.staff-theme #reports-all .cpd,
+  body.staff-theme #reports-all .cpd-app,
+  body.staff-theme #reports-all .layout,
+  body.staff-theme #reports-all .db-panel,
+  body.staff-theme #reports-all .table-card,
+  body.staff-theme #reports-all .db-table-area,
+  body.staff-theme #reports-all #rptTableWrap {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  body.staff-theme #reports-all .db-panel { padding: 12px; }
+  body.staff-theme #reports-all .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  body.staff-theme #reports-all .kpi-card {
+    min-width: 0;
+    padding: 12px 8px;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #reports-all .kpi-label,
+  body.staff-theme #reports-all .kpi-sub {
+    max-width: 100%;
+    font-size: 11px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #reports-all .kpi-value { font-size: 22px; }
+  body.staff-theme #reports-all .db-toolbar {
+    align-items: stretch;
+    gap: 10px;
+  }
+  body.staff-theme #reports-all .search-grow-wrap,
+  body.staff-theme #reports-all .toolbar-filters,
+  body.staff-theme #reports-all .db-toolbar-actions {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-left: 0;
+  }
+  body.staff-theme #reports-all .toolbar-filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  body.staff-theme #reports-all .tf-select {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 12px;
+  }
+  body.staff-theme #reports-all .db-toolbar-actions .sd-btn { width: 100%; }
+  body.staff-theme #reports-all .bulk-bar,
+  body.staff-theme #reports-all .bulk-bar .bulk-actions {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  body.staff-theme #reports-all .bulk-bar .bulk-actions { gap: 3px; }
+  body.staff-theme #reports-all .bulk-bar .bulk-count {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #reports-all .db-table-area { overflow: visible; }
+  body.staff-theme #reports-all #rptTableWrap {
+    min-height: 0;
+    overflow: hidden;
+  }
+  body.staff-theme #reports-all #rptTableWrap > div {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.staff-theme #reports-all #rptTableWrap table {
+    width: 960px !important;
+    min-width: 960px !important;
+    table-layout: fixed;
+  }
+  body.staff-theme #reports-all #rptTableWrap th,
+  body.staff-theme #reports-all #rptTableWrap td {
+    box-sizing: border-box;
+    padding: 5px 4px;
+    font-size: 11px;
+    line-height: 1.3;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: middle;
+  }
+  body.staff-theme #reports-all #rptTableWrap th {
+    height: auto;
+    font-size: 10px;
+  }
+  body.staff-theme #reports-all #rptTableWrap th:first-child,
+  body.staff-theme #reports-all #rptTableWrap td:first-child { width: 36px; }
+  body.staff-theme #reports-all #rptTableWrap th:last-child,
+  body.staff-theme #reports-all #rptTableWrap td:last-child { width: 36px; }
+  body.staff-theme #reports-all #rptTableWrap .th-sort {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    gap: 2px;
+    margin: 0;
+    padding: 2px;
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+  }
+  body.staff-theme #reports-all #rptTableWrap .th-sort-icon {
+    width: 10px;
+    height: 10px;
+    flex: 0 0 10px;
+  }
+  body.staff-theme #reports-all #rptTableWrap .client-cell {
+    min-width: 0;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  body.staff-theme #reports-all #rptTableWrap .client-name,
+  body.staff-theme #reports-all #rptTableWrap .contact-main,
+  body.staff-theme #reports-all #rptTableWrap .contact-sub {
+    min-width: 0;
+    font-size: 10px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  body.staff-theme #reports-all #rptTableWrap .avatar {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    font-size: 10px;
+  }
+  body.staff-theme #reports-all #rptTableWrap .rpt-status,
+  body.staff-theme #reports-all #rptTableWrap .type-badge {
+    max-width: 100%;
+    padding: 2px 4px !important;
+    font-size: 9px !important;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #reports-all #rptTableWrap .sd-row-actions {
+    width: 28px;
+    height: 30px;
+    padding: 0;
+  }
+  body.staff-theme #reports-all .dt-pagination {
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 4px;
+  }
+  body.staff-theme #reports-all .dt-pagination-right {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  body.staff-theme #reports-all .dt-rows { gap: 5px; font-size: 11px; }
+  body.staff-theme #reports-all .dt-rows select { width: 54px; font-size: 12px; }
+  body.staff-theme #reports-all .dt-page-label {
+    width: auto;
+    min-width: 78px;
+    font-size: 11px;
+  }
+  body.staff-theme #reports-all .dt-page-btn { width: 30px; height: 30px; }
+
+  body.staff-theme #rptDetailsModal.cd-drawer.modal {
+    box-sizing: border-box;
+    align-items: center !important;
+    justify-content: center;
+    padding: 12px !important;
+    overflow-y: auto;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog {
+    box-sizing: border-box;
+    width: min(440px, calc(100vw - 24px));
+    max-width: calc(100vw - 24px);
+    height: auto;
+    max-height: calc(100dvh - 24px);
+    justify-content: center;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-content {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    max-height: calc(100dvh - 24px);
+    padding: 16px;
+    gap: 12px;
+    overflow: hidden;
+    border: 1px solid #e4e4e7;
+    border-radius: 14px;
+    box-shadow: 0 24px 64px rgba(15, 23, 32, 0.24);
+    transform: scale(.98);
+    transition: transform .2s ease;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer.active .sd-dialog-content { transform: scale(1); }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-header,
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-footer { flex: 0 0 auto; }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-title {
+    font-size: 16px;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-description {
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-field-group {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  body.staff-theme #rptDetailsModal .rpt-response-decision-actions {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-close {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    align-self: flex-end;
+    flex: 0 0 auto;
+  }
+}
+
+@media (max-width: 360px) {
+  body.staff-theme #reports-all .kpis { grid-template-columns: minmax(0, 1fr); }
+  body.staff-theme #reports-all .toolbar-filters { grid-template-columns: minmax(0, 1fr); }
+  body.staff-theme #reports-all .db-panel { padding: 10px; }
+  body.staff-theme #reports-all .dt-pagination-right { flex-wrap: wrap; }
+}
+
 /* ── Print ── */
 @media print {
   .sidebar, .topbar, .sidebar-overlay, .modal, .toast,
-  .notif-dropdown, .topbar-toggle, .topbar-right .topbar-user,
-  .notif-bell, .notif-panel, .topbar-time { display: none !important; }
+  .notif-dropdown, .topbar-toggle, .topbar-right .user-profile,
+  .notif-btn, .notif-panel { display: none !important; }
   .main-content { margin-left: 0 !important; margin-top: 0 !important; padding: 0 !important; }
   .content-section { display: block !important; }
 }

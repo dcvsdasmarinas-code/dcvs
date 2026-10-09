@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (!valid) {
-        showAlert('loginAlert', 'loginAlertMsg', 'Please fix the errors below.');
+        showAlert('loginAlert', 'loginAlertMsg', 'Unable to sign in. Please check your credentials and try again.');
         return;
       }
 

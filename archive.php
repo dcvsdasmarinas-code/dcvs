@@ -67,6 +67,20 @@ while ($row = $archivedAppointmentsResult->fetch_assoc()) {
     $archivedAppointments[] = $row;
 }
 $archivedAppointmentsQuery->close();
+
+function residentArchiveStatusStyle($status, $isAppointment = false) {
+    $status = strtolower((string)$status);
+    if ($isAppointment && $status === 'scheduled') {
+        return 'background:#0E8131;color:#FFFFFF;border-color:#0E8131;';
+    }
+    if ($isAppointment && $status === 'completed') {
+        return 'background:#DBEAFE;color:#1E40AF;border-color:#BFDBFE;';
+    }
+    if (!$isAppointment && $status === 'resolved') {
+        return 'background:#0E8131;color:#FFFFFF;border-color:#0E8131;';
+    }
+    return 'background:#F4F4F5;color:#52525B;border-color:#E4E4E7;';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -105,6 +119,16 @@ $archivedAppointmentsQuery->close();
         }
         .archive-table tr:hover {
             background: #f9f9f9;
+        }
+        .archive-status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 10px;
+            border: 1px solid;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
         }
         .no-items {
             text-align: center;
@@ -222,7 +246,7 @@ $archivedAppointmentsQuery->close();
                                         <td><?php echo htmlspecialchars($report['reference_id'] ?? '#RPT-'.str_pad($report['report_id'], 4, '0', STR_PAD_LEFT)); ?></td>
                                         <td><?php echo ucfirst($report['report_type']); ?></td>
                                         <td><?php echo htmlspecialchars($report['location_address']); ?></td>
-                                        <td><?php echo ucfirst($report['status']); ?></td>
+                                        <td><span class="archive-status-pill" style="<?php echo residentArchiveStatusStyle($report['status']); ?>"><?php echo ucfirst($report['status']); ?></span></td>
                                         <td><?php echo date('M d, Y', strtotime($report['created_at'])); ?></td>
                                         <td><?php echo date('M d, Y', strtotime($report['archived_at'])); ?></td>
                                     </tr>
@@ -256,7 +280,7 @@ $archivedAppointmentsQuery->close();
                                         <td><?php echo ucfirst($appt['appointment_type']); ?></td>
                                         <td><?php echo date('M d, Y', strtotime($appt['preferred_date'])); ?></td>
                                         <td><?php echo date('h:i A', strtotime($appt['preferred_time'])); ?></td>
-                                        <td><?php echo ucfirst($appt['status']); ?></td>
+                                        <td><span class="archive-status-pill" style="<?php echo residentArchiveStatusStyle($appt['status'], true); ?>"><?php echo ucfirst($appt['status']); ?></span></td>
                                         <td><?php echo date('M d, Y', strtotime($appt['archived_at'])); ?></td>
                                     </tr>
                                 <?php endforeach; ?>

@@ -15,6 +15,8 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/availability.php';
+require_once 'includes/waitlist.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -32,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET
     }
 
     // Check if appointment belongs to user
-    $checkAppt = $conn->prepare("SELECT appointment_id FROM appointments WHERE appointment_id = ? AND user_id = ?");
+    $checkAppt = $conn->prepare("SELECT appointment_id, appointment_type, urgency_level, preferred_date, preferred_time, status FROM appointments WHERE appointment_id = ? AND user_id = ?");
     $checkAppt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
     $checkAppt->execute();
     $checkAppt->store_result();
@@ -42,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET
         header('Location: dashboard-resident.php');
         exit;
     }
+    $checkAppt->bind_result($existingAppointmentId, $oldService, $oldUrgency, $oldDate, $oldTime, $oldStatus);
+    $checkAppt->fetch();
     $checkAppt->close();
 
     // Archive appointment (soft delete - add archived_at timestamp)
@@ -49,6 +53,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET
     $stmt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
 
     if ($stmt->execute()) {
+        if (in_array($oldStatus, dcvsHeldStatuses(), true)) {
+            dcvsNotifyWaitlistForSlot($conn, $oldDate, $oldTime, $oldService, $oldUrgency ?? 'routine');
+        }
         $_SESSION['appointment_success'] = "Appointment archived successfully!";
         header('Location: dashboard-resident.php#archive');
         exit;

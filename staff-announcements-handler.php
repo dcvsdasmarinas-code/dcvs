@@ -108,6 +108,7 @@ function validateFields($p) {
 function handleSave($conn, $userId) {
     $id = (int)($_POST['id'] ?? 0);
     $title = trim($_POST['title'] ?? '');
+    $location = trim($_POST['location'] ?? '');
     $content = trim($_POST['content'] ?? '');
     $linkUrl = trim($_POST['link_url'] ?? '');
     $barangayId = null;
@@ -115,7 +116,6 @@ function handleSave($conn, $userId) {
     if (empty($title) || empty($content)) {
         return ['success' => false, 'message' => 'Title and content are required'];
     }
-
     list($category, $subject, $status, $audienceType, $audienceBarangays, $barangayId, $publishAt, $featured) = validateFields($_POST);
 
     $photoUrl = null;
@@ -154,14 +154,14 @@ function handleSave($conn, $userId) {
         if ($status === 'archived') {
             $archivedAt = $now;
         }
-        $stmt = $conn->prepare("UPDATE announcements SET title=?, content=?, category=?, subject=?, link_url=?, barangay_id=?, status=?, publish_at=?, archived_at=?, audience_type=?, audience_barangays=?, is_featured=?, photo_url=?, photo_hover_url=?, updated_at=? WHERE announcement_id=?");
-        $stmt->bind_param("sssssisssssisssi", $title, $content, $category, $subject, $linkUrl, $barangayId, $status, $publishAt, $archivedAt, $audienceType, $audienceBarangays, $featured, $photoUrl, $photoHoverUrl, $now, $id);
+        $stmt = $conn->prepare("UPDATE announcements SET title=?, location=?, content=?, category=?, subject=?, link_url=?, barangay_id=?, status=?, publish_at=?, archived_at=?, audience_type=?, audience_barangays=?, is_featured=?, photo_url=?, photo_hover_url=?, updated_at=? WHERE announcement_id=?");
+        $stmt->bind_param("ssssssisssssisssi", $title, $location, $content, $category, $subject, $linkUrl, $barangayId, $status, $publishAt, $archivedAt, $audienceType, $audienceBarangays, $featured, $photoUrl, $photoHoverUrl, $now, $id);
     } else {
         if ($status === 'archived') {
             $status = 'draft';
         }
-        $stmt = $conn->prepare("INSERT INTO announcements (title, content, category, subject, link_url, barangay_id, status, publish_at, audience_type, audience_barangays, is_featured, photo_url, photo_hover_url, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssissssississ", $title, $content, $category, $subject, $linkUrl, $barangayId, $status, $publishAt, $audienceType, $audienceBarangays, $featured, $photoUrl, $photoHoverUrl, $userId, $now, $now);
+        $stmt = $conn->prepare("INSERT INTO announcements (title, location, content, category, subject, link_url, barangay_id, status, publish_at, audience_type, audience_barangays, is_featured, photo_url, photo_hover_url, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("ssssssissssississ", $title, $location, $content, $category, $subject, $linkUrl, $barangayId, $status, $publishAt, $audienceType, $audienceBarangays, $featured, $photoUrl, $photoHoverUrl, $userId, $now, $now);
     }
 
     if ($stmt->execute()) {
@@ -281,9 +281,9 @@ function handleDuplicate($conn, $userId) {
     if (!$row) return ['success' => false, 'message' => 'Not found'];
 
     $now = date('Y-m-d H:i:s');
-    $stmt = $conn->prepare("INSERT INTO announcements (title, content, category, subject, link_url, barangay_id, status, publish_at, audience_type, audience_barangays, is_featured, photo_url, photo_hover_url, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $stmt = $conn->prepare("INSERT INTO announcements (title, location, content, category, subject, link_url, barangay_id, status, publish_at, audience_type, audience_barangays, is_featured, photo_url, photo_hover_url, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', NULL, ?, ?, ?, ?, ?, ?, ?, ?)");
     $newTitle = $row['title'] . ' (Copy)';
-    $stmt->bind_param("sssssissississ", $newTitle, $row['content'], $row['category'], $row['subject'], $row['link_url'], $row['barangay_id'], $row['audience_type'], $row['audience_barangays'], $row['is_featured'], $row['photo_url'], $row['photo_hover_url'], $userId, $now, $now);
+    $stmt->bind_param("ssssssissississ", $newTitle, $row['location'], $row['content'], $row['category'], $row['subject'], $row['link_url'], $row['barangay_id'], $row['audience_type'], $row['audience_barangays'], $row['is_featured'], $row['photo_url'], $row['photo_hover_url'], $userId, $now, $now);
     if ($stmt->execute()) {
         $newId = $stmt->insert_id;
         $stmt->close();

@@ -14,6 +14,8 @@ session_start();
 header('Content-Type: application/json');
 
 require_once 'db.php';
+require_once 'includes/availability.php';
+require_once 'includes/waitlist.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     echo json_encode(['success' => false, 'message' => 'Unauthorized.']);
@@ -37,6 +39,14 @@ if (empty($ids)) {
 $placeholders = implode(',', array_fill(0, count($ids), '?'));
 $types = str_repeat('i', count($ids));
 
+$slotStmt = $conn->prepare("SELECT appointment_type, urgency_level, preferred_date, preferred_time FROM appointments
+    WHERE appointment_id IN ($placeholders) AND archived_at IS NULL
+      AND status IN ('pending','approved','scheduled','rescheduled','in_progress')");
+$slotStmt->bind_param($types, ...$ids);
+$slotStmt->execute();
+$slotsToRelease = $slotStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+$slotStmt->close();
+
 $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
 $stmt->bind_param($types, ...$ids);
 $ok = $stmt->execute();
@@ -46,6 +56,9 @@ $stmt->close();
 if (!$ok || $affected <= 0) {
     echo json_encode(['success' => false, 'message' => 'Failed to archive appointment(s).']);
     exit;
+}
+foreach ($slotsToRelease as $releasedSlot) {
+    dcvsNotifyWaitlistForSlot($conn, $releasedSlot['preferred_date'], $releasedSlot['preferred_time'], $releasedSlot['appointment_type'], $releasedSlot['urgency_level'] ?? 'routine');
 }
 
 $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';

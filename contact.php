@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_submit'])) {
             ['Submitted', date('F j, Y \a\t g:i A')],
         ];
 
-        $content = '<p style="margin:0 0 6px;font-family:Inter,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#4b5563;">A resident sent a message through the DCVS contact form.</p>';
+        $content = '<p style="margin:0 0 16px;">A resident sent a message through the DCVS contact form.</p>';
         $content .= dcvsInfoTable($rows);
         $content .= dcvsStaffMessage($old['message'], 'Message');
 
@@ -102,9 +102,11 @@ include 'includes/header.php';
 }
 @media(max-width:900px){.grid{grid-template-columns:1fr;}}
 
+.contact-page *{font-family:'Inter',system-ui,sans-serif !important;}
+
 .eyebrow{font-size:12.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8a93ab;margin-bottom:14px;}
 .left h1{
-  font-weight:800;font-size:48px;line-height:1.1;letter-spacing:-0.02em;
+  font-weight:800;font-size:48px;line-height:1.1;letter-spacing:-0.025em;
   margin:0 0 32px;max-width:750px;color:var(--ink);
 }
 .left p{font-size:16px;color:#4b4b4b;margin:0 0 20px;max-width:480px;}
@@ -122,7 +124,7 @@ include 'includes/header.php';
   width:100%;padding:10px 12px;font-size:14px;border-radius:8px;
   border:1px solid #e2e5ea;background:#f9fafb;color:#1f2328;
   outline:none;transition:background .15s,border-color .15s,box-shadow .15s;
-  box-sizing:border-box;font-family:inherit;
+  box-sizing:border-box;
 }
 .ps-field input:focus,.ps-field select:focus,.ps-field textarea:focus{
   background:#fff;border-color:#000;box-shadow:0 0 0 3px rgba(0,0,0,0.08);
@@ -142,7 +144,7 @@ include 'includes/header.php';
   background:#fff;border-radius:16px;padding:40px;max-width:600px;width:90%;
   max-height:80vh;overflow-y:auto;position:relative;
 }
-.modal h2{font-weight:800;font-size:28px;margin:0 0 20px;}
+.modal h2{font-weight:800;font-size:28px;margin:0 0 20px;letter-spacing:-0.025em;}
 .modal p{font-size:15px;line-height:1.6;color:#4b4b4b;margin:0 0 16px;}
 .modal-close{
   position:absolute;top:20px;right:20px;background:none;border:none;

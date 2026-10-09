@@ -24,25 +24,25 @@ $currentMonth = (int)date('n');
 $now = date('F j, Y \a\t g:i A');
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ KPI QUERIES ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-$totalResidents = (int)($conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident'")->fetch_row()[0] ?? 0);
-$totalPets = (int)($conn->query("SELECT COUNT(*) FROM pets WHERE archived_at IS NULL")->fetch_row()[0] ?? 0);
-$totalReports = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL")->fetch_row()[0] ?? 0);
-$activeRabies = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE report_type='rabies' AND status IN ('pending','validated') AND archived_at IS NULL")->fetch_row()[0] ?? 0);
-$confirmedCasesTotal = (int)($conn->query("SELECT COUNT(*) FROM confirmed_cases")->fetch_row()[0] ?? 0);
-$resolvedCases = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE status='resolved' AND archived_at IS NULL")->fetch_row()[0] ?? 0);
-$pendingReports = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE status='pending' AND archived_at IS NULL")->fetch_row()[0] ?? 0);
-$scheduledAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments WHERE status IN ('approved','pending')")->fetch_row()[0] ?? 0);
-$completedAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments WHERE status='completed'")->fetch_row()[0] ?? 0);
-$totalAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments")->fetch_row()[0] ?? 0);
-$adoptionListings = (int)($conn->query("SELECT COUNT(*) FROM adoption_listings")->fetch_row()[0] ?? 0);
-$adoptionApplications = (int)($conn->query("SELECT COUNT(*) FROM adoption_applications")->fetch_row()[0] ?? 0);
+$totalResidents = (int)($conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident' AND status = 'active' AND deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$totalPets = (int)($conn->query("SELECT COUNT(*) FROM pets p JOIN users u ON p.owner_id = u.user_id WHERE p.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$totalReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$activeRabies = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND r.status IN ('pending','validated') AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$confirmedCasesTotal = (int)($conn->query("SELECT COUNT(*) FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id JOIN users u ON r.reporter_id = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$resolvedCases = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='resolved' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$pendingReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='pending' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$scheduledAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE a.status IN ('approved','pending') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$completedAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE a.status='completed' AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$totalAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$adoptionListings = (int)($conn->query("SELECT COUNT(*) FROM adoption_listings al JOIN users u ON al.listed_by = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$adoptionApplications = (int)($conn->query("SELECT COUNT(*) FROM adoption_applications aa JOIN users u ON aa.applicant_id = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $totalBarangays = (int)($conn->query("SELECT COUNT(*) FROM barangays")->fetch_row()[0] ?? 0);
-$vaccinatedPets = (int)($conn->query("SELECT COUNT(*) FROM pets WHERE archived_at IS NULL AND vaccination_status IS NOT NULL AND vaccination_status != ''")->fetch_row()[0] ?? 0);
-$completedVaxAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments WHERE appointment_type='vaccination' AND status='completed'")->fetch_row()[0] ?? 0);
+$vaccinatedPets = (int)($conn->query("SELECT COUNT(*) FROM pets p JOIN users u ON p.owner_id = u.user_id WHERE p.archived_at IS NULL AND p.vaccination_status IS NOT NULL AND p.vaccination_status != '' AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$completedVaxAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE a.appointment_type='vaccination' AND a.status='completed' AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ REPORTS BREAKDOWN ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 $reportsByTypeStatus = [];
-$rbts = $conn->query("SELECT report_type, status, COUNT(*) as c FROM reports WHERE archived_at IS NULL GROUP BY report_type, status ORDER BY report_type, status");
+$rbts = $conn->query("SELECT r.report_type, r.status, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY r.report_type, r.status ORDER BY r.report_type, r.status");
 if ($rbts) {
     while ($r = $rbts->fetch_assoc()) {
         $type = $r['report_type'];
@@ -64,8 +64,8 @@ $bq = $conn->query("
       COUNT(DISTINCT p.pet_id) as registered_pets,
       COUNT(DISTINCT CASE WHEN a.appointment_type='vaccination' AND a.status='completed' THEN a.appointment_id END) as vaccinations
     FROM barangays b
-    LEFT JOIN users u ON u.barangay_id = b.barangay_id AND u.role='resident'
-    LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.archived_at IS NULL
+    LEFT JOIN users u ON u.barangay_id = b.barangay_id AND u.role='resident' AND u.status='active' AND u.deleted_at IS NULL
+    LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.reporter_id = u.user_id AND r.archived_at IS NULL
     LEFT JOIN pets p ON p.owner_id = u.user_id AND p.archived_at IS NULL
     LEFT JOIN appointments a ON a.user_id = u.user_id AND a.appointment_type='vaccination' AND a.status='completed'
     GROUP BY b.barangay_id, b.barangay_name
@@ -101,16 +101,16 @@ $monthlyRabies = array_fill(1, 12, 0);
 $monthlyPets = array_fill(1, 12, 0);
 $monthlyAppts = array_fill(1, 12, 0);
 
-$mrq = $conn->query("SELECT MONTH(created_at) as m, COUNT(*) as c FROM reports WHERE YEAR(created_at)=$currentYear AND archived_at IS NULL GROUP BY MONTH(created_at)");
+$mrq = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
 if ($mrq) { while ($r = $mrq->fetch_assoc()) { $monthlyReports[(int)$r['m']] = (int)$r['c']; } }
 
-$mrb = $conn->query("SELECT MONTH(created_at) as m, COUNT(*) as c FROM reports WHERE report_type='rabies' AND YEAR(created_at)=$currentYear AND archived_at IS NULL GROUP BY MONTH(created_at)");
+$mrb = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
 if ($mrb) { while ($r = $mrb->fetch_assoc()) { $monthlyRabies[(int)$r['m']] = (int)$r['c']; } }
 
-$mpq = $conn->query("SELECT MONTH(created_at) as m, COUNT(*) as c FROM pets WHERE YEAR(created_at)=$currentYear AND archived_at IS NULL GROUP BY MONTH(created_at)");
+$mpq = $conn->query("SELECT MONTH(p.created_at) as m, COUNT(*) as c FROM pets p JOIN users u ON p.owner_id = u.user_id WHERE YEAR(p.created_at)=$currentYear AND p.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(p.created_at)");
 if ($mpq) { while ($r = $mpq->fetch_assoc()) { $monthlyPets[(int)$r['m']] = (int)$r['c']; } }
 
-$maq = $conn->query("SELECT MONTH(preferred_date) as m, COUNT(*) as c FROM appointments WHERE YEAR(preferred_date)=$currentYear GROUP BY MONTH(preferred_date)");
+$maq = $conn->query("SELECT MONTH(a.preferred_date) as m, COUNT(*) as c FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE YEAR(a.preferred_date)=$currentYear AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(a.preferred_date)");
 if ($maq) { while ($r = $maq->fetch_assoc()) { $monthlyAppts[(int)$r['m']] = (int)$r['c']; } }
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ INSIGHTS ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
@@ -182,7 +182,7 @@ $statusLabels = ['pending' => 'Pending', 'validated' => 'Validated', 'rejected' 
     padding-bottom: 14px; border-bottom: 3px solid #1e40af; margin-bottom: 20px;
   }
   .report-header img { height: 56px; width: auto; }
-  .report-header h1 { font-size: 16pt; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.3px; font-family: 'Montserrat', sans-serif; }
+  .report-header h1 { font-size: 16pt; font-weight: 800; color: #0f172a; margin: 0; letter-spacing: -0.3px; font-family: 'Inter', sans-serif; }
   .report-header .subtitle { font-size: 8.5pt; color: #475569; margin-top: 2px; }
   .report-meta {
     margin-left: auto; text-align: right; font-size: 7.5pt; color: #64748b; line-height: 1.7;
@@ -193,9 +193,9 @@ $statusLabels = ['pending' => 'Pending', 'validated' => 'Validated', 'rejected' 
   h2 {
     font-size: 13pt; font-weight: 700; color: #1e40af;
     border-bottom: 2px solid #e2e8f0; padding-bottom: 5px; margin: 22px 0 10px 0;
-    font-family: 'Montserrat', sans-serif;
+    font-family: 'Inter', sans-serif;
   }
-  h3 { font-size: 10.5pt; font-weight: 700; color: #0f172a; margin: 14px 0 6px 0; font-family: 'Montserrat', sans-serif; }
+  h3 { font-size: 10.5pt; font-weight: 700; color: #0f172a; margin: 14px 0 6px 0; font-family: 'Inter', sans-serif; }
 
   /* EXECUTIVE SUMMARY */
   .exec-summary { background: #f8fafc; border-left: 4px solid #1e40af; padding: 10px 14px; margin-bottom: 14px; border-radius: 0 4px 4px 0; font-size: 9pt; }
@@ -279,7 +279,7 @@ $statusLabels = ['pending' => 'Pending', 'validated' => 'Validated', 'rejected' 
 
   <!-- ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â 1. COVER / HEADER ÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚ÂÃƒÂ¢Ã¢â‚¬Â¢Ã‚Â -->
   <div class="report-header">
-    <img src="uploads/site/logo.png" alt="DCVS Logo" onerror="this.style.display='none'">
+    <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" onerror="this.style.display='none'">
     <div>
       <h1>Citywide Veterinary Analytics Report</h1>
       <div class="subtitle">Dasmari&ntilde;as City Veterinary Services &mdash; Official Document</div>

@@ -15,6 +15,7 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/adoption-workflow.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -24,6 +25,28 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $sec = isset($_POST['return_section']) && preg_match('/^[a-z0-9_-]+$/', $_POST['return_section']) ? '#' . $_POST['return_section'] : '';
+    if (($_POST['from_adoption'] ?? '') === '1') {
+        $applicationId = (int)($_POST['adoption_application_id'] ?? 0);
+        if ($applicationId > 0) {
+            $approvedStmt = $conn->prepare(
+                "SELECT resulting_pet_id FROM adoption_applications
+                 WHERE application_id = ? AND applicant_id = ? AND status = 'approved'
+                   AND resulting_pet_id IS NOT NULL"
+            );
+            $approvedStmt->bind_param('ii', $applicationId, $_SESSION['user_id']);
+            $approvedStmt->execute();
+            $approved = $approvedStmt->get_result()->fetch_assoc();
+            $approvedStmt->close();
+            if ($approved) {
+                $_SESSION['pet_success'] = 'This approved adoption is already registered in your pet profile.';
+                header('Location: dashboard-resident.php#my-pets');
+                exit;
+            }
+        }
+        $_SESSION['pet_error'] = 'Adopted pets can only be registered through an approved adoption application.';
+        header('Location: dashboard-resident.php#adoption');
+        exit;
+    }
     error_log("POST request received for add-pet.php");
     error_log("POST data: " . print_r($_POST, true));
 
@@ -61,6 +84,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
+    try {
+        adoptionBeginResidentPetRegistration($conn, (int)$_SESSION['user_id']);
+    } catch (AdoptionWorkflowException $exception) {
+        $_SESSION['pet_error'] = $exception->getMessage();
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+
     // Build vaccination status text
     $vaccinationStatus = '';
     switch ($vaccinated) {
@@ -88,12 +119,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $detectedType = finfo_file($finfo, $photo['tmp_name']);
         finfo_close($finfo);
         if (!in_array($detectedType, $allowedTypes)) {
+            $conn->rollback();
             $_SESSION['pet_error'] = "Invalid file type. Please upload a JPEG, PNG, or GIF image.";
             header('Location: dashboard-resident.php' . $sec);
             exit;
         }
 
         if ($photo['size'] > $maxSize) {
+            $conn->rollback();
             $_SESSION['pet_error'] = "File size exceeds 5MB limit.";
             header('Location: dashboard-resident.php' . $sec);
             exit;
@@ -127,40 +160,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($stmt->execute()) {
         $petId = $stmt->insert_id;
+        adoptionCommit($conn);
         error_log("Pet inserted successfully with ID: " . $petId);
 
-        // If from adoption flow, create adoption listing and mark pet_listings as adopted
-        $fromAdoption = ($_POST['from_adoption'] ?? '') === '1';
-        if ($fromAdoption) {
-            $alStmt = $conn->prepare("INSERT INTO adoption_listings (pet_id, listed_by, title, status) VALUES (?, ?, ?, 'available')");
-            $alStmt->bind_param("iis", $petId, $_SESSION['user_id'], $petName);
-            $alStmt->execute();
-            $alStmt->close();
-
-            // Remove from public pet list so no one else can request it
-            if (!empty($_SESSION['adopt_listing_id'])) {
-                $plStmt = $conn->prepare("UPDATE pet_listings SET status = 'adopted' WHERE listing_id = ?");
-                $plStmt->bind_param("i", $_SESSION['adopt_listing_id']);
-                $plStmt->execute();
-                $plStmt->close();
-            }
-
-            // Notify staff that a resident has started the adoption process
-            $staffStmt = $conn->prepare("SELECT user_id FROM users WHERE role = 'staff' AND status = 'active'");
-            $staffStmt->execute();
-            $staffResult = $staffStmt->get_result();
-            while ($staff = $staffResult->fetch_assoc()) {
-                createNotification($conn, $staff['user_id'], 'adoption_request', 'New Adoption Registration',
-                    "$petName has been registered for adoption by " . ($_SESSION['name'] ?? 'a resident') . ". Schedule an appointment to proceed.",
-                    'pets', $petId);
-            }
-            $staffStmt->close();
-
-            unset($_SESSION['adopt_data'], $_SESSION['adopt_listing_id'], $_SESSION['show_adopt_modal']);
-            $_SESSION['pet_success'] = "Pet registered for adoption! Request an appointment to schedule pickup.";
-        } else {
-            $_SESSION['pet_success'] = "Pet registered successfully!";
-        }
+        $_SESSION['pet_success'] = "Pet registered successfully!";
 
         // Log activity for pet registration
         $logAction = "Pet Registered";
@@ -175,6 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-resident.php' . $sec);
         exit;
     } else {
+        $conn->rollback();
         error_log("Failed to insert pet. Error: " . $stmt->error);
         $_SESSION['pet_error'] = "Failed to register pet. Please try again.";
         header('Location: dashboard-resident.php' . $sec);

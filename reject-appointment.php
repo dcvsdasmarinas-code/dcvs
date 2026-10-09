@@ -13,9 +13,23 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
+require_once 'includes/availability.php';
+require_once 'includes/waitlist.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
+    exit;
+}
+// JSON response for the sequential review dialog (ajax=1), session flash + redirect otherwise
+function apptRespond($success, $message) {
+    if (($_POST['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => (bool)$success, 'message' => $message]);
+        exit;
+    }
+    $_SESSION[$success ? 'appointment_success' : 'appointment_error'] = $message;
+    header('Location: dashboard-staff.php#appointments');
     exit;
 }
 
@@ -24,34 +38,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reason = trim($_POST['reason'] ?? '');
 
     if ($appointmentId === 0) {
-        $_SESSION['appointment_error'] = "Invalid appointment ID.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Invalid appointment ID.");
     }
 
     if (empty($reason)) {
-        $_SESSION['appointment_error'] = "Reason for rejection is required.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Reason for rejection is required.");
     }
 
     // Load the request - must still be pending
-    $stmt = $conn->prepare("SELECT a.appointment_id, a.user_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, a.reference_id FROM appointments a WHERE a.appointment_id = ? AND a.archived_at IS NULL");
+    $stmt = $conn->prepare("SELECT a.appointment_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, a.reference_id, u.full_name AS resident_name, p.pet_name FROM appointments a JOIN users u ON u.user_id = a.user_id LEFT JOIN pets p ON p.pet_id = a.pet_id WHERE a.appointment_id = ? AND a.archived_at IS NULL");
     $stmt->bind_param("i", $appointmentId);
     $stmt->execute();
     $appt = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if (!$appt) {
-        $_SESSION['appointment_error'] = "Appointment request not found.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Appointment request not found.");
     }
 
     if ($appt['status'] !== 'pending') {
-        $_SESSION['appointment_error'] = "This request has already been processed (current status: " . $appt['status'] . ").";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "This request has already been processed (current status: " . $appt['status'] . ").");
     }
 
     // Reject - keep original notes, append rejection reason
@@ -78,24 +84,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Send email notification
         $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
         sendAppointmentEmail($conn, $appointmentId, 'rejected', $reason, $staffName);
+        sendAppointmentSms($conn, $appointmentId, 'rejected', $staffName, $reason);
+        dcvsNotifyWaitlistForSlot($conn, $appt['preferred_date'], $appt['preferred_time'], $appt['appointment_type'], $appt['urgency_level'] ?? 'routine');
 
         // Log activity
         $action = "Appointment Rejected";
-        $details = "Rejected appointment $refId. Reason: $reason";
+        $details = "Rejected " . ucfirst($appt['appointment_type']) . " appointment for " . $appt['resident_name']
+            . (!empty($appt['pet_name']) ? " (pet: " . $appt['pet_name'] . ")" : "")
+            . ". Reason: $reason";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['appointment_success'] = "Appointment request rejected. Resident has been notified.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(true, "Appointment request rejected. Resident has been notified.");
     } else {
         $updStmt->close();
-        $_SESSION['appointment_error'] = "Failed to reject appointment. It may have already been processed.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Failed to reject appointment. It may have already been processed.");
     }
 }
 

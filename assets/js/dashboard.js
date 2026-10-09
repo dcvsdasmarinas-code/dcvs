@@ -3,7 +3,8 @@
 // ── Section Switching ──
 function switchSection(sectionId) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
-  var target = document.getElementById(sectionId);
+  var contentSectionId = sectionId === 'adoption' ? 'analytics' : sectionId;
+  var target = document.getElementById(contentSectionId);
   if (target) target.style.display = 'block';
   document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments' || sectionId === 'account-settings');
   document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
@@ -18,7 +19,9 @@ function switchSection(sectionId) {
     'reports-all':'All Reports','reports-pending':'Pending Validation','reports-active':'Active Cases','reports-resolved':'Resolved Cases'
   };
   var bc = document.getElementById('breadcrumbCurrent');
-  if (bc) bc.textContent = labels[sectionId] || sectionId;
+  var analyticsLabels = { engine:'Cases Analytics', intel:'Appointment Overview', architect:'Programs & Services', citydrives:'City Drives' };
+  var activeAnalyticsLabel = sectionId === 'analytics' ? analyticsLabels[window.aethCurrentPage] : '';
+  if (bc) bc.textContent = activeAnalyticsLabel || labels[sectionId] || sectionId;
   localStorage.setItem('activeSection', sectionId);
   window.location.hash = sectionId;
   window.scrollTo({ top: 0, behavior: 'smooth' });

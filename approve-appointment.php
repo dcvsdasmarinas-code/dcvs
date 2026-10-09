@@ -12,10 +12,24 @@ session_set_cookie_params([
 session_start();
 
 require_once 'db.php';
+require_once 'includes/availability.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
+    exit;
+}
+
+// JSON response for the sequential review dialog (ajax=1), session flash + redirect otherwise
+function apptRespond($success, $message) {
+    if (($_POST['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        echo json_encode(['success' => (bool)$success, 'message' => $message]);
+        exit;
+    }
+    $_SESSION[$success ? 'appointment_success' : 'appointment_error'] = $message;
+    header('Location: dashboard-staff.php#appointments');
     exit;
 }
 
@@ -24,28 +38,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $staffMessage = trim($_POST['staff_message'] ?? '');
 
     if ($appointmentId === 0) {
-        $_SESSION['appointment_error'] = "Invalid appointment ID.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Invalid appointment ID.");
     }
 
     // Load the request - must still be pending
-    $stmt = $conn->prepare("SELECT a.appointment_id, a.user_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, a.reference_id FROM appointments a WHERE a.appointment_id = ? AND a.archived_at IS NULL");
+    $stmt = $conn->prepare("SELECT a.appointment_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, a.reference_id, u.full_name AS resident_name, p.pet_name FROM appointments a JOIN users u ON u.user_id = a.user_id LEFT JOIN pets p ON p.pet_id = a.pet_id WHERE a.appointment_id = ? AND a.archived_at IS NULL");
     $stmt->bind_param("i", $appointmentId);
     $stmt->execute();
     $appt = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if (!$appt) {
-        $_SESSION['appointment_error'] = "Appointment request not found.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Appointment request not found.");
     }
 
     if ($appt['status'] !== 'pending') {
-        $_SESSION['appointment_error'] = "This request has already been processed (current status: " . $appt['status'] . ").";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "This request has already been processed (current status: " . $appt['status'] . ").");
+    }
+
+    $urgency = $appt['urgency_level'] ?? 'routine';
+    $slotIsAvailable = $urgency === 'urgent'
+        ? dcvsUrgentSlotAvailable($conn, $appt['preferred_date'], substr($appt['preferred_time'], 0, 5))
+        : dcvsSlotAvailable($conn, $appt['preferred_date'], substr($appt['preferred_time'], 0, 5));
+    if (!$slotIsAvailable) {
+        apptRespond(false, dcvsSlotUnavailableReason($conn, $appt['preferred_date'], $appt['preferred_time']));
     }
 
     $activeStatuses = "'pending','scheduled'";
@@ -56,35 +72,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $dupStmt->execute();
     if ($dupStmt->get_result()->fetch_row()[0] > 0) {
         $dupStmt->close();
-        $_SESSION['appointment_error'] = "This resident already has another appointment at this date and time.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "This resident already has another appointment at this date and time.");
     }
     $dupStmt->close();
 
-    // Check daily capacity (max 5)
-    $dStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status IN ($activeStatuses) AND archived_at IS NULL AND appointment_id != ?");
-    $dStmt->bind_param("si", $appt['preferred_date'], $appointmentId);
-    $dStmt->execute();
-    if ($dStmt->get_result()->fetch_row()[0] >= 5) {
-        $dStmt->close();
-        $_SESSION['appointment_error'] = "Cannot approve: " . date('M d, Y', strtotime($appt['preferred_date'])) . " is fully booked (max 5).";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+    // Check daily capacity, excluding this pending request.
+    $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
+    if (dcvsAppointmentDayCount($conn, $appt['preferred_date'], $appointmentId, $urgency) >= $dailyLimit) {
+        apptRespond(false, "Cannot approve: " . date('M d, Y', strtotime($appt['preferred_date'])) . " is at its " . $urgency . " appointment limit.");
     }
-    $dStmt->close();
 
-    // Check per-slot capacity (max 1)
-    $cStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND preferred_time = ? AND status IN ($activeStatuses) AND archived_at IS NULL AND appointment_id != ?");
-    $cStmt->bind_param("ssi", $appt['preferred_date'], $appt['preferred_time'], $appointmentId);
-    $cStmt->execute();
-    if ($cStmt->get_result()->fetch_row()[0] >= 1) {
-        $cStmt->close();
-        $_SESSION['appointment_error'] = "Cannot approve: this time slot is already reserved by another resident (max 1).";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+    // Check per-slot capacity.
+    $slotCapacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $appt['preferred_date'], substr($appt['preferred_time'], 0, 5));
+    if (dcvsAppointmentSlotCount($conn, $appt['preferred_date'], $appt['preferred_time'], $appointmentId, $urgency) >= $slotCapacity) {
+        apptRespond(false, "Cannot approve: this time slot no longer has enough staff capacity.");
     }
-    $cStmt->close();
 
     // Approve the request using the resident's preferred date/time
     $updStmt = $conn->prepare("UPDATE appointments SET status = 'scheduled' WHERE appointment_id = ? AND status = 'pending'");
@@ -107,24 +109,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Send email notification
         $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
         sendAppointmentEmail($conn, $appointmentId, 'scheduled', $staffMessage, $staffName);
+        sendAppointmentSms($conn, $appointmentId, 'scheduled', $staffName, $staffMessage);
 
         // Log activity
         $action = "Appointment Approved";
-        $details = "Approved appointment $refId for " . $appt['appointment_type'] . " on " . $appt['preferred_date'] . ".";
+        $details = "Approved " . ucfirst($appt['appointment_type']) . " appointment for " . $appt['resident_name']
+            . (!empty($appt['pet_name']) ? " (pet: " . $appt['pet_name'] . ")" : "")
+            . " on " . $appt['preferred_date'] . ".";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['appointment_success'] = "Appointment request approved and scheduled.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(true, "Appointment request approved and scheduled.");
     } else {
         $updStmt->close();
-        $_SESSION['appointment_error'] = "Failed to approve appointment. It may have already been processed.";
-        header('Location: dashboard-staff.php#appointments');
-        exit;
+        apptRespond(false, "Failed to approve appointment. It may have already been processed.");
     }
 }
 

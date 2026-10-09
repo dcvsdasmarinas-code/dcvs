@@ -51,23 +51,31 @@
 /* numbers */
 .numbers-intro{text-align:center;max-width:700px;margin:0 auto 50px;}
 .numbers-intro h2{font-size:3rem;font-weight:800;color:#045e1f;font-family:'Montserrat',sans-serif;}
-.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;}
+.stats-row{display:grid;grid-template-columns:repeat(3,1fr);gap:40px;margin-top:2rem;}
 @media(max-width:800px){.stats-row{grid-template-columns:1fr;}}
-.stat-card{background:#f3f8ff;border-radius:16px;padding:28px;}
-.icon-badge{width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:20px;font-size:18px;}
-.stat-card h3{font-size:2.25rem;margin:0 0 12px;font-weight:700;color:#212121;}
-.stat-card p{font-size:1rem;color:#4b5563;line-height:1.7;margin:0;}
+.stat-item{text-align:center;padding:0 1rem;}
+.stat-item h3{font-size:2.25rem;margin:0 0 12px;font-weight:600;color:#212121;}
+.stat-item p{font-size:1rem;color:#4b5563;line-height:1.7;margin:0;}
 
 /* building */
-.building-intro{text-align:center;max-width:760px;margin:0 auto 60px;}
+.building-intro{text-align:center;max-width:760px;margin:2rem auto 60px;}
 .building-intro h2{font-size:3rem;font-weight:800;color:#045e1f;font-family:'Montserrat',sans-serif;}
 .building-intro p{color:#212121;font-size:1.125rem;line-height:1.7;}
 
 /* CTA before footer */
 .about-cta{text-align:center;padding:60px 32px 80px;background:#fff;}
 .about-cta h2{font-size:2rem;font-weight:800;color:#045e1f;font-family:'Montserrat',sans-serif;margin:0 0 24px;}
-.about-cta .cta-link{display:inline-block;padding:14px 36px;background:#045e1f;color:#fff;border-radius:8px;font-weight:600;font-size:1rem;text-decoration:none;transition:background 0.3s;}
-.about-cta .cta-link:hover{background:#047a28;}
+.about-cta .cta-link{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  height:36px;padding:0 16px;
+  border-radius:6px;border:1px solid transparent;
+  background:#18181b;color:#fafafa;
+  font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;
+  white-space:nowrap;cursor:pointer;text-decoration:none;
+  box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);
+  transition:background-color 0.15s ease,border-color 0.15s ease,color 0.15s ease;
+}
+.about-cta .cta-link:hover{background:#27272a;}
 
 /* animations */
 .fade-up{opacity:0;transform:translateY(40px);transition:opacity 0.8s ease-out,transform 0.8s ease-out;}
@@ -79,7 +87,49 @@
 @media(max-width:900px){
   .about-hero h1{font-size:42px;}
   .about-page h2{font-size:28px;}
-  .stat-card h3{font-size:28px;}
+  .stat-item h3{font-size:28px;}
+}
+
+/* Inter font (shadcn dialog style) */
+.about-page h1,
+.about-page h2,
+.about-hero p,
+.body-text p,
+.hq-box,
+.numbers-intro p,
+.building-intro p,
+.stat-item h3,
+.stat-item p,
+.about-cta h2,
+.about-cta .cta-link,
+.caption,
+.stack-caption {
+  font-family: 'Inter', sans-serif !important;
+}
+
+.about-page h1,
+.about-page h2 {
+  letter-spacing: -0.025em !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+}
+
+.about-hero p,
+.body-text p,
+.hq-box,
+.building-intro p,
+.stat-item p {
+  letter-spacing: -0.01em !important;
+  line-height: 1.7 !important;
+}
+
+.stat-item h3 {
+  letter-spacing: -0.02em !important;
+  font-weight: 600 !important;
+}
+
+.about-cta h2 {
+  letter-spacing: -0.02em !important;
 }
 </style>
 
@@ -129,24 +179,15 @@
     <h2>What We Do</h2>
   </div>
   <div class="wrap stats-row">
-    <div class="stat-card fade-up fade-up-delay-1">
-      <div class="icon-badge" style="background:#f5f5f5;color:#0d0d0d;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      </div>
-      <h3 class="count-up" data-target="2026" data-format="plain">0</h3>
+    <div class="stat-item fade-up fade-up-delay-1">
+      <h3>Served 2020–2026</h3>
       <p>Served Dasmariñas City residents through animal welfare programs, vaccination drives, and rabies response initiatives.</p>
     </div>
-    <div class="stat-card fade-up fade-up-delay-2">
-      <div class="icon-badge" style="background:#f5f5f5;color:#0d0d0d;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-      </div>
+    <div class="stat-item fade-up fade-up-delay-2">
       <h3 class="count-up" data-target="50" data-format="plus">0</h3>
       <p>Barangays across the city fall under our coverage and coordination.</p>
     </div>
-    <div class="stat-card fade-up fade-up-delay-3">
-      <div class="icon-badge" style="background:#f5f5f5;color:#0d0d0d;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-      </div>
+    <div class="stat-item fade-up fade-up-delay-3">
       <h3 class="count-up" data-target="10000" data-format="comma-plus">0</h3>
       <p>Core services we provide: reporting, pet registration, adoption, and veterinary appointments.</p>
     </div>
@@ -158,7 +199,7 @@
     <h2>What we're building</h2>
     <p>DCVS manages pet registration, vaccination monitoring, animal rescue, and response to rabies-related incidents across the city. We work closely with barangay officials to validate community reports, confirm cases, and ensure that every concern big or small reaches the right people quickly and accurately.</p>
   </div>
-  <div class="wrap two-col fade-up" style="margin-bottom:80px;">
+  <div class="wrap two-col fade-up" style="margin-bottom:80px;margin-top:4rem;">
     <div class="body-text">
       <h2>Report with confidence</h2>
       <p>We encourage residents to report stray animals and suspected rabies cases with clear details location, description, and condition so our team can respond quickly and appropriately, wherever the concern happens to be.</p>

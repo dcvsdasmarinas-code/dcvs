@@ -10,6 +10,9 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once 'includes/adoption-workflow.php';
+
+adoptionReleaseExpiredReservations($conn);
 
 $listingId = (int)($_GET['listing_id'] ?? 0);
 
@@ -23,32 +26,22 @@ $stmt->bind_param("i", $listingId);
 $stmt->execute();
 $pet = $stmt->get_result()->fetch_assoc();
 $stmt->close();
-$conn->close();
 
 if (!$pet) {
-    header('Location: petlist.php');
-    exit;
+   header('Location: petlist.php');
+   exit;
 }
-
-$data = [
-    'name' => $pet['name'],
-    'species' => $pet['species'],
-    'breed' => $pet['breed'],
-    'age' => $pet['age'],
-    'gender' => $pet['gender'],
-    'weight' => $pet['weight'],
-    'color' => $pet['color'],
-    'photo' => $pet['photo_url'] ?? '',
-];
-
-$_SESSION['adopt_data'] = $data;
-$_SESSION['adopt_listing_id'] = $listingId;
-$_SESSION['show_adopt_modal'] = true;
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
-    header('Location: login.php');
-    exit;
+   $_SESSION['adoption_apply_listing_id'] = $listingId;
+   header('Location: login.php');
+   exit;
 }
 
-header('Location: dashboard-resident.php');
+if (($_SESSION['role'] ?? '') !== 'resident') {
+   header('Location: login.php');
+   exit;
+}
+
+header('Location: resident-adoption-applications.php?apply=' . $listingId);
 exit;

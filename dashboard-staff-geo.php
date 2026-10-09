@@ -11,6 +11,7 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once 'db.php';
+require_once __DIR__ . '/includes/reports/location.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -30,6 +31,18 @@ if ($roleRow = $roleResult->fetch_assoc()) {
     }
 }
 $roleCheck->close();
+
+$reportPinsEnabled = false;
+loadDcvsEnv();
+$reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
+$mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
+if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
+    $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
+        __DIR__ . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
+        __DIR__ . '/geo-map/barangays-boundary.json'
+    );
+    $reportPinsEnabled = dcvsReportPinFeatureEnabled($conn, $reportPinFeatures);
+}
 
 $userId = $_SESSION['user_id'];
 $fullName = $_SESSION['full_name'] ?? 'Staff';
@@ -56,8 +69,9 @@ $activePage = 'geo';
 
   <!-- MapCN bundle -->
   <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css">
-  <script src="dist/mapcn.umd.js"></script>
+  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/geo-map/map.css'); ?>">
+  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/geo-drawer.css'); ?>">
+  <script src="dist/mapcn.umd.cjs"></script>
 
   <style>
     :root {
@@ -75,7 +89,7 @@ $activePage = 'geo';
     .staff-main { flex: 1; margin-left: 80px; margin-top: var(--topbar-h, 64px); padding: 1.75rem 2rem; min-height: calc(100vh - var(--topbar-h, 64px)); }
 
     .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
-    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Montserrat',sans-serif; display:flex; align-items:center; gap:10px; }
+    .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Inter',sans-serif; display:flex; align-items:center; gap:10px; }
     .page-title i { color:#0E8131; }
     .page-subtitle { font-size:0.88rem; color:#64748b; margin:4px 0 0; }
 
@@ -88,6 +102,14 @@ $activePage = 'geo';
       .staff-main { margin-left: 0; padding: 1rem; }
       .geo-full-page { margin: -1rem; }
     }
+
+    /* Buttons */
+    .sd-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid transparent;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,.05);transition:background-color .15s ease,border-color .15s ease,color .15s ease;}
+    .sd-btn:hover{background:#f4f4f5;}
+    .sd-btn-primary{background:#18181b;color:#fafafa;border-color:#18181b;}
+    .sd-btn-primary:hover{background:#27272a;}
+    .sd-btn-outline{background:#ffffff;border-color:#e4e4e7;color:#18181b;}
+    .sd-btn-outline:hover{background:#f4f4f5;}
   </style>
 </head>
 <body class="staff-theme">
@@ -111,37 +133,25 @@ $activePage = 'geo';
           </span>
         </div>
         <!-- Map container -->
-        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}' style="width:100%;position:relative;">
+        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" data-report-route-enabled="<?php echo $reportRoutingEnabled ? '1' : '0'; ?>" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;position:relative;">
           <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
+          <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
         </div>
-        <!-- Slide-in Info Panel -->
-        <div class="geo-info-panel" id="geoInfoPanel">
+        <!-- Hidden panel kept for mapcn bundle compatibility -->
+        <div class="geo-info-panel" id="geoInfoPanel" style="display:none !important;">
           <div class="geo-panel-header">
             <h3><span id="geoPanelName">Barangay</span></h3>
             <button class="geo-panel-close" onclick="MapCN.barangayOverlay.closePanel()">&times;</button>
           </div>
           <div class="geo-panel-body">
-            <div style="margin-bottom:1rem;">
-              <span class="geo-panel-risk-badge" id="geoPanelRisk" style="background:#dcfce7;color:#166534;">Low</span>
-            </div>
-            <div class="geo-panel-stat">
-              <span class="geo-panel-stat-label">Confirmed Cases</span>
-              <span class="geo-panel-stat-value" id="geoPanelConfirmed">0</span>
-            </div>
-            <div class="geo-panel-stat">
-              <span class="geo-panel-stat-label">Pending Reports</span>
-              <span class="geo-panel-stat-value" id="geoPanelPending">0</span>
-            </div>
-            <div class="geo-panel-stat">
-              <span class="geo-panel-stat-label">Resolved</span>
-              <span class="geo-panel-stat-value" id="geoPanelResolved">0</span>
-            </div>
-            <div class="geo-panel-stat">
-              <span class="geo-panel-stat-label">Last Updated</span>
-              <span class="geo-panel-stat-value" id="geoPanelUpdated">--</span>
-            </div>
+            <span class="geo-panel-risk-badge" id="geoPanelRisk">Low</span>
+            <div class="geo-panel-stat"><span class="geo-panel-stat-label">Confirmed</span><span class="geo-panel-stat-value" id="geoPanelConfirmed">0</span></div>
+            <div class="geo-panel-stat"><span class="geo-panel-stat-label">Pending</span><span class="geo-panel-stat-value" id="geoPanelPending">0</span></div>
+            <div class="geo-panel-stat"><span class="geo-panel-stat-label">Resolved</span><span class="geo-panel-stat-value" id="geoPanelResolved">0</span></div>
+            <div class="geo-panel-stat"><span class="geo-panel-stat-label">Updated</span><span class="geo-panel-stat-value" id="geoPanelUpdated">--</span></div>
           </div>
         </div>
+        <?php include 'includes/geo-drawer.php'; ?>
         <!-- Legend -->
         <div class="geo-legend">
           <span style="font-weight:600;color:#18181b;font-size:12px;">Risk Level:</span>
@@ -227,7 +237,7 @@ document.addEventListener('DOMContentLoaded', function() {
       map.setPaintProperty('barangay-outline', 'line-opacity', ['case', inIds, 1, 0.3]);
       if (first && first.geometry) {
         var bounds = bbFromFeature(first);
-        map.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 800 });
+        map.fitBounds(bounds, { padding: 60, maxZoom: 16, duration: 800 });
       }
     } else if (tries++ > 150) {
       clearInterval(iv);
@@ -256,6 +266,201 @@ document.addEventListener('DOMContentLoaded', function() {
     return [[minLng, minLat], [maxLng, maxLat]];
   }
 });
+
+/* ── Geo Drawer: intercept barangay clicks & populate right drawer ── */
+(function() {
+  var currentBrgyId = null;
+
+  var riskConfig = {
+    Green:  { dot: '#22c55e', text: '#166534', label: 'LOW RISK', desc: 'No confirmed cases in this barangay' },
+    Yellow: { dot: '#eab308', text: '#854d0e', label: 'MEDIUM RISK', desc: 'Active cases detected in this barangay' },
+    Orange: { dot: '#f97316', text: '#9a3412', label: 'HIGH RISK', desc: 'Multiple active cases require attention' },
+    Red:    { dot: '#ef4444', text: '#991b1b', label: 'CRITICAL RISK', desc: 'Significant outbreak — immediate action needed' }
+  };
+
+  var typeLabels = {
+    rabies: 'Rabies Reports',
+    rescue: 'Rescue Reports',
+    stray: 'Stray Reports',
+    injured: 'Injured Reports',
+    dead: 'Dead Reports'
+  };
+
+  var typeIcons = {
+    rabies: '#dc2626',
+    rescue: '#2563eb',
+    stray: '#ea580c',
+    injured: '#d97706',
+    dead: '#6b7280'
+  };
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '--';
+    var d = new Date(dateStr.replace(' ', 'T') + 'Z');
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return months[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear();
+  }
+
+  function formatDateTime(dateStr) {
+    if (!dateStr) return '--';
+    var d = new Date(dateStr.replace(' ', 'T') + 'Z');
+    var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var h = d.getUTCHours(), m = d.getUTCMinutes();
+    var ampm = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return months[d.getUTCMonth()] + ' ' + d.getUTCDate() + ', ' + d.getUTCFullYear() + ' · ' + h + ':' + String(m).padStart(2,'0') + ' ' + ampm;
+  }
+
+  window.openGeoDrawer = function(barangayId, props) {
+    currentBrgyId = barangayId;
+    var name = (props && props.name) || 'Unknown';
+    var risk = (props && props.risk) || 'Green';
+    var confirmed = (props && props.confirmed) || 0;
+    var pending = (props && props.pending) || 0;
+    var resolved = (props && props.resolved) || 0;
+    var total = confirmed + pending + resolved;
+    var rc = riskConfig[risk] || riskConfig.Green;
+
+    document.getElementById('geoDrawerName').textContent = name;
+
+    var dot = document.getElementById('geoDrawerRiskDot');
+    dot.style.background = rc.dot;
+    var rtxt = document.getElementById('geoDrawerRiskText');
+    rtxt.textContent = rc.label;
+    rtxt.style.color = rc.text;
+    document.getElementById('geoDrawerRiskDesc').textContent = rc.desc;
+
+    document.getElementById('geoDrawerConfirmed').textContent = confirmed;
+    document.getElementById('geoDrawerPending').textContent = pending;
+    document.getElementById('geoDrawerResolved').textContent = resolved;
+    document.getElementById('geoDrawerTotal').textContent = total;
+
+    document.getElementById('geoDrawerViewAll').href = 'dashboard-staff.php#reports-all';
+    document.getElementById('geoDrawerUpdated').textContent = formatDateTime(props && props.lastUpdated);
+
+    document.getElementById('geoDrawerBreakdown').innerHTML = '<div style="font-size:13px;color:#a1a1aa;padding:8px 0;">Loading...</div>';
+    document.getElementById('geoDrawerRecentWrap').style.display = 'none';
+    document.getElementById('geoDrawerNoRecent').style.display = 'none';
+
+    document.getElementById('geoDrawerOverlay').classList.add('open');
+    document.getElementById('geoDrawer').classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    fetch('geo-map/barangay-detail.php?barangay_id=' + barangayId + '&sess=DCVS_STAFF_SESSION')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var bkHtml = '';
+        if (data.breakdown && data.breakdown.length) {
+          data.breakdown.forEach(function(b) {
+            var lbl = typeLabels[b.type] || (b.type.charAt(0).toUpperCase() + b.type.slice(1) + ' Reports');
+            var color = typeIcons[b.type] || '#71717a';
+            bkHtml += '<div class="geo-activity-row"><span class="geo-activity-name"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + color + ';margin-right:8px;vertical-align:middle;"></span>' + lbl + '</span><span class="geo-activity-count">' + b.count + '</span></div>';
+          });
+        } else {
+          bkHtml = '<div style="font-size:13px;color:#a1a1aa;padding:8px 0;">No reports</div>';
+        }
+        document.getElementById('geoDrawerBreakdown').innerHTML = bkHtml;
+
+        if (data.recent_case) {
+          var rc2 = data.recent_case;
+          document.getElementById('geoDrawerRecentWrap').style.display = 'block';
+          document.getElementById('geoDrawerNoRecent').style.display = 'none';
+          var typeLabel = rc2.type === 'rabies' ? 'Suspected Rabies' : rc2.type.charAt(0).toUpperCase() + rc2.type.slice(1);
+          var urg = rc2.urgency || 'medium';
+          var urgStyles = {
+            critical: { bg: '#fef2f2', color: '#991b1b', border: '#fecaca' },
+            high:     { bg: '#fff7ed', color: '#9a3412', border: '#fed7aa' },
+            medium:   { bg: '#eff6ff', color: '#1e40af', border: '#bfdbfe' },
+            low:      { bg: '#f9fafb', color: '#374151', border: '#e5e7eb' }
+          };
+          var us = urgStyles[urg] || urgStyles.medium;
+          var urgLabel = urg.charAt(0).toUpperCase() + urg.slice(1) + ' Risk';
+          document.getElementById('geoDrawerRecent').innerHTML =
+            '<div class="geo-recent-id">' + rc2.ref_code + '</div>' +
+            '<div class="geo-recent-type">' + typeLabel + '</div>' +
+            '<div class="geo-recent-meta">' +
+              '<span class="geo-recent-urgency" style="background:' + us.bg + ';color:' + us.color + ';border:1px solid ' + us.border + ';">' + urgLabel + '</span>' +
+              '<span class="geo-recent-date">' + formatDate(rc2.date) + '</span>' +
+            '</div>' +
+            '<a class="geo-recent-action" href="dashboard-staff.php#reports-all">View Report <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></a>';
+        } else {
+          document.getElementById('geoDrawerRecentWrap').style.display = 'none';
+          document.getElementById('geoDrawerNoRecent').style.display = 'block';
+        }
+      })
+      .catch(function(err) {
+        console.error('Barangay detail fetch error:', err);
+        document.getElementById('geoDrawerBreakdown').innerHTML = '<div style="font-size:13px;color:#dc2626;padding:8px 0;">Failed to load data</div>';
+      });
+  };
+
+  window.closeGeoDrawer = function() {
+    document.getElementById('geoDrawerOverlay').classList.remove('open');
+    document.getElementById('geoDrawer').classList.remove('open');
+    document.body.style.overflow = '';
+    currentBrgyId = null;
+  };
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && document.getElementById('geoDrawer').classList.contains('open')) {
+      closeGeoDrawer();
+    }
+  });
+
+  /* Keep the legacy panel hidden; barangay selection opens the right drawer directly. */
+  function setupGeoIntercept() {
+    var panel = document.getElementById('geoInfoPanel');
+    if (!panel) return false;
+
+    var observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        if (m.attributeName === 'class' && panel.classList.contains('open')) {
+          panel.classList.remove('open');
+        }
+      });
+    });
+    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+    return true;
+  }
+
+  function setupBarangayDrawer(map) {
+    if (!map || map.__dcvsBarangayDrawerClickBound) return;
+    map.__dcvsBarangayDrawerClickBound = true;
+    map.on('click', function(clickEvent) {
+      if (!map.getLayer('barangay-fill')) return;
+      var pinLayers = ['report-pins-points', 'report-pins-clusters'].filter(function(layerId) {
+        return !!map.getLayer(layerId);
+      });
+      if (pinLayers.length && map.queryRenderedFeatures(clickEvent.point, { layers: pinLayers }).length) return;
+      var features = map.queryRenderedFeatures(clickEvent.point, { layers: ['barangay-fill'] });
+      var feature = features[0];
+      if (feature && feature.properties) {
+        openGeoDrawer(feature.properties.id, feature.properties);
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    var mapElement = document.getElementById('geoMap');
+    if (mapElement) {
+      mapElement.addEventListener('mapcn:load', function(event) {
+        setupBarangayDrawer(event.detail && event.detail.map);
+      });
+    }
+    setupBarangayDrawer(window.MapCN && window.MapCN.map);
+    if (!setupGeoIntercept()) {
+      var tries = 0;
+      var iv = setInterval(function() {
+        if (setupGeoIntercept() || tries++ > 50) clearInterval(iv);
+      }, 200);
+    }
+  });
+})();
 </script>
+<?php if ($reportPinsEnabled): ?>
+<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/report-map-pins.js'); ?>"></script>
+<?php endif; ?>
+<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-landmarks.js'); ?>"></script>
+<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-basemap-toggle.js'); ?>"></script>
 </body>
 </html>

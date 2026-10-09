@@ -13,6 +13,18 @@ session_start();
 
 require_once 'db.php';
 require_once 'mailer.php';
+require_once 'sms-sender.php';
+
+function confirmScheduleRespond($success, $message, $data = []) {
+    if (($_POST['ajax'] ?? '') === '1') {
+        header('Content-Type: application/json');
+        echo json_encode(array_merge(['success' => (bool)$success, 'message' => $message], $data));
+        exit;
+    }
+    $_SESSION[$success ? 'report_success' : 'report_error'] = $message;
+    header('Location: dashboard-staff.php#' . ($success ? 'reports-active' : 'reports-pending'));
+    exit;
+}
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -21,40 +33,41 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reportId = intval($_POST['report_id'] ?? 0);
-    $scheduledAt = $_POST['scheduled_at'] ?? '';
+    $scheduledAtInput = trim($_POST['scheduled_at'] ?? '');
+    $scheduledAt = null;
     $dcvsNotes = trim($_POST['dcvs_notes'] ?? '');
 
     if ($reportId === 0) {
-        $_SESSION['report_error'] = "Invalid report ID.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        confirmScheduleRespond(false, 'Invalid report ID.');
     }
 
-    if (empty($scheduledAt)) {
-        $_SESSION['report_error'] = "Schedule date and time are required.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+    if ($scheduledAtInput !== '') {
+        $parsedSchedule = DateTime::createFromFormat('Y-m-d\\TH:i', $scheduledAtInput);
+        $dateErrors = DateTime::getLastErrors();
+        if (!$parsedSchedule || ($dateErrors && ($dateErrors['warning_count'] || $dateErrors['error_count']))) {
+            confirmScheduleRespond(false, 'Invalid schedule date and time.');
+        }
+        $scheduledAt = $parsedSchedule->format('Y-m-d H:i:s');
     }
 
     // Fetch report details
-    $stmt = $conn->prepare("SELECT * FROM reports WHERE report_id = ? AND status = 'validated'");
+    $stmt = $conn->prepare("SELECT r.*, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON u.user_id = r.reporter_id WHERE r.report_id = ? AND r.status = 'validated'");
     $stmt->bind_param("i", $reportId);
     $stmt->execute();
     $report = $stmt->get_result()->fetch_assoc();
     $stmt->close();
 
     if (!$report) {
-        $_SESSION['report_error'] = "Report not found or already processed.";
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        confirmScheduleRespond(false, 'Report not found or already processed.');
     }
 
     $conn->begin_transaction();
 
     try {
-        // Update report status to scheduled
-        $updateStmt = $conn->prepare("UPDATE reports SET status = 'scheduled', confirmed_by = ?, confirmed_at = NOW(), scheduled_at = ?, dcvs_notes = ? WHERE report_id = ?");
-        $updateStmt->bind_param("issi", $_SESSION['user_id'], $scheduledAt, $dcvsNotes, $reportId);
+        // Confirm the report; only mark it scheduled when staff picked an action time.
+        $newStatus = $scheduledAt !== null ? 'scheduled' : 'confirmed';
+        $updateStmt = $conn->prepare("UPDATE reports SET status = ?, confirmed_by = ?, confirmed_at = NOW(), scheduled_at = ?, dcvs_notes = ? WHERE report_id = ?");
+        $updateStmt->bind_param("sissi", $newStatus, $_SESSION['user_id'], $scheduledAt, $dcvsNotes, $reportId);
         $updateStmt->execute();
         $updateStmt->close();
 
@@ -62,19 +75,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insertStmt = $conn->prepare("INSERT INTO confirmed_cases (report_id, case_type, location_address, coordinates_lat, coordinates_long, barangay_id, urgency_level, status, confirmed_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', NOW())");
         $insertStmt->bind_param("issddds", $reportId, $report['report_type'], $report['location_address'], $report['coordinates_lat'], $report['coordinates_long'], $report['barangay_id'], $report['urgency_level']);
         $insertStmt->execute();
+        $caseId = (int)$insertStmt->insert_id;
         $insertStmt->close();
 
-        $actionDate = date('F j, Y \a\t g:i A', strtotime($scheduledAt));
-        $actionMsg = "scheduled for action on " . $actionDate;
-        $fullMsg = $dcvsNotes ? $actionMsg . ". Notes: " . $dcvsNotes : $actionMsg . ".";
+        $actionMsg = $scheduledAt !== null
+            ? 'scheduled for action on ' . date('F j, Y \\a\\t g:i A', strtotime($scheduledAt))
+            : 'confirmed by DCVS; the action schedule will be coordinated by the staff';
+        $fullMsg = $dcvsNotes ? $actionMsg . '. Notes: ' . $dcvsNotes : $actionMsg . '.';
 
         // Notify resident
         createNotification($conn, $report['reporter_id'], 'report_confirmed',
-            'Report Scheduled',
+            $scheduledAt !== null ? 'Report Scheduled' : 'Report Confirmed',
             'Your report has been confirmed by DCVS and is ' . $fullMsg,
             'report', $reportId);
         $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
-        sendReportEmail($conn, $reportId, 'scheduled', '', $staffName);
+        sendReportEmail($conn, $reportId, $newStatus, '', $staffName);
+        sendReportSms($conn, $reportId, $newStatus, $staffName, $dcvsNotes);
 
         // Notify barangay officers
         if ($report['barangay_id']) {
@@ -94,8 +110,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Log activity
-        $action = "Case Confirmed & Scheduled";
-        $details = "Report #$reportId confirmed and scheduled on $actionDate.";
+        $action = $scheduledAt !== null ? 'Case Confirmed & Scheduled' : 'Case Confirmed';
+        $details = $scheduledAt !== null
+            ? ucfirst($report['report_type']) . " report from " . ($report['reporter_name'] ?: 'a resident') . " confirmed and scheduled on " . date('F j, Y \\a\\t g:i A', strtotime($scheduledAt)) . "."
+            : ucfirst($report['report_type']) . " report from " . ($report['reporter_name'] ?: 'a resident') . " confirmed without an action schedule.";
         $ip = $_SERVER['REMOTE_ADDR'];
         $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
         $logStmt->bind_param("isss", $_SESSION['user_id'], $action, $details, $ip);
@@ -104,14 +122,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $conn->commit();
 
-        $_SESSION['report_success'] = "Case confirmed and scheduled successfully. Resident and barangay have been notified.";
-        header('Location: dashboard-staff.php#reports-active');
-        exit;
+        confirmScheduleRespond(true, $scheduledAt !== null
+            ? 'Case confirmed and scheduled successfully.'
+            : 'Case confirmed successfully without an action schedule.', [
+                'report_id' => $reportId,
+                'case_id' => $caseId,
+                'status' => $newStatus,
+                'scheduled_at' => $scheduledAt,
+                'confirmed_at' => date('M d, Y h:i A'),
+            ]);
     } catch (Exception $e) {
         $conn->rollback();
-        $_SESSION['report_error'] = "Failed to confirm case: " . $e->getMessage();
-        header('Location: dashboard-staff.php#reports-pending');
-        exit;
+        confirmScheduleRespond(false, 'Failed to confirm case: ' . $e->getMessage());
     }
 }
 

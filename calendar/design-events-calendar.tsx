@@ -113,16 +113,14 @@ export default function DesignEventsCalendar() {
   }, [])
 
   useEffect(() => {
-    if (!isLoggedIn) {
-      const timer = setTimeout(() => {
-        toast({
-          title: "Save your favorite events",
-          description: 'Sign in to save events and access your personalized "My Events" view.',
-        })
-      }, 1500)
-      return () => clearTimeout(timer)
-    }
-  }, [isLoggedIn, toast])
+    const timer = setTimeout(() => {
+      toast({
+        title: "Welcome to the Event & Appointment Calendar",
+        description: "View and manage upcoming pet appointments and DCVS events.",
+      })
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [toast])
 
   const handleMonthSelect = (month: string) => {
     const element = document.getElementById(month.toLowerCase())

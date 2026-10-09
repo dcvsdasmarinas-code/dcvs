@@ -10,28 +10,24 @@ $success = $_GET['success'] ?? null;
   <title>Forgot Password — DCVS Dasmariñas</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="icon" type="image/x-icon" href="favicon.ico" />
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
-      --green: #0E8131;
-      --green-dark: #065729;
-      --green-light: #f0fdf4;
-      --bg: #f4f5f7;
-      --surface: #ffffff;
-      --text: #0f172a;
+      --text-main: #0f172a;
       --text-muted: #64748b;
-      --text-light: #94a3b8;
-      --border: #e2e8f0;
-      --radius: 16px;
-      --shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04);
+      --border-color: #e2e8f0;
+      --error: #ef4444;
+      --error-bg: #fef2f2;
+      --surface: #ffffff;
+      --bg: #f8fafc;
     }
 
     body {
-      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-family: 'Inter', sans-serif;
       background: var(--bg);
       min-height: 100vh;
       display: flex;
@@ -40,24 +36,25 @@ $success = $_GET['success'] ?? null;
       padding: 1.5rem;
     }
 
-    .card {
-      background: var(--surface);
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
+    .auth-form-card {
       width: 100%;
-      max-width: 420px;
-      padding: 2.25rem 2rem 2rem;
+      max-width: 440px;
+      background: var(--surface);
+      border: 1px solid var(--border-color);
+      border-radius: 3px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
+      padding: 2.5rem 2.5rem 2rem;
     }
 
-    .header {
+    .form-header {
       text-align: center;
       margin-bottom: 1.75rem;
     }
 
-    .header .icon-wrap {
+    .form-header .icon-wrap {
       width: 48px;
       height: 48px;
-      background: var(--green-light);
+      background: var(--error-bg);
       border-radius: 50%;
       display: flex;
       align-items: center;
@@ -65,64 +62,70 @@ $success = $_GET['success'] ?? null;
       margin: 0 auto 0.75rem;
     }
 
-    .header .icon-wrap i {
-      font-size: 1.25rem;
-      color: var(--green);
+    .form-header .icon-wrap i {
+      font-size: 1.15rem;
+      color: var(--error);
     }
 
-    .header h2 {
-      font-family: 'Montserrat', sans-serif;
-      font-size: 1.35rem;
+    .form-header h2 {
+      font-family: 'Inter', sans-serif;
+      font-size: 1.4rem;
       font-weight: 700;
-      color: var(--text);
-      margin-bottom: 0.25rem;
+      color: var(--text-main);
+      margin-bottom: 0.35rem;
+      letter-spacing: -0.02em;
     }
 
-    .header p {
+    .form-header p {
       font-size: 0.875rem;
       color: var(--text-muted);
       line-height: 1.5;
     }
 
     .form-group {
-      margin-bottom: 1.25rem;
+      margin-bottom: 1rem;
     }
 
     .form-group label {
       display: block;
-      font-size: 0.825rem;
+      font-size: 0.875rem;
       font-weight: 600;
-      color: var(--text);
+      color: var(--text-main);
       margin-bottom: 0.4rem;
     }
 
     .form-group input {
       width: 100%;
-      padding: 0.75rem 1rem;
-      border: 1.5px solid var(--border);
-      border-radius: 10px;
-      font-size: 0.925rem;
-      font-family: inherit;
-      color: var(--text);
-      background: #fafbfc;
-      transition: border-color 0.2s, box-shadow 0.2s;
+      height: 36px;
+      padding: 0 0.875rem;
+      border: 1.5px solid var(--border-color);
+      border-radius: 6px;
+      font-family: 'Inter', sans-serif;
+      font-size: 0.9rem;
+      color: var(--text-main);
+      background: var(--surface);
       outline: none;
+      transition: border-color 0.25s, box-shadow 0.25s;
     }
 
+    .form-group input::placeholder { color: #94a3b8; }
+
+    .form-group input:hover { border-color: #cbd5e1; }
+
     .form-group input:focus {
-      border-color: var(--green);
-      box-shadow: 0 0 0 3px rgba(14,129,49,0.1);
-      background: #fff;
+      border-color: #0a7a3b;
+      box-shadow: 0 0 0 3px rgba(10,122,59,0.08);
     }
 
     .form-group.has-error input {
-      border-color: #ef4444;
+      border-color: var(--error);
+      box-shadow: 0 0 0 3px var(--error-bg);
     }
 
     .field-error {
       display: block;
       font-size: 0.75rem;
-      color: #ef4444;
+      color: var(--error);
       margin-top: 0.3rem;
       min-height: 1rem;
     }
@@ -133,148 +136,120 @@ $success = $_GET['success'] ?? null;
 
     .input-wrapper i.input-icon {
       position: absolute;
-      left: 1rem;
+      left: 0.875rem;
       top: 50%;
       transform: translateY(-50%);
-      color: var(--text-light);
-      font-size: 0.95rem;
+      color: #94a3b8;
+      font-size: 0.85rem;
     }
 
     .input-wrapper input {
-      padding-left: 2.75rem;
+      padding-left: 2.5rem;
     }
 
-    .btn {
-      width: 100%;
-      padding: 0.8rem 1.5rem;
-      background: var(--text);
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      font-family: 'Montserrat', sans-serif;
-      font-size: 0.925rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
+    .btn-signin {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      gap: 0.5rem;
-      transition: background 0.2s, opacity 0.2s;
+      gap: 8px;
+      width: 100%;
+      height: 36px;
+      padding: 0 16px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      background: #18181b;
+      color: #fafafa;
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 1;
+      white-space: nowrap;
+      box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+      cursor: pointer;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
       margin-top: 0.5rem;
     }
 
-    .btn:hover { background: #1e293b; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .btn-signin:hover { background: #27272a; }
+    .btn-signin:active { background: #18181b; box-shadow: none; }
+    .btn-signin:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .btn-signin .btn-loader { display: none; }
 
-    .btn .btn-loader { display: none; }
-
-    .alert {
+    .auth-alert {
       display: flex;
-      align-items: flex-start;
-      gap: 0.6rem;
+      align-items: center;
+      gap: 0.65rem;
       padding: 0.75rem 1rem;
-      border-radius: 10px;
+      border-radius: 6px;
       font-size: 0.85rem;
-      line-height: 1.45;
+      font-weight: 500;
       margin-bottom: 1.25rem;
     }
 
-    .alert-error {
-      background: #fef2f2;
-      color: #991b1b;
-      border: 1px solid #fecaca;
+    .auth-alert-error {
+      background: var(--error-bg);
+      color: var(--error);
+      border: 1px solid rgba(239,68,68,0.15);
     }
 
-    .alert-error i { color: #ef4444; margin-top: 0.1rem; }
-
-    .alert-success {
-      background: #f0fdf4;
+    .auth-alert-success {
+      background: var(--error-bg);
       color: #065f46;
-      border: 1px solid #bbf7d0;
+      border: 1px solid rgba(16,185,129,0.15);
     }
 
-    .alert-success i { color: var(--green); margin-top: 0.1rem; }
-
-    .alert i { flex-shrink: 0; font-size: 0.95rem; }
-
-    .divider {
-      text-align: center;
-      margin: 1.25rem 0;
-      font-size: 0.8rem;
-      color: var(--text-light);
-      position: relative;
-    }
-
-    .divider::before,
-    .divider::after {
-      content: '';
-      position: absolute;
-      top: 50%;
-      width: 42%;
-      height: 1px;
-      background: var(--border);
-    }
-
-    .divider::before { left: 0; }
-    .divider::after { right: 0; }
+    .auth-alert i { flex-shrink: 0; font-size: 0.9rem; }
 
     .footer-links {
       text-align: center;
       font-size: 0.875rem;
+      margin-top: 1rem;
     }
 
     .footer-links a {
-      color: var(--green);
-      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 0.85rem;
       text-decoration: none;
       transition: color 0.2s;
     }
 
-    .footer-links a:hover { color: var(--green-dark); text-decoration: underline; }
-
-    .footer-links .back-link {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      margin-top: 0.75rem;
-      color: var(--text-muted);
-      font-weight: 500;
-      font-size: 0.85rem;
-    }
-
-    .footer-links .back-link:hover { color: var(--text); }
+    .footer-links a:hover { color: var(--text-main); text-decoration: underline; }
 
     @media (max-width: 480px) {
       body { padding: 1rem; }
-      .card { padding: 1.75rem 1.25rem 1.5rem; }
-      .header h2 { font-size: 1.2rem; }
+      .auth-form-card { padding: 1.75rem 1.25rem 1.5rem; }
+      .form-header h2 { font-size: 1.2rem; }
     }
   </style>
 </head>
 <body>
 
-  <div class="card">
+  <div class="auth-form-card">
 
     <?php if ($error): ?>
-    <div class="alert alert-error">
+    <div class="auth-alert auth-alert-error">
       <i class="fas fa-exclamation-circle"></i>
       <span><?php echo htmlspecialchars($error); ?></span>
     </div>
     <?php endif; ?>
 
     <?php if ($success): ?>
-    <div class="alert alert-success">
+    <div class="auth-alert auth-alert-success">
       <i class="fas fa-check-circle"></i>
       <span><?php echo htmlspecialchars($success); ?></span>
     </div>
     <?php endif; ?>
 
-    <div class="header">
+    <div class="form-header">
       <div class="icon-wrap">
         <i class="fas fa-lock"></i>
       </div>
       <h2>Forgot Password</h2>
-      <p>Enter your registered email and we'll send you a verification code.</p>
+      <p>Enter your registered email and we'll send you a verification link.</p>
     </div>
 
     <form id="forgotForm" action="send-reset-code.php" method="POST" novalidate>
@@ -288,18 +263,16 @@ $success = $_GET['success'] ?? null;
         <span class="field-error" id="emailError"></span>
       </div>
 
-      <button type="submit" class="btn" id="sendBtn">
-        <span class="btn-text">Send Verification Code</span>
-        <i class="fas fa-paper-plane"></i>
+      <button type="submit" class="btn-signin" id="sendBtn">
+        <span class="btn-text">Send Verification Link</span>
+        <i class="fas fa-paper-plane" style="font-size:13px;"></i>
         <span class="btn-loader"><i class="fas fa-spinner fa-spin"></i></span>
       </button>
 
     </form>
 
-    <div class="divider">or</div>
-
-    <div class="footer-links">
-      <a href="login.php" class="back-link"><i class="fas fa-arrow-left"></i> Back to Login</a>
+    <div class="footer-links" style="margin-top:1.25rem;">
+      <a href="login.php"><i class="fas fa-arrow-left"></i> Back to Login</a>
     </div>
 
   </div>
@@ -329,7 +302,7 @@ $success = $_GET['success'] ?? null;
       function setLoading(loading) {
         sendBtn.disabled = loading;
         const text = sendBtn.querySelector('.btn-text');
-        const icon = sendBtn.querySelector('.btn-icon');
+        const icon = sendBtn.querySelector('.fa-paper-plane');
         const loader = sendBtn.querySelector('.btn-loader');
         if (text) text.style.opacity = loading ? '0.6' : '1';
         if (icon) icon.style.display = loading ? 'none' : 'inline-block';
@@ -338,7 +311,7 @@ $success = $_GET['success'] ?? null;
 
       emailInput.addEventListener('input', () => {
         clearError('emailGroup', 'emailError');
-        const alert = document.querySelector('.alert-error');
+        const alert = document.querySelector('.auth-alert-error');
         if (alert) alert.style.display = 'none';
       });
 

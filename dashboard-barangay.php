@@ -10,7 +10,10 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/env.php';
+loadDcvsEnv();
+$dashboardResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'barangay') {
     header('Location: login-barangay.php');
@@ -31,6 +34,7 @@ if ($roleRow = $roleResult->fetch_assoc()) {
     }
 }
 $roleCheck->close();
+
 ?>
 
 <?php
@@ -42,6 +46,8 @@ $barangayId = (int)($_SESSION['barangay_id'] ?? 0);
 $fullName   = $_SESSION['full_name'] ?? 'Barangay Officer';
 $avatarUrl  = $_SESSION['avatar_url'] ?? '';
 $activePage = 'overview';
+$responseTargetHours = max(1, (int)env('DCVS_RESPONSE_TARGET_HOURS', '24'));
+$progressTargetHours = max(1, (int)env('DCVS_PROGRESS_TARGET_HOURS', '48'));
 
 // Barangay info
 $barangayName = 'Barangay';
@@ -59,8 +65,8 @@ $bq->close();
 // Report type & display labels
 $typeLabels = ['stray' => 'Stray', 'rabies' => 'Rabies', 'injured' => 'Injured', 'dead' => 'Dead'];
 $statusLabels = [
-    'pending'   => 'New',
-    'validated' => 'For validation',
+  'pending'   => 'Pending Barangay Review',
+  'validated' => 'Pending DCVS Review',
     'confirmed' => 'In progress',
     'scheduled' => 'In progress',
     'resolved'  => 'Resolved',
@@ -69,14 +75,14 @@ $statusLabels = [
 
 // ── KPI pipeline counts (active reports only) ──
 $kpi = ['new' => 0, 'validation' => 0, 'progress' => 0, 'resolved' => 0, 'closed' => 0];
-$kq = $conn->prepare("SELECT status, COUNT(*) c FROM reports WHERE barangay_id = ? GROUP BY status");
+$kq = $conn->prepare("SELECT status, COUNT(*) c FROM reports WHERE barangay_id = ? AND archived_at IS NULL GROUP BY status");
 $kq->bind_param('i', $barangayId);
 $kq->execute();
 $kr = $kq->get_result();
 while ($kRow = $kr->fetch_assoc()) {
     switch ($kRow['status']) {
-        case 'pending':   $kpi['new']        += (int)$kRow['c']; break;
-        case 'validated': $kpi['validation'] += (int)$kRow['c']; break;
+        case 'pending':   $kpi['validation'] += (int)$kRow['c']; break;
+        case 'validated': $kpi['new']        += (int)$kRow['c']; break;
         case 'confirmed':
         case 'scheduled': $kpi['progress']   += (int)$kRow['c']; break;
         case 'resolved':  $kpi['resolved']   += (int)$kRow['c']; break;
@@ -88,8 +94,8 @@ $kq->close();
 // ── KPI trend (30 days vs previous 30 days) ──
 $kpiTrends = [];
 $kpiMap = [
-    'new'        => ['pending'],
-    'validation' => ['validated'],
+    'new'        => ['validated'],
+    'validation' => ['pending'],
     'progress'   => ['confirmed', 'scheduled'],
     'resolved'   => ['resolved'],
     'closed'     => ['rejected'],
@@ -115,14 +121,23 @@ foreach ($kpiMap as $key => $statuses) {
 // ── Reports list (real rows for the attention table) ──
 $reports = [];
 $rq = $conn->prepare("
-    SELECT r.report_id, r.reference_id, r.report_type, r.urgency_level, r.status,
-           r.location_address, r.description, r.photo_url, r.rejection_reason,
-           r.created_at, r.validated_at, r.confirmed_at, r.updated_at,
-           u.full_name AS reporter_name,
+    SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_count, r.animal_behavior,
+           r.barangay_validation_status, r.urgency_level, r.status,
+           r.location_address, r.description, r.photo_url, r.video_url, r.rejection_reason,
+           r.incident_at, r.created_at, r.validated_at, r.confirmed_at, r.updated_at, cc.resolved_at,
+           u.full_name AS reporter_name, rw.state AS response_state, rw.response_mode,
+           rw.response_deadline, rw.progress_deadline, rw.last_progress_at, rw.turnover_deadline,
+           rw.holding_location, rw.animal_condition,
+           rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at,
+           tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at,
            v.full_name AS validator_name
     FROM reports r
     JOIN users u ON r.reporter_id = u.user_id
     LEFT JOIN users v ON r.validated_by = v.user_id
+    LEFT JOIN confirmed_cases cc ON r.report_id = cc.report_id
+    LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
+    LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
+    LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
     WHERE r.barangay_id = ?
     ORDER BY r.created_at DESC
     LIMIT 50
@@ -131,67 +146,204 @@ $rq->bind_param('i', $barangayId);
 $rq->execute();
 $rResult = $rq->get_result();
 while ($rRow = $rResult->fetch_assoc()) {
+  $reportedAt = !empty($rRow['incident_at']) ? $rRow['incident_at'] : $rRow['created_at'];
     $reports[] = [
         'id'          => $rRow['reference_id'],
         'report_id'   => (int)$rRow['report_id'],
         'category'    => $typeLabels[$rRow['report_type']] ?? ucfirst($rRow['report_type']),
         'type'        => $rRow['report_type'],
+        'animalType'  => (string)($rRow['animal_type'] ?? ''),
+        'animalCount' => (string)($rRow['animal_count'] ?? ''),
+        'animalBehavior' => (string)($rRow['animal_behavior'] ?? ''),
         'location'    => $rRow['location_address'],
         'description' => $rRow['description'],
         'photo'       => $rRow['photo_url'] ?: '',
+        'video'       => $rRow['video_url'] ?: '',
         'rejection'   => $rRow['rejection_reason'] ?: '',
         'reporter'    => $rRow['reporter_name'],
         'submitted'   => date('M j, Y g:i A', strtotime($rRow['created_at'])),
         'submittedDate' => date('M j, Y', strtotime($rRow['created_at'])),
         'submittedTime' => date('g:i A', strtotime($rRow['created_at'])),
-        '_sortDate'     => date('Y-m-d', strtotime($rRow['created_at'])),
-        '_sortTime'     => date('H:i:s', strtotime($rRow['created_at'])),
+        'incidentDate' => date('M j, Y', strtotime($reportedAt)),
+        '_sortDate'     => date('Y-m-d', strtotime($reportedAt)),
+        '_sortTime'     => date('H:i:s', strtotime($reportedAt)),
         'priority'    => ucfirst($rRow['urgency_level']),
         'urgency'     => $rRow['urgency_level'],
-        'status'      => $statusLabels[$rRow['status']] ?? ucfirst($rRow['status']),
+        'fieldStatus' => (string)($rRow['barangay_validation_status'] ?? ''),
+        'status'      => ($rRow['response_state'] ?? '') === 'barangay_response_approved'
+            ? (($rRow['barangay_validation_status'] ?? '') === 'site_visit_pending'
+                ? 'Accepted by Barangay · Site visit pending'
+                : 'Accepted by Barangay')
+            : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status'])),
         'assignedTo'  => $rRow['validator_name'] ?: 'Unassigned',
+        'dateResolved'=> $rRow['resolved_at'] ? date('M j, Y g:i A', strtotime($rRow['resolved_at'])) : '-',
         '_created_at' => $rRow['created_at'],
         '_validated_at' => $rRow['validated_at'],
         '_confirmed_at' => $rRow['confirmed_at'],
         '_updated_at' => $rRow['updated_at'],
         '_db_status'  => $rRow['status'],
         '_validator'  => $rRow['validator_name'] ?: '',
+        'responseState' => (string)($rRow['response_state'] ?? ''),
+        'responseMode' => (string)($rRow['response_mode'] ?? ''),
+        'responseDeadline' => (string)($rRow['response_deadline'] ?? ''),
+        'progressDeadline' => (string)($rRow['progress_deadline'] ?? ''),
+        'lastProgressAt' => (string)($rRow['last_progress_at'] ?? ''),
+        'turnoverDeadline' => (string)($rRow['turnover_deadline'] ?? ''),
+        'holdingLocation' => (string)($rRow['holding_location'] ?? ''),
+        'animalCondition' => (string)($rRow['animal_condition'] ?? ''),
+        'resolutionDetails' => (string)($rRow['resolution_details'] ?? ''),
+        'animalDisposition' => (string)($rRow['animal_disposition'] ?? ''),
+        'responseResolvedAt' => (string)($rRow['response_resolved_at'] ?? ''),
+        'turnoverStatus' => (string)($rRow['turnover_status'] ?? ''),
+        'turnoverDueAt' => (string)($rRow['turnover_due_at'] ?? ''),
+        'turnoverReceivedAt' => (string)($rRow['turnover_received_at'] ?? ''),
     ];
 }
 $rq->close();
 
-// ── Comparison chart: last 30 days placeholder data ──
+// ── Comparison chart: actual reports and resolved cases ──
 $cmpLabels = [];
-$cmpPrev   = [];
-$cmpActual = [];
+$cmpDailyReportMap = [];
+$cmpDailyResolvedMap = [];
+$cmpStart = date('Y-m-d', strtotime('-29 days'));
+$cmpEnd = date('Y-m-d', strtotime('+1 day'));
 for ($i = 29; $i >= 0; $i--) {
-    $ts = strtotime("-{$i} days");
-    $cmpLabels[] = date('M j', $ts);
-    $cmpPrev[]   = random_int(2, 8);
-    $cmpActual[] = random_int(3, 10);
+  $ts = strtotime("-{$i} days");
+  $day = date('Y-m-d', $ts);
+  $cmpLabels[] = date('M j', $ts);
+  $cmpDailyReportMap[$day] = 0;
+  $cmpDailyResolvedMap[$day] = 0;
+}
+$cmpStmt = $conn->prepare("SELECT DATE(COALESCE(incident_at, created_at)) AS report_day, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY DATE(COALESCE(incident_at, created_at))");
+if ($cmpStmt) {
+  $cmpStmt->bind_param('iss', $barangayId, $cmpStart, $cmpEnd);
+  $cmpStmt->execute();
+  $cmpResult = $cmpStmt->get_result();
+  while ($cmpRow = $cmpResult->fetch_assoc()) $cmpDailyReportMap[$cmpRow['report_day']] = (int)$cmpRow['total'];
+  $cmpStmt->close();
+}
+$cmpStmt = $conn->prepare("SELECT DATE(cc.resolved_at) AS resolved_day, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY DATE(cc.resolved_at)");
+if ($cmpStmt) {
+  $cmpStmt->bind_param('iss', $barangayId, $cmpStart, $cmpEnd);
+  $cmpStmt->execute();
+  $cmpResult = $cmpStmt->get_result();
+  while ($cmpRow = $cmpResult->fetch_assoc()) $cmpDailyResolvedMap[$cmpRow['resolved_day']] = (int)$cmpRow['total'];
+  $cmpStmt->close();
+}
+$cmpDaily = ['labels' => $cmpLabels, 'reports' => array_values($cmpDailyReportMap), 'resolved' => array_values($cmpDailyResolvedMap)];
+
+$cmpYearly = [];
+$firstTrendYear = 2021;
+$lastTrendYear = (int)date('Y');
+for ($year = $firstTrendYear; $year <= $lastTrendYear; $year++) {
+  $cmpYearly[(string)$year] = ['reports' => array_fill(0, 12, 0), 'resolved' => array_fill(0, 12, 0)];
+}
+$cmpStmt = $conn->prepare("SELECT YEAR(COALESCE(incident_at, created_at)) AS report_year, MONTH(COALESCE(incident_at, created_at)) AS report_month, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY YEAR(COALESCE(incident_at, created_at)), MONTH(COALESCE(incident_at, created_at))");
+if ($cmpStmt) {
+  $yearStart = $firstTrendYear . '-01-01';
+  $yearEnd = ($lastTrendYear + 1) . '-01-01';
+  $cmpStmt->bind_param('iss', $barangayId, $yearStart, $yearEnd);
+  $cmpStmt->execute();
+  $cmpResult = $cmpStmt->get_result();
+  while ($cmpRow = $cmpResult->fetch_assoc()) $cmpYearly[(string)$cmpRow['report_year']]['reports'][(int)$cmpRow['report_month'] - 1] = (int)$cmpRow['total'];
+  $cmpStmt->close();
+}
+$cmpStmt = $conn->prepare("SELECT YEAR(cc.resolved_at) AS resolved_year, MONTH(cc.resolved_at) AS resolved_month, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY YEAR(cc.resolved_at), MONTH(cc.resolved_at)");
+if ($cmpStmt) {
+  $yearStart = $firstTrendYear . '-01-01';
+  $yearEnd = ($lastTrendYear + 1) . '-01-01';
+  $cmpStmt->bind_param('iss', $barangayId, $yearStart, $yearEnd);
+  $cmpStmt->execute();
+  $cmpResult = $cmpStmt->get_result();
+  while ($cmpRow = $cmpResult->fetch_assoc()) $cmpYearly[(string)$cmpRow['resolved_year']]['resolved'][(int)$cmpRow['resolved_month'] - 1] = (int)$cmpRow['total'];
+  $cmpStmt->close();
 }
 
-// ── Categories (report_type counts, all-time active) ──
+// ── Categories: actual report counts by time period ──
 $categories = [];
 $categoryIcons = ['stray' => 'paw', 'rabies' => 'rabies', 'injured' => 'injured', 'dead' => 'dead'];
-$cq2 = $conn->prepare("SELECT report_type, COUNT(*) c FROM reports WHERE barangay_id = ? AND archived_at IS NULL GROUP BY report_type");
-$cq2->bind_param('i', $barangayId);
-$cq2->execute();
-$cr2 = $cq2->get_result();
+$categoryTypes = ['stray', 'rabies', 'injured', 'dead'];
+$categoryPeriods = ['all' => [], '30' => [], '7' => [], 'today' => []];
+$categorySummary = [
+  'all' => ['total' => 0, 'previousTotal' => null, 'unresolved' => 0],
+  '30' => ['total' => 0, 'previousTotal' => 0, 'unresolved' => 0],
+  '7' => ['total' => 0, 'previousTotal' => 0, 'unresolved' => 0],
+  'today' => ['total' => 0, 'previousTotal' => 0, 'unresolved' => 0],
+];
+$categoryCounts = [];
+$cq2 = $conn->prepare("
+    SELECT report_type,
+           COUNT(*) AS all_time,
+           SUM(created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS last_30_days,
+           SUM(created_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)
+               AND created_at < DATE_SUB(NOW(), INTERVAL 30 DAY)) AS previous_30_days,
+           SUM(created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS last_7_days,
+           SUM(created_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+               AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)) AS previous_7_days,
+           SUM(created_at >= CURDATE()) AS today,
+           SUM(created_at >= DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+               AND created_at < CURDATE()) AS yesterday,
+           SUM(status NOT IN ('resolved', 'rejected')) AS unresolved_all,
+           SUM(status NOT IN ('resolved', 'rejected')
+               AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS unresolved_30_days,
+           SUM(status NOT IN ('resolved', 'rejected')
+               AND created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS unresolved_7_days,
+           SUM(status NOT IN ('resolved', 'rejected')
+               AND created_at >= CURDATE()) AS unresolved_today
+    FROM reports
+    WHERE barangay_id = ?
+    GROUP BY report_type
+");
+if (!$cq2) {
+  error_log('Failed to prepare barangay category summary: ' . $conn->error);
+} else {
+  $cq2->bind_param('i', $barangayId);
+  if (!$cq2->execute()) {
+    error_log('Failed to query barangay category summary: ' . $cq2->error);
+  } else {
+    $cr2 = $cq2->get_result();
+    if (!$cr2) {
+      error_log('Failed to read barangay category summary: ' . $cq2->error);
+    } else {
+      while ($cRow = $cr2->fetch_assoc()) $categoryCounts[$cRow['report_type']] = $cRow;
+    }
+  }
+  $cq2->close();
+}
 $categoryAll = [];
-while ($cRow = $cr2->fetch_assoc()) $categoryAll[$cRow['report_type']] = (int)$cRow['c'];
-$cq2->close();
+foreach ($categoryTypes as $t) {
+  $row = $categoryCounts[$t] ?? [];
+  $total = (int)($row['all_time'] ?? 0);
+  $categoryAll[$t] = $total;
+  $last30 = (int)($row['last_30_days'] ?? 0);
+  $last7 = (int)($row['last_7_days'] ?? 0);
+  $today = (int)($row['today'] ?? 0);
+  $categoryPeriods['all'][] = ['label' => $typeLabels[$t], 'count' => $total];
+  $categoryPeriods['30'][] = ['label' => $typeLabels[$t], 'count' => $last30];
+  $categoryPeriods['7'][] = ['label' => $typeLabels[$t], 'count' => $last7];
+  $categoryPeriods['today'][] = ['label' => $typeLabels[$t], 'count' => $today];
+  $categorySummary['all']['total'] += $total;
+  $categorySummary['all']['unresolved'] += (int)($row['unresolved_all'] ?? 0);
+  $categorySummary['30']['total'] += $last30;
+  $categorySummary['30']['previousTotal'] += (int)($row['previous_30_days'] ?? 0);
+  $categorySummary['30']['unresolved'] += (int)($row['unresolved_30_days'] ?? 0);
+  $categorySummary['7']['total'] += $last7;
+  $categorySummary['7']['previousTotal'] += (int)($row['previous_7_days'] ?? 0);
+  $categorySummary['7']['unresolved'] += (int)($row['unresolved_7_days'] ?? 0);
+  $categorySummary['today']['total'] += $today;
+  $categorySummary['today']['previousTotal'] += (int)($row['yesterday'] ?? 0);
+  $categorySummary['today']['unresolved'] += (int)($row['unresolved_today'] ?? 0);
+}
 $categoryGrandTotal = array_sum($categoryAll);
-
-foreach (['stray', 'rabies', 'injured', 'dead'] as $t) {
-    $total = $categoryAll[$t] ?? 0;
-    $categories[] = [
-        'name'       => $typeLabels[$t],
-        'count'      => $total,
-        'total'      => $total,
-        'percentage' => $categoryGrandTotal > 0 ? (int)round(($total / max($categoryGrandTotal, 1)) * 100) : 0,
-        'icon'       => $categoryIcons[$t],
-    ];
+foreach ($categoryTypes as $t) {
+  $total = $categoryAll[$t];
+  $categories[] = [
+    'name'       => $typeLabels[$t],
+    'count'      => $total,
+    'total'      => $total,
+    'percentage' => $categoryGrandTotal > 0 ? (int)round(($total / $categoryGrandTotal) * 100) : 0,
+    'icon'       => $categoryIcons[$t],
+  ];
 }
 
 // ── Activity feed (real report lifecycle events) ──
@@ -225,7 +377,7 @@ foreach (array_slice($activityEvents, 0, 8) as $ev) {
 
 // ── Unread notifications ──
 $unreadNotifs = 0;
-$uq = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0");
+$uq = $conn->prepare("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0 AND archived_at IS NULL");
 $uq->bind_param('i', $userId);
 $uq->execute();
 $unreadNotifs = (int)$uq->get_result()->fetch_row()[0];
@@ -238,13 +390,14 @@ $dashboardConfig = [
     'location'      => $barangayDistrict ? $barangayDistrict . ' City, Cavite' : 'Dasmariñas City, Cavite',
     'user'          => ['name' => $fullName, 'role' => 'Barangay Officer'],
     'comparisonChart' => [
-        'labels'   => $cmpLabels,
-        'previous' => $cmpPrev,
-        'actual'   => $cmpActual,
+      'daily'     => $cmpDaily,
+      'yearly'    => $cmpYearly,
     ],
     'metrics'       => $kpi,
     'reports'       => $reports,
     'categories'    => $categories,
+    'categoryPeriods' => $categoryPeriods,
+    'categorySummary' => $categorySummary,
     'categoryTotal' => $categoryGrandTotal,
     'activities'    => $activities,
 ];
@@ -262,12 +415,6 @@ $dashboardConfig = [
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-
-  <!-- MapCN bundle (geo mapping) -->
-  <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css">
-  <script src="dist/mapcn.umd.js"></script>
-
 
   <style>
     /* ==========================================================================
@@ -397,6 +544,28 @@ $dashboardConfig = [
       gap: 18px;
     }
 
+    .topbar-breadcrumb {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      color: #94a3b8;
+    }
+
+    .breadcrumb-root {
+      color: #0B4D26;
+      font-weight: 600;
+    }
+
+    .breadcrumb-sep {
+      font-size: 0.6rem;
+    }
+
+    .breadcrumb-current {
+      color: #0f172a;
+      font-weight: 600;
+    }
+
     .barangay-selector {
       display: inline-flex;
       align-items: center;
@@ -455,65 +624,6 @@ $dashboardConfig = [
     }
     @media (max-width: 768px) {
       .topbar-toggle { display: flex !important; }
-    }
-
-    /* Search Box */
-    .search-container {
-      position: relative;
-      width: 320px;
-    }
-
-    .search-input-wrapper {
-      position: relative;
-      display: flex;
-      align-items: center;
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 11px;
-      width: 15px;
-      height: 15px;
-      color: var(--text-muted);
-      pointer-events: none;
-    }
-
-    .search-input {
-      width: 100%;
-      height: 36px;
-      padding: 0 44px 0 34px;
-      background-color: #FAFAFA;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      color: var(--text-main);
-      font-family: inherit;
-      transition: var(--transition);
-      outline: none;
-    }
-
-    .search-input:focus {
-      background-color: #FFFFFF;
-      border-color: var(--primary-green);
-      box-shadow: 0 0 0 3px rgba(11, 77, 38, 0.1);
-    }
-
-    .search-input::placeholder {
-      color: var(--text-muted);
-    }
-
-    .search-shortcut {
-      position: absolute;
-      right: 9px;
-      background-color: #FFFFFF;
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
-      font-size: 10.5px;
-      font-family: 'IBM Plex Mono', monospace;
-      color: var(--text-muted);
-      padding: 1px 5px;
-      font-weight: 600;
-      pointer-events: none;
     }
 
     /* Notification Dropdown */
@@ -604,165 +714,11 @@ $dashboardConfig = [
     .action-bar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
+      justify-content: flex-end;
       margin-bottom: 22px;
       flex-wrap: wrap;
       gap: 12px;
       position: relative;
-    }
-
-    .date-filter-group {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      position: relative;
-    }
-
-    .date-dropdown-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: #FFFFFF;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      padding: 7.5px 14px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-main);
-      cursor: pointer;
-      transition: var(--transition);
-      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-      user-select: none;
-    }
-
-    .date-dropdown-btn:hover {
-      background-color: var(--bg-hover);
-      border-color: var(--border-color-dark);
-    }
-
-    .date-dropdown-btn.active {
-      border-color: var(--primary-green);
-      box-shadow: 0 0 0 3px rgba(11, 77, 38, 0.1);
-    }
-
-    .date-comparison-label {
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 500;
-      transition: var(--transition);
-    }
-
-    /* Interactive Date Range Dropdown Popover */
-    .date-picker-popover {
-      position: absolute;
-      top: calc(100% + 8px);
-      left: 0;
-      background: #FFFFFF;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-dropdown);
-      padding: 16px;
-      width: 330px;
-      z-index: 50;
-      display: none;
-      animation: popoverFadeIn 0.2s ease;
-    }
-
-    @keyframes popoverFadeIn {
-      from { opacity: 0; transform: translateY(-6px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    .date-picker-popover.show {
-      display: block;
-    }
-
-    .date-preset-list {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin-bottom: 14px;
-    }
-
-    .date-preset-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 10px;
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-main);
-      background: none;
-      border: none;
-      cursor: pointer;
-      transition: var(--transition);
-      text-align: left;
-      width: 100%;
-    }
-
-    .date-preset-item:hover {
-      background-color: var(--primary-green-light);
-      color: var(--primary-green);
-    }
-
-    .date-preset-item.selected {
-      background-color: var(--primary-green);
-      color: #FFFFFF;
-    }
-
-    .custom-range-divider {
-      height: 1px;
-      background-color: var(--border-color-light);
-      margin: 12px 0;
-    }
-
-    .custom-range-title {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 8px;
-    }
-
-    .custom-range-inputs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-
-    .custom-range-inputs input {
-      width: 100%;
-      padding: 6px 8px;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-family: inherit;
-      color: var(--text-main);
-      outline: none;
-    }
-
-    .custom-range-inputs input:focus {
-      border-color: var(--primary-green);
-    }
-
-    .apply-custom-date-btn {
-      width: 100%;
-      padding: 8px;
-      background-color: var(--primary-green);
-      color: #FFFFFF;
-      font-weight: 500;
-      font-size: 14px;
-      border: none;
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: var(--transition);
-    }
-
-    .apply-custom-date-btn:hover {
-      background-color: var(--primary-green-hover);
     }
 
     .action-buttons-group {
@@ -916,14 +872,33 @@ $dashboardConfig = [
     /* Both columns stretch to align bottom edges */
     .grid-left > .dashboard-card,
     .grid-right > .dashboard-card { flex: 1; display: flex; flex-direction: column; }
-    .chart-canvas-wrap { height: 400px; position: relative; }
+    .grid-right > .category-chart-card { flex: 0 0 auto; }
+    .chart-canvas-wrap { height: 320px; position: relative; }
+    .comparison-chart-card .chart-container { flex: 1; display: flex; min-height: 0; }
+    .comparison-chart-card .chart-canvas-wrap { flex: 1; min-height: 320px; height: auto; }
+    .comparison-chart-card #brgyComparisonChart { width: 100% !important; height: 100% !important; }
 
     /* Reports by category — horizontal bar chart (recharts-style) */
-    .cat-chart-wrap { height: 220px; position: relative; }
+    .category-chart-card .cat-chart-container { flex: 0 0 auto; }
+    .category-chart-card .cat-chart-wrap { height: 220px; position: relative; }
     .cat-chart-footer {
       display: flex; flex-direction: column; justify-content: flex-end; gap: 0; flex: 1;
       padding: 12px 16px 16px;
     }
+    .cat-chart-empty {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      background: #fff;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+    }
+    .cat-chart-empty[hidden],
+    .cat-chart-share-bar[hidden] { display: none; }
 
     .cat-chart-footer-top {
       margin-bottom: 8px;
@@ -931,21 +906,49 @@ $dashboardConfig = [
     .cat-chart-trend { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--text-main); }
     .cat-chart-note { font-size: 12px; color: var(--text-muted); }
 
+    .cat-chart-share-bar {
+      display: flex;
+      height: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+      border-radius: 999px;
+      background: #f1f5f9;
+    }
+    .cat-chart-share-segment {
+      height: 100%;
+      min-width: 0;
+      transition: width .2s ease;
+    }
     .cat-chart-stats {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      padding-top: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
     }
-
     .cat-chart-stat {
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid #eef2f6;
+      border-radius: 8px;
       font-family: 'Inter', 'Segoe UI', sans-serif;
-      font-size: 13px;
-      font-weight: 500;
+      font-size: 12px;
+      font-weight: 400;
       color: #52525b;
       line-height: 1.4;
     }
-
+    .cat-chart-stat strong {
+      display: block;
+      margin-top: 3px;
+      color: #18181b;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .cat-chart-stat .cat-stat-detail {
+      display: block;
+      margin-top: 2px;
+      color: #71717a;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
     .cat-stat-label {
       font-weight: 600;
       color: #18181b;
@@ -1028,6 +1031,40 @@ $dashboardConfig = [
       height: 10px;
       border-radius: 2px;
       flex-shrink: 0;
+    }
+
+    .geo-legend-refresh {
+      width: 32px;
+      height: 32px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 8px;
+      border: 1px solid #e4e4e7;
+      border-radius: 8px;
+      background: #fff;
+      color: #475569;
+      cursor: pointer;
+      transition: color .15s ease, border-color .15s ease, background .15s ease;
+    }
+    .geo-legend-refresh:hover:not(:disabled) {
+      border-color: #0E8131;
+      background: #f0fdf4;
+      color: #0E8131;
+    }
+    .geo-legend-refresh:focus-visible {
+      outline: 2px solid #0E8131;
+      outline-offset: 2px;
+    }
+    .geo-legend-refresh:disabled {
+      cursor: wait;
+      opacity: .65;
+    }
+    .geo-legend-refresh.is-loading i {
+      animation: geo-map-refresh-spin .8s linear infinite;
+    }
+    @keyframes geo-map-refresh-spin {
+      to { transform: rotate(360deg); }
     }
 
     .geo-map-section {
@@ -1252,7 +1289,6 @@ $dashboardConfig = [
 
     .data-table tbody tr {
       border-bottom: 1px solid #f4f4f5;
-      cursor: pointer;
       transition: background 0.1s;
     }
 
@@ -1268,22 +1304,11 @@ $dashboardConfig = [
       display: flex;
       align-items: center;
       gap: 8px;
-      font-weight: 600;
+      font-weight: 400;
       font-family: 'Inter', 'Segoe UI', sans-serif;
       font-size: 13px;
       color: #18181b;
     }
-
-    .priority-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-
-    .priority-dot.high { background-color: #ef4444; }
-    .priority-dot.medium { background-color: #f59e0b; }
-    .priority-dot.low { background-color: #22c55e; }
 
     .category-cell {
       font-weight: 500;
@@ -1293,6 +1318,7 @@ $dashboardConfig = [
     .location-cell {
       color: #71717a;
       font-size: 13px;
+      font-weight: 400;
     }
 
     .submitted-cell {
@@ -1304,14 +1330,16 @@ $dashboardConfig = [
     .status-badge {
       display: inline-flex;
       align-items: center;
-      padding: 3px 10px;
+      justify-content: center;
+      padding: 2px 8px;
       border-radius: 4px;
       font-family: 'Inter', 'Segoe UI', sans-serif;
       font-size: 12px;
       font-weight: 500;
       white-space: nowrap;
-      line-height: 1.4;
+      line-height: 1.5;
       border: 1px solid #e4e4e7;
+      letter-spacing: normal;
     }
 
     .status-badge.priority-high {
@@ -1332,7 +1360,7 @@ $dashboardConfig = [
       border-color: #bbf7d0;
     }
 
-    .status-badge.status-new {
+    .status-badge.status-pending {
       background-color: #fef3c7;
       color: #92400e;
       border-color: #fde68a;
@@ -1351,9 +1379,9 @@ $dashboardConfig = [
     }
 
     .status-badge.status-resolved {
-      background-color: #ECFDF5;
-      color: #027A48;
-      border-color: #a7f3d0;
+      background-color: #0E8131;
+      color: #ffffff;
+      border-color: #0E8131;
     }
 
     .status-badge.status-closed {
@@ -1362,32 +1390,46 @@ $dashboardConfig = [
       border-color: #fecaca;
     }
 
-    .assignee-cell {
+    .date-resolved-cell {
       font-size: 14px;
-      font-weight: 500;
-      color: var(--text-main);
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      white-space: nowrap;
     }
 
-    .assignee-cell.unassigned {
-      color: var(--text-faint);
-    }
-
-    .row-action-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      padding: 4px;
-      border-radius: 4px;
-      display: flex;
+    .sd-row-actions {
+      width: 32px;
+      height: 32px;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      transition: var(--transition);
+      padding: 0;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      color: #71717a;
+      cursor: pointer;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1;
+      transition: all 0.15s ease;
     }
 
-    .row-action-btn:hover {
-      background-color: var(--bg-hover);
-      color: var(--text-main);
+    .sd-row-actions:hover {
+      background: #f4f4f5;
+      color: #18181b;
+    }
+
+    .sd-row-actions .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     /* ==========================================================================
@@ -1900,7 +1942,7 @@ $dashboardConfig = [
       height: 100vh;
       background: rgba(0,0,0,0.4);
       backdrop-filter: blur(2px);
-      z-index: 100;
+      z-index: 1000;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -2009,6 +2051,117 @@ $dashboardConfig = [
       gap: 8px;
       padding-top: 8px;
       border-top: 1px solid #e4e4e7;
+    }
+
+    /* ── shadcn/ui Alert Dialog (Reject / Validate Report) ── */
+    .sd-alert-dialog-content {
+      position: relative;
+      width: 100%;
+      max-width: 420px;
+      background: #ffffff;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.1), 0 4px 6px -4px rgba(15, 23, 42, 0.1);
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      animation: modalIn 0.2s ease;
+    }
+
+    .sd-alert-dialog-header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      text-align: left;
+    }
+
+    .sd-alert-dialog-title {
+      margin: 0;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      color: #18181b;
+    }
+
+    .sd-alert-dialog-description {
+      margin: 0;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 1.5;
+      color: #71717a;
+    }
+
+    .sd-alert-dialog-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sd-alert-dialog-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .validation-field-label { display:block;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;line-height:1.4;color:#18181b; }
+    .validation-form-control { font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.5; }
+    .validation-status-grid { display:grid;grid-template-columns:1fr 1fr;gap:8px; }
+    .validation-status-option { display:flex;align-items:flex-start;gap:9px;padding:11px;border:1px solid #e4e4e7;border-radius:8px;cursor:pointer;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;line-height:1.4;transition:border-color .15s,background .15s; }
+    .validation-status-option:has(input:checked) { border-color:#16a34a;background:#f0fdf4;box-shadow:0 0 0 1px #16a34a; }
+    .validation-status-option input { margin-top:2px;accent-color:#15803d;flex:0 0 auto; }
+    .validation-status-copy { display:flex;flex-direction:column;gap:3px; }
+    .validation-status-copy strong { font-weight:500;color:#18181b; }
+    .validation-status-copy span { font-size:12px;font-weight:400;line-height:1.4;color:#71717a; }
+    .validation-route-fieldset { border:0;padding:0;margin:0; }
+    .validation-route-grid { display:grid;grid-template-columns:1fr;gap:7px; }
+    .validation-route-option { display:flex;align-items:flex-start;gap:9px;padding:10px 11px;border:1px solid #e4e4e7;border-radius:8px;cursor:pointer;font-size:13px;line-height:1.4;transition:border-color .15s,background .15s,box-shadow .15s; }
+    .validation-route-option:has(input:checked) { border-color:#16a34a;background:#f0fdf4;box-shadow:0 0 0 1px #16a34a; }
+    .validation-route-option input { margin:3px 0 0;accent-color:#16a34a;flex:0 0 auto; }
+    .validation-route-copy { display:flex;min-width:0;flex:1;flex-direction:column;gap:2px; }
+    .validation-route-copy strong { color:#18181b;font-weight:600; }
+    .validation-route-copy>span { color:#71717a;font-size:12px;font-weight:400;line-height:1.4; }
+    .validation-route-meta { display:flex;flex-wrap:wrap;gap:5px;margin-top:7px; }
+    .validation-route-meta span { padding:2px 7px;border:1px solid #e4e4e7;border-radius:999px;background:#fff;color:#52525b;font-size:11px;font-weight:500;line-height:1.35; }
+    .validation-risk-check { display:flex;flex-direction:column;gap:3px;padding:10px 12px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;color:#166534;font-size:12px;line-height:1.45; }
+    .validation-risk-check.is-high-risk { border-color:#fecaca;background:#fef2f2;color:#991b1b; }
+    .validation-risk-title { display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600; }
+    .validation-risk-copy { font-weight:400; }
+    .validation-upload { position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:120px;padding:18px;border:1px dashed #a1a1aa;border-radius:8px;background:#fafafa;text-align:center;cursor:pointer;transition:border-color .15s,background .15s; }
+    .validation-upload:hover,.validation-upload.is-dragging { border-color:#16a34a;background:#f0fdf4; }
+    .validation-upload svg { color:#71717a; }
+    .validation-upload strong { font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;color:#27272a; }
+    .validation-upload-hint,.validation-upload-meta { font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;line-height:1.4;color:#71717a; }
+    .validation-file-input { position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer; }
+    .validation-notes-meta { display:flex;justify-content:flex-end;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;color:#71717a; }
+    .validation-warning { padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:400;line-height:1.45; }
+    @media(max-width:600px) { .validation-status-grid { grid-template-columns:1fr; } }
+
+    .btn-danger {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: #dc2626;
+      border: 1px solid #dc2626;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      color: #ffffff;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-danger:hover {
+      background: #b91c1c;
+      border-color: #b91c1c;
     }
 
     .form-group {
@@ -2133,7 +2286,7 @@ $dashboardConfig = [
       display: flex;
       align-items: center;
       gap: 10px;
-      z-index: 200;
+      z-index: 1100;
       transform: translateY(100px);
       opacity: 0;
       transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2144,16 +2297,16 @@ $dashboardConfig = [
       opacity: 1;
     }
 
-    /* Quick Action Dropdown Menu */
+    /* Quick Action Dropdown Menu (same style as All Reports row menu) */
     .quick-dropdown {
       position: absolute;
-      background: #FFFFFF;
-      border: 1px solid var(--border-color);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-dropdown);
+      background: #ffffff;
+      border: 1px solid #e6e9ee;
+      border-radius: 10px;
+      box-shadow: 0 4px 14px rgba(15, 23, 32, .06);
       padding: 6px;
-      z-index: 50;
-      min-width: 170px;
+      z-index: 9999;
+      min-width: 190px;
       display: none;
     }
 
@@ -2164,23 +2317,30 @@ $dashboardConfig = [
     .quick-dropdown-item {
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 7px 10px;
-      font-size: 14px;
-      font-weight: 500;
-      color: var(--text-main);
-      border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: var(--transition);
+      gap: 10px;
+      width: 100%;
+      min-height: 36px;
+      padding: 9px 10px;
       border: none;
       background: none;
-      width: 100%;
+      border-radius: 8px;
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 500;
+      color: #334155;
+      cursor: pointer;
       text-align: left;
+      line-height: 1.4;
     }
 
     .quick-dropdown-item:hover {
-      background-color: var(--bg-hover);
-      color: var(--primary-green);
+      background: #f8fafc;
+    }
+
+    .quick-dropdown-item svg {
+      flex-shrink: 0;
+      width: 15px;
+      height: 15px;
     }
 
     /* ==========================================================================
@@ -2259,10 +2419,13 @@ $dashboardConfig = [
       .metric-pipeline-container {
         grid-template-columns: 1fr;
       }
+      .cat-chart-stats { grid-template-columns: 1fr 1fr; }
+      .cat-chart-stat { padding: 8px; font-size: 11px; }
     }
 
 
   </style>
+  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/notification.css'); ?>" />
 </head>
 <body>
 
@@ -2278,39 +2441,40 @@ $dashboardConfig = [
       <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
         <i class="fas fa-bars"></i>
       </button>
+      <div class="topbar-breadcrumb">
+        <span class="breadcrumb-root">Barangay Portal</span>
+        <span class="breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+        <span class="breadcrumb-current" id="breadcrumbCurrent">Overview</span>
+      </div>
     </div>
 
     <div class="topbar-right">
-      <!-- Global Search -->
-      <div class="search-container">
-        <div class="search-input-wrapper">
-          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          <input type="text" id="global-search" class="search-input" placeholder="Search reports, residents, services...">
-          <span class="search-shortcut">⌘ K</span>
-        </div>
-      </div>
-
       <!-- Notification Bell -->
       <div class="notif-dropdown" id="notifDropdown">
-        <button class="notif-btn" id="notif-btn" title="<?php echo $unreadNotifs; ?> unread notifications">
+        <button class="notif-btn" id="notif-btn" type="button" title="<?php echo $unreadNotifs; ?> unread notifications">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
             <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
           </svg>
-          <?php if ($unreadNotifs > 0): ?>
-          <span class="notif-badge" id="notifBadge"><?php echo $unreadNotifs; ?></span>
-          <?php endif; ?>
+          <span class="notif-badge" id="notifBadge" data-realtime="notif-badge" style="<?php echo $unreadNotifs > 0 ? '' : 'display:none;'; ?>"><?php echo $unreadNotifs > 9 ? '9+' : $unreadNotifs; ?></span>
         </button>
-        <div class="notif-panel" id="notifPanel">
+        <div class="notif-panel" id="notifPanel" data-notification-panel data-portal="barangay"
+          data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
+          data-action-url="includes/staff-notification-action.php?portal=barangay"
+          data-load-url="get-notifications.php?limit=30"
+          data-app-base-url="">
           <div class="notif-panel-header">
             <h4>Notifications</h4>
-            <a onclick="markAllNotifRead()">Mark all read</a>
+            <button class="notif-mark-all" type="button" <?php echo $unreadNotifs === 0 ? 'disabled' : ''; ?>><i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read</button>
           </div>
+          <div class="notif-tabs" role="tablist" aria-label="Notification filters">
+            <button class="notif-tab active" type="button" role="tab" aria-selected="true" data-notif-tab="all">All</button>
+            <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="inbox">Inbox<span class="notif-tab-count" data-tab-count="inbox"><?php echo $unreadNotifs > 0 ? ($unreadNotifs > 99 ? '99+' : $unreadNotifs) : ''; ?></span></button>
+            <button class="notif-tab" type="button" role="tab" aria-selected="false" data-notif-tab="archived">Archived</button>
+          </div>
+          <div class="notif-feedback" role="status" aria-live="polite"></div>
           <div class="notif-panel-body" id="notifList">
-            <div class="notif-empty">Loading...</div>
+            <div class="notif-empty">Loading notifications…</div>
           </div>
         </div>
       </div>
@@ -2342,63 +2506,6 @@ $dashboardConfig = [
 
     <!-- Action & Date Range Controls -->
     <section class="action-bar">
-      <div class="date-filter-group">
-        <!-- Interactive Date Range Dropdown Button -->
-        <button class="date-dropdown-btn" id="date-range-btn" aria-expanded="false" aria-haspopup="true">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
-            <line x1="16" y1="2" x2="16" y2="6"/>
-            <line x1="8" y1="2" x2="8" y2="6"/>
-            <line x1="3" y1="10" x2="21" y2="10"/>
-          </svg>
-          <span id="current-date-range-text"><?php echo date('M j', strtotime('first day of this month')) . ' – ' . date('M j, Y', strtotime('last day of this month')); ?></span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="6 9 12 15 18 9"/>
-          </svg>
-        </button>
-        <span class="date-comparison-label" id="date-comparison-text"><?php echo 'Compared to ' . date('M j', strtotime('first day of last month')) . ' – ' . date('M j, Y', strtotime('last day of last month')); ?></span>
-
-        <!-- Functional Date Picker Popover Menu -->
-        <div class="date-picker-popover" id="date-picker-popover">
-          <div class="date-preset-list">
-            <button class="date-preset-item selected" data-preset="this-month" data-label="<?php echo date('M j', strtotime('first day of this month')) . ' – ' . date('M j, Y', strtotime('last day of this month')); ?>" data-comp="<?php echo 'Compared to ' . date('M j', strtotime('first day of last month')) . ' – ' . date('M j, Y', strtotime('last day of last month')); ?>">
-              <span>This Month (<?php echo date('M Y'); ?>)</span>
-              <span>✓</span>
-            </button>
-            <button class="date-preset-item" data-preset="last-month" data-label="<?php echo date('M j', strtotime('first day of last month')) . ' – ' . date('M j, Y', strtotime('last day of last month')); ?>" data-comp="<?php echo 'Compared to ' . date('M j', strtotime('first day of -2 months')) . ' – ' . date('M j, Y', strtotime('last day of -2 months')); ?>">
-              <span>Last Month (<?php echo date('M Y', strtotime('last month')); ?>)</span>
-              <span></span>
-            </button>
-            <button class="date-preset-item" data-preset="last-7-days" data-label="<?php echo date('M j', strtotime('-6 days')) . ' – ' . date('M j, Y'); ?>" data-comp="<?php echo 'Compared to ' . date('M j', strtotime('-13 days')) . ' – ' . date('M j, Y', strtotime('-7 days')); ?>">
-              <span>Last 7 Days</span>
-              <span></span>
-            </button>
-            <button class="date-preset-item" data-preset="last-30-days" data-label="<?php echo date('M j', strtotime('-29 days')) . ' – ' . date('M j, Y'); ?>" data-comp="Compared to previous 30 days">
-              <span>Last 30 Days</span>
-              <span></span>
-            </button>
-            <button class="date-preset-item" data-preset="year-to-date" data-label="<?php echo 'Jan 1 – ' . date('M j, Y'); ?>" data-comp="<?php echo 'Compared to Jan 1 – ' . date('M j, Y', strtotime('Jan 1 last year')); ?>">
-              <span>Year to Date (<?php echo date('Y'); ?>)</span>
-              <span></span>
-            </button>
-          </div>
-
-          <div class="custom-range-divider"></div>
-          <div class="custom-range-title">Custom Date Range</div>
-          <div class="custom-range-inputs">
-            <div>
-              <label style="font-size: 10.5px; color: var(--text-muted); display: block; margin-bottom: 2px;">Start Date</label>
-              <input type="date" id="custom-start-date" value="<?php echo date('Y-m-01'); ?>">
-            </div>
-            <div>
-              <label style="font-size: 10.5px; color: var(--text-muted); display: block; margin-bottom: 2px;">End Date</label>
-              <input type="date" id="custom-end-date" value="<?php echo date('Y-m-d'); ?>">
-            </div>
-          </div>
-          <button type="button" class="apply-custom-date-btn" id="apply-custom-date-btn">Apply Custom Range</button>
-        </div>
-      </div>
-
       <div class="action-buttons-group">
         <button class="btn-secondary" id="export-btn" title="Export report data">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2432,7 +2539,7 @@ $dashboardConfig = [
           </svg>
         </div>
         <div class="step-content">
-          <span class="step-label">New</span>
+          <span class="step-label">Pending DCVS Review</span>
           <span class="step-value" id="kpi-new-val"><?php echo $kpi['new']; ?></span>
           <span class="step-trend">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -2455,7 +2562,7 @@ $dashboardConfig = [
           </svg>
         </div>
         <div class="step-content">
-          <span class="step-label">For validation</span>
+          <span class="step-label">Pending Barangay Review</span>
           <span class="step-value" id="kpi-validation-val"><?php echo $kpi['validation']; ?></span>
           <span class="step-trend">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
@@ -2527,10 +2634,10 @@ $dashboardConfig = [
               <th>Category</th>
               <th>Location</th>
               <th>Reporter</th>
-              <th>Submitted</th>
+              <th>Incident Date</th>
               <th>Priority</th>
               <th>Status</th>
-              <th>Assigned to</th>
+              <th>Date Resolved</th>
               <th style="width: 36px;"></th>
             </tr>
           </thead>
@@ -2550,7 +2657,7 @@ $dashboardConfig = [
       <div class="grid-left">
 
         <!-- Card: Monthly Reports vs. Resolved Cases -->
-        <div class="dashboard-card">
+        <div class="dashboard-card comparison-chart-card">
           <div class="card-header">
             <h2 class="card-title">Monthly Reports vs. Resolved Cases</h2>
             <div class="chart-range-controls">
@@ -2587,7 +2694,7 @@ $dashboardConfig = [
       <div class="grid-right">
 
         <!-- Card 1: Reports by category -->
-        <div class="dashboard-card">
+        <div class="dashboard-card category-chart-card">
           <div class="card-header no-border">
             <h2 class="card-title">Reports By Category</h2>
             <div class="dropdown-wrap" id="categoryPeriodDropdown">
@@ -2609,53 +2716,13 @@ $dashboardConfig = [
           <div class="cat-chart-container">
             <div class="cat-chart-wrap">
               <canvas id="brgyCategoryChart"></canvas>
-            </div>
-            <div class="cat-chart-footer">
-              <div class="cat-chart-footer-top">
-                <div class="cat-chart-trend">
-                  Most Reported Categories
-                </div>
-                <div class="cat-chart-note">Distribution of reported cases by category</div>
-              </div>
-              <div class="cat-chart-stats">
-                <span class="cat-chart-stat"><span class="cat-stat-label">Highest:</span> Rabies · 305 reports</span>
-                <span class="cat-chart-stat"><span class="cat-stat-label">Lowest:</span> Dead · 73 reports</span>
-              </div>
+              <div class="cat-chart-empty" id="category-empty-state" hidden>No reports in this period.</div>
             </div>
           </div>
         </div>
 
       </div>
 
-    </div>
-
-    <!-- Geo Map Section (full width) -->
-    <div class="geo-map-section" id="geo-map">
-      <div class="geo-map-card">
-        <div class="geo-summary-bar">
-          <span class="geo-summary-item">Barangay: <strong id="geoBgyName"><?php echo htmlspecialchars($barangayName); ?></strong></span>
-          <span class="geo-summary-item">Active Cases: <strong id="geoBgyConfirmed">0</strong></span>
-          <span class="geo-summary-item">Pending: <strong id="geoBgyPending">0</strong></span>
-          <span class="geo-summary-item">Resolved: <strong id="geoBgyResolved">0</strong></span>
-          <span class="geo-summary-item">Updated: <strong id="geoBgyUpdated">--</strong></span>
-        </div>
-
-        <div id="geoMap"
-             data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}'
-             style="width:100%;position:relative;">
-          <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
-        </div>
-
-        <!-- Legend -->
-        <div class="geo-legend">
-          <span class="geo-legend-title">Risk Level</span>
-          <span class="geo-legend-item" style="--legend-color:#22c55e;">Low</span>
-          <span class="geo-legend-item" style="--legend-color:#eab308;">Medium</span>
-          <span class="geo-legend-item" style="--legend-color:#f97316;">High</span>
-          <span class="geo-legend-item" style="--legend-color:#ef4444;">Critical</span>
-          <button class="geo-legend-refresh" id="geoRefreshBtn" title="Refresh map"><i class="fas fa-sync-alt"></i></button>
-        </div>
-      </div>
     </div>
 
       </div>
@@ -2781,42 +2848,106 @@ $dashboardConfig = [
   </div>
 </div>
 
-<!-- Report Details Modal -->
-<div class="modal-backdrop" id="report-detail-modal">
+<!-- Validate Report AlertDialog (shadcn/ui) -->
+<div class="modal-backdrop" id="validate-alert-dialog">
   <div class="modal-dialog">
-    <div class="modal-dialog-content">
-      <button class="modal-dialog-close" id="close-detail-modal-btn">&times;</button>
-      <div class="modal-dialog-header">
-        <span style="font-family:'Inter','Segoe UI',sans-serif; font-size:13px; color:#71717a;" id="detail-id">RPT-0000-0</span>
-        <h3 class="modal-dialog-title" id="detail-category">Incident Details</h3>
+    <form class="sd-alert-dialog-content" id="dashboard-validation-form" role="dialog" aria-modal="true" aria-labelledby="validate-alert-title" aria-describedby="validate-alert-desc" enctype="multipart/form-data" style="max-width:560px;max-height:90vh;overflow-y:auto;">
+      <input type="hidden" name="report_id" value="">
+      <input type="hidden" name="action" value="validate">
+      <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
+      <div class="sd-alert-dialog-header">
+        <h3 class="sd-alert-dialog-title" id="validate-alert-title">Validate Report</h3>
+        <p class="sd-alert-dialog-description" id="validate-alert-desc">Record what you found on site. If the incident has not been visited yet, select Site visit pending.</p>
+        </div>
+        <div class="sd-alert-dialog-body">
+          <div id="dashboard-validation-context" style="padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px;background:#f8fafc;color:#334155;font-size:13px;"></div>
+          <fieldset style="border:0;padding:0;margin:0;">
+            <legend class="validation-field-label" style="margin-bottom:8px;">Field status <span style="color:#dc2626;" aria-hidden="true">*</span></legend>
+            <div class="validation-status-grid">
+              <label class="validation-status-option"><input type="radio" name="field_status" value="site_visit_pending" required checked><span class="validation-status-copy"><strong>Site visit pending</strong><span>The incident has not been checked on site yet.</span></span></label>
+              <label class="validation-status-option"><input type="radio" name="field_status" value="confirmed_on_site" required><span class="validation-status-copy"><strong>Confirmed on site</strong><span>Animal and location were verified.</span></span></label>
+            <label class="validation-status-option"><input type="radio" name="field_status" value="urgent_response"><span class="validation-status-copy"><strong>Needs urgent response</strong><span>Immediate assistance is needed.</span></span></label>
+            <label class="validation-status-option"><input type="radio" name="field_status" value="animal_already_gone"><span class="validation-status-copy"><strong>Animal already gone</strong><span>Animal was no longer at the location.</span></span></label>
+            <label class="validation-status-option"><input type="radio" name="field_status" value="wrong_or_unclear_location"><span class="validation-status-copy"><strong>Wrong / unclear location</strong><span>Could not verify the reported location.</span></span></label>
+          </div>
+        </fieldset>
+        <fieldset class="validation-route-fieldset">
+          <legend class="validation-field-label" style="margin-bottom:8px;">Who will handle this case? <span style="color:#dc2626;" aria-hidden="true">*</span></legend>
+          <div class="validation-route-grid">
+            <label class="validation-route-option">
+              <input type="radio" name="barangay_will_respond" value="0" required>
+              <span class="validation-route-copy"><strong>Forward to DCVS</strong><span>DCVS reviews the report and assigns its own personnel.</span></span>
+            </label>
+            <?php if ($dashboardResponseEnabled): ?>
+            <label class="validation-route-option">
+              <input type="radio" name="barangay_will_respond" value="1" required>
+              <span class="validation-route-copy">
+                <strong>Barangay will respond</strong>
+                <span>Your barangay is assigned now. Start the response when the team is heading to the incident. No DCVS approval needed.</span>
+                <span class="validation-route-meta">
+                  <span>First response within <?php echo $responseTargetHours; ?> hours</span>
+                  <span>Progress update every <?php echo $progressTargetHours; ?> hours</span>
+                </span>
+              </span>
+            </label>
+            <?php endif; ?>
+          </div>
+        </fieldset>
+        <div class="validation-risk-check" id="dashboard-validation-risk" role="status" aria-live="polite">
+          <strong class="validation-risk-title"><span aria-hidden="true" id="dashboard-validation-risk-icon">&#10003;</span><span id="dashboard-validation-risk-title">No high-risk flags</span></strong>
+          <span class="validation-risk-copy" id="dashboard-validation-risk-copy">Review the report details before selecting who will handle the case.</span>
+        </div>
+        <label class="validation-field-label">Review notes / Message to DCVS <span style="color:#dc2626;" aria-hidden="true">*</span>
+          <textarea class="sd-input validation-form-control" name="validation_notes" rows="4" maxlength="500" required placeholder="Add review notes or describe your on-site findings..." style="height:auto;padding:10px 12px;margin-top:7px;resize:vertical;"></textarea>
+          <span class="validation-notes-meta"><span id="dashboard-validation-notes-count">0</span>/500</span>
+        </label>
+        <label class="validation-field-label">Photo / Video evidence
+          <span class="validation-upload" id="dashboard-validation-upload-zone">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></svg>
+            <strong>Drop photos or videos here, or click to browse</strong>
+            <span class="validation-upload-hint">JPG, PNG, or MP4 · Up to 6 files · 25 MB each</span>
+            <span class="validation-upload-meta" id="dashboard-validation-upload-meta">No files selected</span>
+            <input class="validation-file-input" id="dashboard-validation-attachments" name="validation_attachments[]" type="file" accept="image/jpeg,image/png,video/mp4" multiple aria-label="Choose photo or video evidence">
+          </span>
+        </label>
       </div>
-      <div class="modal-dialog-body" id="detail-modal-body">
-        <!-- Dynamic detailed summary -->
+      <div class="sd-alert-dialog-footer">
+        <button type="button" class="btn-secondary" id="validate-alert-cancel">Cancel</button>
+        <button type="submit" class="btn-primary" id="validate-alert-confirm">Validate &amp; Forward to DCVS</button>
       </div>
-      <div class="modal-dialog-footer" id="detail-modal-footer">
-        <!-- Action buttons (dynamic) -->
+    </form>
+  </div>
+</div>
+
+<!-- Reject Report AlertDialog (shadcn/ui) -->
+<div class="modal-backdrop" id="reject-alert-dialog">
+  <div class="modal-dialog">
+    <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="reject-alert-title" aria-describedby="reject-alert-desc">
+      <div class="sd-alert-dialog-header">
+        <h3 class="sd-alert-dialog-title" id="reject-alert-title">Reject Report</h3>
+        <p class="sd-alert-dialog-description" id="reject-alert-desc">Are you sure you want to reject this report? This action will update the report status.</p>
+      </div>
+      <div class="sd-alert-dialog-body">
+        <label class="form-label" for="reject-reason-input">Rejection Reason</label>
+        <textarea class="form-control" id="reject-reason-input" rows="3" placeholder="State the reason for rejecting this report..."></textarea>
+      </div>
+      <div class="sd-alert-dialog-footer">
+        <button type="button" class="btn-secondary" id="reject-alert-cancel">Cancel</button>
+        <button type="button" class="btn-danger" id="reject-alert-confirm">Reject Report</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Floating Action Dropdown Menu for Table Actions (⋮) -->
+<!-- Quick Action Dropdown Menu for Table Actions (⋮) -->
 <div class="quick-dropdown" id="quick-action-dropdown">
   <button class="quick-dropdown-item" data-action="view">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
     <span>View Details</span>
   </button>
-  <button class="quick-dropdown-item" data-action="assign">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-    <span>Reassign Officer</span>
-  </button>
-  <button class="quick-dropdown-item" data-action="progress">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    <span>Mark In Progress</span>
-  </button>
-  <button class="quick-dropdown-item" data-action="resolve">
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    <span>Mark Resolved</span>
+  <button class="quick-dropdown-item" data-action="location">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+    <span>View Location</span>
   </button>
 </div>
 
@@ -2889,7 +3020,7 @@ function renderReportsTable(filterStatus = null, searchQuery = '') {
       r.id.toLowerCase().includes(q) ||
       r.category.toLowerCase().includes(q) ||
       r.location.toLowerCase().includes(q) ||
-      r.assignedTo.toLowerCase().includes(q) ||
+      (r.dateResolved || '').toLowerCase().includes(q) ||
       r.priority.toLowerCase().includes(q)
     );
   }
@@ -2910,60 +3041,79 @@ function renderReportsTable(filterStatus = null, searchQuery = '') {
 
   filtered.forEach(report => {
     const tr = document.createElement('tr');
-    tr.dataset.id = report.id;
 
-    // Priority class & dot
+    // Priority class
     const pLow = report.priority.toLowerCase();
     const priorityClass = (pLow === 'high' || pLow === 'critical') ? 'priority-high' : (pLow === 'medium' ? 'priority-medium' : 'priority-low');
-    const priorityDotClass = (pLow === 'high' || pLow === 'critical') ? 'high' : (pLow === 'medium' ? 'medium' : 'low');
 
-    // Status class
+    // Keep the barangay-review and DCVS-review stages distinct.
+    const rawStatus = (report._db_status || '').toLowerCase();
     const sLow = report.status.toLowerCase();
-    let statusClass = 'status-new';
-    if (sLow.includes('validation')) statusClass = 'status-validation';
-    else if (sLow.includes('progress')) statusClass = 'status-progress';
-    else if (sLow.includes('resolved')) statusClass = 'status-resolved';
-    else if (sLow.includes('closed')) statusClass = 'status-closed';
+    let statusClass = 'status-pending';
+    if (rawStatus === 'validated' || (!rawStatus && sLow.includes('confirmation'))) statusClass = 'status-validation';
+    else if (rawStatus === 'confirmed' || rawStatus === 'scheduled' || (!rawStatus && sLow.includes('progress'))) statusClass = 'status-progress';
+    else if (rawStatus === 'resolved' || (!rawStatus && sLow.includes('resolved'))) statusClass = 'status-resolved';
+    else if (rawStatus === 'rejected' || (!rawStatus && sLow.includes('closed'))) statusClass = 'status-closed';
+
+    const dateResolved = report.dateResolved || '-';
+    const resolvedMuted = dateResolved === '-' ? ' style="color:#a1a1aa;"' : '';
 
     tr.innerHTML = `
       <td>
         <div class="report-id-cell">
-          <span class="priority-dot ${priorityDotClass}"></span>
           <span>${report.id}</span>
         </div>
       </td>
       <td class="category-cell">${report.category}</td>
       <td class="location-cell">${report.location}</td>
       <td class="reporter-cell">${report.reporter || ''}</td>
-      <td class="submitted-cell">${report.submitted || ''}</td>
+      <td class="submitted-cell">${report.incidentDate || report.submittedDate || ''}</td>
       <td>
         <span class="status-badge ${priorityClass}">${report.priority}</span>
       </td>
       <td>
         <span class="status-badge ${statusClass}">${report.status}</span>
       </td>
-      <td class="assignee-cell ${report.assignedTo === 'Unassigned' ? 'unassigned' : ''}">
-        ${report.assignedTo}
-      </td>
+      <td class="date-resolved-cell"${resolvedMuted}>${dateResolved}</td>
       <td style="text-align: right;">
-        <button class="row-action-btn action-dots-btn" data-id="${report.id}" title="Quick actions">⋮</button>
+        <button class="sd-row-actions action-dots-btn" data-id="${report.id}" title="More options">
+          <span class="sr-only">Open menu</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+        </button>
       </td>
     `;
-
-    // Row Click: Open Details
-    tr.addEventListener('click', (e) => {
-      if (e.target.closest('.action-dots-btn')) return;
-      openReportDetails(report.id);
-    });
 
     tbody.appendChild(tr);
   });
 }
 
-// Sidebar report filter (All / Pending Validation / Resolved Cases)
+// Sidebar report filter (All / Pending Barangay Review / Resolved Cases)
 function setReportFilter(status) {
-  activeFilter = (status === 'all' || !status) ? null : status;
-  renderReportsTable(activeFilter);
+  activeFilter = (status === 'all' || !status) ? 'all' : status;
+  renderReportsTable(activeFilter === 'all' ? null : activeFilter);
+}
+
+function updateBarangayReportStatus(report, status) {
+  if (!report) return;
+  var previousStatus = report._db_status || 'pending';
+  if (status === 'confirmed' && report.responseMode === 'barangay_response') {
+    report.responseState = 'barangay_response_approved';
+  }
+  var display = status === 'confirmed' && report.responseState === 'barangay_response_approved'
+    ? (report.fieldStatus === 'site_visit_pending'
+      ? 'Accepted by Barangay · Site visit pending'
+      : 'Accepted by Barangay')
+    : ({ validated: 'Pending DCVS Review', confirmed: 'In progress', scheduled: 'In progress', resolved: 'Resolved', rejected: 'Closed' }[status] || (status === 'pending' ? 'Pending Barangay Review' : status));
+  report._db_status = status;
+  report.status = display;
+  if (previousStatus === 'pending') DASHBOARD_CONFIG.metrics.validation = Math.max(0, DASHBOARD_CONFIG.metrics.validation - 1);
+  if (status === 'validated') DASHBOARD_CONFIG.metrics.new++;
+  if (status === 'rejected') DASHBOARD_CONFIG.metrics.closed++;
+  var newCount = document.getElementById('kpi-new-val');
+  var validationCount = document.getElementById('kpi-validation-val');
+  if (newCount) newCount.textContent = DASHBOARD_CONFIG.metrics.new;
+  if (validationCount) validationCount.textContent = DASHBOARD_CONFIG.metrics.validation;
+  renderReportsTable(activeFilter === 'all' ? null : (activeFilter || 'pending'));
 }
 
 /**
@@ -2977,9 +3127,12 @@ var brgyBarLabelPlugin = {
     var ds = chart.data.datasets[0];
     var labels = chart.data.labels;
     if (!meta || !meta.data || !ds) return;
+    var total = ds.data.reduce(function(sum, count) { return sum + Number(count || 0); }, 0);
     ctx.save();
     ctx.textBaseline = 'middle';
     meta.data.forEach(function(bar, i) {
+      var count = Number(ds.data[i] || 0);
+      if (count <= 0) return;
       var left = bar.base;   // start of bar (value axis 0)
       var right = bar.x;     // end of bar (data value)
       var y = bar.y;         // center of the bar row
@@ -2989,7 +3142,7 @@ var brgyBarLabelPlugin = {
       ctx.fillText(labels[i], left + 12, y);
       ctx.fillStyle = '#18181b';
       ctx.font = '500 12px Inter, sans-serif';
-      ctx.fillText(String(ds.data[i]), right + 10, y);
+      ctx.fillText(count.toLocaleString() + ' (' + Math.round((count / total) * 100) + '%)', right + 10, y);
     });
     ctx.restore();
   }
@@ -2999,14 +3152,79 @@ function renderCategoryChart() {
   var el = document.getElementById('brgyCategoryChart');
   if (!el || typeof Chart === 'undefined') return;
 
-  var catData = catPlaceholderData[catCurrentPeriod] || catPlaceholderData.all;
+  var periods = DASHBOARD_CONFIG.categoryPeriods || {};
+  var catData = periods[catCurrentPeriod] || periods.all || [];
   var labels = catData.map(function(d) { return d.label; });
   var values = catData.map(function(d) { return d.count; });
+  var scaleMaximum = Math.max(20, values.reduce(function(max, count) {
+    return Math.max(max, Number(count) || 0);
+  }, 0));
+  var total = values.reduce(function(sum, count) { return sum + Number(count || 0); }, 0);
+  var rankedCategories = catData.filter(function(d) { return d.count > 0; }).slice().sort(function(a, b) { return b.count - a.count; });
+  var summary = ((DASHBOARD_CONFIG.categorySummary || {})[catCurrentPeriod]) || {};
+  var comparisonLabel = { '30': 'previous 30 days', '7': 'previous 7 days', today: 'yesterday' }[catCurrentPeriod] || '';
+  var criticalCount = catData.reduce(function(sum, item) {
+    return ['rabies', 'dead'].indexOf(String(item.label).toLowerCase()) !== -1 ? sum + Number(item.count || 0) : sum;
+  }, 0);
+  var topCategory = rankedCategories[0];
+  var totalStat = document.getElementById('category-total-stat');
+  var topStat = document.getElementById('category-top-stat');
+  var trendStat = document.getElementById('category-trend-stat');
+  var criticalStat = document.getElementById('category-critical-stat');
+  var unresolvedStat = document.getElementById('category-unresolved-stat');
+  var shareBar = document.getElementById('category-share-bar');
+  var emptyState = document.getElementById('category-empty-state');
+  var noReports = total === 0;
+
+  if (totalStat) totalStat.textContent = total.toLocaleString() + (total === 1 ? ' report' : ' reports');
+  if (topStat) {
+    topStat.textContent = topCategory
+      ? topCategory.label + ' · ' + Math.round((topCategory.count / total) * 100) + '%'
+      : '—';
+  }
+  if (trendStat) {
+    if (!comparisonLabel || summary.previousTotal === null || summary.previousTotal === undefined) {
+      trendStat.textContent = 'Not available for all time';
+    } else {
+      var trendDelta = total - Number(summary.previousTotal || 0);
+      trendStat.textContent = trendDelta > 0
+        ? '↑ ' + trendDelta.toLocaleString() + ' vs ' + comparisonLabel
+        : trendDelta < 0
+          ? '↓ ' + Math.abs(trendDelta).toLocaleString() + ' vs ' + comparisonLabel
+          : 'No change vs ' + comparisonLabel;
+    }
+  }
+  if (criticalStat) {
+    criticalStat.textContent = criticalCount.toLocaleString() + (criticalCount === 1 ? ' report' : ' reports')
+      + ' (' + (total > 0 ? Math.round((criticalCount / total) * 100) : 0) + '%)';
+  }
+  if (unresolvedStat) {
+    var unresolved = Number(summary.unresolved || 0);
+    unresolvedStat.textContent = unresolved.toLocaleString() + (unresolved === 1 ? ' report' : ' reports');
+  }
+  if (shareBar) {
+    shareBar.replaceChildren();
+    catData.forEach(function(item, index) {
+      var count = Number(item.count || 0);
+      if (count <= 0 || total <= 0) return;
+      var segment = document.createElement('span');
+      segment.className = 'cat-chart-share-segment';
+      segment.style.width = ((count / total) * 100) + '%';
+      segment.style.backgroundColor = ['#0E8131', '#DC2626', '#F79009', '#475569'][index % 4];
+      segment.title = item.label + ': ' + count + ' (' + Math.round((count / total) * 100) + '%)';
+      shareBar.appendChild(segment);
+    });
+    shareBar.setAttribute('aria-label', noReports ? 'No reports in this period' : 'Category distribution for ' + total + ' reports');
+    shareBar.hidden = noReports;
+  }
+  if (emptyState) emptyState.hidden = !noReports;
+  el.style.visibility = noReports ? 'hidden' : 'visible';
 
   if (brgyCharts['brgyCategoryChart']) {
     var chart = brgyCharts['brgyCategoryChart'];
     chart.data.labels = labels;
     chart.data.datasets[0].data = values;
+    chart.options.scales.x.max = scaleMaximum;
     chart.update();
     return;
   }
@@ -3018,7 +3236,7 @@ function renderCategoryChart() {
       datasets: [{
         label: 'Reports',
         data: values,
-        backgroundColor: '#18181b',
+        backgroundColor: ['#0E8131', '#DC2626', '#F79009', '#475569'],
         borderRadius: 6,
         barThickness: 28,
         maxBarThickness: 28,
@@ -3031,10 +3249,12 @@ function renderCategoryChart() {
       responsive: true,
       maintainAspectRatio: false,
       layout: {
-        padding: { right: 48, top: 8, bottom: 8 }
+        padding: { right: 88, top: 8, bottom: 8 }
       },
       scales: {
         x: {
+          min: 0,
+          max: scaleMaximum,
           grid: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
           border: { display: false },
           ticks: { display: false }
@@ -3114,135 +3334,174 @@ function showToast(message) {
   }, 3200);
 }
 
-// Open Details Modal
-function openReportDetails(reportId) {
-  const report = DASHBOARD_CONFIG.reports.find(r => r.id === reportId);
-  if (!report) return;
-  currentSelectedReport = report;
-
-  document.getElementById('detail-id').textContent = report.id;
-  document.getElementById('detail-category').textContent = report.category;
-
-  const modalBody = document.getElementById('detail-modal-body');
-  const isPending = report._db_status === 'pending';
-  const isRejected = report._db_status === 'rejected';
-
-  const photoHtml = report.photo
-    ? `<div style="background:#f9fafb; padding:14px; border-radius:8px; border:1px solid #e4e4e7;">
-        <span style="font-size:12px; font-weight:600; color:#71717a; display:block; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.03em;">Attached Photo Evidence</span>
-        <img src="${report.photo}" alt="Photo evidence" style="width:100%; border-radius:6px; border:1px solid #e4e4e7; max-height:260px; object-fit:cover;" onerror="this.style.display='none';" />
-      </div>`
-    : '';
-
-  const rejectionHtml = isRejected && report.rejection
-    ? `<div style="background:#fef2f2; padding:14px; border-radius:8px; border:1px solid #fecaca;">
-        <span style="font-size:12px; font-weight:600; color:#991b1b; display:block; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.03em;">Rejection Reason</span>
-        <p style="font-size:14px; color:#991b1b; line-height:1.6; margin:0;">${report.rejection}</p>
-      </div>`
-    : '';
-
-  modalBody.innerHTML = `
-    <div style="display:flex; gap:10px;">
-      <span class="status-badge priority-${report.priority.toLowerCase()}">Priority: ${report.priority}</span>
-      <span class="status-badge status-${report.status.toLowerCase().replace(' ', '-')}">Status: ${report.status}</span>
-    </div>
-    <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; font-size:14px;">
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Type of Report</span>
-        <strong style="color:#18181b;">${report.category}</strong>
-      </div>
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Urgency Level</span>
-        <strong style="color:#18181b;">${report.priority}</strong>
-      </div>
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Location</span>
-        <strong style="color:#18181b;">${report.location}</strong>
-      </div>
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Date Submitted</span>
-        <strong style="color:#18181b;">${report.submitted}</strong>
-      </div>
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Reported By</span>
-        <strong style="color:#18181b;">${report.reporter || 'Resident'}</strong>
-      </div>
-      <div>
-        <span style="color:#71717a; font-size:12px; font-weight:500; display:block; margin-bottom:4px;">Assigned Officer</span>
-        <strong style="color:#18181b;">${report.assignedTo}</strong>
-      </div>
-    </div>
-    <div style="background:#f9fafb; padding:14px; border-radius:8px; border:1px solid #e4e4e7;">
-      <span style="font-size:12px; font-weight:600; color:#71717a; display:block; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.03em;">Situation &amp; Detailed Description</span>
-      <p style="font-size:14px; color:#18181b; line-height:1.6; margin:0;">
-        ${report.description || 'No description provided.'}
-      </p>
-    </div>
-    ${photoHtml}
-    ${rejectionHtml}
-  `;
-
-  // Action buttons — only for pending reports
-  const footer = document.getElementById('detail-modal-footer');
-  if (isPending) {
-    footer.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:10px; width:100%;">
-        <div id="reject-reason-wrap" style="display:none; flex-direction:column; gap:10px;">
-          <label class="form-label" for="reject-reason-input">Rejection Reason</label>
-          <textarea class="form-control" id="reject-reason-input" rows="3" placeholder="State the reason for rejecting this report..."></textarea>
-          <div style="display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:8px;">
-            <button type="button" class="btn-primary" id="confirm-reject-btn" style="background:#B91C1C; border-color:#B91C1C;">Confirm Reject</button>
-            <button type="button" class="btn-secondary" id="cancel-reject-btn">Cancel</button>
-          </div>
-        </div>
-        <div style="display:flex; flex-direction:row-reverse; justify-content:flex-end; gap:8px;">
-          <button type="button" class="btn-primary" id="validate-report-btn">Validate Report</button>
-          <button type="button" class="btn-secondary" id="reject-report-btn" style="color:#B91C1C; border-color:#fecaca;">Reject Report</button>
-          <button type="button" class="btn-secondary" id="close-detail-footer-btn">Close</button>
-        </div>
-      </div>`;
-    document.getElementById('validate-report-btn').addEventListener('click', validateReport);
-    document.getElementById('reject-report-btn').addEventListener('click', function() {
-      const wrap = document.getElementById('reject-reason-wrap');
-      wrap.style.display = wrap.style.display === 'none' ? 'flex' : 'none';
-    });
-    document.getElementById('confirm-reject-btn').addEventListener('click', rejectReport);
-    document.getElementById('cancel-reject-btn').addEventListener('click', function() {
-      document.getElementById('reject-reason-wrap').style.display = 'none';
-    });
-    document.getElementById('close-detail-footer-btn').addEventListener('click', closeDetailModal);
-  } else {
-    footer.innerHTML = `
-      <button type="button" class="btn-secondary" id="close-detail-footer-btn">Close</button>`;
-    document.getElementById('close-detail-footer-btn').addEventListener('click', closeDetailModal);
-  }
-
-  document.getElementById('report-detail-modal').classList.add('open');
+/* ── shadcn Alert Dialog: Validate / Reject Report ── */
+function openAlertDialog(id) {
+  document.getElementById(id).classList.add('open');
 }
 
-function closeDetailModal() {
-  document.getElementById('report-detail-modal').classList.remove('open');
+function closeAlertDialog(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+function openValidateAlertDialog() {
+  if (!currentSelectedReport) return;
+  const form = document.getElementById('dashboard-validation-form');
+  form.reset();
+  form.elements.namedItem('report_id').value = currentSelectedReport.report_id;
+  updateDashboardValidationMeta();
+  document.getElementById('dashboard-validation-context').textContent =
+    (currentSelectedReport.id || 'Report') + ' · ' +
+    (currentSelectedReport.category || currentSelectedReport.type || 'Report') + ' · ' +
+    (currentSelectedReport.animalType || 'Animal unspecified') + ' · ' +
+    (currentSelectedReport.location || 'Location not provided') + ' · ' +
+    (currentSelectedReport.priority || 'Unknown priority');
+  const submitButton = document.getElementById('validate-alert-confirm');
+  submitButton.disabled = false;
+  updateDashboardValidationRoutingChoice();
+  openAlertDialog('validate-alert-dialog');
+}
+
+function updateDashboardValidationRoutingChoice() {
+  const form = document.getElementById('dashboard-validation-form');
+  const selection = form && form.querySelector('[name="barangay_will_respond"]:checked');
+  const willRespond = !!(selection && selection.value === '1');
+  const submitButton = document.getElementById('validate-alert-confirm');
+  if (submitButton) submitButton.textContent = willRespond
+    ? 'Validate & Assign to Barangay'
+    : 'Validate & Forward to DCVS';
+  updateDashboardValidationRisk(willRespond);
+}
+
+function updateDashboardValidationRisk(willRespond) {
+  const panel = document.getElementById('dashboard-validation-risk');
+  const title = document.getElementById('dashboard-validation-risk-title');
+  const icon = document.getElementById('dashboard-validation-risk-icon');
+  const copy = document.getElementById('dashboard-validation-risk-copy');
+  if (!panel || !title || !icon || !copy) return;
+  const report = currentSelectedReport || {};
+  const urgency = String(report.urgency || report.priority || '').toLowerCase();
+  const behavior = String(report.animalBehavior || '').toLowerCase();
+  const count = String(report.animalCount || '').trim();
+  const fieldStatus = document.querySelector('#dashboard-validation-form [name="field_status"]:checked');
+  const flags = [];
+  if (String(report.type || '').toLowerCase() === 'rabies') flags.push('rabies concern');
+  if (urgency === 'high' || urgency === 'critical') flags.push(urgency + ' priority');
+  if (/aggress|bit(e|ten)|attack/.test(behavior)) flags.push('reported aggressive or biting behavior');
+  if (/^(?:6\+|[6-9]\d*|\d{2,})$/.test(count)) flags.push('large number of animals');
+  if (fieldStatus && fieldStatus.value === 'urgent_response') flags.push('field status marked urgent');
+  const highRisk = flags.length > 0;
+  panel.classList.toggle('is-high-risk', highRisk);
+  icon.textContent = highRisk ? '⚠' : '✓';
+  title.textContent = highRisk ? 'High-risk flags' : 'No high-risk flags';
+  copy.textContent = highRisk
+    ? flags.join(' · ') + '. ' + (willRespond
+      ? 'Coordinate with DCVS according to protocol. This does not prevent your barangay from responding if it can do so safely.'
+      : 'Forward for DCVS review and coordination. Urgent cases should be escalated according to protocol.')
+    : (willRespond
+      ? 'No high-risk flags detected. Your barangay will be assigned now; start the response when the team is heading out.'
+      : 'No risk flags detected from the report. DCVS will review and assign personnel.');
+}
+
+function updateDashboardValidationMeta() {
+  const notes = document.querySelector('#dashboard-validation-form [name="validation_notes"]');
+  const count = document.getElementById('dashboard-validation-notes-count');
+  const input = document.getElementById('dashboard-validation-attachments');
+  const uploadMeta = document.getElementById('dashboard-validation-upload-meta');
+  if (notes && count) count.textContent = String(notes.value.length);
+  if (input && uploadMeta) {
+    const files = Array.from(input.files || []);
+    uploadMeta.textContent = files.length
+      ? files.length + ' file(s) selected: ' + files.map(file => file.name).join(', ')
+      : 'No files selected';
+  }
+}
+
+function bindDashboardValidationUpload() {
+  const input = document.getElementById('dashboard-validation-attachments');
+  const zone = document.getElementById('dashboard-validation-upload-zone');
+  const notes = document.querySelector('#dashboard-validation-form [name="validation_notes"]');
+  if (notes) notes.addEventListener('input', updateDashboardValidationMeta);
+  if (!input || !zone) return;
+  input.addEventListener('change', updateDashboardValidationMeta);
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    zone.classList.add('is-dragging');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('is-dragging'));
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    zone.classList.remove('is-dragging');
+    if (event.dataTransfer && event.dataTransfer.files) {
+      input.files = event.dataTransfer.files;
+      updateDashboardValidationMeta();
+    }
+  });
+}
+
+function openRejectAlertDialog() {
+  if (!currentSelectedReport) return;
+  const reasonInput = document.getElementById('reject-reason-input');
+  if (reasonInput) reasonInput.value = '';
+  openAlertDialog('reject-alert-dialog');
 }
 
 function validateReport() {
   const report = currentSelectedReport;
   if (!report) return;
+  const form = document.getElementById('dashboard-validation-form');
+  const files = form.elements.namedItem('validation_attachments[]').files;
+  if (files.length > 6) { showToast('Attach no more than 6 files.'); return; }
+  for (const file of files) {
+    if (file.size > 25 * 1024 * 1024) { showToast('Each evidence file must be no larger than 25 MB.'); return; }
+  }
+  const routing = form.querySelector('[name="barangay_will_respond"]:checked');
+  const barangayWillRespond = !!(routing && routing.value === '1');
+  const fieldStatus = form.querySelector('[name="field_status"]:checked');
+  const submitButton = document.getElementById('validate-alert-confirm');
+  const cancelButton = document.getElementById('validate-alert-cancel');
+  submitButton.disabled = true;
+  cancelButton.disabled = true;
+  submitButton.textContent = 'Forwarding...';
   fetch('validate-report.php', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ report_id: report.report_id, action: 'validate' })
+    body: new FormData(form)
   })
-  .then(r => r.json())
-  .then(data => {
-    if (data.success) {
-      showToast('Report validated. Forwarded to DCVS staff.');
-      closeDetailModal();
-      setTimeout(() => location.reload(), 800);
-    } else {
-      showToast(data.message || 'Failed to validate report.');
+  .then(r => r.text().then(text => {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (error) {
+      throw new Error('The server returned an invalid response (HTTP ' + r.status + '). Check the PHP error log.');
     }
+    if (!r.ok || !data || !data.success) {
+      throw new Error((data && data.message) || ('The request failed (HTTP ' + r.status + ').'));
+    }
+    return data;
+  }))
+  .then(data => {
+    submitButton.disabled = false;
+    cancelButton.disabled = false;
+    updateDashboardValidationRoutingChoice();
+    closeAlertDialog('validate-alert-dialog');
+    report.fieldStatus = fieldStatus ? fieldStatus.value : '';
+    if (barangayWillRespond) report.responseMode = 'barangay_response';
+    updateBarangayReportStatus(report, barangayWillRespond ? 'confirmed' : 'validated');
+    var detailModal = document.getElementById('report-detail-modal');
+    if (detailModal) detailModal.classList.remove('open');
+    currentSelectedReport = null;
+    showToast(barangayWillRespond
+      ? 'Report validated and assigned to your barangay. Start the response when the team is heading out.'
+      : 'Report validated and forwarded to DCVS.');
   })
-  .catch(() => showToast('Network error. Please try again.'));
+  .catch(error => {
+    submitButton.disabled = false;
+    cancelButton.disabled = false;
+    updateDashboardValidationRoutingChoice();
+    console.error('Could not forward barangay-validated report:', error);
+    showToast(error instanceof TypeError
+      ? 'Could not contact the server while forwarding the report. Check your connection and try again.'
+      : (error.message || 'The report could not be forwarded.'));
+  });
 }
 
 function rejectReport() {
@@ -3261,119 +3520,16 @@ function rejectReport() {
   .then(r => r.json())
   .then(data => {
     if (data.success) {
+      updateBarangayReportStatus(report, 'rejected');
+      var detailModal = document.getElementById('report-detail-modal');
+      if (detailModal) detailModal.classList.remove('open');
+      currentSelectedReport = null;
       showToast('Report rejected.');
-      closeDetailModal();
-      setTimeout(() => location.reload(), 800);
     } else {
       showToast(data.message || 'Failed to reject report.');
     }
   })
   .catch(() => showToast('Network error. Please try again.'));
-}
-
-/**
- * ==========================================================================
- * FUNCTIONAL DATE RANGE PICKER HANDLERS
- * ==========================================================================
- */
-function initDateRangePicker() {
-  const dateBtn = document.getElementById('date-range-btn');
-  const popover = document.getElementById('date-picker-popover');
-  const currentText = document.getElementById('current-date-range-text');
-  const compText = document.getElementById('date-comparison-text');
-  const presetItems = document.querySelectorAll('.date-preset-item');
-  const applyCustomBtn = document.getElementById('apply-custom-date-btn');
-  const customStart = document.getElementById('custom-start-date');
-  const customEnd = document.getElementById('custom-end-date');
-
-  // Toggle Popover
-  dateBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isOpen = popover.classList.contains('show');
-    if (isOpen) {
-      popover.classList.remove('show');
-      dateBtn.classList.remove('active');
-    } else {
-      popover.classList.add('show');
-      dateBtn.classList.add('active');
-    }
-  });
-
-  // Close when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!popover.contains(e.target) && !dateBtn.contains(e.target)) {
-      popover.classList.remove('show');
-      dateBtn.classList.remove('active');
-    }
-  });
-
-  // Handle Preset Click
-  presetItems.forEach(item => {
-    item.addEventListener('click', () => {
-      presetItems.forEach(i => {
-        i.classList.remove('selected');
-        i.querySelector('span:last-child').textContent = '';
-      });
-      item.classList.add('selected');
-      item.querySelector('span:last-child').textContent = '✓';
-
-      const label = item.dataset.label;
-      const comp = item.dataset.comp;
-      const preset = item.dataset.preset;
-
-      currentText.textContent = label;
-      compText.textContent = comp;
-
-      // Dynamically simulate metric variations per period
-      updateDashboardDataForRange(preset, label);
-
-      popover.classList.remove('show');
-      dateBtn.classList.remove('active');
-      showToast(`Date range set to: ${label}`);
-    });
-  });
-
-  // Handle Custom Date Range Apply
-  if (applyCustomBtn) {
-    applyCustomBtn.addEventListener('click', () => {
-      const startVal = customStart.value;
-      const endVal = customEnd.value;
-      if (!startVal || !endVal) {
-        showToast('Please select valid start and end dates.');
-        return;
-      }
-
-      const formatDate = (dStr) => {
-        const d = new Date(dStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      };
-
-      const customRangeText = `${formatDate(startVal)} – ${formatDate(endVal)}`;
-      currentText.textContent = customRangeText;
-      compText.textContent = `Compared to previous period`;
-
-      presetItems.forEach(i => {
-        i.classList.remove('selected');
-        i.querySelector('span:last-child').textContent = '';
-      });
-
-      updateDashboardDataForRange('custom', customRangeText);
-      popover.classList.remove('show');
-      dateBtn.classList.remove('active');
-      showToast(`Applied custom date range: ${customRangeText}`);
-    });
-  }
-}
-
-// Function to update metric values when date range changes
-function updateDashboardDataForRange(rangeKey, label) {
-  // Date range changes only update the label for now — all figures come
-  // from real database records and are refreshed on reload.
-  const vals = document.querySelectorAll('.step-value');
-  vals.forEach(v => {
-    v.style.transform = 'scale(1.1)';
-    setTimeout(() => v.style.transform = 'scale(1)', 200);
-  });
 }
 
 /**
@@ -3493,12 +3649,16 @@ function renderCmpChart() {
 
   if (cmpCurrentRange === 'year') {
     labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    reports = [42, 55, 38, 61, 47, 53, 68, 72, 59, 81, 76, 89];
-    resolved = [30, 40, 28, 45, 35, 42, 52, 58, 46, 65, 60, 72];
+    var yearSelect = document.getElementById('cmpYearSelect');
+    var yearKey = yearSelect ? yearSelect.value : String(new Date().getFullYear());
+    var yearData = (cmp.yearly || {})[yearKey] || { reports: Array(12).fill(0), resolved: Array(12).fill(0) };
+    reports = yearData.reports;
+    resolved = yearData.resolved;
   } else {
-    labels = cmp.labels || [];
-    reports = cmp.actual || [];
-    resolved = cmp.previous || [];
+    var dailyData = cmp.daily || {};
+    labels = dailyData.labels || [];
+    reports = dailyData.reports || [];
+    resolved = dailyData.resolved || [];
   }
 
   var rgb = brgyHexToRgb('#18181b');
@@ -3546,12 +3706,13 @@ function renderCmpChart() {
       ]
     },
     options: Object.assign(brgyBaseOpts(), {
-      animation: brgyAnimOpts(),
+      animation: false,
       interaction: { mode: 'index', intersect: false },
       onHover: function(e, active) { if (!active.length) e.native.target.style.cursor = 'default'; else e.native.target.style.cursor = 'pointer'; },
       scales: {
         y: {
           beginAtZero: true,
+          max: 20,
           grid: { color: 'rgba(0,0,0,0.06)' },
           ticks: { color: '#737373', font: { family: 'Inter', size: 10 }, precision: 0 }
         },
@@ -3573,43 +3734,12 @@ function renderCmpChart() {
         })
       }
     }),
-    plugins: [brgyLineDrawPlugin, brgyCrosshairPlugin]
+    plugins: [brgyCrosshairPlugin]
   });
 }
 
 // Category period dropdown
 var catCurrentPeriod = 'all';
-
-var catPlaceholderData = {
-  all: [
-    { label: "Stray animal", count: 186 },
-    { label: "Rabies", count: 305 },
-    { label: "Injured animal", count: 237 },
-    { label: "Dead animal", count: 73 },
-    { label: "Rescue", count: 209 }
-  ],
-  30: [
-    { label: "Stray animal", count: 42 },
-    { label: "Rabies", count: 68 },
-    { label: "Injured animal", count: 51 },
-    { label: "Dead animal", count: 15 },
-    { label: "Rescue", count: 47 }
-  ],
-  7: [
-    { label: "Stray animal", count: 12 },
-    { label: "Rabies", count: 19 },
-    { label: "Injured animal", count: 14 },
-    { label: "Dead animal", count: 4 },
-    { label: "Rescue", count: 11 }
-  ],
-  today: [
-    { label: "Stray animal", count: 3 },
-    { label: "Rabies", count: 5 },
-    { label: "Injured animal", count: 2 },
-    { label: "Dead animal", count: 1 },
-    { label: "Rescue", count: 4 }
-  ]
-};
 
 function setCategoryPeriod(label, btn) {
   document.getElementById('category-period-label').textContent = label;
@@ -3635,18 +3765,10 @@ document.addEventListener('click', function(e) {
 // Document Ready Initialization
 document.addEventListener('DOMContentLoaded', () => {
   // Initial renders
-  renderReportsTable('pending');
-  initDateRangePicker();
+  activeFilter = 'pending';
+  renderReportsTable(activeFilter);
   renderCmpChart();
   renderCategoryChart();
-
-  // Global Search
-  const globalSearch = document.getElementById('global-search');
-  if (globalSearch) {
-    globalSearch.addEventListener('input', (e) => {
-      renderReportsTable(activeFilter, e.target.value);
-    });
-  }
 
   // Modal Controls: Create Report
   const createModal = document.getElementById('create-report-modal');
@@ -3697,8 +3819,9 @@ document.addEventListener('DOMContentLoaded', () => {
         _sortDate: nowStr.slice(0, 10),
         _sortTime: nowStr.slice(11, 19),
         priority: priority,
-        status: "New",
+        status: "Pending Barangay Review",
         assignedTo: "Unassigned",
+        dateResolved: "-",
         description: desc,
         actionTaken: actionTaken,
         incidentDate: incidentDate,
@@ -3706,8 +3829,8 @@ document.addEventListener('DOMContentLoaded', () => {
       };
 
       DASHBOARD_CONFIG.reports.unshift(newReport);
-      DASHBOARD_CONFIG.metrics.new += 1;
-      document.getElementById('kpi-new-val').textContent = DASHBOARD_CONFIG.metrics.new;
+      DASHBOARD_CONFIG.metrics.validation += 1;
+      document.getElementById('kpi-validation-val').textContent = DASHBOARD_CONFIG.metrics.validation;
 
       // Add to activity with day and donut ring
       DASHBOARD_CONFIG.activities.unshift({
@@ -3749,13 +3872,53 @@ document.addEventListener('DOMContentLoaded', () => {
     dateInput.value = today.toISOString().split('T')[0];
   }
 
-  // Details Modal Close (X button)
-  const detailModal = document.getElementById('report-detail-modal');
-  const closeDetailBtn = document.getElementById('close-detail-modal-btn');
+  // Alert Dialog Controls: Validate / Reject Report (DB update only after confirmation)
+  const validateAlertCancel = document.getElementById('validate-alert-cancel');
+  const validateAlertConfirm = document.getElementById('validate-alert-confirm');
+  const rejectAlertCancel = document.getElementById('reject-alert-cancel');
+  const rejectAlertConfirm = document.getElementById('reject-alert-confirm');
 
-  if (closeDetailBtn) closeDetailBtn.addEventListener('click', closeDetailModal);
+  if (validateAlertCancel) validateAlertCancel.addEventListener('click', () => closeAlertDialog('validate-alert-dialog'));
+  if (rejectAlertCancel) rejectAlertCancel.addEventListener('click', () => closeAlertDialog('reject-alert-dialog'));
 
-  // Quick Action Dropdown Menu
+  const dashboardValidationForm = document.getElementById('dashboard-validation-form');
+  if (dashboardValidationForm) dashboardValidationForm.addEventListener('submit', event => {
+    event.preventDefault();
+    validateReport();
+  });
+  if (dashboardValidationForm) {
+    dashboardValidationForm.querySelectorAll('[name="barangay_will_respond"]').forEach(input => {
+      input.addEventListener('change', updateDashboardValidationRoutingChoice);
+    });
+    dashboardValidationForm.querySelectorAll('[name="field_status"]').forEach(input => {
+      input.addEventListener('change', updateDashboardValidationRoutingChoice);
+    });
+  }
+  bindDashboardValidationUpload();
+
+  if (rejectAlertConfirm) {
+    rejectAlertConfirm.addEventListener('click', () => {
+      const reason = (document.getElementById('reject-reason-input') || {}).value || '';
+      if (!reason.trim()) {
+        showToast('Please state a rejection reason.');
+        return;
+      }
+      closeAlertDialog('reject-alert-dialog');
+      rejectReport();
+    });
+  }
+
+  // Alert dialogs are modal decisions: dismiss with Escape only
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('reject-alert-dialog').classList.contains('open')) {
+      closeAlertDialog('reject-alert-dialog');
+    } else if (document.getElementById('validate-alert-dialog').classList.contains('open')) {
+      closeAlertDialog('validate-alert-dialog');
+    }
+  });
+
+  // Quick Action Dropdown Menu (⋮)
   const quickDropdown = document.getElementById('quick-action-dropdown');
   document.addEventListener('click', (e) => {
     const dotsBtn = e.target.closest('.action-dots-btn');
@@ -3764,7 +3927,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentSelectedReport = DASHBOARD_CONFIG.reports.find(r => r.id === reportId);
       const rect = dotsBtn.getBoundingClientRect();
       quickDropdown.style.top = `${rect.bottom + window.scrollY + 4}px`;
-      quickDropdown.style.left = `${rect.right - 170 + window.scrollX}px`;
+      quickDropdown.style.left = `${rect.right - 190 + window.scrollX}px`;
       quickDropdown.classList.add('show');
     } else if (!e.target.closest('#quick-action-dropdown')) {
       if (quickDropdown) quickDropdown.classList.remove('show');
@@ -3772,27 +3935,15 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Handle Quick Dropdown Actions
-  const dropdownItems = document.querySelectorAll('.quick-dropdown-item');
-  dropdownItems.forEach(item => {
+  document.querySelectorAll('.quick-dropdown-item').forEach(item => {
     item.addEventListener('click', () => {
-      const action = item.dataset.action;
       if (!currentSelectedReport) return;
-      
-      if (action === 'view') {
-        openReportDetails(currentSelectedReport.id);
-      } else if (action === 'assign') {
-        currentSelectedReport.assignedTo = DASHBOARD_CONFIG.user.name;
-        showToast(`Assigned ${currentSelectedReport.id} to ${DASHBOARD_CONFIG.user.name}.`);
-      } else if (action === 'progress') {
-        currentSelectedReport.status = "In progress";
-        showToast(`Marked ${currentSelectedReport.id} as In progress.`);
-      } else if (action === 'resolve') {
-        currentSelectedReport.status = "Resolved";
-        showToast(`Marked ${currentSelectedReport.id} as Resolved.`);
-      }
-      
       quickDropdown.classList.remove('show');
-      renderReportsTable(activeFilter);
+      if (item.dataset.action === 'view') {
+        location.href = 'reports-barangay.php?view=' + encodeURIComponent(currentSelectedReport.report_id);
+      } else if (item.dataset.action === 'location') {
+        location.href = 'dashboard-barangay-geo.php?report_id=' + encodeURIComponent(currentSelectedReport.report_id);
+      }
     });
   });
 
@@ -3801,10 +3952,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
       const csvRows = [
-        ["Report ID", "Category", "Location", "Submitted", "Priority", "Status", "Assigned To"]
+        ["Report ID", "Category", "Location", "Incident Date", "Priority", "Status", "Date Resolved"]
       ];
       DASHBOARD_CONFIG.reports.forEach(r => {
-        csvRows.push([r.id, r.category, r.location, r.submitted, r.priority, r.status, r.assignedTo]);
+        csvRows.push([r.id, r.category, r.location, r.incidentDate || r.submittedDate, r.priority, r.status, r.dateResolved || '-']);
       });
       const csvContent = "data:text/csv;charset=utf-8," + csvRows.map(e => e.join(",")).join("\n");
       const encodedUri = encodeURI(csvContent);
@@ -3868,6 +4019,110 @@ document.addEventListener('DOMContentLoaded', () => {
     return null;
   }
 
+  var drawerRequestId = 0;
+  var riskConfig = {
+    Green: { dot:'#22c55e', text:'#166534', label:'LOW RISK', desc:'No confirmed cases in this barangay' },
+    Yellow: { dot:'#eab308', text:'#854d0e', label:'MEDIUM RISK', desc:'Active cases detected in this barangay' },
+    Orange: { dot:'#f97316', text:'#9a3412', label:'HIGH RISK', desc:'Multiple active cases require attention' },
+    Red: { dot:'#ef4444', text:'#991b1b', label:'CRITICAL RISK', desc:'Significant outbreak — immediate action needed' }
+  };
+  var reportTypeLabels = { rabies:'Rabies Reports', rescue:'Rescue Reports', stray:'Stray Reports', injured:'Injured Reports', dead:'Dead Reports' };
+  var reportTypeColors = { rabies:'#dc2626', rescue:'#2563eb', stray:'#ea580c', injured:'#d97706', dead:'#6b7280' };
+
+  function escapeGeoText(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch];
+    });
+  }
+  function formatGeoDate(value) {
+    if (!value) return '--';
+    var date = new Date(String(value).replace(' ', 'T'));
+    return isNaN(date.getTime()) ? '--' : date.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  }
+  function formatGeoDateTime(value) {
+    if (!value) return '--';
+    var date = new Date(String(value).replace(' ', 'T'));
+    return isNaN(date.getTime()) ? '--' : date.toLocaleString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+  }
+
+  window.openGeoDrawer = function(barangayId, props) {
+    var requestId = ++drawerRequestId;
+    var risk = (props && props.risk) || 'Green';
+    var riskStyle = riskConfig[risk] || riskConfig.Green;
+    document.getElementById('geoDrawerName').textContent = (props && props.name) || BRGY_NAME;
+    document.getElementById('geoDrawerRiskDot').style.background = riskStyle.dot;
+    var riskLabel = document.getElementById('geoDrawerRiskText');
+    riskLabel.textContent = riskStyle.label;
+    riskLabel.style.color = riskStyle.text;
+    document.getElementById('geoDrawerRiskDesc').textContent = riskStyle.desc;
+    document.getElementById('geoDrawerConfirmed').textContent = (props && props.confirmed) || 0;
+    document.getElementById('geoDrawerPending').textContent = (props && props.pending) || 0;
+    document.getElementById('geoDrawerResolved').textContent = (props && props.resolved) || 0;
+    document.getElementById('geoDrawerTotal').textContent = (Number((props && props.confirmed) || 0) + Number((props && props.pending) || 0) + Number((props && props.resolved) || 0));
+    document.getElementById('geoDrawerUpdated').textContent = formatGeoDateTime(props && props.lastUpdated);
+    document.getElementById('geoDrawerViewAll').href = 'dashboard-barangay.php#reports';
+    document.getElementById('geoDrawerBreakdown').innerHTML = '<div style="font-size:13px;color:#a1a1aa;padding:8px 0;">Loading...</div>';
+    document.getElementById('geoDrawerRecentWrap').style.display = 'none';
+    document.getElementById('geoDrawerNoRecent').style.display = 'none';
+    document.getElementById('geoDrawerOverlay').classList.add('open');
+    document.getElementById('geoDrawer').classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    fetch('geo-map/barangay-detail.php?barangay_id=' + encodeURIComponent(BRGY_ID) + '&sess=DCVS_BARANGAY_SESSION', { credentials:'same-origin' })
+      .then(function(response) { return response.json(); })
+      .then(function(data) {
+        if (requestId !== drawerRequestId || !document.getElementById('geoDrawer').classList.contains('open')) return;
+        if (data.error) throw new Error(data.error);
+        document.getElementById('geoDrawerConfirmed').textContent = data.confirmed || 0;
+        document.getElementById('geoDrawerPending').textContent = data.pending || 0;
+        document.getElementById('geoDrawerResolved').textContent = data.resolved || 0;
+        document.getElementById('geoDrawerTotal').textContent = data.total || 0;
+        document.getElementById('geoDrawerUpdated').textContent = formatGeoDateTime(data.last_updated);
+
+        var breakdown = '';
+        (data.breakdown || []).forEach(function(item) {
+          var type = String(item.type || 'other');
+          breakdown += '<div class="geo-activity-row"><span class="geo-activity-name"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:' + (reportTypeColors[type] || '#71717a') + ';margin-right:8px;vertical-align:middle;"></span>' + escapeGeoText(reportTypeLabels[type] || (type.charAt(0).toUpperCase() + type.slice(1) + ' Reports')) + '</span><span class="geo-activity-count">' + Number(item.count || 0) + '</span></div>';
+        });
+        document.getElementById('geoDrawerBreakdown').innerHTML = breakdown || '<div style="font-size:13px;color:#a1a1aa;padding:8px 0;">No reports</div>';
+
+        if (data.recent_case) {
+          var recent = data.recent_case;
+          var urgency = String(recent.urgency || 'medium').toLowerCase();
+          var urgencyStyle = {
+            critical:{ bg:'#fef2f2', color:'#991b1b', border:'#fecaca' },
+            high:{ bg:'#fff7ed', color:'#9a3412', border:'#fed7aa' },
+            medium:{ bg:'#eff6ff', color:'#1e40af', border:'#bfdbfe' },
+            low:{ bg:'#f9fafb', color:'#374151', border:'#e5e7eb' }
+          }[urgency] || { bg:'#f9fafb', color:'#374151', border:'#e5e7eb' };
+          var type = String(recent.type || 'report');
+          document.getElementById('geoDrawerRecent').innerHTML =
+            '<div class="geo-recent-id">' + escapeGeoText(recent.ref_code || '') + '</div>' +
+            '<div class="geo-recent-type">' + escapeGeoText(type === 'rabies' ? 'Suspected Rabies' : type.charAt(0).toUpperCase() + type.slice(1)) + '</div>' +
+            '<div class="geo-recent-meta"><span class="geo-recent-urgency" style="background:' + urgencyStyle.bg + ';color:' + urgencyStyle.color + ';border:1px solid ' + urgencyStyle.border + ';">' + escapeGeoText(urgency.charAt(0).toUpperCase() + urgency.slice(1) + ' Risk') + '</span><span class="geo-recent-date">' + escapeGeoText(formatGeoDate(recent.date)) + '</span></div>' +
+            '<a class="geo-recent-action" href="reports-barangay.php?view=' + encodeURIComponent(recent.id) + '">View Report <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></a>';
+          document.getElementById('geoDrawerRecentWrap').style.display = 'block';
+        } else {
+          document.getElementById('geoDrawerNoRecent').style.display = 'block';
+        }
+      })
+      .catch(function(error) {
+        if (requestId !== drawerRequestId) return;
+        console.error('Barangay geo drawer load failed:', error);
+        document.getElementById('geoDrawerBreakdown').innerHTML = '<div style="font-size:13px;color:#dc2626;padding:8px 0;">Failed to load report details</div>';
+      });
+  };
+
+  window.closeGeoDrawer = function() {
+    drawerRequestId++;
+    document.getElementById('geoDrawerOverlay').classList.remove('open');
+    document.getElementById('geoDrawer').classList.remove('open');
+    document.body.style.overflow = '';
+  };
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && document.getElementById('geoDrawer').classList.contains('open')) window.closeGeoDrawer();
+  });
+
   function setupBrgyOnly(map, geojson) {
     var target = findTarget(geojson.features || []);
     if (!target) return;
@@ -3910,7 +4165,7 @@ document.addEventListener('DOMContentLoaded', () => {
       paint: { 'text-color': '#1e293b', 'text-halo-color': '#ffffff', 'text-halo-width': 2 } });
 
     var bounds = bbFromFeature(target);
-    map.fitBounds(bounds, { padding: 60, maxZoom: 14, duration: 800 });
+    map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 800 });
 
     var p = target.properties || {};
     setText('geoBgyConfirmed', p.confirmed || 0);
@@ -3920,10 +4175,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     map.on('mouseenter', 'barangay-fill', function() { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'barangay-fill', function() { map.getCanvas().style.cursor = ''; });
+    map.on('click', 'barangay-fill', function(clickEvent) {
+      var pinLayers = ['report-pins-points', 'report-pins-clusters'].filter(function(layerId) {
+        return !!map.getLayer(layerId);
+      });
+      if (pinLayers.length && map.queryRenderedFeatures(clickEvent.point, { layers: pinLayers }).length) return;
+      window.openGeoDrawer(BRGY_ID, target.properties);
+    });
 
     if (window.MapCN && window.MapCN.barangayOverlay) {
       window.MapCN.barangayOverlay.refresh = function() {
-        fetchGeojson().then(function(data) {
+        return fetchGeojson().then(function(data) {
           var t = findTarget(data.features || []);
           if (t) {
             var src2 = map.getSource('barangays');
@@ -3937,11 +4199,29 @@ document.addEventListener('DOMContentLoaded', () => {
       };
     }
     fitted = true;
+    mapEl.dispatchEvent(new CustomEvent('dcvs:barangaymapscope', {
+      detail: { feature: target }
+    }));
   }
 
   if (refreshBtn) {
     refreshBtn.addEventListener('click', function() {
-      if (window.MapCN && window.MapCN.barangayOverlay) window.MapCN.barangayOverlay.refresh();
+      if (refreshBtn.disabled) return;
+      var refresh = window.MapCN && window.MapCN.barangayOverlay && window.MapCN.barangayOverlay.refresh;
+      if (typeof refresh !== 'function') {
+        console.error('Barangay map refresh is unavailable.');
+        return;
+      }
+      refreshBtn.disabled = true;
+      refreshBtn.classList.add('is-loading');
+      refreshBtn.setAttribute('aria-busy', 'true');
+      Promise.resolve(refresh()).catch(function(error) {
+        console.error('Failed to refresh barangay map:', error);
+      }).finally(function() {
+        refreshBtn.disabled = false;
+        refreshBtn.classList.remove('is-loading');
+        refreshBtn.removeAttribute('aria-busy');
+      });
     });
   }
 
@@ -3964,105 +4244,8 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 <script>
-/* ── Notification Dropdown ── */
-(function() {
-  var dropdown = document.getElementById('notifDropdown');
-  var btn = document.getElementById('notif-btn');
-  var panel = document.getElementById('notifPanel');
-  var list = document.getElementById('notifList');
-  var badge = document.getElementById('notifBadge');
-  if (!dropdown || !btn || !panel || !list) return;
-
-  var open = false;
-
-  function togglePanel() {
-    open = !open;
-    panel.classList.toggle('open', open);
-    if (open) loadNotifications();
-  }
-
-  btn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    togglePanel();
-  });
-
-  document.addEventListener('click', function(e) {
-    if (open && !dropdown.contains(e.target)) {
-      open = false;
-      panel.classList.remove('open');
-    }
-  });
-
-  function timeAgo(dateStr) {
-    var diff = (Date.now() - new Date(dateStr).getTime()) / 1000;
-    if (diff < 60) return 'Just now';
-    if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
-    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
-    if (diff < 604800) return Math.floor(diff / 86400) + 'd ago';
-    return new Date(dateStr).toLocaleDateString();
-  }
-
-  function notifIcon(type) {
-    if (type.indexOf('resolved') !== -1) return '<i class="fas fa-check-circle" style="color:#16a34a;"></i>';
-    if (type.indexOf('rejected') !== -1) return '<i class="fas fa-times-circle" style="color:#dc2626;"></i>';
-    if (type.indexOf('validated') !== -1) return '<i class="fas fa-check-double" style="color:#2563eb;"></i>';
-    if (type.indexOf('confirmed') !== -1) return '<i class="fas fa-check" style="color:#0e8131;"></i>';
-    return '<i class="fas fa-bell" style="color:#d97706;"></i>';
-  }
-
-  function loadNotifications() {
-    fetch('get-notifications.php?limit=20')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        if (!data.success || !data.notifications.length) {
-          list.innerHTML = '<div class="notif-empty"><i class="fas fa-bell-slash" style="font-size:1.5rem;margin-bottom:8px;display:block;color:#cbd5e1;"></i>No notifications yet</div>';
-          return;
-        }
-        var html = '';
-        data.notifications.forEach(function(n) {
-          var cls = n.read ? '' : ' unread';
-          html += '<div class="notif-item' + cls + '" data-id="' + n.id + '" data-reftype="' + (n.refType || '') + '" data-refid="' + (n.refId || '') + '">'
-            + '<div class="notif-icon">' + notifIcon(n.type) + '</div>'
-            + '<div class="notif-content">'
-            + '<div class="notif-title">' + escHtml(n.title) + '</div>'
-            + '<div class="notif-msg">' + escHtml(n.message) + '</div>'
-            + '<div class="notif-time">' + timeAgo(n.createdAt) + '</div>'
-            + '</div></div>';
-        });
-        list.innerHTML = html;
-
-        list.querySelectorAll('.notif-item').forEach(function(item) {
-          item.addEventListener('click', function() {
-            var nid = item.getAttribute('data-id');
-            var refType = item.getAttribute('data-reftype');
-            var refId = item.getAttribute('data-refid');
-            item.classList.remove('unread');
-            fetch('mark-notifications-read.php?type=barangay&nid=' + nid);
-            if (refType === 'report' && refId) {
-              window.location.href = 'reports-barangay.php';
-            }
-          });
-        });
-      })
-      .catch(function() {
-        list.innerHTML = '<div class="notif-empty">Failed to load notifications</div>';
-      });
-  }
-
-  function escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s || '';
-    return d.innerHTML;
-  }
-
-  window.markAllNotifRead = function() {
-    fetch('mark-notifications-read.php?type=barangay').then(function() {
-      list.querySelectorAll('.notif-item.unread').forEach(function(el) { el.classList.remove('unread'); });
-      if (badge) badge.style.display = 'none';
-    });
-  };
-})();
+// Notifications are managed by assets/js/notification-panel.js.
 </script>
-
+<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/notification-panel.js'); ?>" defer></script>
 </body>
 </html>

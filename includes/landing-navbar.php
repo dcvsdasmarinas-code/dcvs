@@ -1,6 +1,6 @@
 <header class="site-header">
   <nav class="navbar">
-    <a href="<?php echo $homePage; ?>"><img src="uploads/site/logo.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
+    <a href="<?php echo $homePage; ?>"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -22,13 +22,6 @@
         </div>
       </li>
       <li><a href="adoption.php">Adoption</a></li>
-      <li class="nav-item">
-        <a href="javascript:void(0)" class="dropdown-toggle <?php echo in_array($currentPage, ['knowledge','philippine-initiatives']) ? 'active' : ''; ?>">Insights <span class="arrow">▾</span></a>
-        <div class="dropdown-menu">
-          <a href="Knowledge-Hub.php">Knowledge Hub</a>
-          <a href="Philippine-Initiatives.php">Philippine Initiatives</a>
-        </div>
-      </li>
     </ul>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
@@ -58,7 +51,6 @@
     if (p === 'announcements.php' || p === 'geo-map-landing.php') return 'updates';
     if (p === 'about.php' || p === 'faq.php' || p === 'contact.php') return 'about';
     if (p === 'adoption.php') return 'adoption';
-    if (p === 'knowledge-hub.php' || p === 'philippine-initiatives.php') return 'insights';
     return 'home';
   }
   function sync() {
@@ -74,9 +66,6 @@
     } else if (k === 'about') {
       var ab = document.querySelector('.nav-links > li:nth-child(3) > .dropdown-toggle');
       if (ab) ab.classList.add('active');
-    } else if (k === 'insights') {
-      var ins = document.querySelector('.nav-links > li:nth-child(5) > .dropdown-toggle');
-      if (ins) ins.classList.add('active');
     } else if (k === 'adoption') {
       var ad = document.querySelector('.nav-links a[href="adoption.php"]');
       if (ad) ad.classList.add('active');

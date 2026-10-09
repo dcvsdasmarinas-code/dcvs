@@ -14,7 +14,7 @@
   --ro-radius: 12px;
   --ro-gap: 20px;
   --ro-card-pad: 20px;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   color: var(--ro-dark);
   font-size: 14px;
   line-height: 1.5;
@@ -54,7 +54,7 @@
   background: var(--ro-green);
   color: #fff;
   padding: 0 18px;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -96,7 +96,7 @@
   display: none;
 }
 .resident-overview .ro-kpi-label {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -104,7 +104,7 @@
   margin: 0 0 6px;
 }
 .resident-overview .ro-kpi-value {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 26px;
   font-weight: 600;
   line-height: 1;
@@ -113,7 +113,7 @@
   margin: 0 0 6px;
 }
 .resident-overview .ro-kpi-sub {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   margin: 0;
@@ -121,7 +121,7 @@
 .resident-overview .ro-link {
   color: var(--ro-green);
   font-weight: 600;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
 }
 
@@ -152,7 +152,7 @@
   border-bottom: 1px solid var(--ro-border);
 }
 .resident-overview .ro-card-head h2 {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 18px;
   font-weight: 600;
   line-height: 1;
@@ -168,7 +168,7 @@
   font-weight: 400;
 }
 .resident-overview .ro-view {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: var(--ro-green);
@@ -183,7 +183,7 @@
   border-radius: 8px;
   background: #fff;
   color: #344054;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   padding: 0 12px;
@@ -221,7 +221,7 @@
   position: relative;
 }
 .resident-overview .ro-time {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: #71717a;
@@ -276,7 +276,7 @@
   flex: 1;
 }
 .resident-overview .ro-appt-info strong {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -284,14 +284,14 @@
   display: block;
 }
 .resident-overview .ro-appt-info span {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   display: block;
   margin-top: 2px;
 }
 .resident-overview .ro-status {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 11.5px;
   font-weight: 700;
   padding: 3px 10px;
@@ -318,7 +318,7 @@
   background: #fff;
   border: 1px solid var(--ro-border);
   border-radius: 8px;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: #344054;
@@ -358,7 +358,7 @@
   font-size: 16px;
 }
 .resident-overview .ro-pet strong {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -367,7 +367,7 @@
 }
 .resident-overview .ro-pet span {
   display: block;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   margin-top: 3px;
@@ -376,7 +376,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 11.5px;
   font-weight: 700;
   color: #64748b;
@@ -394,7 +394,7 @@
   color: #71717a;
   cursor: pointer;
   transition: color 0.15s ease;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
 }
 .resident-overview .ro-add-pet:hover { color: var(--ro-green); }
@@ -454,14 +454,14 @@
 }
 .resident-overview .ro-task-text {
   flex: 1;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: #18181b;
 }
 .resident-overview .ro-task-date {
   color: var(--ro-green);
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -487,19 +487,19 @@
 }
 .resident-overview .ro-row-label {
   flex: 1;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: #18181b;
 }
 .resident-overview .ro-row strong {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 600;
   color: #18181b;
 }
 .resident-overview .ro-live {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   color: var(--ro-green);
@@ -516,7 +516,7 @@
   color: #b45309;
   border-radius: 0;
   padding: 3px 10px;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 11.5px;
   font-weight: 700;
   display: inline-flex;
@@ -539,7 +539,7 @@
   font-size: 16px;
 }
 .resident-overview .ro-announcement strong {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   line-height: 1;
@@ -547,14 +547,14 @@
   display: block;
 }
 .resident-overview .ro-announcement p {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   line-height: 1.45;
   margin: 4px 0;
 }
 .resident-overview .ro-announcement time {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #98A2B3;
 }
@@ -571,13 +571,13 @@
 .resident-overview .ro-table {
   width: 100%;
   border-collapse: collapse;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
 }
 .resident-overview .ro-table th {
   text-align: left;
   color: #71717a;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   letter-spacing: 0.03em;
   font-weight: 600;
@@ -594,7 +594,7 @@
 .resident-overview .ro-table tr:first-child td { border-top: 0; }
 .resident-overview .ro-badge {
   display: inline-block;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   padding: 4px 10px;
@@ -632,7 +632,7 @@
 }
 .resident-overview .ro-help-copy { flex: 1; }
 .resident-overview .ro-help-copy strong {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 18px;
   font-weight: 600;
   line-height: 1;
@@ -641,14 +641,14 @@
   display: block;
 }
 .resident-overview .ro-help-copy p {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   margin: 6px 0;
   line-height: 1.5;
 }
 .resident-overview .ro-contact {
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   color: #71717a;
   line-height: 1.9;
@@ -671,7 +671,7 @@
   background: #fff;
   border-radius: 8px;
   color: #344054;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -695,7 +695,7 @@
   padding: 32px 0;
   text-align: center;
   color: #71717a;
-  font-family: 'Inter', 'Segoe UI', sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 14px;
 }
 

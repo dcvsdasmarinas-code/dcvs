@@ -22,6 +22,11 @@ function getRiskBadgeColor(risk) {
   }
 }
 
+function setTextById(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
 function updateSummary(metadata) {
   if (!metadata) return;
   const e1 = document.getElementById('geoTotalConfirmed');
@@ -41,15 +46,20 @@ function openInfoPanel(props) {
   const rc = getRiskBadgeColor(props.risk);
   const lastUpdated = props.lastUpdated ? new Date(props.lastUpdated).toLocaleString() : 'N/A';
 
-  document.getElementById('geoPanelName').textContent = props.name || 'Unknown';
+  const nameEl = document.getElementById('geoPanelName');
   const riskEl = document.getElementById('geoPanelRisk');
-  riskEl.textContent = props.risk || 'Green';
-  riskEl.style.background = rc.bg;
-  riskEl.style.color = rc.text;
-  document.getElementById('geoPanelConfirmed').textContent = props.confirmed || 0;
-  document.getElementById('geoPanelPending').textContent = props.pending || 0;
-  document.getElementById('geoPanelResolved').textContent = props.resolved || 0;
-  document.getElementById('geoPanelUpdated').textContent = lastUpdated;
+
+  if (nameEl) nameEl.textContent = props.name || 'Unknown';
+  if (riskEl) {
+    riskEl.textContent = props.risk || 'Green';
+    riskEl.style.background = rc.bg;
+    riskEl.style.color = rc.text;
+  }
+
+  setTextById('geoPanelConfirmed', props.confirmed || 0);
+  setTextById('geoPanelPending', props.pending || 0);
+  setTextById('geoPanelResolved', props.resolved || 0);
+  setTextById('geoPanelUpdated', lastUpdated);
 
   panel.classList.add('open');
 }
@@ -306,6 +316,8 @@ function searchBarangay(map, query) {
 
 export function initBarangayOverlay(map, opts) {
   if (opts && opts.geojsonUrl) GEOJSON_URL = opts.geojsonUrl;
+  const root = map?.getContainer?.()?.parentElement;
+
   fetchBarangayData()
     .then((data) => {
       addLayers(map, data);
@@ -317,6 +329,13 @@ export function initBarangayOverlay(map, opts) {
     })
     .catch((err) => {
       console.error('Barangay overlay init failed:', err);
+      if (root) {
+        const loader = root.querySelector('.mapcn-loading');
+        if (loader) {
+          loader.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Failed to load barangay map data. Please refresh the page.';
+        }
+        root.classList.add('mapcn-error');
+      }
     });
 }
 

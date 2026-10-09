@@ -52,10 +52,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $stmt->execute();
         $stmt->close();
     };
+    $beginLifecycleTransaction = function($userIds, $mode) use ($conn, $adminId) {
+        $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds), function($id) { return $id > 0; })));
+        if (!$userIds) return ['error' => 'Select at least one valid user.'];
+
+        $conn->begin_transaction();
+        $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+        $types = str_repeat('i', count($userIds));
+        $stmt = $conn->prepare("SELECT user_id, full_name, email, role, status FROM users WHERE user_id IN ($placeholders) AND deleted_at IS NULL FOR UPDATE");
+        $stmt->bind_param($types, ...$userIds);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $users = [];
+        while ($user = $result->fetch_assoc()) $users[(int)$user['user_id']] = $user;
+        $stmt->close();
+
+        if (count($users) !== count($userIds)) {
+            $conn->rollback();
+            return ['error' => 'One or more users no longer exist or have already been deleted. Refresh the page and try again.'];
+        }
+
+        $shouldDeactivate = $mode === 'delete' ||
+            ($mode === 'toggle' && isset($users[(int)$adminId]) && $users[(int)$adminId]['status'] === 'active') ||
+            ($mode === 'deactivate');
+        if ($shouldDeactivate && isset($users[(int)$adminId])) {
+            $conn->rollback();
+            return ['error' => 'You cannot deactivate or delete your own admin account.'];
+        }
+
+        if ($mode === 'delete' || $mode === 'deactivate' || $mode === 'toggle') {
+            $adminRows = $conn->query("SELECT user_id, status FROM users WHERE role = 'admin' AND deleted_at IS NULL FOR UPDATE");
+            $allAdminIds = [];
+            $activeAdminIds = [];
+            while ($row = $adminRows->fetch_assoc()) {
+                $adminIdInDb = (int)$row['user_id'];
+                $allAdminIds[] = $adminIdInDb;
+                if ($row['status'] === 'active') $activeAdminIds[] = $adminIdInDb;
+            }
+            $targetAdmins = count(array_intersect($allAdminIds, $userIds));
+            if ($mode === 'delete' && $targetAdmins > 0 && count($allAdminIds) - $targetAdmins < 1) {
+                $conn->rollback();
+                return ['error' => 'The last admin account cannot be deleted.'];
+            }
+            $targetActiveAdmins = count(array_intersect($activeAdminIds, $userIds));
+            if ($targetActiveAdmins > 0 && count($activeAdminIds) - $targetActiveAdmins < 1) {
+                $conn->rollback();
+                return ['error' => 'The last active admin account cannot be deactivated or deleted.'];
+            }
+        }
+
+        return ['users' => $users, 'ids' => $userIds];
+    };
 
     if ($action === 'get_user') {
         $userId = intval($_POST['user_id'] ?? 0);
-        $stmt = $conn->prepare("SELECT user_id, username, email, full_name, role, barangay_id, phone, address, status FROM users WHERE user_id = ?");
+        $stmt = $conn->prepare("SELECT u.user_id, u.username, u.email, u.full_name, u.role, u.barangay_id, u.phone, u.address, u.status, u.reference_id, u.created_at, u.avatar_url, b.barangay_name FROM users u LEFT JOIN barangays b ON u.barangay_id = b.barangay_id WHERE u.user_id = ? AND u.deleted_at IS NULL");
         $stmt->bind_param("i", $userId);
         $stmt->execute();
         $u = $stmt->get_result()->fetch_assoc();
@@ -65,6 +116,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } else {
             echo json_encode(['success' => false, 'message' => 'User not found.']);
         }
+        exit;
+    }
+
+    if ($action === 'get_user_pets') {
+        $userId = intval($_POST['user_id'] ?? 0);
+        $stmt = $conn->prepare("SELECT pet_id, reference_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, photo_url, created_at FROM pets WHERE owner_id = ? AND archived_at IS NULL AND EXISTS (SELECT 1 FROM users WHERE user_id = ? AND deleted_at IS NULL) ORDER BY pet_id ASC");
+        $stmt->bind_param("ii", $userId, $userId);
+        $stmt->execute();
+        $pets = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+        echo json_encode(['success' => true, 'pets' => $pets]);
         exit;
     }
 
@@ -78,7 +140,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $role = $_POST['role'] ?? 'resident';
         $phone = trim($_POST['phone'] ?? '');
         $address = trim($_POST['address'] ?? '');
-        $status = $_POST['status'] ?? 'active';
         $barangayIdVal = !empty($_POST['barangay_id']) ? intval($_POST['barangay_id']) : null;
 
         $errors = [];
@@ -119,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         if (empty($errors)) {
             if ($isEdit) {
-                $oldRoleQ = $conn->prepare("SELECT role FROM users WHERE user_id = ?");
+                $oldRoleQ = $conn->prepare("SELECT role FROM users WHERE user_id = ? AND deleted_at IS NULL");
                 $oldRoleQ->bind_param("i", $userId); $oldRoleQ->execute(); $origRow = $oldRoleQ->get_result()->fetch_assoc(); $oldRoleQ->close();
                 if ($origRow) {
                     $origRole = $origRow['role'];
@@ -137,8 +198,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $hash = $isEdit ? null : password_hash($password, PASSWORD_DEFAULT);
 
             if ($isEdit) {
-                $stmt = $conn->prepare("UPDATE users SET full_name=?, email=?, username=?, role=?, phone=?, address=?, barangay_id=?, status=? WHERE user_id=?");
-                $stmt->bind_param("ssssssssi", $fullName, $email, $username, $role, $phone, $address, $barangayIdVal, $status, $userId);
+                $stmt = $conn->prepare("UPDATE users SET full_name=?, email=?, username=?, role=?, phone=?, address=?, barangay_id=? WHERE user_id=? AND deleted_at IS NULL");
+                $stmt->bind_param("sssssssi", $fullName, $email, $username, $role, $phone, $address, $barangayIdVal, $userId);
                 if ($stmt->execute()) {
                     $detail = "Edited user '$fullName' ($email)";
                     $logAction($adminId, 'User Edited', $detail);
@@ -185,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode($response); exit;
         }
 
-        $old = $conn->prepare("SELECT full_name, role FROM users WHERE user_id = ?");
+        $old = $conn->prepare("SELECT full_name, role FROM users WHERE user_id = ? AND deleted_at IS NULL");
         $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
         if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
 
@@ -223,26 +284,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'toggle_status') {
         $userId = intval($_POST['user_id'] ?? 0);
-        $old = $conn->prepare("SELECT full_name, email, status FROM users WHERE user_id = ?");
-        $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
-        if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
+        $lifecycle = $beginLifecycleTransaction([$userId], 'toggle');
+        if (!empty($lifecycle['error'])) { $response['message'] = $lifecycle['error']; echo json_encode($response); exit; }
+        $u = $lifecycle['users'][$userId];
 
         $newStatus = $u['status'] === 'active' ? 'inactive' : 'active';
-        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE user_id = ?");
+        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE user_id = ? AND deleted_at IS NULL");
         $stmt->bind_param("si", $newStatus, $userId);
         if ($stmt->execute()) {
+            $conn->commit();
             $actionLabel = $newStatus === 'active' ? 'Activated' : 'Deactivated';
             $detail = "$actionLabel user '{$u['full_name']}'";
             $logAction($adminId, "User $actionLabel", $detail);
             $_SESSION['flash_msg'] = "User '{$u['full_name']}' " . strtolower($actionLabel) . " successfully.";
             $_SESSION['flash_type'] = 'success';
-            if ($newStatus === 'inactive') {
+            if ($newStatus === 'inactive' && $u['role'] === 'resident') {
                 $subject = 'Account Deactivated — Dasmariñas City Veterinary Services';
-                $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account has been <strong>deactivated</strong> by an administrator.</p><p>You will not be able to log in until your account is reactivated. Please contact the administrator for more information.</p>";
+                $htmlBody = dcvsEmailTemplate('Account Deactivated', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your DCVS account has been <strong>deactivated</strong> by an administrator.</p><p style="margin:0 0 16px;">You will not be able to log in until your account is reactivated. Please contact the administrator for more information.</p>');
                 sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
             }
             $response = ['success' => true];
         } else {
+            $conn->rollback();
             $response['message'] = 'Failed to update status.';
         }
         $stmt->close();
@@ -251,20 +314,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'archive_user') {
         $userId = intval($_POST['user_id'] ?? 0);
-        $old = $conn->prepare("SELECT full_name, email FROM users WHERE user_id = ?");
+        $old = $conn->prepare("SELECT full_name, email, role FROM users WHERE user_id = ? AND deleted_at IS NULL");
         $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
         if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
 
-        $stmt = $conn->prepare("UPDATE users SET archived_at = NOW(), status = 'inactive' WHERE user_id = ?");
+        $stmt = $conn->prepare("UPDATE users SET archived_at = NOW() WHERE user_id = ? AND deleted_at IS NULL");
         $stmt->bind_param("i", $userId);
         if ($stmt->execute()) {
             $detail = "Archived user '{$u['full_name']}'";
             $logAction($adminId, 'User Archived', $detail);
             $_SESSION['flash_msg'] = "User '{$u['full_name']}' archived successfully.";
             $_SESSION['flash_type'] = 'success';
-            $subject = 'Account Archived — Dasmariñas City Veterinary Services';
-            $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account has been <strong>archived</strong> by an administrator.</p><p>You will not be able to log in until your account is restored. Please contact the administrator for more information.</p>";
-            sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+            if ($u['role'] === 'resident') {
+                $subject = 'Account Archived — Dasmariñas City Veterinary Services';
+                $htmlBody = dcvsEmailTemplate('Account Archived', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your account has been archived from the administrator’s main user list. This organizational action does not change your account access.</p>');
+                sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+            }
             $response = ['success' => true];
         } else {
             $response['message'] = 'Failed to archive user.';
@@ -275,20 +340,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'restore_user') {
         $userId = intval($_POST['user_id'] ?? 0);
-        $old = $conn->prepare("SELECT full_name, email FROM users WHERE user_id = ?");
+        $old = $conn->prepare("SELECT full_name, email, role, status FROM users WHERE user_id = ? AND archived_at IS NOT NULL AND deleted_at IS NULL");
         $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
         if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
 
-        $stmt = $conn->prepare("UPDATE users SET archived_at = NULL, status = 'active' WHERE user_id = ?");
+        $stmt = $conn->prepare("UPDATE users SET archived_at = NULL WHERE user_id = ? AND deleted_at IS NULL");
         $stmt->bind_param("i", $userId);
         if ($stmt->execute()) {
-            $detail = "Restored user '{$u['full_name']}'";
-            $logAction($adminId, 'User Restored', $detail);
-            $_SESSION['flash_msg'] = "User '{$u['full_name']}' restored successfully.";
+            $detail = "Unarchived user '{$u['full_name']}'";
+            $logAction($adminId, 'User Unarchived', $detail);
+            $_SESSION['flash_msg'] = "User '{$u['full_name']}' unarchived successfully.";
             $_SESSION['flash_type'] = 'success';
-            $subject = 'Account Restored — Dasmariñas City Veterinary Services';
-            $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account has been <strong>restored</strong> by an administrator. You can now log in again.</p>";
-            sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+            if ($u['role'] === 'resident') {
+                $accessText = $u['status'] === 'active' ? 'Your account access remains active.' : 'Your account remains deactivated until an administrator activates it.';
+                $subject = 'Account Unarchived — Dasmariñas City Veterinary Services';
+                $htmlBody = dcvsEmailTemplate('Account Unarchived', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your account has been removed from the administrator’s archive. ' . $accessText . '</p>');
+                sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+            }
             $response = ['success' => true];
         } else {
             $response['message'] = 'Failed to restore user.';
@@ -299,34 +367,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     if ($action === 'delete_user') {
         $userId = intval($_POST['user_id'] ?? 0);
-        $old = $conn->prepare("SELECT full_name, email FROM users WHERE user_id = ?");
-        $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
-        if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
-
-        $related = [];
-        $tables = ['pets' => 'owner_id', 'reports' => 'reporter_id', 'appointments' => 'user_id', 'notifications' => 'user_id', 'adoption_applications' => 'applicant_id', 'adoption_listings' => 'listed_by', 'alerts' => 'created_by', 'announcements' => 'created_by'];
-        foreach ($tables as $table => $col) {
-            $chk = $conn->query("SELECT COUNT(*) FROM $table WHERE $col = $userId");
-            if ($chk && $chk->fetch_row()[0] > 0) $related[] = $table;
-        }
-        if (!empty($related)) {
-            $response['message'] = "Cannot delete — user has records in: " . implode(', ', $related) . ". Archive the user instead.";
-            echo json_encode($response); exit;
-        }
+        $lifecycle = $beginLifecycleTransaction([$userId], 'delete');
+        if (!empty($lifecycle['error'])) { $response['message'] = $lifecycle['error']; echo json_encode($response); exit; }
+        $u = $lifecycle['users'][$userId];
 
         $subject = 'Account Deleted — Dasmariñas City Veterinary Services';
-        $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account has been <strong>permanently deleted</strong> by an administrator.</p><p>If you believe this was a mistake, please contact the administrator.</p>";
-        sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
-
-        $conn->begin_transaction();
+        $htmlBody = dcvsEmailTemplate('Account Deleted', '<p style="margin:0 0 16px;">Hello <strong>' . htmlspecialchars($u['full_name']) . '</strong>,</p><p style="margin:0 0 16px;">Your DCVS account has been deactivated and marked as deleted by an administrator. Your records remain in the system.</p><p style="margin:0 0 16px;">If you believe this was a mistake, please contact the administrator.</p>');
         try {
-            $conn->query("DELETE FROM activity_logs WHERE user_id = $userId");
-            $stmt = $conn->prepare("DELETE FROM users WHERE user_id = ?");
+            $stmt = $conn->prepare("UPDATE users SET deleted_at = NOW(), status = 'inactive' WHERE user_id = ? AND deleted_at IS NULL");
             $stmt->bind_param("i", $userId); $stmt->execute(); $stmt->close();
+            $tokenStmt = $conn->prepare("DELETE FROM remember_tokens WHERE user_id = ?");
+            $tokenStmt->bind_param("i", $userId); $tokenStmt->execute(); $tokenStmt->close();
             $conn->commit();
-            $detail = "Permanently deleted user '{$u['full_name']}' (ID: $userId)";
+            if ($u['role'] === 'resident') {
+                sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
+            }
+            $detail = "Soft-deleted user '{$u['full_name']}' (ID: $userId)";
             $logAction($adminId, 'User Deleted', $detail);
-            $_SESSION['flash_msg'] = "User '{$u['full_name']}' permanently deleted.";
+            $_SESSION['flash_msg'] = "User '{$u['full_name']}' deleted. Their records were retained.";
             $_SESSION['flash_type'] = 'success';
             $response = ['success' => true];
         } catch (Exception $e) {
@@ -336,54 +394,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         echo json_encode($response); exit;
     }
 
-    if ($action === 'reset_password') {
-        $userId = intval($_POST['user_id'] ?? 0);
-        $newPassword = $_POST['new_password'] ?? '';
-
-        if (strlen($newPassword) < 6) {
-            $response['message'] = 'Password must be at least 6 characters.';
-            echo json_encode($response); exit;
-        }
-
-        $old = $conn->prepare("SELECT full_name, email FROM users WHERE user_id = ?");
-        $old->bind_param("i", $userId); $old->execute(); $u = $old->get_result()->fetch_assoc(); $old->close();
-        if (!$u) { $response['message'] = 'User not found.'; echo json_encode($response); exit; }
-
-        $hash = password_hash($newPassword, PASSWORD_DEFAULT);
-        $stmt = $conn->prepare("UPDATE users SET password = ?, password_updated_at = NOW() WHERE user_id = ?");
-        $stmt->bind_param("si", $hash, $userId);
-        if ($stmt->execute()) {
-            $detail = "Reset password for user '{$u['full_name']}'";
-            $logAction($adminId, 'Password Reset', $detail);
-            $_SESSION['flash_msg'] = "Password reset for '{$u['full_name']}' successfully.";
-            $_SESSION['flash_type'] = 'success';
-            $subject = 'Password Changed — Dasmariñas City Veterinary Services';
-            $htmlBody = "<p>Hello <strong>{$u['full_name']}</strong>,</p><p>Your DCVS account password has been <strong>reset</strong> by an administrator.</p><p>Please use the new password provided to log in. We recommend changing your password after logging in.</p>";
-            sendDcvsEmail($u['email'], $subject, $htmlBody, $conn, $u['full_name'], $adminId, 'resident', null, null, 'account_status');
-            $response = ['success' => true];
-        } else {
-            $response['message'] = 'Failed to reset password.';
-        }
-        $stmt->close();
-        echo json_encode($response); exit;
-    }
-
     if ($action === 'bulk_toggle_status') {
-        $userIds = array_map('intval', explode(',', $_POST['user_ids'] ?? ''));
+        $userIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $_POST['user_ids'] ?? '')), function($id) { return $id > 0; })));
         $newStatus = $_POST['new_status'] ?? 'active';
         if (empty($userIds) || !in_array($newStatus, ['active', 'inactive'])) {
             $response['message'] = 'Invalid parameters.';
             echo json_encode($response); exit;
         }
         $placeholders = implode(',', array_fill(0, count($userIds), '?'));
-        $types = str_repeat('i', count($userIds)) . 's';
-        $params = array_merge($userIds, [$newStatus]);
-        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE user_id IN ($placeholders) AND archived_at IS NULL");
+        $lifecycle = $beginLifecycleTransaction($userIds, $newStatus === 'inactive' ? 'deactivate' : 'none');
+        if (!empty($lifecycle['error'])) { $response['message'] = $lifecycle['error']; echo json_encode($response); exit; }
+        $userIds = $lifecycle['ids'];
+        $placeholders = implode(',', array_fill(0, count($userIds), '?'));
         $paramTypes = 's' . str_repeat('i', count($userIds));
         $paramVals = array_merge([$newStatus], $userIds);
-        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE user_id IN ($placeholders)");
+        $stmt = $conn->prepare("UPDATE users SET status = ? WHERE user_id IN ($placeholders) AND deleted_at IS NULL");
         $stmt->bind_param($paramTypes, ...$paramVals);
         if ($stmt->execute()) {
+            $conn->commit();
             $count = $stmt->affected_rows;
             $actionLabel = $newStatus === 'active' ? 'Activated' : 'Deactivated';
             $logAction($adminId, "Bulk $actionLabel", "$actionLabel $count user(s)");
@@ -391,6 +419,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $_SESSION['flash_type'] = 'success';
             $response = ['success' => true];
         } else {
+            $conn->rollback();
             $response['message'] = 'Failed to update users.';
         }
         $stmt->close();
@@ -398,14 +427,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'bulk_archive') {
-        $userIds = array_map('intval', explode(',', $_POST['user_ids'] ?? ''));
+        $userIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $_POST['user_ids'] ?? '')), function($id) { return $id > 0; })));
         if (empty($userIds)) {
             $response['message'] = 'No users selected.';
             echo json_encode($response); exit;
         }
         $placeholders = implode(',', array_fill(0, count($userIds), '?'));
         $types = str_repeat('i', count($userIds));
-        $stmt = $conn->prepare("UPDATE users SET archived_at = NOW(), status = 'inactive' WHERE user_id IN ($placeholders)");
+        $stmt = $conn->prepare("UPDATE users SET archived_at = NOW() WHERE user_id IN ($placeholders) AND deleted_at IS NULL");
         $stmt->bind_param($types, ...$userIds);
         if ($stmt->execute()) {
             $count = $stmt->affected_rows;
@@ -427,15 +456,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             echo json_encode($response); exit;
         }
         $role = $_POST['role'] ?? '';
-        $status = $_POST['status'] ?? '';
         $barangayId = !empty($_POST['barangay_id']) ? intval($_POST['barangay_id']) : null;
         $validRoles = ['resident','barangay','staff','admin'];
         if ($role && !in_array($role, $validRoles)) {
             $response['message'] = 'Invalid role.';
-            echo json_encode($response); exit;
-        }
-        if ($status && !in_array($status, ['active','inactive'])) {
-            $response['message'] = 'Invalid status.';
             echo json_encode($response); exit;
         }
         $placeholders = implode(',', array_fill(0, count($userIds), '?'));
@@ -443,28 +467,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $setTypes = '';
         $setVals = [];
         if ($role) { $sets[] = 'role = ?'; $setTypes .= 's'; $setVals[] = $role; }
-        if ($status) { $sets[] = 'status = ?'; $setTypes .= 's'; $setVals[] = $status; }
         if ($barangayId) { $sets[] = 'barangay_id = ?'; $setTypes .= 'i'; $setVals[] = $barangayId; }
         if (empty($sets)) {
             $response['message'] = 'No changes specified.';
             echo json_encode($response); exit;
         }
-        $sql = "UPDATE users SET " . implode(', ', $sets) . " WHERE user_id IN ($placeholders)";
+        $lifecycle = $beginLifecycleTransaction($userIds, 'none');
+        if (!empty($lifecycle['error'])) { $response['message'] = $lifecycle['error']; echo json_encode($response); exit; }
+        $userIds = $lifecycle['ids'];
+        $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+        $sql = "UPDATE users SET " . implode(', ', $sets) . " WHERE user_id IN ($placeholders) AND deleted_at IS NULL";
         $allVals = array_merge($setVals, $userIds);
         $allTypes = $setTypes . str_repeat('i', count($userIds));
         $stmt = $conn->prepare($sql);
         $stmt->bind_param($allTypes, ...$allVals);
         if ($stmt->execute()) {
+            $conn->commit();
             $count = $stmt->affected_rows;
             $changed = [];
             if ($role) $changed[] = "role → $role";
-            if ($status) $changed[] = "status → $status";
             if ($barangayId) $changed[] = "barangay → #$barangayId";
             $logAction($adminId, "Bulk Edit", "Updated " . implode(', ', $changed) . " for $count user(s)");
             $_SESSION['flash_msg'] = "Updated $count user(s) successfully.";
             $_SESSION['flash_type'] = 'success';
             $response = ['success' => true];
         } else {
+            $conn->rollback();
             $response['message'] = 'Failed to update users.';
         }
         $stmt->close();
@@ -472,36 +500,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 
     if ($action === 'bulk_delete') {
-        $userIds = array_map('intval', explode(',', $_POST['user_ids'] ?? ''));
+        $userIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $_POST['user_ids'] ?? '')), function($id) { return $id > 0; })));
         if (empty($userIds)) {
             $response['message'] = 'No users selected.';
             echo json_encode($response); exit;
         }
+        $lifecycle = $beginLifecycleTransaction($userIds, 'delete');
+        if (!empty($lifecycle['error'])) { $response['message'] = $lifecycle['error']; echo json_encode($response); exit; }
+        $userIds = $lifecycle['ids'];
         $placeholders = implode(',', array_fill(0, count($userIds), '?'));
         $types = str_repeat('i', count($userIds));
-
-        $related = [];
-        $tables = ['pets' => 'owner_id', 'reports' => 'reporter_id', 'appointments' => 'user_id', 'notifications' => 'user_id', 'adoption_applications' => 'applicant_id', 'adoption_listings' => 'listed_by', 'alerts' => 'created_by', 'announcements' => 'created_by'];
-        foreach ($tables as $table => $col) {
-            $chk = $conn->query("SELECT COUNT(*) FROM $table WHERE $col IN ($placeholders)");
-            if ($chk && $chk->fetch_row()[0] > 0) $related[] = $table;
-        }
-        if (!empty($related)) {
-            $response['message'] = "Cannot delete — users have records in: " . implode(', ', $related) . ". Archive them instead.";
-            echo json_encode($response); exit;
-        }
-
-        $conn->begin_transaction();
         try {
-            $conn->query("DELETE FROM activity_logs WHERE user_id IN ($placeholders)");
-            $stmt = $conn->prepare("DELETE FROM users WHERE user_id IN ($placeholders)");
+            $stmt = $conn->prepare("UPDATE users SET deleted_at = NOW(), status = 'inactive' WHERE user_id IN ($placeholders) AND deleted_at IS NULL");
             $stmt->bind_param($types, ...$userIds);
             $stmt->execute();
             $stmt->close();
+            $tokenStmt = $conn->prepare("DELETE FROM remember_tokens WHERE user_id IN ($placeholders)");
+            $tokenStmt->bind_param($types, ...$userIds);
+            $tokenStmt->execute();
+            $tokenStmt->close();
             $conn->commit();
             $count = count($userIds);
-            $logAction($adminId, "Bulk Delete", "Permanently deleted $count user(s)");
-            $_SESSION['flash_msg'] = "Permanently deleted $count user(s) successfully.";
+            $logAction($adminId, "Bulk Delete", "Soft-deleted $count user(s); retained linked records");
+            $_SESSION['flash_msg'] = "Deleted $count user(s). Their records were retained.";
             $_SESSION['flash_type'] = 'success';
             $response = ['success' => true];
         } catch (Exception $e) {
@@ -524,7 +545,7 @@ $search = trim($_GET['search'] ?? '');
 $roleFilter = $_GET['role'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 $barangayFilter = isset($_GET['barangay']) ? intval($_GET['barangay']) : 0;
-$where = "WHERE 1=1";
+$where = "WHERE u.deleted_at IS NULL";
 $params = [];
 $types = "";
 
@@ -568,9 +589,9 @@ $barangays = [];
 $br = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
 if ($br) $barangays = $br->fetch_all(MYSQLI_ASSOC);
 
-$archivedCount = $conn->query("SELECT COUNT(*) FROM users WHERE archived_at IS NOT NULL")->fetch_row()[0];
+$archivedCount = $conn->query("SELECT COUNT(*) FROM users WHERE archived_at IS NOT NULL AND deleted_at IS NULL")->fetch_row()[0];
 $pageTitle = 'Role Management';
-$activePage = 'roles';
+$activePage = 'users';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -612,6 +633,8 @@ body { background:#ffffff; }
 .appt-table tbody tr:last-child{border-bottom:none;}
 .appt-table tbody tr:hover{background:#f9fafb;}
 .appt-table tbody td{padding:10px 12px;font-size:14px;color:#18181b;vertical-align:middle;}
+.user-reference{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;}
+.client-name.user-full-name{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;}
 .appt-table tbody td.sd-td-action{text-align:right;}
 
 /* ── Sort buttons ── */
@@ -673,6 +696,14 @@ body { background:#ffffff; }
 .sd-dialog-title{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-0.025em;color:#18181b;}
 .sd-dialog-description{margin:0;font-size:14px;color:#71717a;line-height:1.5;}
 .sd-dialog-footer{display:flex;justify-content:flex-end;align-items:center;gap:8px;}
+.alert-dialog-content{max-width:512px;gap:16px;padding:24px;}
+.alert-dialog-content .sd-dialog-header{gap:8px;}
+.alert-dialog-content .sd-dialog-title{font-size:18px;line-height:1.4;letter-spacing:normal;}
+.alert-dialog-content .sd-dialog-description{font-size:14px;line-height:1.5;}
+.alert-dialog-content .sd-dialog-footer{padding-top:8px;}
+.alert-dialog-content .sd-btn{height:36px;padding:0 16px;border-radius:6px;font-size:14px;font-weight:500;}
+.alert-dialog-content .sd-btn-danger{background:#18181b;border-color:#18181b;color:#fff;}
+.alert-dialog-content .sd-btn-danger:hover{background:#27272a;border-color:#27272a;}
 .sd-field-group{display:flex;flex-direction:column;gap:16px;}
 .sd-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .sd-field-full{grid-column:1 / -1;}
@@ -769,6 +800,21 @@ body { background:#ffffff; }
 .sd-profile-head{display:flex;align-items:flex-start;gap:14px;padding-bottom:16px;border-bottom:1px solid #e4e4e7;}
 .sd-profile-name{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;margin:0;}
 .sd-profile-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#71717a;margin:2px 0 0;}
+#viewProfileModal,
+#viewProfileModal *:not(i):not(svg){font-family:'Inter','Segoe UI',sans-serif !important;}
+#viewProfileModal .sd-profile-head,
+#viewProfileModal .sd-section-title{border-bottom:0;}
+#viewProfileModal .sd-dialog-title{font-family:'Inter','Segoe UI',sans-serif !important;font-size:18px;font-weight:600;line-height:1;letter-spacing:-0.025em;color:#18181b;}
+#viewProfileModal .sd-dialog-description{font-family:'Inter','Segoe UI',sans-serif !important;font-size:14px;font-weight:400;line-height:1.5;letter-spacing:normal;color:#71717a;}
+#viewProfileModal .sd-section-title{font-family:'Inter','Segoe UI',sans-serif !important;font-size:14px;font-weight:600;line-height:1.6;letter-spacing:0;color:#18181b;}
+#viewProfileModal .sd-section-title span{font-family:'Inter','Segoe UI',sans-serif !important;font-size:12px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#71717a;}
+#viewProfileModal .sd-info-item .sd-info-label{font-family:'Inter','Segoe UI',sans-serif !important;font-size:13px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#71717a;}
+#viewProfileModal .sd-info-item .sd-info-value{font-family:'Inter','Segoe UI',sans-serif !important;font-size:15px;font-weight:400;line-height:1.6;letter-spacing:normal;color:#18181b;word-break:break-word;}
+#viewProfileModal .sd-profile-name{font-family:'Inter','Segoe UI',sans-serif !important;font-size:18px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#18181b;}
+#viewProfileModal .sd-profile-sub{font-family:'Inter',sans-serif !important;font-size:13px;font-weight:500;line-height:1.6;letter-spacing:normal;}
+#viewProfileModal #vpStatus .appt-status-pill{font-family:'Inter',sans-serif !important;font-size:13px;font-weight:500;line-height:1.6;letter-spacing:normal;}
+#viewProfileModal #vpPetsList .vp-pet-name{font-family:'Inter','Segoe UI',sans-serif !important;font-size:15px;font-weight:400;line-height:1.6;letter-spacing:normal;color:#18181b;}
+#viewProfileModal #vpPetsList .vp-pet-details{font-family:'Inter','Segoe UI',sans-serif !important;font-size:13px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#71717a;}
 .appt-table tbody tr{cursor:pointer;}
 
 @media(max-width:768px){
@@ -821,7 +867,7 @@ body { background:#ffffff; }
   <div class="bulk-bar" id="bulkBar">
     <div class="bulk-actions">
       <span class="bulk-count"><span id="bulkCount">0</span> contacts selected</span>
-      <button class="bulk-btn" onclick="bulkAction('deactivate')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> Deactivate</button>
+      <button class="bulk-btn" onclick="bulkAction('deactivate')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg> Activate / Deactivate</button>
       <button class="bulk-btn" onclick="bulkAction('archive')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg> Archive</button>
       <button class="bulk-btn danger" onclick="bulkAction('delete')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg> Delete</button>
     </div>
@@ -849,15 +895,22 @@ body { background:#ffffff; }
             <?php foreach ($users as $u): ?>
               <tr data-userid="<?php echo $u['user_id']; ?>">
                 <td><input type="checkbox" class="sd-table-cb row-cb" value="<?php echo $u['user_id']; ?>" onclick="updateBulkBar()" /></td>
-                <td><span style="font-size:12px;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
-                <td><div class="client-cell"><span class="client-name"><?php echo htmlspecialchars($u['full_name']); ?></span></div></td>
+                <td><span class="user-reference"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
+                <td><div class="client-cell" style="flex-direction:row;align-items:center;gap:8px;">
+                  <?php if (!empty($u['avatar_url'])): ?>
+                    <img src="<?php echo htmlspecialchars($u['avatar_url']); ?>" alt="Avatar" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                  <?php else: ?>
+                    <div style="width:32px;height:32px;border-radius:50%;background:#e4e4e7;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;"><?php echo strtoupper(substr($u['full_name'] ?? 'U', 0, 1)); ?></div>
+                  <?php endif; ?>
+                  <span class="client-name user-full-name"><?php echo htmlspecialchars($u['full_name']); ?></span>
+                </div></td>
                 <td>
                   <div class="client-cell">
                     <span class="contact-main"><?php echo htmlspecialchars($u['phone'] ?? '—'); ?></span>
                     <span style="font-size:13px;color:#71717a;"><?php echo htmlspecialchars($u['email']); ?></span>
                   </div>
                 </td>
-                <td><span class="pet-cat-tag tag-<?php echo htmlspecialchars($u['role']); ?>"><?php echo ucfirst($u['role']); ?></span></td>
+                <td style="font-size:14px;color:#18181b;"><?php echo ucfirst(htmlspecialchars($u['role'])); ?></td>
                 <td style="font-size:14px;color:#18181b;"><?php echo htmlspecialchars($u['barangay_name'] ?? '—'); ?></td>
                 <td>
                   <?php if ($u['archived_at']): ?>
@@ -883,23 +936,20 @@ body { background:#ffffff; }
                       <?php endif; ?>
                       <div class="menu-divider"></div>
                       <?php if ($u['archived_at']): ?>
-                        <button class="action-menu-item success" onclick="closeDropdowns();confirmAction('restore_user', <?php echo $u['user_id']; ?>, 'Restore user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? This will reactivate their account.')">
-                          <i class="fas fa-undo"></i> Restore
+                        <button class="action-menu-item success" onclick="closeDropdowns();confirmAction('restore_user', <?php echo $u['user_id']; ?>, 'Unarchive user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? Their account access status will not change.')">
+                          <i class="fas fa-undo"></i> Unarchive
                         </button>
                       <?php else: ?>
-                        <button class="action-menu-item <?php echo $u['status'] === 'active' ? 'warning' : 'success'; ?>" onclick="closeDropdowns();confirmAction('toggle_status', <?php echo $u['user_id']; ?>, '<?php echo $u['status'] === 'active' ? 'Deactivate' : 'Activate'; ?> user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>?')">
+                        <button class="action-menu-item <?php echo $u['status'] === 'active' ? 'warning' : 'success'; ?>" onclick="closeDropdowns();confirmAction('toggle_status', <?php echo $u['user_id']; ?>, '<?php echo $u['status'] === 'active' ? 'Deactivate' : 'Activate'; ?> user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? <?php echo $u['status'] === 'active' ? 'They will no longer be able to sign in or submit requests.' : 'They will regain access.'; ?>')">
                           <i class="fas fa-<?php echo $u['status'] === 'active' ? 'ban' : 'check-circle'; ?>"></i>
                           <?php echo $u['status'] === 'active' ? 'Deactivate' : 'Activate'; ?>
                         </button>
-                        <button class="action-menu-item" onclick="closeDropdowns();confirmAction('archive_user', <?php echo $u['user_id']; ?>, 'Archive user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? They will be deactivated and hidden.')">
+                        <button class="action-menu-item" onclick="closeDropdowns();confirmAction('archive_user', <?php echo $u['user_id']; ?>, 'Archive user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? This hides the account from the main list without changing access.')">
                           <i class="fas fa-archive"></i> Archive
                         </button>
                       <?php endif; ?>
-                      <button class="action-menu-item" onclick="closeDropdowns();openPasswordModal(<?php echo $u['user_id']; ?>, '<?php echo htmlspecialchars(addslashes($u['full_name'])); ?>')">
-                        <i class="fas fa-key"></i> Reset Password
-                      </button>
                       <div class="menu-divider"></div>
-                      <button class="action-menu-item danger" onclick="closeDropdowns();confirmAction('delete_user', <?php echo $u['user_id']; ?>, 'Permanently delete user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? This will also remove their activity logs.')">
+                      <button class="action-menu-item danger" onclick="closeDropdowns();confirmAction('delete_user', <?php echo $u['user_id']; ?>, 'Delete user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? This disables account access but retains the account and linked records.')">
                         <i class="fas fa-trash"></i> Delete
                       </button>
                     </div>
@@ -964,13 +1014,6 @@ body { background:#ffffff; }
               <div id="uRoleHint" style="display:none;margin-top:4px;font-size:12px;color:#d97706;">
                 <i class="fas fa-lock"></i> Resident accounts cannot change role.
               </div>
-            </div>
-            <div class="sd-field">
-              <label class="sd-label">Status</label>
-              <select class="sd-select" name="status" id="uStatus">
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-              </select>
             </div>
           </div>
           <div class="sd-field">
@@ -1039,45 +1082,14 @@ body { background:#ffffff; }
 <!-- ══ Confirm Action Modal ══ -->
 <div class="modal" id="confirmModal">
   <div class="sd-dialog">
-    <div class="sd-dialog-content" role="dialog" aria-modal="true" style="max-width:420px;">
-      <div style="text-align:center;">
-        <div id="confirmIcon" style="margin-bottom:14px;">
-          <i class="fas fa-exclamation-triangle" style="font-size:40px;color:#f59e0b;"></i>
-        </div>
-        <div id="confirmText" style="font-size:14px;color:#71717a;line-height:1.5;">Are you sure?</div>
-      </div>
-      <div class="sd-dialog-footer" style="justify-content:center;">
-        <button type="button" class="sd-btn sd-btn-secondary" onclick="closeModal('confirmModal')">Cancel</button>
-        <button type="button" class="sd-btn sd-btn-primary" id="confirmSubmitBtn" onclick="submitConfirmedAction()"><i class="fas fa-check"></i> Confirm</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══ Password Reset Modal ══ -->
-<div class="modal" id="passwordModal">
-  <div class="sd-dialog">
-    <div class="sd-dialog-content" role="dialog" aria-modal="true" style="max-width:420px;">
-      <button type="button" class="sd-dialog-close" onclick="closeModal('passwordModal')" aria-label="Close">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
+    <div class="sd-dialog-content alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmText">
       <div class="sd-dialog-header">
-        <h2 class="sd-dialog-title">Reset Password</h2>
-        <p class="sd-dialog-description">Set a new password for <strong id="pwdUserName">—</strong></p>
-      </div>
-      <div class="sd-field-group">
-        <div class="sd-field">
-          <label class="sd-label">New Password</label>
-          <input type="password" class="sd-input" id="pwdNewPassword" placeholder="Min. 6 characters" />
-        </div>
-        <div class="sd-field">
-          <label class="sd-label">Confirm Password</label>
-          <input type="password" class="sd-input" id="pwdConfirmPassword" placeholder="Re-enter password" />
-        </div>
+        <h2 class="sd-dialog-title" id="confirmTitle">Confirm action</h2>
+        <p class="sd-dialog-description" id="confirmText">Are you sure?</p>
       </div>
       <div class="sd-dialog-footer">
-        <button type="button" class="sd-btn sd-btn-secondary" onclick="closeModal('passwordModal')">Cancel</button>
-        <button type="button" class="sd-btn sd-btn-primary" onclick="submitPasswordReset()"><i class="fas fa-key"></i> Reset Password</button>
+        <button type="button" class="sd-btn sd-btn-secondary" onclick="closeModal('confirmModal')">Cancel</button>
+        <button type="button" class="sd-btn sd-btn-primary" id="confirmSubmitBtn" onclick="submitConfirmedAction()">Confirm</button>
       </div>
     </div>
   </div>
@@ -1103,14 +1115,6 @@ body { background:#ffffff; }
             <option value="staff">DCVS Staff</option>
             <option value="admin">Admin</option>
             <option value="resident">Resident</option>
-          </select>
-        </div>
-        <div class="sd-field">
-          <label class="sd-label">Status</label>
-          <select class="sd-select" id="bulkStatus">
-            <option value="">Keep existing status</option>
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
           </select>
         </div>
         <div class="sd-field">
@@ -1171,6 +1175,11 @@ body { background:#ffffff; }
             <div class="sd-info-item"><div class="sd-info-label">Status</div><div class="sd-info-value" id="vpStatus">—</div></div>
             <div class="sd-info-item"><div class="sd-info-label">Registered</div><div class="sd-info-value" id="vpRegistered">—</div></div>
           </div>
+        </div>
+        <div class="sd-section" id="vpPetsSection" style="display:none;">
+          <div class="sd-section-title"><span>03</span> Pets</div>
+          <div id="vpPetsList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:center;"></div>
+          <div id="vpNoPets" style="display:none;font-size:13px;color:#71717a;padding:8px 0;">No registered pets.</div>
         </div>
       </div>
     </div>
@@ -1412,16 +1421,13 @@ function bulkAction(action) {
     var currentRole = roleTag ? roleTag.textContent.trim().toLowerCase() : '';
     closeDropdowns(); openRoleModal(ids[0], currentRole);
   } else if (action === 'deactivate') {
-    confirmAction('bulk_toggle_status', 0, 'Deactivate <strong>' + ids.length + ' user(s)</strong>?');
+    var nextStatus = getBulkActionType();
+    var statusAction = nextStatus === 'inactive' ? 'Deactivate' : 'Activate';
+    confirmAction('bulk_toggle_status', 0, statusAction + ' <strong>' + ids.length + ' user(s)</strong>?');
   } else if (action === 'archive') {
-    confirmAction('bulk_archive', 0, 'Archive <strong>' + ids.length + ' user(s)</strong>? They will be deactivated and hidden.');
-  } else if (action === 'reset_password') {
-    if (ids.length !== 1) { showToast('Invalid selection', { type: 'error', description: 'Select exactly 1 user to reset password.' }); return; }
-    var row = document.querySelector('.row-cb[value="' + ids[0] + '"]').closest('tr');
-    var name = row.querySelector('.client-name') ? row.querySelector('.client-name').textContent.trim() : '';
-    closeDropdowns(); openPasswordModal(ids[0], name);
+    confirmAction('bulk_archive', 0, 'Archive <strong>' + ids.length + ' user(s)</strong>? This only hides them from the main list and does not change account access.');
   } else if (action === 'delete') {
-    confirmAction('bulk_delete', 0, 'Permanently delete <strong>' + ids.length + ' user(s)</strong>? This will also remove their activity logs.');
+    confirmAction('bulk_delete', 0, 'Delete <strong>' + ids.length + ' user(s)</strong>? Access will be disabled, while accounts and linked records are retained.');
   }
 }
 
@@ -1429,7 +1435,6 @@ function openBulkEditModal(ids) {
   document.getElementById('bulkEditCount').textContent = ids.length;
   document.getElementById('bulkEditCountWarn').textContent = ids.length;
   document.getElementById('bulkRole').value = '';
-  document.getElementById('bulkStatus').value = '';
   document.getElementById('bulkBarangay').value = '';
   openModal('bulkEditModal');
 }
@@ -1438,12 +1443,11 @@ function submitBulkEdit() {
   var ids = getSelectedUserIds();
   if (!ids.length) return;
   var role = document.getElementById('bulkRole').value;
-  var status = document.getElementById('bulkStatus').value;
   var barangay = document.getElementById('bulkBarangay').value;
-  if (!role && !status && !barangay) { showToast('No changes', { type: 'error', description: 'Please select at least one field to update.' }); return; }
+  if (!role && !barangay) { showToast('No changes', { type: 'error', description: 'Please select at least one field to update.' }); return; }
   var btn = document.getElementById('bulkEditSubmitBtn');
   btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-  var data = { action: 'bulk_edit', user_ids: ids.join(','), role: role, status: status, barangay_id: barangay };
+  var data = { action: 'bulk_edit', user_ids: ids.join(','), role: role, barangay_id: barangay };
   apiPost(data, function(resp) {
     btn.disabled = false; btn.innerHTML = '<i class="fas fa-save"></i> Save Changes';
     if (resp.success) {
@@ -1463,14 +1467,13 @@ function submitBulkEdit() {
 }
 
 function getBulkActionType() {
-  var ids = getSelectedUserIds();
   var allActive = true;
   document.querySelectorAll('.row-cb:checked').forEach(function(cb) {
     var row = cb.closest('tr');
     var statusCell = row.querySelectorAll('td')[6];
     if (statusCell && !statusCell.textContent.trim().match(/^Active$/i)) allActive = false;
   });
-  return allActive ? 'deactivate' : 'activate';
+  return allActive ? 'inactive' : 'active';
 }
 
 var searchTimer;
@@ -1510,7 +1513,6 @@ function openAddModal() {
   roleSel.style.opacity = '1';
   roleSel.title = '';
   document.getElementById('uRoleHint').style.display = 'none';
-  document.getElementById('uStatus').value = 'active';
   document.getElementById('uPhone').value = '';
   document.getElementById('uBarangay').value = '';
   document.getElementById('uAddress').value = '';
@@ -1535,7 +1537,6 @@ function openEditModal(userId) {
       document.getElementById('uUsername').value = u.username;
       document.getElementById('uPassword').value = '';
       document.getElementById('uRole').value = u.role;
-      document.getElementById('uStatus').value = u.status;
       document.getElementById('uPhone').value = u.phone || '';
       document.getElementById('uBarangay').value = u.barangay_id || '';
       document.getElementById('uAddress').value = u.address || '';
@@ -1632,32 +1633,37 @@ function confirmAction(action, userId, message) {
   pendingAction = action;
   pendingUserId = userId;
   document.getElementById('confirmText').innerHTML = message;
-  var icon = document.getElementById('confirmIcon');
+  var titleByAction = {
+    delete_user: 'Delete this account?',
+    bulk_delete: 'Delete selected accounts?',
+    toggle_status: 'Change account access?',
+    bulk_toggle_status: 'Change account access?',
+    archive_user: 'Archive this account?',
+    bulk_archive: 'Archive selected accounts?',
+    restore_user: 'Unarchive this account?'
+  };
+  document.getElementById('confirmTitle').textContent = titleByAction[action] || 'Confirm action';
   var btn = document.getElementById('confirmSubmitBtn');
-  btn.innerHTML = '<i class="fas fa-check"></i> Confirm';
+  btn.textContent = 'Confirm';
   btn.className = 'sd-btn sd-btn-primary';
-  icon.innerHTML = '<i class="fas fa-exclamation-triangle" style="font-size:40px;color:#f59e0b;"></i>';
+  var isDeactivating = action === 'toggle_status' && message.indexOf('Deactivate') >= 0;
+  var isBulkDeactivating = action === 'bulk_toggle_status' && getBulkActionType() === 'inactive';
   if (action === 'delete_user' || action === 'bulk_delete') {
-    icon.innerHTML = '<i class="fas fa-trash" style="font-size:40px;color:#dc2626;"></i>';
     btn.className = 'sd-btn sd-btn-danger';
-    btn.innerHTML = '<i class="fas fa-trash"></i> Delete Permanently';
+    btn.textContent = action === 'bulk_delete' ? 'Delete selected accounts' : 'Delete account';
   }
-  if (action === 'toggle_status' || action === 'bulk_toggle_status') {
-    icon.innerHTML = '<i class="fas fa-ban" style="font-size:40px;color:#f59e0b;"></i>';
-  }
-  if (action === 'archive_user' || action === 'bulk_archive') {
-    icon.innerHTML = '<i class="fas fa-archive" style="font-size:40px;color:#64748b;"></i>';
-  }
-  if (action === 'restore_user') {
-    icon.innerHTML = '<i class="fas fa-undo" style="font-size:40px;color:#059669;"></i>';
-    btn.className = 'sd-btn sd-btn-primary';
-  }
+  if (action === 'toggle_status') btn.textContent = isDeactivating ? 'Deactivate account' : 'Activate account';
+  if (action === 'bulk_toggle_status') btn.textContent = isBulkDeactivating ? 'Deactivate selected' : 'Activate selected';
+  if (action === 'archive_user') btn.textContent = 'Archive account';
+  if (action === 'bulk_archive') btn.textContent = 'Archive selected';
+  if (action === 'restore_user') btn.textContent = 'Unarchive account';
+  if (isDeactivating || isBulkDeactivating) btn.className = 'sd-btn sd-btn-danger';
   openModal('confirmModal');
 }
 
 function submitConfirmedAction() {
   var btn = document.getElementById('confirmSubmitBtn');
-  btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+  btn.disabled = true; btn.textContent = 'Processing...';
   var data = {action: pendingAction, user_id: pendingUserId};
   if (pendingAction === 'bulk_delete' || pendingAction === 'bulk_toggle_status' || pendingAction === 'bulk_archive') {
     data.user_ids = getSelectedUserIds().join(',');
@@ -1685,37 +1691,6 @@ function submitConfirmedAction() {
   });
 }
 
-var pwdUserId = 0;
-function openPasswordModal(userId, userName) {
-  pwdUserId = userId;
-  document.getElementById('pwdUserName').textContent = userName;
-  document.getElementById('pwdNewPassword').value = '';
-  document.getElementById('pwdConfirmPassword').value = '';
-  openModal('passwordModal');
-}
-
-function submitPasswordReset() {
-  var pw = document.getElementById('pwdNewPassword').value;
-  var cp = document.getElementById('pwdConfirmPassword').value;
-  if (!pw || pw.length < 6) { showToast('Invalid password', { type: 'error', description: 'Password must be at least 6 characters.' }); return; }
-  if (pw !== cp) { showToast('Password mismatch', { type: 'error', description: 'Passwords do not match.' }); return; }
-  apiPost({action:'reset_password', user_id: pwdUserId, new_password: pw}, function(resp) {
-    if (resp.success) {
-      closeModal('passwordModal');
-      var p = [];
-      var s = document.getElementById('searchInput').value;
-      var r = document.getElementById('roleFilter').value;
-      var st = document.getElementById('statusFilter').value;
-      var br = document.getElementById('barangayFilter').value;
-      if (s) p.push('search=' + encodeURIComponent(s));
-      if (r) p.push('role=' + encodeURIComponent(r));
-      if (st) p.push('status=' + encodeURIComponent(st));
-      if (br) p.push('barangay=' + encodeURIComponent(br));
-      window.location.href = 'role-management.php?' + p.join('&');
-    } else { showToast('Reset failed', { type: 'error', description: resp.message || 'Could not reset password.' }); }
-  });
-}
-
 function viewUserProfile(u) {
   document.getElementById('vpName').textContent = u.full_name || '—';
   var roleIcon = {'admin':'fa-crown','staff':'fa-user-md','barangay':'fa-map-pin','resident':'fa-user'};
@@ -1734,6 +1709,44 @@ function viewUserProfile(u) {
   var avatarEl = document.getElementById('vpAvatar');
   if (u.avatar_url) { avatarEl.innerHTML = '<img src="'+u.avatar_url+'" alt="Avatar" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">'; }
   else { var initials = (u.full_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2) || '?'; avatarEl.textContent = initials; }
+  var petsSection = document.getElementById('vpPetsSection');
+  var petsList = document.getElementById('vpPetsList');
+  var noPets = document.getElementById('vpNoPets');
+  if (u.role === 'resident') {
+    petsSection.style.display = '';
+    petsList.innerHTML = '<div style="font-size:13px;color:#71717a;">Loading pets...</div>';
+    noPets.style.display = 'none';
+    apiPost({action:'get_user_pets', user_id: u.user_id}, function(resp) {
+      if (resp.success && resp.pets && resp.pets.length > 0) {
+        var html = '';
+        var typeIcon = {'dog':'fa-dog','cat':'fa-cat','other':'fa-paw'};
+        resp.pets.forEach(function(p) {
+          html += '<div style="display:flex;align-items:center;justify-content:center;gap:10px;">';
+          if (p.photo_url) {
+            html += '<img src="'+p.photo_url+'" alt="'+(p.pet_name||'Pet')+'" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;">';
+          } else {
+            html += '<div style="width:48px;height:48px;border-radius:50%;background:#e4e4e7;color:#52525b;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;font-weight:600;">'+((p.pet_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2)||'?')+'</div>';
+          }
+          html += '<div style="text-align:left;">';
+          html += '<div class="vp-pet-name">'+(p.pet_name||'—')+'</div>';
+          var details = [];
+          if (p.pet_type) details.push(p.pet_type.charAt(0).toUpperCase()+p.pet_type.slice(1));
+          if (p.breed) details.push(p.breed);
+          if (p.gender) details.push(p.gender.charAt(0).toUpperCase()+p.gender.slice(1));
+          html += '<div class="vp-pet-details">'+(details.join(' · ')||'—')+'</div>';
+          html += '</div></div>';
+        });
+        petsList.innerHTML = html;
+        noPets.style.display = 'none';
+      } else {
+        petsList.innerHTML = '';
+        noPets.style.display = '';
+      }
+    });
+  } else {
+    petsSection.style.display = 'none';
+    petsList.innerHTML = '';
+  }
   openModal('viewProfileModal');
 }
 

@@ -4,10 +4,10 @@
  * Connects to dcvs_system MySQL database
  */
 
-$host = 'localhost';
+$host = '127.0.0.1';
 $username = 'root';
 $password = '';
-$database = 'dcvs_system';
+$database = 'dcvs_system_recovered_20261008';
 
 // Create connection
 $conn = new mysqli($host, $username, $password, $database);
@@ -114,7 +114,7 @@ function logEmail($conn, $recipientEmail, $recipientName, $subject, $body, $stat
  */
 function getUsersByRole($conn, $role) {
     $users = [];
-    $stmt = $conn->prepare("SELECT user_id, full_name, email, reference_id FROM users WHERE role = ? AND status = 'active' ORDER BY full_name ASC");
+    $stmt = $conn->prepare("SELECT u.user_id, u.full_name, u.email, u.phone, u.reference_id, u.barangay_id, b.barangay_name FROM users u LEFT JOIN barangays b ON u.barangay_id = b.barangay_id WHERE u.role = ? AND u.status = 'active' AND u.deleted_at IS NULL ORDER BY u.full_name ASC");
     if (!$stmt) return $users;
     $stmt->bind_param("s", $role);
     $stmt->execute();
@@ -160,41 +160,96 @@ function autoLoginRememberMe($conn) {
     $stmt = $conn->prepare("SELECT user_id, expires_at FROM remember_tokens WHERE token_hash = ?");
     $stmt->bind_param("s", $hash);
     $stmt->execute();
-    $result = $stmt->get_result();
-    if ($row = $result->fetch_assoc()) {
-        if (strtotime($row['expires_at']) > time()) {
-            $uid = $row['user_id'];
-            $stmt->close();
-            $stmt = $conn->prepare("SELECT user_id, username, email, full_name, role, barangay_id, phone, address, status, avatar_url, reference_id FROM users WHERE user_id = ? AND status = 'active'");
-            $stmt->bind_param("i", $uid);
-            $stmt->execute();
-            $user = $stmt->get_result()->fetch_assoc();
-            if ($user) {
-                $_SESSION['user_id'] = $user['user_id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['email'] = $user['email'];
-                $_SESSION['full_name'] = $user['full_name'];
-                $_SESSION['role'] = $user['role'];
-                $_SESSION['barangay_id'] = $user['barangay_id'];
-                $_SESSION['phone'] = $user['phone'];
-                $_SESSION['address'] = $user['address'];
-                $_SESSION['avatar_url'] = $user['avatar_url'] ?? '';
-                $_SESSION['reference_id'] = $user['reference_id'] ?? '';
-                $_SESSION['logged_in'] = true;
-                session_regenerate_id(true);
-                $stmt->close();
-                return $user;
-            }
-        } else {
-            $stmt->close();
-            $stmt = $conn->prepare("DELETE FROM remember_tokens WHERE token_hash = ?");
-            $stmt->bind_param("s", $hash);
-            $stmt->execute();
-        }
-    }
+    $token = $stmt->get_result()->fetch_assoc();
     $stmt->close();
-    setcookie('remember_token', '', time() - 3600, '/', '', !empty($_SERVER['HTTPS']), true);
-    unset($_COOKIE['remember_token']);
+
+    if ($token && strtotime($token['expires_at']) > time()) {
+        $userId = (int)$token['user_id'];
+        $userStmt = $conn->prepare("SELECT user_id, username, email, full_name, role, barangay_id, phone, address, status, avatar_url, reference_id, deleted_at FROM users WHERE user_id = ?");
+        $userStmt->bind_param("i", $userId);
+        $userStmt->execute();
+        $user = $userStmt->get_result()->fetch_assoc();
+        $userStmt->close();
+
+        if ($user && $user['status'] === 'active' && empty($user['deleted_at'])) {
+            $_SESSION['user_id'] = $user['user_id'];
+            $_SESSION['username'] = $user['username'];
+            $_SESSION['email'] = $user['email'];
+            $_SESSION['full_name'] = $user['full_name'];
+            $_SESSION['role'] = $user['role'];
+            $_SESSION['barangay_id'] = $user['barangay_id'];
+            $_SESSION['phone'] = $user['phone'];
+            $_SESSION['address'] = $user['address'];
+            $_SESSION['avatar_url'] = $user['avatar_url'] ?? '';
+            $_SESSION['reference_id'] = $user['reference_id'] ?? '';
+            $_SESSION['logged_in'] = true;
+            session_regenerate_id(true);
+            return $user;
+        }
+
+        if ($user && !empty($user['deleted_at'])) {
+            $_SESSION['login_error'] = 'Your account has been deleted by the administrator. Contact us for clarification.';
+        } elseif ($user && $user['status'] !== 'active') {
+            $_SESSION['login_error'] = 'Your account has been deactivated. Please contact the administrator.';
+        }
+        $deleteStmt = $conn->prepare("DELETE FROM remember_tokens WHERE user_id = ?");
+        $deleteStmt->bind_param("i", $userId);
+        $deleteStmt->execute();
+        $deleteStmt->close();
+    } elseif ($token) {
+        $deleteStmt = $conn->prepare("DELETE FROM remember_tokens WHERE token_hash = ?");
+        $deleteStmt->bind_param("s", $hash);
+        $deleteStmt->execute();
+        $deleteStmt->close();
+    }
+    clearRememberMe($conn);
+}
+
+function dcvsEnforceAuthenticatedAccount($conn) {
+    if (session_status() !== PHP_SESSION_ACTIVE || empty($_SESSION['logged_in']) || empty($_SESSION['user_id'])) {
+        return;
+    }
+
+    $userId = (int)$_SESSION['user_id'];
+    $stmt = $conn->prepare("SELECT role, status, deleted_at FROM users WHERE user_id = ?");
+    if (!$stmt) {
+        error_log('Unable to prepare authenticated account status check: ' . $conn->error);
+        http_response_code(503);
+        exit('Account status validation is temporarily unavailable.');
+    }
+    $stmt->bind_param("i", $userId);
+    $stmt->execute();
+    $user = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    $message = '';
+    if (!$user) {
+        $message = 'Your session is no longer valid. Please sign in again.';
+    } elseif (!empty($user['deleted_at'])) {
+        $message = 'Your account has been deleted by the administrator. Contact us for clarification.';
+    } elseif ($user['status'] !== 'active') {
+        $message = 'Your account has been deactivated. Please contact the administrator.';
+    } elseif ($user['role'] !== ($_SESSION['role'] ?? '')) {
+        $message = 'Your session is no longer valid. Please sign in again.';
+    }
+
+    if ($message === '') {
+        return;
+    }
+
+    $tokenStmt = $conn->prepare("DELETE FROM remember_tokens WHERE user_id = ?");
+    if ($tokenStmt) {
+        $tokenStmt->bind_param("i", $userId);
+        $tokenStmt->execute();
+        $tokenStmt->close();
+    }
+    clearRememberMe($conn);
+
+    foreach (['user_id', 'username', 'email', 'full_name', 'role', 'barangay_id', 'phone', 'address', 'avatar_url', 'reference_id', 'logged_in'] as $key) {
+        unset($_SESSION[$key]);
+    }
+    $_SESSION['login_error'] = $message;
+    session_regenerate_id(true);
 }
 
 function generateReferenceId($conn, $prefix, $table, $column = 'reference_id') {
@@ -248,6 +303,27 @@ function getReportStatusLabel($status) {
     return $labels[$status] ?? ucfirst($status);
 }
 
+/**
+ * Normalize a submitted report type into the reports.report_type ENUM value.
+ * Accepts either the stored key (stray, rabies, injured, dead) or the label
+ * chosen on the report form (Stray Animal, Rabies Concern, ...).
+ * Returns '' when the value cannot be mapped.
+ */
+function reportTypeKey($value) {
+    $map = [
+        'stray'          => 'stray',
+        'stray animal'   => 'stray',
+        'rabies'         => 'rabies',
+        'rabies case'    => 'rabies',
+        'rabies concern' => 'rabies',
+        'injured'        => 'injured',
+        'injured animal' => 'injured',
+        'dead'           => 'dead',
+        'dead animal'    => 'dead',
+    ];
+    return $map[strtolower(trim((string)$value))] ?? '';
+}
+
 function csrfToken() {
     if (empty($_SESSION['csrf_token'])) {
         $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -262,4 +338,6 @@ function csrfField() {
 function validateCsrf($token) {
     return !empty($_SESSION['csrf_token']) && is_string($token) && hash_equals($_SESSION['csrf_token'], $token);
 }
+
+dcvsEnforceAuthenticatedAccount($conn);
 ?>
