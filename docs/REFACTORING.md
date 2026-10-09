@@ -55,9 +55,9 @@ Owns staff dashboard display formatters:
 
 Page implementations are organized under `pages/`, and request handlers are organized under `api/`. Root-level compatibility files continue to load the moved implementations so existing bookmarks, forms, AJAX requests, redirects, and email/SMS links retain their established URLs. Filesystem includes and upload paths were adjusted to the moved implementation locations; stored upload URL values remain unchanged.
 
-## Intentionally Not Split Yet
+## Outside the Move-and-Relink Scope
 
-- `dashboard-resident.php`, `dashboard-staff.php`, `adoption-pool.php`, and `dashboard-barangay.php` contain tightly coupled page markup, server data preparation, and inline browser controllers. They should be split feature-by-feature with page-level regression checks rather than moved wholesale.
+- `dashboard-resident.php`, `dashboard-staff.php`, `adoption-pool.php`, and `dashboard-barangay.php` remain cohesive page implementations under `pages/`; splitting their markup, server data preparation, and inline browser controllers into features is a separate change.
 - `includes/availability.php` is already a focused shared module.
 - Existing sidebars and notification polling files are already separated by responsibility.
 - Generated assets, media, backup snapshots, PHPMailer, and dependency directories were excluded from the application refactor.

@@ -13,9 +13,9 @@ session_start();
 
 header('Content-Type: application/json');
 
-require_once 'db.php';
-require_once 'includes/availability.php';
-require_once 'includes/waitlist.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/availability.php';
+require_once __DIR__ . '/../includes/waitlist.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     echo json_encode(['success' => false, 'message' => 'Unauthorized.']);

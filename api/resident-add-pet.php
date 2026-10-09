@@ -9,8 +9,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once 'includes/adoption-workflow.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/adoption-workflow.php';
 
 header('Content-Type: application/json');
 
@@ -81,12 +81,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        $uploadDir = 'uploads/pets/';
+        $uploadDir = __DIR__ . '/../uploads/pets/';
         if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
         $filename = uniqid('pet_') . '_' . time() . '.' . $ext;
         $filepath = $uploadDir . $filename;
         if (move_uploaded_file($_FILES['photo']['tmp_name'], $filepath)) {
-            $photoUrl = $filepath;
+            $photoUrl = 'uploads/pets/' . $filename;
         }
     }
 
