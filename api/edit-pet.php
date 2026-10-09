@@ -14,7 +14,7 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -120,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         // Create upload directory if it doesn't exist
-        $uploadDir = 'uploads/pets/';
+        $uploadDir = __DIR__ . '/../uploads/pets/';
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0755, true);
         }
@@ -131,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $filepath = $uploadDir . $filename;
 
         if (move_uploaded_file($photo['tmp_name'], $filepath)) {
-            $photoUrl = $filepath;
+            $photoUrl = 'uploads/pets/' . $filename;
             error_log("Photo uploaded successfully: $photoUrl");
         } else {
             error_log("Failed to move uploaded file");
