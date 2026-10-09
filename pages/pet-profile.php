@@ -40,7 +40,7 @@ session_name($sessionName);
 session_start();
 $role = $_SESSION['role'] ?? '';
 
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
 $petId = intval($_GET['id'] ?? 0);
 if ($petId === 0) {
