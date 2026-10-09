@@ -9,8 +9,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
-require_once 'db.php';
-require_once 'includes/adoption-workflow.php';
+require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/adoption-workflow.php';
 
 adoptionReleaseExpiredReservations($conn);
 
