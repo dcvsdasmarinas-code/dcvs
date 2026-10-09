@@ -51,3 +51,9 @@ RewriteRule ^staff-archive\.php$ pages/staff/staff-archive.php [END]
 RewriteRule ^archive-pet\.php$ api/shared/archive-pet.php [END]
 RewriteRule ^archive-report\.php$ api/shared/archive-report.php [END]
 RewriteRule ^restore-report\.php$ api/shared/restore-report.php [END]
+
+# Availability compatibility routes.
+RewriteRule ^availability\.php$ pages/staff/availability.php [END,E=DCVS_AVAILABILITY_ROUTE:1]
+RewriteRule ^availability-save\.php$ api/staff/availability-save.php [END,E=DCVS_AVAILABILITY_ROUTE:1]
+Header always set X-DCVS-Availability-Route "rewritten" env=DCVS_AVAILABILITY_ROUTE
+Header always set X-DCVS-Availability-Route "rewritten" env=REDIRECT_DCVS_AVAILABILITY_ROUTE
