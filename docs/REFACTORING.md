@@ -51,6 +51,10 @@ Owns staff dashboard display formatters:
 
 `dashboard-staff.php` loads this include once during bootstrap. The formatter implementations and all call sites remain unchanged.
 
+## Application Folder Layout
+
+Page implementations are organized under `pages/`, and request handlers are organized under `api/`. Root-level compatibility files continue to load the moved implementations so existing bookmarks, forms, AJAX requests, redirects, and email/SMS links retain their established URLs. Filesystem includes and upload paths were adjusted to the moved implementation locations; stored upload URL values remain unchanged.
+
 ## Intentionally Not Split Yet
 
 - `dashboard-resident.php`, `dashboard-staff.php`, `adoption-pool.php`, and `dashboard-barangay.php` contain tightly coupled page markup, server data preparation, and inline browser controllers. They should be split feature-by-feature with page-level regression checks rather than moved wholesale.
