@@ -11,7 +11,7 @@ session_set_cookie_params([
 ]);
 session_start();
 
-require_once 'db.php';
+require_once __DIR__ . '/../db.php';
 
 header('Content-Type: application/json');
 
@@ -88,4 +88,3 @@ echo json_encode([
     'owner' => $owner,
     'pets' => $pets
 ]);
-
