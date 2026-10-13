@@ -1,5 +1,5 @@
 <?php
-/** Return staff active cases (plus an explicitly requested pin) and barangay-scoped open pins. */
+/** Return all non-archived pinned reports for the signed-in staff or assigned barangay. */
 $sessionRoles = [
     'DCVS_STAFF_SESSION' => 'staff',
     'DCVS_BARANGAY_SESSION' => 'barangay',
@@ -83,7 +83,6 @@ $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
             latest.action AS latest_response_action, latest.reason AS latest_response_reason,
             latest.created_at AS latest_response_at, latest_actor.full_name AS latest_response_actor
         FROM reports r
-        LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id AND cc.status = 'active'
         INNER JOIN barangays b ON b.barangay_id = r.barangay_id
         LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
         LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
@@ -99,13 +98,10 @@ $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
         LEFT JOIN users latest_actor ON latest_actor.user_id = latest.actor_id
         LEFT JOIN report_attachments ra ON ra.report_id = r.report_id
         WHERE r.archived_at IS NULL
-          AND r.location_status = 'pinned'
           AND r.coordinates_lat IS NOT NULL
           AND r.coordinates_long IS NOT NULL";
 if ($expectedRole === 'staff') {
-    $sql .= $targetReportId === null
-    ? " AND (cc.report_id IS NOT NULL OR r.status IN ('pending', 'validated') OR (r.status = 'resolved' AND tt.status = 'pending'))"
-    : " AND (cc.report_id IS NOT NULL OR r.status IN ('pending', 'validated') OR (r.status = 'resolved' AND tt.status = 'pending') OR r.report_id = ?)";
+    if ($targetReportId !== null) $sql .= " AND r.report_id = ?";
 }
 if ($expectedRole === 'barangay') {
     $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
@@ -136,11 +132,8 @@ if ($expectedRole === 'barangay') {
             LEFT JOIN users latest_actor ON latest_actor.user_id = latest.actor_id
             LEFT JOIN report_attachments ra ON ra.report_id = r.report_id
             WHERE r.archived_at IS NULL
-              AND r.location_status = 'pinned'
               AND r.coordinates_lat IS NOT NULL
               AND r.coordinates_long IS NOT NULL
-              AND (r.status IN ('pending', 'validated', 'confirmed', 'scheduled')
-                   OR (r.status = 'resolved' AND tt.status = 'pending'))
               AND r.barangay_id = ?";
 }
 $sql .= ' ORDER BY r.created_at DESC, ra.display_order ASC, ra.attachment_id ASC';

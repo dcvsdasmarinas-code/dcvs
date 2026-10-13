@@ -12,6 +12,9 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../env.php';
+require_once __DIR__ . '/../../includes/barangay-announcements.php';
+require_once __DIR__ . '/../../includes/barangay-app-base.php';
+$barangayAppBaseUrl = dcvsBarangayAppBaseUrl();
 loadDcvsEnv();
 $dashboardResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 
@@ -46,6 +49,7 @@ $barangayId = (int)($_SESSION['barangay_id'] ?? 0);
 $fullName   = $_SESSION['full_name'] ?? 'Barangay Officer';
 $avatarUrl  = $_SESSION['avatar_url'] ?? '';
 $activePage = 'overview';
+$barangaySidebarStylesheetInHead = true;
 $responseTargetHours = max(1, (int)env('DCVS_RESPONSE_TARGET_HOURS', '24'));
 $progressTargetHours = max(1, (int)env('DCVS_PROGRESS_TARGET_HOURS', '48'));
 
@@ -62,8 +66,11 @@ if ($bResult && $bRow = $bResult->fetch_assoc()) {
 }
 $bq->close();
 
+$overviewAnnouncements = loadBarangayAnnouncementsForPortal($conn, $barangayId, 3);
+
 // Report type & display labels
 $typeLabels = ['stray' => 'Stray', 'rabies' => 'Rabies', 'injured' => 'Injured', 'dead' => 'Dead'];
+$categoryColors = ['stray' => '#1A1A1A', 'rabies' => '#D4D4D4', 'injured' => '#EF4444', 'dead' => '#F59E0B'];
 $statusLabels = [
   'pending'   => 'Pending Barangay Review',
   'validated' => 'Pending DCVS Review',
@@ -171,10 +178,14 @@ while ($rRow = $rResult->fetch_assoc()) {
         'urgency'     => $rRow['urgency_level'],
         'fieldStatus' => (string)($rRow['barangay_validation_status'] ?? ''),
         'status'      => ($rRow['response_state'] ?? '') === 'barangay_response_approved'
-            ? (($rRow['barangay_validation_status'] ?? '') === 'site_visit_pending'
-                ? 'Accepted by Barangay · Site visit pending'
-                : 'Accepted by Barangay')
-            : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status'])),
+            ? 'Accepted by Barangay'
+            : (($rRow['response_state'] ?? '') === 'barangay_responding' && $rRow['status'] === 'validated'
+                ? 'Barangay Responding'
+                : ((($rRow['response_state'] ?? '') === 'escalated_to_dcvs')
+                    ? 'Escalated to DCVS'
+                    : ((($rRow['response_state'] ?? '') === 'unable_to_locate')
+                        ? 'Unable to Locate'
+                        : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status']))))),
         'assignedTo'  => $rRow['validator_name'] ?: 'Unassigned',
         'dateResolved'=> $rRow['resolved_at'] ? date('M j, Y g:i A', strtotime($rRow['resolved_at'])) : '-',
         '_created_at' => $rRow['created_at'],
@@ -210,7 +221,7 @@ $cmpEnd = date('Y-m-d', strtotime('+1 day'));
 for ($i = 29; $i >= 0; $i--) {
   $ts = strtotime("-{$i} days");
   $day = date('Y-m-d', $ts);
-  $cmpLabels[] = date('M j', $ts);
+  $cmpLabels[] = date('M d', $ts);
   $cmpDailyReportMap[$day] = 0;
   $cmpDailyResolvedMap[$day] = 0;
 }
@@ -318,10 +329,10 @@ foreach ($categoryTypes as $t) {
   $last30 = (int)($row['last_30_days'] ?? 0);
   $last7 = (int)($row['last_7_days'] ?? 0);
   $today = (int)($row['today'] ?? 0);
-  $categoryPeriods['all'][] = ['label' => $typeLabels[$t], 'count' => $total];
-  $categoryPeriods['30'][] = ['label' => $typeLabels[$t], 'count' => $last30];
-  $categoryPeriods['7'][] = ['label' => $typeLabels[$t], 'count' => $last7];
-  $categoryPeriods['today'][] = ['label' => $typeLabels[$t], 'count' => $today];
+  $categoryPeriods['all'][] = ['label' => $typeLabels[$t], 'count' => $total, 'color' => $categoryColors[$t]];
+  $categoryPeriods['30'][] = ['label' => $typeLabels[$t], 'count' => $last30, 'color' => $categoryColors[$t]];
+  $categoryPeriods['7'][] = ['label' => $typeLabels[$t], 'count' => $last7, 'color' => $categoryColors[$t]];
+  $categoryPeriods['today'][] = ['label' => $typeLabels[$t], 'count' => $today, 'color' => $categoryColors[$t]];
   $categorySummary['all']['total'] += $total;
   $categorySummary['all']['unresolved'] += (int)($row['unresolved_all'] ?? 0);
   $categorySummary['30']['total'] += $last30;
@@ -341,6 +352,7 @@ foreach ($categoryTypes as $t) {
     'name'       => $typeLabels[$t],
     'count'      => $total,
     'total'      => $total,
+    'color'      => $categoryColors[$t],
     'percentage' => $categoryGrandTotal > 0 ? (int)round(($total / $categoryGrandTotal) * 100) : 0,
     'icon'       => $categoryIcons[$t],
   ];
@@ -415,6 +427,7 @@ $dashboardConfig = [
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>">
 
   <style>
     /* ==========================================================================
@@ -510,12 +523,13 @@ $dashboardConfig = [
       line-height: 1.5;
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
-      overflow-x: hidden;
       min-height: 100vh;
     }
 
     .app-wrapper {
       min-height: 100vh;
+      min-width: 0;
+      width: 100%;
       display: flex;
       flex-direction: column;
       background-color: var(--bg-page);
@@ -536,20 +550,31 @@ $dashboardConfig = [
       top: 0;
       z-index: 40;
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+      width: 100%;
+      min-width: 0;
     }
 
     .topbar-left {
       display: flex;
       align-items: center;
       gap: 18px;
+      min-width: 0;
     }
 
     .topbar-breadcrumb {
       display: flex;
       align-items: center;
       gap: 8px;
+      min-width: 0;
       font-size: 0.82rem;
       color: #94a3b8;
+    }
+
+    .breadcrumb-root,
+    .breadcrumb-current {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .breadcrumb-root {
@@ -594,6 +619,7 @@ $dashboardConfig = [
       display: flex;
       align-items: center;
       gap: 14px;
+      flex: 0 0 auto;
     }
 
     /* ── Sidebar integration (sb2) ── */
@@ -703,11 +729,13 @@ $dashboardConfig = [
        DASHBOARD CONTENT AREA
        ========================================================================== */
     .dashboard-content {
-      padding: 24px 32px 50px;
-      max-width: 1440px;
-      margin: 0 auto;
+      padding: 24px 20px 50px;
+      max-width: none;
+      margin: 0;
       width: 100%;
       flex: 1;
+      min-width: 0;
+      max-width: 100%;
     }
 
     /* Action & Date Filter Bar */
@@ -719,12 +747,14 @@ $dashboardConfig = [
       flex-wrap: wrap;
       gap: 12px;
       position: relative;
+      min-width: 0;
     }
 
     .action-buttons-group {
       display: flex;
       align-items: center;
       gap: 10px;
+      min-width: 0;
     }
 
     .btn-secondary {
@@ -776,6 +806,14 @@ $dashboardConfig = [
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 16px;
+      margin-bottom: 16px;
+      min-width: 0;
+    }
+
+    .create-report-action {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
       margin-bottom: 24px;
     }
 
@@ -847,44 +885,107 @@ $dashboardConfig = [
     }
 
     /* ==========================================================================
-       MAIN GRID LAYOUT (Left Content vs Right Sidebar)
+       MAIN CHARTS AND STATUS OVERVIEW
        ========================================================================== */
     .dashboard-grid {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 350px;
-      gap: 24px;
+      grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+      gap: 18px;
       align-items: stretch;
-    }
-
-    .grid-left {
-      display: flex;
-      flex-direction: column;
-      gap: 24px;
       min-width: 0;
     }
 
-    .grid-right {
+    .dashboard-grid > .dashboard-card { min-width: 0; display: flex; flex-direction: column; }
+    .dashboard-grid,
+    .dashboard-grid > .dashboard-card,
+    .metric-pipeline-container,
+    .pipeline-step,
+    .comparison-chart-card,
+    .category-chart-card,
+    .report-status-card { min-width: 0; }
+    .comparison-chart-card,
+    .category-chart-card,
+    .report-status-card { min-height: 360px; }
+    .dashboard-grid > .dashboard-card { border-radius: 0; }
+    .chart-canvas-wrap { height: 320px; position: relative; }
+    .comparison-chart-card .chart-container { flex: 1; display: flex; min-height: 0; min-width: 0; max-width: 100%; overflow: hidden; }
+    .comparison-chart-card .chart-canvas-wrap { position: relative; flex: 1 1 auto; width: 100%; min-width: 0; max-width: 100%; min-height: 320px; height: 320px; overflow: hidden; }
+    .comparison-chart-card #brgyComparisonChart { display: block; width: 100% !important; height: 100% !important; max-width: 100%; }
+    .comparison-chart-card > .comparison-chart-head {
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 20px 20px 16px;
+      border-bottom: 0;
+    }
+    .comparison-chart-head .card-title { font-size: 16px; }
+    .comparison-chart-sub { margin-top: 4px; color: var(--text-muted); font-size: 13px; }
+    .comparison-chart-controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+    }
+    .comparison-chart-controls .chart-range {
+      border-radius: 0;
+    }
+    .comparison-chart-controls .chart-range-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+    .comparison-chart-controls .chart-legend {
+      gap: 14px;
+      margin: 0 0 0 4px;
+    }
+    .comparison-chart-controls .chart-legend-item {
+      gap: 6px;
+      color: #52525b;
+      font-size: 13px;
+    }
+    .comparison-chart-controls .chart-legend-swatch {
+      width: 10px;
+      height: 10px;
+      border-radius: 0;
+    }
+    .comparison-chart-card > .chart-container {
+      padding: 0 20px 20px;
+    }
+    @media (max-width: 768px) {
+      .comparison-chart-controls .chart-legend { margin-left: 0; }
+    }
+
+    /* Reports by category donut chart */
+    .category-chart-card .cat-chart-container {
+      flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 24px;
+      align-items: stretch;
+      justify-content: flex-start;
+      gap: 12px;
+      padding: 0 16px 16px;
     }
-
-    /* Both columns stretch to align bottom edges */
-    .grid-left > .dashboard-card,
-    .grid-right > .dashboard-card { flex: 1; display: flex; flex-direction: column; }
-    .grid-right > .category-chart-card { flex: 0 0 auto; }
-    .chart-canvas-wrap { height: 320px; position: relative; }
-    .comparison-chart-card .chart-container { flex: 1; display: flex; min-height: 0; }
-    .comparison-chart-card .chart-canvas-wrap { flex: 1; min-height: 320px; height: auto; }
-    .comparison-chart-card #brgyComparisonChart { width: 100% !important; height: 100% !important; }
-
-    /* Reports by category — horizontal bar chart (recharts-style) */
-    .category-chart-card .cat-chart-container { flex: 0 0 auto; }
-    .category-chart-card .cat-chart-wrap { height: 220px; position: relative; }
-    .cat-chart-footer {
-      display: flex; flex-direction: column; justify-content: flex-end; gap: 0; flex: 1;
-      padding: 12px 16px 16px;
+    .category-chart-card .cat-chart-wrap { align-self: center; width: min(100%, 256px); height: 256px; position: relative; }
+    .category-chart-card #brgyCategoryChart { width: 100% !important; height: 100% !important; }
+    .cat-chart-legend {
+      width: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px 12px;
+      margin-top: auto;
     }
+    .cat-chart-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: #71717a;
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 13px;
+    }
+    .cat-chart-legend-swatch { width: 8px; height: 8px; flex: 0 0 8px; }
+    .cat-chart-legend-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .cat-chart-empty {
       position: absolute;
       inset: 0;
@@ -897,62 +998,101 @@ $dashboardConfig = [
       font-size: 13px;
       text-align: center;
     }
-    .cat-chart-empty[hidden],
-    .cat-chart-share-bar[hidden] { display: none; }
+    .cat-chart-empty[hidden] { display: none; }
 
-    .cat-chart-footer-top {
-      margin-bottom: 8px;
-    }
-    .cat-chart-trend { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 500; color: var(--text-main); }
-    .cat-chart-note { font-size: 12px; color: var(--text-muted); }
-
-    .cat-chart-share-bar {
+    .report-status-card > .card-header { border-bottom: 0; }
+    .report-status-list { padding: 0 20px 20px; }
+    .report-status-row { margin-bottom: 20px; }
+    .report-status-row:last-child { margin-bottom: 0; }
+    .report-status-label-row {
       display: flex;
-      height: 8px;
-      overflow: hidden;
-      margin: 12px 0;
-      border-radius: 999px;
-      background: #f1f5f9;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
     }
-    .cat-chart-share-segment {
-      height: 100%;
-      min-width: 0;
-      transition: width .2s ease;
+    .report-status-label,
+    .report-status-count {
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
     }
-    .cat-chart-stats {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+    .report-status-count { font-weight: 600; }
+    .report-status-bar { height: 8px; background: #f0f0f0; overflow: hidden; }
+    .report-status-fill { height: 100%; transition: width 1s ease-out; }
+
+    .barangay-announcements-card { margin-top: 24px; border-radius: 0; }
+    .barangay-announcements-card > .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px;
+      border-bottom: 1px solid #e4e4e7;
+    }
+    .barangay-announcements-heading {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
       gap: 10px;
     }
-    .cat-chart-stat {
-      min-width: 0;
-      padding: 10px 12px;
-      border: 1px solid #eef2f6;
-      border-radius: 8px;
-      font-family: 'Inter', 'Segoe UI', sans-serif;
-      font-size: 12px;
-      font-weight: 400;
+    .barangay-announcements-heading .card-title { font-size: 14px; font-weight: 600; }
+    .barangay-announcement-count {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border: 1px solid #e4e4e7;
+      background: #f4f4f5;
       color: #52525b;
-      line-height: 1.4;
+      font-size: 12px;
+      font-weight: 500;
     }
-    .cat-chart-stat strong {
-      display: block;
-      margin-top: 3px;
-      color: #18181b;
+    .barangay-announcements-view-all {
+      color: #0e8131;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .barangay-announcements-view-all:hover { text-decoration: underline; }
+    #barangay-announcements { border-radius: 0; }
+    #barangay-announcements .data-table { table-layout: fixed; }
+    #barangay-announcements .data-table thead th {
+      height: auto;
+      padding: 0.9rem 8px;
+      border-bottom-color: #e4e4e7;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #barangay-announcements .data-table tbody td {
+      padding: 0.85rem 1.25rem;
+      border-bottom-color: #e4e4e7;
       font-size: 14px;
-      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .cat-chart-stat .cat-stat-detail {
-      display: block;
-      margin-top: 2px;
-      color: #71717a;
-      font-size: 11px;
-      overflow-wrap: anywhere;
+    #barangay-announcements .data-table th:nth-child(1) { width: 16%; }
+    #barangay-announcements .data-table th:nth-child(2) { width: 30%; }
+    #barangay-announcements .data-table th:nth-child(3) { width: 15%; }
+    #barangay-announcements .data-table th:nth-child(4) { width: 39%; }
+    .barangay-announcement-title { color: #18181b; font-weight: 600; text-decoration: none; }
+    .barangay-announcement-title:hover { text-decoration: underline; }
+    .barangay-announcement-tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 0 8px;
+      border: 1px solid #e4e4e7;
+      color: #52525b;
+      font-size: 12px;
+      font-weight: 500;
     }
-    .cat-stat-label {
-      font-weight: 600;
-      color: #18181b;
-    }
+    .barangay-announcement-empty { padding: 24px 16px; color: #71717a; font-size: 13px; text-align: center; }
 
     .chart-range-controls {
       display: flex;
@@ -1251,8 +1391,13 @@ $dashboardConfig = [
        ========================================================================== */
     .table-container {
       width: 100%;
+      min-width: 0;
+      max-width: 100%;
       overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
     }
+    #reports .table-container,
+    #barangay-announcements .table-container { contain: paint; }
 
     .data-table {
       width: 100%;
@@ -1298,6 +1443,38 @@ $dashboardConfig = [
 
     .data-table tbody tr:hover {
       background: #f9fafb;
+    }
+
+    #reports .data-table thead th {
+      height: auto;
+      padding: 0.9rem 8px;
+      border-bottom-color: #e4e4e7;
+      background: #fff;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #reports .data-table { table-layout: fixed; }
+    #reports { border-radius: 0; }
+    #reports .data-table th:nth-child(1) { width: 11%; }
+    #reports .data-table th:nth-child(2) { width: 9%; }
+    #reports .data-table th:nth-child(3) { width: 15%; }
+    #reports .data-table th:nth-child(4) { width: 12%; }
+    #reports .data-table th:nth-child(5) { width: 12%; }
+    #reports .data-table th:nth-child(6) { width: 8%; }
+    #reports .data-table th:nth-child(7) { width: 14%; }
+    #reports .data-table th:nth-child(8) { width: 14%; }
+    #reports .data-table th:nth-child(9) { width: 5%; }
+    #reports .data-table tbody td {
+      padding: 0.85rem 1.25rem;
+      border-bottom-color: #e4e4e7;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .report-id-cell {
@@ -1438,13 +1615,6 @@ $dashboardConfig = [
     .chart-container {
       padding: 18px 24px 24px;
       position: relative;
-    }
-
-    .cat-chart-container {
-      padding: 12px 0 0;
-      display: flex;
-      flex-direction: column;
-      flex: 1;
     }
 
     .chart-legend {
@@ -2350,16 +2520,9 @@ $dashboardConfig = [
       .metric-pipeline-container {
         grid-template-columns: repeat(3, 1fr);
       }
-      .dashboard-grid {
-        grid-template-columns: 1fr;
-      }
-      .grid-right {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-      }
     }
 
-    @media (max-width: 992px) {
+    @media (max-width: 1100px) {
       .topbar {
         padding: 0 20px;
       }
@@ -2369,11 +2532,11 @@ $dashboardConfig = [
       .bottom-cards-row {
         grid-template-columns: 1fr;
       }
-      .grid-right {
-        grid-template-columns: 1fr;
-      }
       .search-container {
         width: 220px;
+      }
+      .dashboard-grid {
+        grid-template-columns: 1fr;
       }
       .header-divider {
         display: none;
@@ -2401,13 +2564,26 @@ $dashboardConfig = [
         width: 100%;
         justify-content: flex-end;
       }
+      .comparison-chart-card,
+      .category-chart-card,
+      .report-status-card { min-height: 0; }
+      #reports .data-table { min-width: 980px; }
+      #barangay-announcements .data-table { min-width: 680px; }
+      #reports .data-table tbody td,
+      #barangay-announcements .data-table tbody td { white-space: nowrap; }
+      .comparison-chart-card .chart-canvas-wrap {
+        min-height: 260px;
+        height: 260px;
+      }
+      .category-chart-card .cat-chart-wrap { height: 220px; }
+    }
+
+    @media (max-width: 900px) {
+      .search-container { display: none; }
     }
 
     @media (max-width: 640px) {
       .barangay-selector {
-        display: none;
-      }
-      .search-container {
         display: none;
       }
       .user-meta {
@@ -2417,17 +2593,125 @@ $dashboardConfig = [
 
     @media (max-width: 480px) {
       .metric-pipeline-container {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
       }
-      .cat-chart-stats { grid-template-columns: 1fr 1fr; }
-      .cat-chart-stat { padding: 8px; font-size: 11px; }
+      .pipeline-step {
+        min-width: 0;
+        padding: 14px 10px;
+      }
+      .step-label {
+        font-size: 11px;
+        line-height: 1.35;
+      }
+      .step-value {
+        font-size: 22px;
+      }
+      .step-trend {
+        font-size: 11px;
+        line-height: 1.3;
+      }
+      .dashboard-content {
+        padding: 14px 12px 32px;
+      }
+      .topbar {
+        gap: 8px;
+        padding-inline: 10px;
+      }
+      .topbar-left { gap: 8px; }
+      .topbar-breadcrumb { gap: 5px; }
+      .action-buttons-group { flex-direction: row; align-items: center; }
+      .create-report-action { justify-content: flex-end; }
+      #export-btn { align-self: flex-end; }
+      .category-chart-card .cat-chart-wrap { height: 200px; }
     }
 
+    @media (max-width: 640px) {
+      #create-report-modal.modal-backdrop {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        align-items: stretch;
+        justify-content: stretch;
+        padding: 0;
+      }
+      #create-report-modal .modal-dialog {
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        align-items: stretch;
+        justify-content: stretch;
+      }
+      #create-report-modal .modal-dialog-content {
+        flex: 1 1 auto;
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        max-height: none;
+        gap: 0;
+        padding: max(16px, env(safe-area-inset-top)) 16px 0;
+        border: 0;
+        border-radius: 0;
+        overflow: hidden;
+      }
+      #create-report-modal.modal-backdrop.open .modal-dialog { animation: none; }
+      #create-report-modal .modal-dialog-header {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        flex: 0 0 auto;
+        padding: 4px 32px 16px 0;
+        background: #fff;
+        border-bottom: 1px solid #e4e4e7;
+      }
+      #create-report-modal .modal-dialog-title { line-height: 1.3; }
+      #create-report-modal .modal-dialog-close { top: 16px; right: 12px; }
+      #create-report-modal #create-report-form {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+      #create-report-modal .modal-dialog-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding: 16px 0;
+      }
+      #create-report-modal .form-row { grid-template-columns: minmax(0, 1fr); }
+      #create-report-modal .form-group,
+      #create-report-modal .form-control {
+        min-width: 0;
+        width: 100%;
+        box-sizing: border-box;
+      }
+      #create-report-modal .form-control {
+        min-height: 44px;
+        font-size: 16px;
+      }
+      #create-report-modal textarea.form-control { min-height: 96px; }
+      #create-report-modal .modal-dialog-footer {
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
+        flex: 0 0 auto;
+        padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+        background: #fff;
+      }
+      #create-report-modal .modal-dialog-footer button {
+        min-height: 44px;
+      }
+    }
 
   </style>
-  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/notification.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/notification.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 </head>
-<body>
+<body class="barangay-overview-page">
 
 <?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
@@ -2505,27 +2789,6 @@ $dashboardConfig = [
   <main class="dashboard-content">
 
     <!-- Action & Date Range Controls -->
-    <section class="action-bar">
-      <div class="action-buttons-group">
-        <button class="btn-secondary" id="export-btn" title="Export report data">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          <span>Export</span>
-        </button>
-
-        <button class="btn-primary" id="open-create-report-modal">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"/>
-            <line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
-          <span>Create report</span>
-        </button>
-      </div>
-    </section>
-
     <!-- Metric KPI Cards (5 Individual Containers) -->
     <section class="metric-pipeline-container" id="pipeline-steps">
       <!-- 1. New -->
@@ -2617,50 +2880,35 @@ $dashboardConfig = [
 
     </section>
 
-    <!-- Reports requiring attention (full width) -->
-    <div class="dashboard-card" id="reports" style="margin-bottom:24px;">
-      <div class="card-header">
-        <div class="card-title-wrap">
-          <h2 class="card-title">Reports Requiring Attention</h2>
-          <span class="count-badge" id="table-row-count-badge">8</span>
-        </div>
-      </div>
-
-      <div class="table-container">
-        <table class="data-table" id="reports-table">
-          <thead>
-            <tr>
-              <th>Report ID</th>
-              <th>Category</th>
-              <th>Location</th>
-              <th>Reporter</th>
-              <th>Incident Date</th>
-              <th>Priority</th>
-              <th>Status</th>
-              <th>Date Resolved</th>
-              <th style="width: 36px;"></th>
-            </tr>
-          </thead>
-          <tbody id="reports-table-body">
-            <!-- Dynamic rows rendered via JS -->
-          </tbody>
-        </table>
-      </div>
+    <div class="create-report-action">
+      <button class="btn-secondary" id="export-btn" title="Export report data">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        <span>Export</span>
+      </button>
+      <button class="btn-primary" id="open-create-report-modal">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+        <span>Create report</span>
+      </button>
     </div>
 
-    <!-- Main Dashboard 2-Column Grid -->
+    <!-- Main dashboard charts and report status overview -->
     <div class="dashboard-grid">
-
-      <!-- ====================================================================
-           LEFT COLUMN (Monthly Chart)
-           ==================================================================== -->
-      <div class="grid-left">
 
         <!-- Card: Monthly Reports vs. Resolved Cases -->
         <div class="dashboard-card comparison-chart-card">
-          <div class="card-header">
-            <h2 class="card-title">Monthly Reports vs. Resolved Cases</h2>
-            <div class="chart-range-controls">
+          <div class="card-header comparison-chart-head">
+            <div>
+              <h2 class="card-title">Monthly Reports vs. Resolved Cases</h2>
+              <p class="comparison-chart-sub" id="cmpChartSub">Last 30 days</p>
+            </div>
+            <div class="comparison-chart-controls">
               <div class="chart-range" id="cmpRange">
                 <button class="chart-range-btn active" data-range="30d" onclick="cmpSetRange('30d', this)">Last 30 Days</button>
                 <button class="chart-range-btn" data-range="year" onclick="cmpSetRange('year', this)">Per Year</button>
@@ -2685,13 +2933,6 @@ $dashboardConfig = [
             </div>
           </div>
         </div>
-
-      </div>
-
-      <!-- ====================================================================
-           RIGHT COLUMN (Reports by Category & Recent Activity)
-           ==================================================================== -->
-      <div class="grid-right">
 
         <!-- Card 1: Reports by category -->
         <div class="dashboard-card category-chart-card">
@@ -2718,11 +2959,121 @@ $dashboardConfig = [
               <canvas id="brgyCategoryChart"></canvas>
               <div class="cat-chart-empty" id="category-empty-state" hidden>No reports in this period.</div>
             </div>
+            <div class="cat-chart-legend">
+              <?php foreach ($categories as $category): ?>
+                <div class="cat-chart-legend-item">
+                  <span class="cat-chart-legend-swatch" style="background:<?php echo htmlspecialchars($category['color']); ?>;"></span>
+                  <span class="cat-chart-legend-label"><?php echo htmlspecialchars($category['name']); ?></span>
+                </div>
+              <?php endforeach; ?>
+            </div>
           </div>
         </div>
 
+        <!-- Card: Report status overview -->
+        <div class="dashboard-card report-status-card">
+          <div class="card-header">
+            <h2 class="card-title">Report Status Overview</h2>
+          </div>
+          <div class="report-status-list">
+            <?php
+              $reportStatusTotal = array_sum($kpi);
+              $reportStatuses = [
+                  ['label' => 'Pending Barangay Review', 'count' => $kpi['validation'], 'color' => '#D4D4D4'],
+                  ['label' => 'Pending DCVS Review', 'count' => $kpi['new'], 'color' => '#3B82F6'],
+                  ['label' => 'In Progress', 'count' => $kpi['progress'], 'color' => '#EAB308'],
+                  ['label' => 'Resolved', 'count' => $kpi['resolved'], 'color' => '#0E8131'],
+                  ['label' => 'Closed', 'count' => $kpi['closed'], 'color' => '#EF4444'],
+              ];
+            ?>
+            <?php foreach ($reportStatuses as $reportStatus): ?>
+              <?php $statusPercent = $reportStatusTotal ? $reportStatus['count'] / $reportStatusTotal * 100 : 0; ?>
+              <div class="report-status-row">
+                <div class="report-status-label-row">
+                  <span class="report-status-label"><?php echo htmlspecialchars($reportStatus['label']); ?></span>
+                  <span class="report-status-count"><?php echo number_format($reportStatus['count']); ?></span>
+                </div>
+                <div class="report-status-bar">
+                  <div class="report-status-fill" style="width:<?php echo number_format($statusPercent, 1, '.', ''); ?>%;background:<?php echo htmlspecialchars($reportStatus['color']); ?>;"></div>
+                </div>
+              </div>
+            <?php endforeach; ?>
+            <?php if (!$reportStatusTotal): ?>
+              <p style="font-size:13px;color:#71717a;margin:1rem 0 0;">No report records yet.</p>
+            <?php endif; ?>
+          </div>
+        </div>
+
+    </div>
+
+    <section class="dashboard-card barangay-announcements-card" id="barangay-announcements" aria-labelledby="barangay-announcements-title">
+      <div class="card-header">
+        <div class="barangay-announcements-heading">
+          <h2 class="card-title" id="barangay-announcements-title">Announcements for Brgy. <?php echo htmlspecialchars($barangayName); ?></h2>
+          <?php if ($overviewAnnouncements): ?>
+            <span class="barangay-announcement-count"><?php echo count($overviewAnnouncements); ?> recent</span>
+          <?php endif; ?>
+        </div>
+        <a class="barangay-announcements-view-all" href="announcements-barangay.php">View all</a>
+      </div>
+      <div class="table-container ab-table-wrap">
+        <table class="data-table" id="barangay-announcements-table">
+          <thead>
+            <tr>
+              <th>Published</th>
+              <th>Announcement / Event</th>
+              <th>Category</th>
+              <th>Location</th>
+            </tr>
+          </thead>
+          <tbody>
+        <?php if ($overviewAnnouncements): ?>
+          <?php foreach ($overviewAnnouncements as $announcement): ?>
+            <?php $announcementDate = strtotime($announcement['publish_at'] ?: $announcement['created_at']); ?>
+            <tr>
+              <td><?php echo date('M j, Y g:i A', $announcementDate); ?></td>
+              <td><a class="barangay-announcement-title" href="announcements-barangay.php#announcement-<?php echo (int)$announcement['announcement_id']; ?>"><?php echo htmlspecialchars($announcement['title']); ?></a></td>
+              <td><span class="barangay-announcement-tag"><?php echo !empty($announcement['is_event']) ? 'Event' : htmlspecialchars(ucfirst($announcement['category'])); ?></span></td>
+              <td title="<?php echo htmlspecialchars($announcement['location']); ?>"><?php echo htmlspecialchars($announcement['location']); ?></td>
+            </tr>
+          <?php endforeach; ?>
+        <?php else: ?>
+          <tr><td class="barangay-announcement-empty" colspan="4">There are no published announcements for your barangay yet.</td></tr>
+        <?php endif; ?>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Reports requiring attention (full width) -->
+    <div class="dashboard-card" id="reports" style="margin:24px 0;">
+      <div class="card-header">
+        <div class="card-title-wrap">
+          <h2 class="card-title">Reports Requiring Attention</h2>
+          <span class="count-badge" id="table-row-count-badge">8</span>
+        </div>
       </div>
 
+      <div class="table-container ab-table-wrap">
+        <table class="data-table" id="reports-table">
+          <thead>
+            <tr>
+              <th>Report ID</th>
+              <th>Category</th>
+              <th>Location</th>
+              <th>Reporter</th>
+              <th>Incident Date</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Date Resolved</th>
+              <th style="width: 36px;"></th>
+            </tr>
+          </thead>
+          <tbody id="reports-table-body">
+            <!-- Dynamic rows rendered via JS -->
+          </tbody>
+        </table>
+      </div>
     </div>
 
       </div>
@@ -2857,14 +3208,14 @@ $dashboardConfig = [
       <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
       <div class="sd-alert-dialog-header">
         <h3 class="sd-alert-dialog-title" id="validate-alert-title">Validate Report</h3>
-        <p class="sd-alert-dialog-description" id="validate-alert-desc">Record what you found on site. If the incident has not been visited yet, select Site visit pending.</p>
+        <p class="sd-alert-dialog-description" id="validate-alert-desc">Review the report before forwarding it or accepting responsibility. Record site findings later, after the team visits.</p>
         </div>
         <div class="sd-alert-dialog-body">
           <div id="dashboard-validation-context" style="padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px;background:#f8fafc;color:#334155;font-size:13px;"></div>
-          <fieldset style="border:0;padding:0;margin:0;">
+          <fieldset id="dashboardValidationFieldStatus" style="border:0;padding:0;margin:0;">
             <legend class="validation-field-label" style="margin-bottom:8px;">Field status <span style="color:#dc2626;" aria-hidden="true">*</span></legend>
             <div class="validation-status-grid">
-              <label class="validation-status-option"><input type="radio" name="field_status" value="site_visit_pending" required checked><span class="validation-status-copy"><strong>Site visit pending</strong><span>The incident has not been checked on site yet.</span></span></label>
+              <label class="validation-status-option"><input type="radio" name="field_status" value="site_visit_pending" required><span class="validation-status-copy"><strong>Site visit pending</strong><span>The incident has not been checked on site yet.</span></span></label>
               <label class="validation-status-option"><input type="radio" name="field_status" value="confirmed_on_site" required><span class="validation-status-copy"><strong>Confirmed on site</strong><span>Animal and location were verified.</span></span></label>
             <label class="validation-status-option"><input type="radio" name="field_status" value="urgent_response"><span class="validation-status-copy"><strong>Needs urgent response</strong><span>Immediate assistance is needed.</span></span></label>
             <label class="validation-status-option"><input type="radio" name="field_status" value="animal_already_gone"><span class="validation-status-copy"><strong>Animal already gone</strong><span>Animal was no longer at the location.</span></span></label>
@@ -3096,14 +3447,16 @@ function setReportFilter(status) {
 function updateBarangayReportStatus(report, status) {
   if (!report) return;
   var previousStatus = report._db_status || 'pending';
-  if (status === 'confirmed' && report.responseMode === 'barangay_response') {
+  if (status === 'validated' && report.responseMode === 'barangay_response') {
     report.responseState = 'barangay_response_approved';
   }
-  var display = status === 'confirmed' && report.responseState === 'barangay_response_approved'
-    ? (report.fieldStatus === 'site_visit_pending'
-      ? 'Accepted by Barangay · Site visit pending'
-      : 'Accepted by Barangay')
-    : ({ validated: 'Pending DCVS Review', confirmed: 'In progress', scheduled: 'In progress', resolved: 'Resolved', rejected: 'Closed' }[status] || (status === 'pending' ? 'Pending Barangay Review' : status));
+  var display = { validated: 'Pending DCVS Review', confirmed: 'In progress', scheduled: 'In progress', resolved: 'Resolved', rejected: 'Closed' }[status]
+    || (status === 'pending' ? 'Pending Barangay Review' : status);
+  if (report.responseMode === 'barangay_response' && report.responseState === 'barangay_response_approved') {
+    display = 'Accepted by Barangay';
+  } else if (report.responseMode === 'barangay_response' && report.responseState === 'barangay_responding') {
+    display = 'Barangay Responding';
+  }
   report._db_status = status;
   report.status = display;
   if (previousStatus === 'pending') DASHBOARD_CONFIG.metrics.validation = Math.max(0, DASHBOARD_CONFIG.metrics.validation - 1);
@@ -3116,38 +3469,6 @@ function updateBarangayReportStatus(report, status) {
   renderReportsTable(activeFilter === 'all' ? null : (activeFilter || 'pending'));
 }
 
-/**
- * Reports by category — horizontal bar chart (recharts "Bar Chart - Custom Label" style)
- */
-var brgyBarLabelPlugin = {
-  id: 'brgyBarLabel',
-  afterDatasetsDraw: function(chart) {
-    var ctx = chart.ctx;
-    var meta = chart.getDatasetMeta(0);
-    var ds = chart.data.datasets[0];
-    var labels = chart.data.labels;
-    if (!meta || !meta.data || !ds) return;
-    var total = ds.data.reduce(function(sum, count) { return sum + Number(count || 0); }, 0);
-    ctx.save();
-    ctx.textBaseline = 'middle';
-    meta.data.forEach(function(bar, i) {
-      var count = Number(ds.data[i] || 0);
-      if (count <= 0) return;
-      var left = bar.base;   // start of bar (value axis 0)
-      var right = bar.x;     // end of bar (data value)
-      var y = bar.y;         // center of the bar row
-      ctx.fillStyle = '#ffffff';
-      ctx.font = '600 12px Inter, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.fillText(labels[i], left + 12, y);
-      ctx.fillStyle = '#18181b';
-      ctx.font = '500 12px Inter, sans-serif';
-      ctx.fillText(count.toLocaleString() + ' (' + Math.round((count / total) * 100) + '%)', right + 10, y);
-    });
-    ctx.restore();
-  }
-};
-
 function renderCategoryChart() {
   var el = document.getElementById('brgyCategoryChart');
   if (!el || typeof Chart === 'undefined') return;
@@ -3155,68 +3476,12 @@ function renderCategoryChart() {
   var periods = DASHBOARD_CONFIG.categoryPeriods || {};
   var catData = periods[catCurrentPeriod] || periods.all || [];
   var labels = catData.map(function(d) { return d.label; });
-  var values = catData.map(function(d) { return d.count; });
-  var scaleMaximum = Math.max(20, values.reduce(function(max, count) {
-    return Math.max(max, Number(count) || 0);
-  }, 0));
+  var values = catData.map(function(d) { return Number(d.count) || 0; });
+  var colors = catData.map(function(d) { return d.color; });
   var total = values.reduce(function(sum, count) { return sum + Number(count || 0); }, 0);
-  var rankedCategories = catData.filter(function(d) { return d.count > 0; }).slice().sort(function(a, b) { return b.count - a.count; });
-  var summary = ((DASHBOARD_CONFIG.categorySummary || {})[catCurrentPeriod]) || {};
-  var comparisonLabel = { '30': 'previous 30 days', '7': 'previous 7 days', today: 'yesterday' }[catCurrentPeriod] || '';
-  var criticalCount = catData.reduce(function(sum, item) {
-    return ['rabies', 'dead'].indexOf(String(item.label).toLowerCase()) !== -1 ? sum + Number(item.count || 0) : sum;
-  }, 0);
-  var topCategory = rankedCategories[0];
-  var totalStat = document.getElementById('category-total-stat');
-  var topStat = document.getElementById('category-top-stat');
-  var trendStat = document.getElementById('category-trend-stat');
-  var criticalStat = document.getElementById('category-critical-stat');
-  var unresolvedStat = document.getElementById('category-unresolved-stat');
-  var shareBar = document.getElementById('category-share-bar');
   var emptyState = document.getElementById('category-empty-state');
   var noReports = total === 0;
 
-  if (totalStat) totalStat.textContent = total.toLocaleString() + (total === 1 ? ' report' : ' reports');
-  if (topStat) {
-    topStat.textContent = topCategory
-      ? topCategory.label + ' · ' + Math.round((topCategory.count / total) * 100) + '%'
-      : '—';
-  }
-  if (trendStat) {
-    if (!comparisonLabel || summary.previousTotal === null || summary.previousTotal === undefined) {
-      trendStat.textContent = 'Not available for all time';
-    } else {
-      var trendDelta = total - Number(summary.previousTotal || 0);
-      trendStat.textContent = trendDelta > 0
-        ? '↑ ' + trendDelta.toLocaleString() + ' vs ' + comparisonLabel
-        : trendDelta < 0
-          ? '↓ ' + Math.abs(trendDelta).toLocaleString() + ' vs ' + comparisonLabel
-          : 'No change vs ' + comparisonLabel;
-    }
-  }
-  if (criticalStat) {
-    criticalStat.textContent = criticalCount.toLocaleString() + (criticalCount === 1 ? ' report' : ' reports')
-      + ' (' + (total > 0 ? Math.round((criticalCount / total) * 100) : 0) + '%)';
-  }
-  if (unresolvedStat) {
-    var unresolved = Number(summary.unresolved || 0);
-    unresolvedStat.textContent = unresolved.toLocaleString() + (unresolved === 1 ? ' report' : ' reports');
-  }
-  if (shareBar) {
-    shareBar.replaceChildren();
-    catData.forEach(function(item, index) {
-      var count = Number(item.count || 0);
-      if (count <= 0 || total <= 0) return;
-      var segment = document.createElement('span');
-      segment.className = 'cat-chart-share-segment';
-      segment.style.width = ((count / total) * 100) + '%';
-      segment.style.backgroundColor = ['#0E8131', '#DC2626', '#F79009', '#475569'][index % 4];
-      segment.title = item.label + ': ' + count + ' (' + Math.round((count / total) * 100) + '%)';
-      shareBar.appendChild(segment);
-    });
-    shareBar.setAttribute('aria-label', noReports ? 'No reports in this period' : 'Category distribution for ' + total + ' reports');
-    shareBar.hidden = noReports;
-  }
   if (emptyState) emptyState.hidden = !noReports;
   el.style.visibility = noReports ? 'hidden' : 'visible';
 
@@ -3224,62 +3489,27 @@ function renderCategoryChart() {
     var chart = brgyCharts['brgyCategoryChart'];
     chart.data.labels = labels;
     chart.data.datasets[0].data = values;
-    chart.options.scales.x.max = scaleMaximum;
+    chart.data.datasets[0].backgroundColor = colors;
     chart.update();
     return;
   }
 
   brgyCharts['brgyCategoryChart'] = new Chart(el, {
-    type: 'bar',
+    type: 'doughnut',
     data: {
       labels: labels,
       datasets: [{
         label: 'Reports',
         data: values,
-        backgroundColor: ['#0E8131', '#DC2626', '#F79009', '#475569'],
-        borderRadius: 6,
-        barThickness: 28,
-        maxBarThickness: 28,
-        barPercentage: 0.55,
-        categoryPercentage: 1
+        backgroundColor: colors,
+        borderWidth: 0,
+        hoverOffset: 4
       }]
     },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      layout: {
-        padding: { right: 88, top: 8, bottom: 8 }
-      },
-      scales: {
-        x: {
-          min: 0,
-          max: scaleMaximum,
-          grid: { color: 'rgba(0,0,0,0.06)', drawBorder: false },
-          border: { display: false },
-          ticks: { display: false }
-        },
-        y: { display: false }
-      },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#18181b',
-          titleColor: '#f0f0f0',
-          bodyColor: '#f0f0f0',
-          titleFont: { family: 'Inter', size: 11 },
-          bodyFont: { family: 'Inter', size: 12, weight: '700' },
-          displayColors: false,
-          padding: 10,
-          callbacks: {
-            label: function(ctx) {
-              return ' ' + ctx.dataset.label + ': ' + Math.round(ctx.parsed.x).toLocaleString();
-            }
-          }
-        }
-      }
-    },
-    plugins: [brgyBarLabelPlugin]
+    options: Object.assign(brgyBaseOpts(), {
+      cutout: '58%',
+      plugins: { legend: { display: false }, tooltip: brgyTooltipStyle() }
+    })
   });
 }
 
@@ -3366,6 +3596,15 @@ function updateDashboardValidationRoutingChoice() {
   const selection = form && form.querySelector('[name="barangay_will_respond"]:checked');
   const willRespond = !!(selection && selection.value === '1');
   const submitButton = document.getElementById('validate-alert-confirm');
+  const fieldStatus = document.getElementById('dashboardValidationFieldStatus');
+  if (fieldStatus) {
+    fieldStatus.hidden = willRespond;
+    fieldStatus.querySelectorAll('[name="field_status"]').forEach(input => {
+      input.required = !willRespond;
+      input.disabled = willRespond;
+      if (willRespond) input.checked = input.value === 'site_visit_pending';
+    });
+  }
   if (submitButton) submitButton.textContent = willRespond
     ? 'Validate & Assign to Barangay'
     : 'Validate & Forward to DCVS';
@@ -3483,9 +3722,9 @@ function validateReport() {
     cancelButton.disabled = false;
     updateDashboardValidationRoutingChoice();
     closeAlertDialog('validate-alert-dialog');
-    report.fieldStatus = fieldStatus ? fieldStatus.value : '';
+    report.fieldStatus = barangayWillRespond ? 'site_visit_pending' : (fieldStatus ? fieldStatus.value : '');
     if (barangayWillRespond) report.responseMode = 'barangay_response';
-    updateBarangayReportStatus(report, barangayWillRespond ? 'confirmed' : 'validated');
+    updateBarangayReportStatus(report, 'validated');
     var detailModal = document.getElementById('report-detail-modal');
     if (detailModal) detailModal.classList.remove('open');
     currentSelectedReport = null;
@@ -3563,7 +3802,7 @@ function brgyTooltipStyle() {
 }
 
 function brgyBaseOpts() {
-  return { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: brgyTooltipStyle() } };
+  return { responsive: true, maintainAspectRatio: false, resizeDelay: 50, plugins: { legend: { display: false }, tooltip: brgyTooltipStyle() } };
 }
 
 function brgyAnimOpts() {
@@ -3623,6 +3862,23 @@ var brgyCrosshairPlugin = {
 };
 
 var cmpCurrentRange = '30d';
+var brgyChartResizeFrame = 0;
+
+function scheduleBarangayChartResize() {
+  if (brgyChartResizeFrame) cancelAnimationFrame(brgyChartResizeFrame);
+  brgyChartResizeFrame = requestAnimationFrame(function() {
+    brgyChartResizeFrame = 0;
+    Object.keys(brgyCharts).forEach(function(id) {
+      var chart = brgyCharts[id];
+      if (chart) chart.resize();
+    });
+  });
+}
+
+window.addEventListener('resize', scheduleBarangayChartResize);
+window.addEventListener('orientationchange', function() {
+  window.setTimeout(scheduleBarangayChartResize, 100);
+});
 
 function cmpSetRange(range, btn) {
   cmpCurrentRange = range;
@@ -3646,6 +3902,7 @@ function renderCmpChart() {
 
   var cmp = (DASHBOARD_CONFIG.comparisonChart || {});
   var labels, reports, resolved;
+  var subtitle = document.getElementById('cmpChartSub');
 
   if (cmpCurrentRange === 'year') {
     labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -3654,11 +3911,13 @@ function renderCmpChart() {
     var yearData = (cmp.yearly || {})[yearKey] || { reports: Array(12).fill(0), resolved: Array(12).fill(0) };
     reports = yearData.reports;
     resolved = yearData.resolved;
+    if (subtitle) subtitle.textContent = yearKey;
   } else {
     var dailyData = cmp.daily || {};
     labels = dailyData.labels || [];
     reports = dailyData.reports || [];
     resolved = dailyData.resolved || [];
+    if (subtitle) subtitle.textContent = 'Last 30 days';
   }
 
   var rgb = brgyHexToRgb('#18181b');
@@ -3712,13 +3971,16 @@ function renderCmpChart() {
       scales: {
         y: {
           beginAtZero: true,
-          max: 20,
+          suggestedMax: 10,
           grid: { color: 'rgba(0,0,0,0.06)' },
-          ticks: { color: '#737373', font: { family: 'Inter', size: 10 }, precision: 0 }
+          ticks: { color: '#737373', font: { family: 'Inter', size: 11 }, precision: 0 }
         },
         x: {
-          grid: { display: false },
-          ticks: { color: '#737373', font: { family: 'Inter', size: 10 } }
+          grid: { color: 'rgba(0,0,0,0.06)' },
+          ticks: {
+            color: '#737373',
+            font: { family: 'Inter', size: 11 }
+          }
         }
       },
       plugins: {
@@ -3767,8 +4029,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial renders
   activeFilter = 'pending';
   renderReportsTable(activeFilter);
-  renderCmpChart();
-  renderCategoryChart();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    renderCmpChart();
+    renderCategoryChart();
+    scheduleBarangayChartResize();
+  }));
 
   // Modal Controls: Create Report
   const createModal = document.getElementById('create-report-modal');
@@ -3776,18 +4041,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const closeCreateBtn = document.getElementById('close-create-modal-btn');
   const cancelCreateBtn = document.getElementById('cancel-create-modal-btn');
   const createForm = document.getElementById('create-report-form');
+  let previousBodyOverflow = null;
 
   if (openCreateBtn && createModal) {
-    openCreateBtn.addEventListener('click', () => createModal.classList.add('open'));
+    openCreateBtn.addEventListener('click', () => {
+      previousBodyOverflow = document.body.style.overflow;
+      createModal.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      closeCreateBtn.focus();
+    });
   }
 
   const closeCreateModal = () => {
     if (createModal) createModal.classList.remove('open');
+    if (previousBodyOverflow !== null) {
+      document.body.style.overflow = previousBodyOverflow;
+      previousBodyOverflow = null;
+    }
     if (createForm) createForm.reset();
   };
 
   if (closeCreateBtn) closeCreateBtn.addEventListener('click', closeCreateModal);
   if (cancelCreateBtn) cancelCreateBtn.addEventListener('click', closeCreateModal);
+  if (createModal) {
+    createModal.addEventListener('click', event => {
+      if (event.target === createModal) closeCreateModal();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && createModal.classList.contains('open')) closeCreateModal();
+    });
+  }
 
   // Form Submit: New Report
   if (createForm) {
@@ -4246,6 +4529,6 @@ document.addEventListener('DOMContentLoaded', () => {
 <script>
 // Notifications are managed by assets/js/notification-panel.js.
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/notification-panel.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 </body>
 </html>

@@ -338,7 +338,7 @@ body.dashboard { overflow-x: hidden; }
   .btn-auth, .cta-link { width: 100% !important; justify-content: center !important; }
 
   /* ── Tables — horizontal scroll on mobile ── */
-  table.data-table, .data-table, .gm-table-wrap table,
+  table.data-table:not(.no-responsive), .data-table:not(.no-responsive), .gm-table-wrap table:not(.no-responsive),
   table:not(.no-responsive) { display: block !important; overflow-x: auto !important; -webkit-overflow-scrolling: touch !important; white-space: nowrap !important; }
   .table-wrap table { min-width: 0 !important; }
 
@@ -798,7 +798,7 @@ body.dashboard.resident-portal {
   .resident-portal .cv-drawer-info { grid-template-columns: 1fr !important; }
 }
 
-@media (max-width: 360px) {
+@media (max-width: 340px) {
   .resident-portal .resident-rework .metrics-grid,
   .resident-portal #my-pets .pets-kpi-grid,
   .resident-portal #my-reports .rpt-kpis,
@@ -1522,7 +1522,7 @@ body.dashboard.resident-portal {
   }
 }
 
-@media (max-width: 360px) {
+@media (max-width: 340px) {
   .resident-portal #cvDrawer .cv-drawer-body .rpt-detail-grid,
   .resident-portal #cvDrawer .cv-drawer-info {
     grid-template-columns: minmax(0, 1fr) !important;
@@ -1713,32 +1713,6 @@ body.dashboard.resident-portal {
     overflow-wrap: anywhere;
   }
   body.staff-theme #reports-all .kpi-value { font-size: 22px; }
-  body.staff-theme #reports-all .db-toolbar {
-    align-items: stretch;
-    gap: 10px;
-  }
-  body.staff-theme #reports-all .search-grow-wrap,
-  body.staff-theme #reports-all .toolbar-filters,
-  body.staff-theme #reports-all .db-toolbar-actions {
-    box-sizing: border-box;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    margin-left: 0;
-  }
-  body.staff-theme #reports-all .toolbar-filters {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
-  }
-  body.staff-theme #reports-all .tf-select {
-    box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    font-size: 12px;
-  }
-  body.staff-theme #reports-all .db-toolbar-actions .sd-btn { width: 100%; }
   body.staff-theme #reports-all .bulk-bar,
   body.staff-theme #reports-all .bulk-bar .bulk-actions {
     min-width: 0;
@@ -1859,78 +1833,13 @@ body.dashboard.resident-portal {
   }
   body.staff-theme #reports-all .dt-page-btn { width: 30px; height: 30px; }
 
-  body.staff-theme #rptDetailsModal.cd-drawer.modal {
-    box-sizing: border-box;
-    align-items: center !important;
-    justify-content: center;
-    padding: 12px !important;
-    overflow-y: auto;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog {
-    box-sizing: border-box;
-    width: min(440px, calc(100vw - 24px));
-    max-width: calc(100vw - 24px);
-    height: auto;
-    max-height: calc(100dvh - 24px);
-    justify-content: center;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-content {
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-    max-width: 100%;
-    min-width: 0;
-    height: auto;
-    max-height: calc(100dvh - 24px);
-    padding: 16px;
-    gap: 12px;
-    overflow: hidden;
-    border: 1px solid #e4e4e7;
-    border-radius: 14px;
-    box-shadow: 0 24px 64px rgba(15, 23, 32, 0.24);
-    transform: scale(.98);
-    transition: transform .2s ease;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer.active .sd-dialog-content { transform: scale(1); }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-header,
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-footer { flex: 0 0 auto; }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-title {
-    font-size: 16px;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-description {
-    font-size: 12px;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-field-group {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-footer {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
   body.staff-theme #rptDetailsModal .rpt-response-decision-actions {
     grid-template-columns: 36px minmax(0, 1fr);
-  }
-  body.staff-theme #rptDetailsModal.cd-drawer .sd-dialog-close {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-    align-self: flex-end;
-    flex: 0 0 auto;
   }
 }
 
 @media (max-width: 360px) {
   body.staff-theme #reports-all .kpis { grid-template-columns: minmax(0, 1fr); }
-  body.staff-theme #reports-all .toolbar-filters { grid-template-columns: minmax(0, 1fr); }
   body.staff-theme #reports-all .db-panel { padding: 10px; }
   body.staff-theme #reports-all .dt-pagination-right { flex-wrap: wrap; }
 }

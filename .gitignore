@@ -1,6 +1,5 @@
-node_modules/
+
 _backups/
 .vscode/
-vendor/
 .env
 uploads/

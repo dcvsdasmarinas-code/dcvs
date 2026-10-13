@@ -84,7 +84,7 @@ $stmt->close();
 
 // Fetch user's reports from database (excluding archived)
 $reports = [];
-$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address, r.status, r.created_at, r.updated_at, r.photo_url, r.video_url, r.urgency_level, rw.response_mode, rw.state AS response_state, rw.response_deadline, rw.progress_deadline, rw.turnover_deadline, rw.holding_location, rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at, tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at FROM reports r LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
+$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address, r.status, r.created_at, r.updated_at, r.photo_url, r.video_url, r.urgency_level, rw.response_mode, rw.state AS response_state, rw.response_deadline, rw.progress_deadline, rw.turnover_deadline, rw.holding_location, rr.resolution_details, rr.animal_disposition, rr.turnover_required, rr.resolved_at AS response_resolved_at, tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at FROM reports r LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -92,6 +92,95 @@ while ($row = $result->fetch_assoc()) {
     $reports[] = $row;
 }
 $stmt->close();
+
+$reportMediaById = [];
+$mediaStmt = $conn->prepare("SELECT ra.attachment_id, ra.report_id, ra.attachment_type, ra.attachment_source, ra.file_url,
+        ra.mime_type, ra.caption, ra.shared_with_resident, ra.response_history_id, ra.created_at,
+        ra.uploaded_by, u.full_name AS actor_name, u.role AS actor_role,
+        COALESCE(b.barangay_name, rb.barangay_name) AS barangay_name
+    FROM report_attachments ra
+    JOIN reports r ON r.report_id = ra.report_id
+    LEFT JOIN users u ON u.user_id = ra.uploaded_by
+    LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
+    LEFT JOIN barangays rb ON rb.barangay_id = r.barangay_id
+    WHERE r.reporter_id = ? AND r.archived_at IS NULL
+      AND (ra.attachment_source = 'resident'
+        OR (ra.attachment_type = 'photo' AND ra.attachment_source IN (
+            'barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action', 'staff_action'
+        )))
+    ORDER BY ra.report_id, ra.created_at, ra.attachment_id");
+if (!$mediaStmt) {
+    error_log('Could not prepare resident report evidence query: ' . $conn->error);
+} else {
+    $mediaStmt->bind_param('i', $_SESSION['user_id']);
+    if (!$mediaStmt->execute()) {
+        error_log('Could not load resident report evidence: ' . $mediaStmt->error);
+    } else {
+        $mediaResult = $mediaStmt->get_result();
+        while ($media = $mediaResult->fetch_assoc()) {
+            $source = (string)$media['attachment_source'];
+            $actor = (string)($media['actor_role'] ?? '');
+            if ($actor === '') {
+                $actor = in_array($source, ['barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action'], true)
+                    ? 'barangay'
+                    : ($source === 'staff_action' ? 'staff' : '');
+            }
+            $agency = $actor === 'barangay' && !empty($media['barangay_name'])
+                ? 'Brgy. ' . $media['barangay_name']
+                : ($actor === 'staff' ? 'DCVS' : 'You');
+            $reportMediaById[(int)$media['report_id']][] = [
+                'type' => (string)$media['attachment_type'],
+                'source' => $source,
+                'url' => in_array($source, ['barangay_action', 'staff_action'], true)
+                    ? 'api/shared/report-evidence-file.php?id=' . (int)$media['attachment_id'] . '&sess=PHPSESSID'
+                    : (string)$media['file_url'],
+                'mimeType' => (string)$media['mime_type'],
+                'caption' => (string)($media['caption'] ?? ''),
+                'shared' => (int)$media['shared_with_resident'] === 1,
+                'historyId' => (int)($media['response_history_id'] ?? 0),
+                'createdAt' => (string)$media['created_at'],
+                'actor' => $agency,
+                'role' => $actor,
+            ];
+        }
+    }
+    $mediaStmt->close();
+}
+
+$reportUpdatesById = [];
+$historyStmt = $conn->prepare("SELECT h.report_id, h.history_id, h.actor_role, h.action, h.to_state,
+        h.created_at, u.full_name AS actor_name, b.barangay_name
+    FROM report_response_history h
+    JOIN reports r ON r.report_id = h.report_id
+    LEFT JOIN users u ON u.user_id = h.actor_id
+    LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
+    WHERE r.reporter_id = ? AND r.archived_at IS NULL
+    ORDER BY h.report_id, h.created_at, h.history_id");
+if (!$historyStmt) {
+    error_log('Could not prepare resident report updates query: ' . $conn->error);
+} else {
+    $historyStmt->bind_param('i', $_SESSION['user_id']);
+    if (!$historyStmt->execute()) {
+        error_log('Could not load resident report updates: ' . $historyStmt->error);
+    } else {
+        $historyResult = $historyStmt->get_result();
+        while ($entry = $historyResult->fetch_assoc()) {
+            $actor = (string)$entry['actor_role'];
+            $agency = $actor === 'barangay' && !empty($entry['barangay_name'])
+                ? 'Brgy. ' . $entry['barangay_name']
+                : ($actor === 'staff' ? 'DCVS' : ($actor === 'resident' ? 'You' : ($actor === 'system' ? 'System' : 'DCVS')));
+            $reportUpdatesById[(int)$entry['report_id']][] = [
+                'id' => (int)$entry['history_id'],
+                'action' => (string)$entry['action'],
+                'state' => (string)$entry['to_state'],
+                'actor' => $agency,
+                'role' => $actor,
+                'createdAt' => (string)$entry['created_at'],
+            ];
+        }
+    }
+    $historyStmt->close();
+}
 
 // Fetch archived reports
 $archivedReports = [];
@@ -2894,7 +2983,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
     <?php
     $knownReportTypes = ['stray' => 'Stray Animal', 'rabies' => 'Rabies Case', 'injured' => 'Injured Animal', 'dead' => 'Dead Animal', 'other' => 'Other'];
-    function rptStatusLabel($s) {
+    function rptStatusLabel($s, $responseState = '') {
+        if ($responseState === 'barangay_response_approved') return 'Accepted by Barangay';
+        if ($responseState === 'escalated_to_dcvs') return 'Escalated to DCVS';
         switch ($s) {
         case 'pending': return 'Pending Barangay Review';
         case 'validated': return 'Pending DCVS Review';
@@ -2972,7 +3063,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $rType = $report['report_type'];
             $rTypeLabel = $knownReportTypes[strtolower($rType)] ?? ucfirst($rType);
             $rStatus = $report['status'];
-            $rStatusLabel = rptStatusLabel($rStatus);
+            $rStatusLabel = rptStatusLabel($rStatus, $report['response_state'] ?? '');
             $rStatusClass = rptStatusClass($rStatus);
             $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
             $incidentAt = !empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'];
@@ -3032,6 +3123,47 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
     #rptDrawer .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin:0; }
     #rptDrawer .rpt-photo-none { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:0; }
+    #rptDrawer .rpt-latest-update,#rptDrawer .rpt-update-card { padding:14px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;margin:0 0 12px;font-family:'Inter','Segoe UI',sans-serif; }
+    #rptDrawer .rpt-update-title { color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;margin:0 0 5px; }
+    #rptDrawer .rpt-update-meta { color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.5;margin:0 0 8px; }
+    #rptDrawer .rpt-update-copy { color:#3f3f46;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;line-height:1.5;margin:0 0 10px; }
+    #rptDrawer .rpt-evidence-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px; }
+    #rptDrawer .rpt-evidence-thumb { width:100%;aspect-ratio:1;border:1px solid #e4e4e7;border-radius:7px;overflow:hidden;background:#f4f4f5;padding:0;cursor:pointer; }
+    #rptDrawer .rpt-evidence-thumb img { width:100%;height:100%;object-fit:cover;display:block; }
+    #rptDrawer .response-steps { display:flex;align-items:flex-start;padding:8px 2px 16px; }
+    #rptDrawer .response-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
+    #rptDrawer .response-step:not(:last-child)::after { position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
+    #rptDrawer .response-step.is-complete:not(:last-child)::after { background:#22c55e; }
+    #rptDrawer .response-step-dot { position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
+    #rptDrawer .response-step.is-complete .response-step-dot { border-color:#16a34a;background:#16a34a; }
+    #rptDrawer .response-step.is-current { color:#18181b;font-weight:600; }
+    #rptDrawer .response-step.is-current .response-step-dot { border-color:#16a34a;background:#fff; }
+    #rptDrawer .response-step.is-overdue .response-step-dot { border-color:#ef4444;background:#fff; }
+    #rptDrawer .response-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
+    #rptDrawer .rpt-updates-timeline { position:relative;margin:0 0 14px 3px;padding-left:14px;border-left:2px solid #e4e4e7;color:#09090b;font-family:'Inter','Segoe UI',sans-serif; }
+    #rptDrawer .rpt-updates-entry { position:relative;padding:0 0 17px; }
+    #rptDrawer .rpt-updates-entry:last-child { padding-bottom:0; }
+    #rptDrawer .rpt-updates-entry:before { position:absolute;top:3px;left:-20px;width:10px;height:10px;border-radius:50%;background:#22c55e;content:"";box-shadow:0 0 0 2px #fff; }
+    #rptDrawer .rpt-updates-entry-head { display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px; }
+    #rptDrawer .rpt-updates-entry-title { color:#09090b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;line-height:1.35; }
+    #rptDrawer .rpt-updates-entry-date { flex:0 0 auto;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.4;text-align:right; }
+    #rptDrawer .rpt-updates-entry-actor { display:inline-block;margin:0 0 6px;padding:1px 7px;border:1px solid #e4e4e7;border-radius:4px;background:#fafafa;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.35; }
+    #rptDrawer .rpt-updates-entry-copy { margin:0 0 8px;color:#27272a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.45; }
+    #rptDrawer .rpt-updates-photo-grid { display:flex;flex-wrap:wrap;gap:8px; }
+    #rptDrawer .rpt-updates-photo { width:74px;height:74px;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer; }
+    #rptDrawer .rpt-updates-photo img { display:block;width:100%;height:100%;object-fit:cover; }
+    #rptDrawer .rpt-evidence-caption { color:#18181b;font-size:13px;font-weight:500;margin:7px 0 2px; }
+    .rpt-evidence-lightbox { position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(24,24,27,.88); }
+    .rpt-evidence-lightbox.open { display:flex; }
+    .rpt-evidence-lightbox-dialog { position:relative;width:min(760px,100%);max-height:94vh;padding:16px;background:#fff;border-radius:10px;display:flex;flex-direction:column;gap:10px; }
+    .rpt-evidence-lightbox-stage { width:100%;height:min(62vh,560px);display:flex;align-items:center;justify-content:center;background:#18181b;border-radius:7px;overflow:hidden; }
+    .rpt-evidence-lightbox-stage img { width:100%;height:100%;object-fit:contain; }
+    .rpt-evidence-lightbox-caption { margin:0;color:#18181b;font-size:15px;font-weight:600; }
+    .rpt-evidence-lightbox-meta { margin:0;color:#71717a;font-size:13px;line-height:1.5; }
+    .rpt-evidence-lightbox-controls { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .rpt-evidence-lightbox-controls button { min-height:34px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:inherit;cursor:pointer; }
+    .rpt-evidence-lightbox-controls button:disabled { opacity:.45;cursor:not-allowed; }
+    @media(max-width:560px){ #rptDrawer .rpt-tabs{gap:16px;} #rptDrawer .rpt-tab{font-size:13px;} .rpt-evidence-lightbox-dialog{padding:12px;} }
     .rpt-drawer-close { margin-left:auto; width:24px; height:24px; border-radius:4px; background:transparent; border:none; color:#71717a; font-size:16px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s; flex-shrink:0; }
     .rpt-drawer-close:hover { background:#f4f4f5; color:#18181b; }
     .rpt-drawer-body { flex:1; overflow-y:auto; padding:24px; }
@@ -5346,10 +5478,11 @@ window.__petList = <?php
 
     <div class="rpt-tabs">
       <button type="button" class="rpt-tab active" data-tab="details" onclick="rdDetailGo('details')">Details</button>
-      <button type="button" class="rpt-tab" data-tab="attachments" onclick="rdDetailGo('attachments')">Attachments</button>
+      <button type="button" class="rpt-tab" data-tab="updates" onclick="rdDetailGo('updates')">Updates</button>
     </div>
 
     <div class="rpt-detail-body active" data-tab="details">
+      <div id="rdTimeline" style="margin-bottom:1rem;"></div>
       <p class="pet-drawer-section-title">Report Information</p>
       <div class="pet-drawer-info">
         <div class="pet-drawer-info-item"><div class="k">Date Submitted</div><div class="v" id="rdDate"></div></div>
@@ -5371,8 +5504,8 @@ window.__petList = <?php
         <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Description</div><div class="v" id="rdIncident"></div></div>
       </div>
 
-      <p class="pet-drawer-section-title">Status</p>
-      <div id="rdTimeline" style="margin-bottom:1rem;"></div>
+      <p class="pet-drawer-section-title">Latest update</p>
+      <div id="rdLatestUpdate"></div>
       <div class="rpt-detail-block" id="rdResolution" style="display:none;margin-top:0.75rem;">
         <div class="pet-drawer-info-item"><div class="k">Resolution</div><div class="v" id="rdResolutionText"></div></div>
       </div>
@@ -5388,11 +5521,15 @@ window.__petList = <?php
       </div>
     </div>
 
-    <div class="rpt-detail-body" data-tab="attachments">
-      <p class="pet-drawer-section-title">Attached Photos & Videos</p>
-      <div class="pet-drawer-info">
-        <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="v"><div class="rpt-photos" id="rdPhotos"></div></div></div>
-      </div>
+    <div class="rpt-detail-body" data-tab="updates">
+      <p class="pet-drawer-section-title">Case updates</p>
+      <div id="rdUpdates"></div>
+      <p class="pet-drawer-section-title">Your photos</p>
+      <div class="rpt-photos" id="rdYourPhotos"></div>
+      <p class="pet-drawer-section-title" id="rdBarangayPhotosTitle" style="margin-top:22px;">From your barangay</p>
+      <div class="rpt-photos" id="rdBarangayPhotos"></div>
+      <p class="pet-drawer-section-title" style="margin-top:22px;">From DCVS</p>
+      <div class="rpt-photos" id="rdStaffPhotos"></div>
     </div>
   </div>
   <div class="rpt-drawer-foot">
@@ -5401,6 +5538,20 @@ window.__petList = <?php
     <button type="button" class="sd-btn sd-btn-outline" onclick="closeReportDrawer()">Close</button>
   </div>
 </aside>
+<div class="rpt-evidence-lightbox" id="rptEvidenceLightbox" role="dialog" aria-modal="true" aria-label="Shared photo evidence" onclick="if(event.target===this)closeEvidenceLightbox()">
+  <div class="rpt-evidence-lightbox-dialog">
+    <div class="rpt-evidence-lightbox-stage"><img id="rdLightboxImage" src="" alt=""></div>
+    <p class="rpt-evidence-lightbox-caption" id="rdLightboxCaption"></p>
+    <p class="rpt-evidence-lightbox-meta" id="rdLightboxMeta"></p>
+    <p class="rpt-evidence-lightbox-meta" id="rdLightboxPrivacy">Shared with you by the barangay</p>
+    <div class="rpt-evidence-lightbox-controls">
+      <button type="button" id="rdLightboxPrev" onclick="stepEvidenceLightbox(-1)">Prev</button>
+      <span id="rdLightboxCount" class="rpt-evidence-lightbox-meta"></span>
+      <button type="button" id="rdLightboxNext" onclick="stepEvidenceLightbox(1)">Next</button>
+    </div>
+    <button type="button" class="sd-btn sd-btn-outline" onclick="closeEvidenceLightbox()">Close</button>
+  </div>
+</div>
 
 <script>
 window.__reportList = <?php
@@ -5450,7 +5601,7 @@ window.__reportList = <?php
           'photo' => $report['photo_url'] ?? '',
           'video' => $report['video_url'] ?? '',
           'status' => $report['status'],
-          'statusLabel' => rptStatusLabel($report['status']),
+          'statusLabel' => rptStatusLabel($report['status'], $report['response_state'] ?? ''),
           'statusClass' => rptStatusClass($report['status']),
           'resolution' => (string)($report['resolution_details'] ?? ''),
           'responseState' => (string)($report['response_state'] ?? ''),
@@ -5460,12 +5611,39 @@ window.__reportList = <?php
           'turnoverDeadline' => (string)($report['turnover_deadline'] ?? ''),
           'holdingLocation' => (string)($report['holding_location'] ?? ''),
           'animalDisposition' => (string)($report['animal_disposition'] ?? ''),
+          'turnoverRequired' => (bool)($report['turnover_required'] ?? false),
           'turnoverStatus' => (string)($report['turnover_status'] ?? ''),
           'turnoverDueAt' => (string)($report['turnover_due_at'] ?? ''),
           'turnoverReceivedAt' => (string)($report['turnover_received_at'] ?? ''),
+          'media' => (function() use ($report, $reportMediaById) {
+              $media = $reportMediaById[(int)$report['report_id']] ?? [];
+              $hasResidentPhoto = false;
+              $hasResidentVideo = false;
+              foreach ($media as $item) {
+                  if ($item['source'] !== 'resident') continue;
+                  if ($item['type'] === 'photo') $hasResidentPhoto = true;
+                  if ($item['type'] === 'video') $hasResidentVideo = true;
+              }
+              if (!$hasResidentPhoto && !empty($report['photo_url'])) {
+                  $media[] = [
+                      'type' => 'photo', 'source' => 'resident', 'url' => (string)$report['photo_url'],
+                      'mimeType' => 'image/jpeg', 'caption' => 'Your report photo', 'shared' => false,
+                      'historyId' => 0, 'createdAt' => (string)$report['created_at'], 'actor' => 'You', 'role' => 'resident',
+                  ];
+              }
+              if (!$hasResidentVideo && !empty($report['video_url'])) {
+                  $media[] = [
+                      'type' => 'video', 'source' => 'resident', 'url' => (string)$report['video_url'],
+                      'mimeType' => 'video/mp4', 'caption' => '', 'shared' => false,
+                      'historyId' => 0, 'createdAt' => (string)$report['created_at'], 'actor' => 'You', 'role' => 'resident',
+                  ];
+              }
+              return $media;
+          })(),
+          'updates' => $reportUpdatesById[(int)$report['report_id']] ?? [],
       ];
   }
-  echo json_encode($jsonReports);
+  echo json_encode($jsonReports, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 ?>;
 </script>
 
@@ -5474,21 +5652,36 @@ window.__reportList = <?php
   var reportIndex = {};
   window.__reportList.forEach(function(r) { reportIndex[r.id] = r; });
 
-  function buildTimeline(status) {
-    var reviewed = ['validated','confirmed','scheduled','resolved'].indexOf(status) !== -1;
-    var resolved = status === 'resolved';
-    var step = function(state, icon, label) {
-      var cls = state === 'done' ? 'done' : (state === 'current' ? 'current' : '');
-      var ic = (state === 'done' || state === 'current') ? '<i class="fas fa-' + (state === 'done' ? 'check' : 'circle') + '"></i>' : '';
-      return '<span class="tl-step ' + cls + '">' + ic + ' ' + label + '</span>';
-    };
-    if (status === 'rejected') {
-      return '<div class="rpt-timeline rpt-timeline-rejected">' + step('done','times','Submitted') + '<span class="tl-sep"></span><span class="tl-step current">Rejected</span></div>';
-    }
-    var sub = resolved || reviewed ? 'done' : 'current';
-    return '<div class="rpt-timeline">' + step(sub, 'check', 'Submitted') + '<span class="tl-sep"></span>' +
-      step(reviewed ? 'done' : (status === 'pending' ? 'current' : ''), 'check', 'Reviewed') + '<span class="tl-sep"></span>' +
-      step(resolved ? 'done' : '', 'check', 'Resolved') + '</div>';
+  function buildStatusSteps(report, deadlineOverdue) {
+    var state = String(report.responseState || '');
+    var turnoverComplete = report.status === 'resolved' && report.turnoverStatus === 'receipt_confirmed';
+    var turnoverRequired = !!report.turnoverRequired
+      || report.turnoverStatus === 'pending'
+      || report.turnoverStatus === 'receipt_confirmed';
+    var completedStage = report.status === 'pending' || report.status === 'validated' ? 0
+      : (state === 'barangay_response_approved' ? 0
+        : (state === 'barangay_responding' || state === 'escalated_to_dcvs'
+          || state === 'dcvs_dispatch' || state === 'dcvs_processing' ? 1
+          : (state === 'animal_secured' ? 2
+            : (report.status === 'resolved'
+              ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
+              : (report.status === 'confirmed' || report.status === 'scheduled' ? 1 : -1)))));
+    var labels = [
+      report.status === 'pending' ? 'Barangay review'
+        : (report.status === 'validated' ? 'DCVS review' : 'Accepted'),
+      'Responding',
+      'Secured',
+      'Resolved'
+    ];
+    if (turnoverRequired) labels.push(turnoverComplete ? 'Turned over to DCVS' : 'Turned over');
+    return '<div class="response-steps" aria-label="Barangay response progress">' + labels.map(function(label, index) {
+      var stepClass = index < completedStage ? ' is-complete'
+        : (index === completedStage ? (deadlineOverdue && (index === 1 || index === 4) ? ' is-current is-overdue' : ' is-current') : '');
+      var checkIcon = index < completedStage
+        ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '';
+      return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
+    }).join('') + '</div>';
   }
 
   function applyNextSteps(status) {
@@ -5532,6 +5725,167 @@ window.__reportList = <?php
     list.innerHTML = items.map(function(t) { return '<li>' + t + '</li>'; }).join('');
   }
 
+  var evidenceLightboxItems = [];
+  function escapeReportHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]);
+    });
+  }
+  function reportUpdateTitle(update) {
+    var titles = {
+      report_submitted: 'Report submitted',
+      accept_barangay_assignment: 'Accepted by Barangay',
+      forward_to_dcvs_review: 'Forwarded to DCVS',
+      start_response: 'Response started',
+      record_site_visit: 'Site visit recorded',
+      update_progress: 'Progress update',
+      mark_secured: 'Animal secured',
+      resolve_barangay: 'Resolved by Barangay',
+      resolve_case: 'Resolved by DCVS',
+      staff_decide: 'DCVS response decision',
+      unable_to_secure: 'Escalated to DCVS',
+      unable_to_locate: 'Unable to locate animal',
+      confirm_turnover: 'Turnover update',
+      turnover_overdue: 'Animal turnover overdue',
+      add_photo_evidence: 'Photo evidence added',
+      auto_escalate_overdue: 'Escalated to DCVS'
+    };
+    return titles[update.action] || 'Case status updated';
+  }
+  function reportUpdateCopy(update) {
+    var copy = {
+      report_submitted: 'You submitted this report to your barangay.',
+      accept_barangay_assignment: 'The barangay accepted this report for handling.',
+      forward_to_dcvs_review: 'The report was forwarded to DCVS for review.',
+      start_response: 'The response team started working on the report.',
+      record_site_visit: 'The barangay recorded what the team found at the incident location.',
+      update_progress: 'The response team recorded a progress update.',
+      mark_secured: 'The animal was secured by the response team.',
+      resolve_barangay: 'The barangay recorded a resolution for this report.',
+      resolve_case: 'DCVS recorded a resolution for this report.',
+      staff_decide: 'DCVS updated the response plan for this report.',
+      unable_to_secure: 'The case was escalated to DCVS for follow-up.',
+      unable_to_locate: 'The response team could not locate the animal.',
+      confirm_turnover: 'DCVS recorded an animal turnover update.',
+      turnover_overdue: 'The planned animal turnover date has passed without DCVS confirming receipt.',
+      add_photo_evidence: 'Photo evidence was added to this case.',
+      auto_escalate_overdue: 'The response target was missed and the case was escalated to DCVS.'
+    };
+    return copy[update.action] || 'The case status was updated.';
+  }
+  function evidenceThumb(item, index) {
+    var caption = item.caption || (item.source === 'resident'
+      ? 'Your report photo'
+      : (item.source === 'barangay_secured' ? 'Animal secured' : 'Case photo evidence'));
+    return '<button type="button" class="rpt-evidence-thumb" onclick="openEvidenceLightbox(' + index + ')" aria-label="View photo: ' + escapeReportHtml(caption) + '">' +
+      '<img src="' + escapeReportHtml(item.url) + '" alt="' + escapeReportHtml(caption) + '" loading="lazy"></button>';
+  }
+  function renderEvidenceItems(items, emptyText) {
+    if (!items.length) return '<p class="rpt-photo-none">' + escapeReportHtml(emptyText) + '</p>';
+    return '<div class="rpt-evidence-grid">' + items.map(function(item) {
+      var index = evidenceLightboxItems.indexOf(item);
+      return evidenceThumb(item, index);
+    }).join('') + '</div>' + items.map(function(item) {
+      return '<p class="rpt-evidence-caption">' + escapeReportHtml(item.caption || 'Case photo evidence') + '</p>' +
+        '<p class="rpt-update-meta">' + escapeReportHtml(item.actor || 'DCVS') + ' &middot; ' + escapeReportHtml(item.createdAt || '') + '</p>';
+    }).join('');
+  }
+  function reportDateTime(value) {
+    var date = new Date(String(value || '').replace(' ', 'T'));
+    return isNaN(date.getTime()) ? String(value || '') : date.toLocaleString([], {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+  }
+  function renderReportUpdates(report) {
+    var updates = Array.isArray(report.updates) ? report.updates.slice() : [];
+    updates.unshift({id:0,action:'report_submitted',actor:'You',createdAt:report.createdRaw});
+    updates.reverse();
+    var casePhotos = (Array.isArray(report.media) ? report.media : []).filter(function(item) {
+      return item.type === 'photo' && item.source !== 'resident';
+    });
+    evidenceLightboxItems = casePhotos.slice();
+    function photosForUpdate(update) {
+      var legacyActionsBySource = {
+        barangay_validation: ['accept_barangay_assignment', 'forward_to_dcvs_review'],
+        barangay_secured: ['mark_secured'],
+        barangay_turnover: ['confirm_turnover']
+      };
+      return casePhotos.filter(function(item) {
+        if (item.historyId > 0) return item.historyId === update.id;
+        return update.id > 0 && (legacyActionsBySource[item.source] || []).indexOf(update.action) !== -1;
+      }).slice(0, 3);
+    }
+    var timelineHtml = updates.map(function(update) {
+      var linkedPhotos = photosForUpdate(update);
+      return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">' +
+        '<span class="rpt-updates-entry-title">' + escapeReportHtml(reportUpdateTitle(update)) + '</span>' +
+        '<time class="rpt-updates-entry-date">' + escapeReportHtml(reportDateTime(update.createdAt)) + '</time></div>' +
+        '<span class="rpt-updates-entry-actor">' + escapeReportHtml(update.actor || 'DCVS') + '</span>' +
+        '<p class="rpt-updates-entry-copy">' + escapeReportHtml(reportUpdateCopy(update)) + '</p>' +
+        (linkedPhotos.length ? '<div class="rpt-updates-photo-grid">' + linkedPhotos.map(function(item) {
+          var index = evidenceLightboxItems.indexOf(item);
+          var caption = item.caption || 'Case photo evidence';
+          return '<button type="button" class="rpt-updates-photo" onclick="openEvidenceLightbox(' + index + ')" aria-label="View photo: ' + escapeReportHtml(caption) + '">' +
+            '<img src="' + escapeReportHtml(item.url) + '" alt="' + escapeReportHtml(caption) + '" loading="lazy"></button>';
+        }).join('') + '</div>' : '') +
+        '</article>';
+    }).join('');
+    document.getElementById('rdUpdates').innerHTML = timelineHtml
+      ? '<div class="rpt-updates-timeline">' + timelineHtml + '</div>'
+      : '<p class="rpt-photo-none">No case updates have been recorded yet.</p>';
+    var latest = updates.length ? updates[0] : null;
+    document.getElementById('rdLatestUpdate').innerHTML = latest
+      ? '<div class="rpt-latest-update"><p class="rpt-update-title">' + escapeReportHtml(reportUpdateTitle(latest)) + '</p>' +
+        '<p class="rpt-update-meta">' + escapeReportHtml(latest.actor || 'DCVS') + ' &middot; ' + escapeReportHtml(reportDateTime(latest.createdAt)) + '</p>' +
+        '<p class="rpt-update-copy">' + escapeReportHtml(reportUpdateCopy(latest)) + '</p>' +
+        renderEvidenceItems(photosForUpdate(latest), '') + '</div>'
+      : '<div class="rpt-latest-update"><p class="rpt-photo-none">There are no case updates yet.</p></div>';
+
+    var residentMedia = (report.media || []).filter(function(item) { return item.source === 'resident'; });
+    var ownPhotoHtml = residentMedia.map(function(item) {
+      if (item.type === 'video') {
+        return '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + escapeReportHtml(item.url) + '" controls playsinline preload="metadata"></video></div>';
+      }
+      var imageIndex = evidenceLightboxItems.push(item) - 1;
+      return evidenceThumb(item, imageIndex);
+    }).join('');
+    var brgyPhotos = casePhotos.filter(function(item) { return item.role === 'barangay'; });
+    var staffPhotos = casePhotos.filter(function(item) { return item.role !== 'barangay'; });
+    document.getElementById('rdYourPhotos').innerHTML = ownPhotoHtml || '<p class="rpt-photo-none">You have not attached any photos.</p>';
+    var barangayTitle = brgyPhotos.length ? brgyPhotos[0].actor : 'From your barangay';
+    document.getElementById('rdBarangayPhotosTitle').textContent = barangayTitle;
+    document.getElementById('rdBarangayPhotos').innerHTML = renderEvidenceItems(brgyPhotos, 'No photos have been shared by your barangay.');
+    document.getElementById('rdStaffPhotos').innerHTML = renderEvidenceItems(staffPhotos, 'No photos have been shared by DCVS.');
+  }
+
+  window.openEvidenceLightbox = function(index) {
+    if (!evidenceLightboxItems[index]) return;
+    var item = evidenceLightboxItems[index];
+    document.getElementById('rdLightboxImage').src = item.url;
+    document.getElementById('rdLightboxImage').alt = item.caption || 'Shared case photo';
+    document.getElementById('rdLightboxCaption').textContent = item.caption || 'Case photo evidence';
+    document.getElementById('rdLightboxMeta').textContent = (item.actor || (item.source === 'resident' ? 'You' : 'DCVS')) + ' · ' + reportDateTime(item.createdAt);
+    document.getElementById('rdLightboxPrivacy').textContent = item.source === 'resident'
+      ? 'Photo submitted with your report'
+      : (item.role === 'barangay' ? 'Shared with you by the barangay' : 'Shared with you by DCVS');
+    document.getElementById('rdLightboxCount').textContent = (index + 1) + ' of ' + evidenceLightboxItems.length;
+    document.getElementById('rdLightboxPrev').disabled = index <= 0;
+    document.getElementById('rdLightboxNext').disabled = index >= evidenceLightboxItems.length - 1;
+    document.getElementById('rptEvidenceLightbox').dataset.index = String(index);
+    document.getElementById('rptEvidenceLightbox').classList.add('open');
+  };
+  window.stepEvidenceLightbox = function(offset) {
+    var current = Number(document.getElementById('rptEvidenceLightbox').dataset.index || 0);
+    window.openEvidenceLightbox(current + offset);
+  };
+  window.closeEvidenceLightbox = function() {
+    document.getElementById('rptEvidenceLightbox').classList.remove('open');
+  };
+  document.addEventListener('keydown', function(event) {
+    if (!document.getElementById('rptEvidenceLightbox').classList.contains('open')) return;
+    if (event.key === 'Escape') window.closeEvidenceLightbox();
+    if (event.key === 'ArrowLeft') window.stepEvidenceLightbox(-1);
+    if (event.key === 'ArrowRight') window.stepEvidenceLightbox(1);
+  });
+
   var rdTab = 'details';
   function rdRefreshTabs() {
     document.querySelectorAll('#rptDrawer .rpt-tab').forEach(function(b) {
@@ -5543,9 +5897,10 @@ window.__reportList = <?php
   }
   window.rdDetailGo = function(t) { rdTab = t; rdRefreshTabs(); };
 
-  window.openReportDetails = function(id) {
+  window.openReportDetails = function(id, preserveView) {
     var r = reportIndex[id];
     if (!r) return;
+    var activeTab = preserveView ? rdTab : 'details';
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
     var orDash = function(val) {
       var s = (val === null || val === undefined) ? '' : String(val).trim();
@@ -5565,30 +5920,10 @@ window.__reportList = <?php
     set('rdBadgeText', r.statusLabel);
     var tlEl = document.getElementById('rdTimeline');
     if (tlEl) {
-      var responseLabels = {
-        awaiting_dcvs_decision:'Pending DCVS review', dcvs_dispatch:'DCVS team assigned',
-        barangay_response_approved:'Barangay response approved', barangay_responding:'Barangay is responding',
-        animal_secured:'Animal secured by barangay', awaiting_turnover:'Awaiting turnover to DCVS',
-        turned_over:'Turned over to DCVS', dcvs_processing:'DCVS processing',
-        unable_to_locate:'Unable to locate', escalated_to_dcvs:'Escalated to DCVS',
-        returned_to_barangay:'Returned to barangay', closed_not_actionable:'Closed — not actionable',
-        resolved:'Incident resolved'
-      };
-      var responseLabel = responseLabels[r.responseState];
-      var turnoverLabels = { pending:'For Turnover — awaiting DCVS receipt', receipt_confirmed:'Turnover Completed', cancelled:'Turnover Cancelled' };
-      var turnoverLabel = turnoverLabels[r.turnoverStatus] || '';
-      var nextDeadline = r.responseDeadline || r.progressDeadline || '';
+      var nextDeadline = r.responseDeadline || r.progressDeadline
+        || (r.status === 'resolved' && r.turnoverStatus === 'pending' ? r.turnoverDueAt : '');
       var deadlineOverdue = nextDeadline && new Date(nextDeadline.replace(' ', 'T')).getTime() < Date.now();
-      tlEl.innerHTML = buildTimeline(r.status) + (responseLabel
-        ? '<div class="rpt-response-tracker" role="status" style="margin-top:12px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:14px;font-weight:500;">' +
-          '<strong>Case update:</strong> ' + responseLabel +
-          (r.status === 'resolved' && turnoverLabel ? '<br><span style="font-weight:500;">' + turnoverLabel + '</span>' : '') +
-          (r.status !== 'resolved' && nextDeadline ? '<br><span style="font-weight:400;' + (deadlineOverdue ? 'color:#b91c1c;' : '') + '">' +
-            (deadlineOverdue ? 'Response deadline overdue: ' : 'Response target: ') + nextDeadline + '</span>' : '') +
-          (r.holdingLocation && ['animal_secured','awaiting_turnover','turned_over'].indexOf(r.responseState) !== -1
-            ? '<br><span style="font-weight:400;">Holding location: ' + r.holdingLocation.replace(/[&<>"']/g, function (character) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]); }) + '</span>' : '') +
-          (r.turnoverReceivedAt ? '<br><span style="font-weight:400;">DCVS receipt confirmed: ' + r.turnoverReceivedAt + '</span>' : '') +
-          '</div>' : '');
+      tlEl.innerHTML = buildStatusSteps(r, deadlineOverdue);
     }
     var resolved = r.status === 'resolved';
     var res = document.getElementById('rdResolution');
@@ -5599,15 +5934,8 @@ window.__reportList = <?php
       res.style.display = 'none';
     }
     applyNextSteps(r.status);
-    var attachmentHtml = '';
-    if (r.photo) {
-      attachmentHtml += '<div class="rpt-photo-thumb"><img src="' + r.photo + '" alt="Report photo" onclick="viewReportImage(\'' + r.photo + '\')"></div>';
-    }
-    if (r.video) {
-      attachmentHtml += '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + r.video + '" controls playsinline preload="metadata"></video></div>';
-    }
-    document.getElementById('rdPhotos').innerHTML = attachmentHtml || '<p class="rpt-photo-none">No attachments.</p>';
-    rdTab = 'details';
+    renderReportUpdates(r);
+    rdTab = activeTab;
     rdRefreshTabs();
     document.getElementById('rptDrawer').classList.add('open');
     document.getElementById('rptDrawerOverlay').classList.add('open');
@@ -5619,6 +5947,7 @@ window.__reportList = <?php
     document.getElementById('rptDrawer').classList.remove('open');
     document.getElementById('rptDrawerOverlay').classList.remove('open');
     document.body.style.overflow = '';
+    window.__currentReportId = null;
   };
 
   window.RPT = window.RPT || {};
@@ -8084,7 +8413,11 @@ document.addEventListener('dcvs:realtime', function(e) {
               if (existing) {
                 var existingStatus = existing.querySelector('.appt-status-pill');
                 var existingColor = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var existingLabel = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
+                var existingLabel = rpt.response_state === 'barangay_response_approved'
+                  ? 'Accepted by Barangay'
+                  : (rpt.response_state === 'escalated_to_dcvs'
+                    ? 'Escalated to DCVS'
+                    : (rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '')));
                 existing.setAttribute('data-status', rpt.status);
                 if (existingStatus) {
                   existingStatus.classList.toggle('report-status-resolved', rpt.status === 'resolved');
@@ -8101,18 +8434,27 @@ document.addEventListener('dcvs:realtime', function(e) {
                 if (reportItem) {
                   reportItem.status = rpt.status;
                   reportItem.statusLabel = existingLabel;
+                  reportItem.responseState = rpt.response_state || reportItem.responseState;
                   var reportStatusClasses = { pending:'st-pending', validated:'st-awaiting', confirmed:'st-review', scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected' };
                   reportItem.statusClass = reportStatusClasses[rpt.status] || 'st-pending';
                   if (rpt.status === 'resolved') reportItem.resolution = 'This report has been resolved by DCVS.';
                 }
                 if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
                 if (window.RPT && typeof window.RPT.refreshSummary === 'function') window.RPT.refreshSummary();
-                if (Number(window.__currentReportId) === Number(rpt.report_id) && window.RPT && typeof window.RPT.view === 'function') window.RPT.view(rpt.report_id);
+                var reportDrawer = document.getElementById('rptDrawer');
+                if (reportDrawer && reportDrawer.classList.contains('open')
+                    && Number(window.__currentReportId) === Number(rpt.report_id)) {
+                  openReportDetails(rpt.report_id, true);
+                }
                 return;
               }
                 var ref = rpt.reference_id || '#RPT-' + String(rpt.report_id).padStart(4, '0');
                 var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var rlab = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
+                var rlab = rpt.response_state === 'barangay_response_approved'
+                  ? 'Accepted by Barangay'
+                  : (rpt.response_state === 'escalated_to_dcvs'
+                    ? 'Escalated to DCVS'
+                    : (rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '')));
                 var typeLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report') + ' Report';
                 var catLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report');
                 var incidentAt = rpt.incident_at || rpt.created_at || '';

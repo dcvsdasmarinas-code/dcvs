@@ -4,6 +4,8 @@
  * Connects to dcvs_system MySQL database
  */
 
+require_once __DIR__ . '/includes/bootstrap.php';
+
 $host = '127.0.0.1';
 $username = 'root';
 $password = '';
@@ -19,6 +21,7 @@ if ($conn->connect_error) {
 
 // Set charset to utf8mb4
 $conn->set_charset("utf8mb4");
+dcvsSetDatabaseTimezone($conn);
 
 /**
  * Create a notification for a user.

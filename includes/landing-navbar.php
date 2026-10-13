@@ -26,6 +26,7 @@
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>
+<?php if (($currentPage ?? '') === 'updates') { include __DIR__ . '/../pages/shared/announcements-ui.php'; } ?>
 <style>
   .site-header { transition: transform 0.3s ease, box-shadow 0.3s ease; will-change: transform; }
   .site-header.nav-header-hidden { transform: translateY(-110%) !important; }

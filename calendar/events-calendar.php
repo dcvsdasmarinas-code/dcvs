@@ -30,10 +30,10 @@ if (isset($conn) && !$conn->connect_error) {
         $calStmt->close();
     }
     $calAnnouncements = [];
-    $annRes = $conn->query("SELECT a.announcement_id, a.title, a.content, a.category, a.priority, a.status, a.publish_at, a.updated_at, a.expiry_date, a.photo_url, a.barangay_id, b.barangay_name FROM announcements a LEFT JOIN barangays b ON a.barangay_id = b.barangay_id WHERE a.status IN ('published','scheduled') AND a.archived_at IS NULL AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE()) ORDER BY a.publish_at");
+    $annRes = $conn->query("SELECT a.announcement_id, a.title, a.content, a.category, a.priority, a.status, a.publish_at, a.created_at, a.updated_at, a.expiry_date, a.photo_url, a.barangay_id, a.is_event, a.event_date, a.event_end_date, a.event_start_time, a.event_end_time, a.venue_name, b.barangay_name FROM announcements a LEFT JOIN barangays b ON a.barangay_id = b.barangay_id WHERE a.status IN ('published','scheduled') AND a.archived_at IS NULL AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE()) ORDER BY COALESCE(a.publish_at, a.created_at)");
     if ($annRes) { while ($row = $annRes->fetch_assoc()) { $calAnnouncements[] = $row; } }
     $calPrograms = [];
-    $progStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_type, p.description, p.status, p.start_date, p.end_date, p.operating_time, p.location_mode, p.venue, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY b.barangay_name SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON p.program_id = pb.program_id LEFT JOIN barangays b ON pb.barangay_id = b.barangay_id WHERE p.status IN ('scheduled','live','paused') AND p.end_date >= CURDATE() AND p.end_date >= ? AND p.start_date <= ? GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
+    $progStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_type, p.description, p.status, p.start_date, p.end_date, p.operating_time, p.location_mode, p.venue, (SELECT MAX(a.announcement_id) FROM announcements a WHERE a.program_id = p.program_id) AS announcement_id, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY b.barangay_name SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON p.program_id = pb.program_id LEFT JOIN barangays b ON pb.barangay_id = b.barangay_id WHERE p.status IN ('scheduled','live','paused') AND p.end_date >= CURDATE() AND p.end_date >= ? AND p.start_date <= ? GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
     if ($progStmt) {
       $yearStart = $calYear . '-01-01';
       $yearEnd = $calYear . '-12-31';
@@ -189,6 +189,7 @@ if (isset($conn) && !$conn->connect_error) {
   border-bottom:1px solid var(--ec-border);
 }
 #dcvsEventsCalendar .ec-weekday{ padding:8px; text-align:center; font-size:14px; font-weight:500; }
+#dcvsEventsCalendar .ec-weekday-short{ display:none; }
 
 /* Main / months */
 #dcvsEventsCalendar .ec-main{ padding:32px 24px; }
@@ -370,13 +371,21 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day-popover-meta svg{ width:14px; height:14px; flex:0 0 14px; margin-top:1px; color:#71717a; }
 #dcvsEventsCalendar .ec-day-popover-empty{ margin:10px 2px; color:#71717a; font-size:13px; }
 #dcvsEventsCalendar :focus-visible{ outline:2px solid #0e8131; outline-offset:2px; }
-@media(max-width:700px){
+@media(max-width:1024px){
   #dcvsEventsCalendar{ margin:0; }
   #dcvsEventsCalendar .ec-header-inner{ padding:12px; }
   #dcvsEventsCalendar .ec-controls-row,
   #dcvsEventsCalendar .ec-controls-left,
   #dcvsEventsCalendar .ec-controls-right{ flex-wrap:wrap; }
-  #dcvsEventsCalendar .ec-search{ width:min(220px,100%); }
+  #dcvsEventsCalendar .ec-controls-row{ align-items:stretch; gap:10px; }
+  #dcvsEventsCalendar .ec-controls-left,
+  #dcvsEventsCalendar .ec-controls-right{ min-width:0; width:100%; gap:8px; }
+  #dcvsEventsCalendar .ec-controls-right{ justify-content:flex-start; }
+  #dcvsEventsCalendar .ec-search-wrap{ flex:1 1 100%; min-width:0; }
+  #dcvsEventsCalendar .ec-search{ width:100%; max-width:100%; }
+  #dcvsEventsCalendar .ec-dropdown{ min-width:0; max-width:100%; }
+  #dcvsEventsCalendar .ec-btn{ max-width:100%; padding-inline:10px; }
+  #dcvsEventsCalendar .ec-mode-btn{ white-space:normal; text-align:left; }
   #dcvsEventsCalendar .ec-month-nav{ width:auto; }
   #dcvsEventsCalendar .ec-weekday-row .ec-weekdays{ display:none; }
   #dcvsEventsCalendar .ec-main{ padding:14px 8px 24px; }
@@ -393,6 +402,103 @@ if (isset($conn) && !$conn->connect_error) {
   #dcvsEventsCalendar .ec-week-event{ gap:3px; padding:0 3px; }
   #dcvsEventsCalendar .ec-week-event-time{ font-size:9px; }
   #dcvsEventsCalendar .ec-week-event-name{ font-size:10px; }
+}
+@media(max-width:1024px){
+  #dcvsEventsCalendar .ec-weekday-row{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  #dcvsEventsCalendar .ec-month-nav{
+    justify-content:center;
+    width:100%;
+  }
+  #dcvsEventsCalendar .ec-nav-label{ flex:0 0 auto; }
+  #dcvsEventsCalendar .ec-weekday-row .ec-weekdays{
+    display:grid;
+    width:100%;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+  }
+  #dcvsEventsCalendar .ec-weekday{
+    min-width:0;
+    padding:5px 0;
+    font-size:clamp(9px,1.2vw,12px);
+    white-space:nowrap;
+  }
+  #dcvsEventsCalendar .ec-month-row{ display:block; }
+  #dcvsEventsCalendar .ec-month-label{ margin-bottom:8px; }
+  #dcvsEventsCalendar .ec-month-label h2{ font-size:24px; }
+  #dcvsEventsCalendar .ec-grid{
+    display:block;
+    overflow-x:hidden;
+  }
+  #dcvsEventsCalendar .ec-week-row{
+    min-width:0;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-day-num{
+    font-size:clamp(16px,2vw,24px);
+    line-height:1.2;
+    margin-bottom:6px;
+  }
+}
+@media(max-width:700px){
+  #dcvsEventsCalendar .ec-weekday-full{ display:none; }
+  #dcvsEventsCalendar .ec-weekday-short{ display:inline; }
+  #dcvsEventsCalendar .ec-week-row .ec-day{
+    min-width:0;
+    min-height:78px;
+    padding:5px 3px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-day-num{
+    font-size:1rem;
+    line-height:1.2;
+    margin-bottom:5px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-events{
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:3px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-event{
+    width:8px;
+    height:8px;
+    flex:0 0 8px;
+    overflow:hidden;
+    padding:0;
+    border:0;
+    border-radius:50%;
+    background:var(--event-color,#64748b);
+    font-size:0;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-event-card-head,
+  #dcvsEventsCalendar .ec-week-row .ec-event-time,
+  #dcvsEventsCalendar .ec-week-row .ec-event-loc{
+    display:none;
+  }
+}
+@media(max-width:640px){
+  #ecEventDialog.modal{
+    align-items:stretch;
+    justify-content:stretch;
+    padding:0;
+  }
+  #ecEventDialog .sd-dialog{
+    width:100%;
+    height:100%;
+    max-width:none;
+  }
+  #ecEventDialog .sd-dialog-content{
+    box-sizing:border-box;
+    width:100%;
+    max-width:100%;
+    height:100dvh;
+    max-height:100dvh;
+    min-width:0;
+    border:0;
+    border-radius:0;
+    padding:20px 16px calc(16px + env(safe-area-inset-bottom));
+  }
 }
 @media(prefers-reduced-motion:reduce){
   #dcvsEventsCalendar .ec-week-event, #dcvsEventsCalendar .ec-day-popover{ transition:none; }
@@ -536,13 +642,13 @@ if (isset($conn) && !$conn->connect_error) {
         <button type="button" class="ec-nav-btn" onclick="ecNextMonth()" aria-label="Next month" title="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
       </div>
       <div class="ec-weekdays">
-        <div class="ec-weekday">Monday</div>
-        <div class="ec-weekday">Tuesday</div>
-        <div class="ec-weekday">Wednesday</div>
-        <div class="ec-weekday">Thursday</div>
-        <div class="ec-weekday">Friday</div>
-        <div class="ec-weekday">Saturday</div>
-        <div class="ec-weekday">Sunday</div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Monday</span><span class="ec-weekday-short">Mon</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Tuesday</span><span class="ec-weekday-short">Tue</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Wednesday</span><span class="ec-weekday-short">Wed</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Thursday</span><span class="ec-weekday-short">Thu</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Friday</span><span class="ec-weekday-short">Fri</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Saturday</span><span class="ec-weekday-short">Sat</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Sunday</span><span class="ec-weekday-short">Sun</span></div>
       </div>
     </div>
   </div>
@@ -677,21 +783,25 @@ function calDateToTime(dt){
   return h + ':' + String(m).padStart(2,'0') + ' ' + ap;
 }
 var ANNOUNCEMENT_EVENTS = CAL_ANNOUNCEMENTS.filter(function(a){
-  return new Date(String(a.publish_at||a.created_at).replace(/-/g,'/')).getFullYear() === YEAR;
+  var date = a.is_event && a.event_date ? a.event_date : (a.publish_at || a.created_at);
+  return new Date(String(date).replace(/-/g,'/')).getFullYear() === YEAR;
 }).map(function(a){
-  var dt = new Date(String(a.publish_at||a.created_at).replace(/-/g,'/'));
+  var date = a.is_event && a.event_date ? a.event_date : (a.publish_at || a.created_at);
+  var dt = new Date(String(date).replace(/-/g,'/'));
+  var endDate = a.is_event && a.event_end_date ? new Date(String(a.event_end_date).replace(/-/g,'/')) : dt;
   return {
     kind: 'announcement',
     name: a.title || 'Announcement',
     reference: '',
-    time: calDateToTime(dt),
-    location: a.barangay_name || 'City-wide',
+    time: a.is_event && a.event_start_time ? calTime(a.event_start_time) : calDateToTime(dt),
+    location: a.venue_name || a.barangay_name || 'City-wide',
     flag: '',
     url: '',
     continent: a.priority || 'medium',
     month: MONTHS[dt.getMonth()],
     startDay: dt.getDate(),
-    endDay: dt.getDate(),
+    endMonth: MONTHS[endDate.getMonth()],
+    endDay: endDate.getDate(),
     eventType: a.category || 'announcement',
     status: String(a.status||'published'),
     description: a.content || '',
@@ -701,6 +811,8 @@ var ANNOUNCEMENT_EVENTS = CAL_ANNOUNCEMENTS.filter(function(a){
     category: a.category || '',
     priority: a.priority || '',
     publishAt: a.publish_at || '',
+    eventDate: a.event_date || '',
+    eventEndDate: a.event_end_date || '',
     updatedAt: a.updated_at || '',
     photoUrl: a.photo_url || '',
     announcementId: a.announcement_id || ''
@@ -728,6 +840,7 @@ var PROGRAM_EVENTS = CAL_PROGRAMS.map(function(p){
     eventType: p.program_type || 'other',
     status: p.status || 'scheduled',
     description: p.description || '',
+    announcementId: p.announcement_id || '',
     venue: p.venue || '',
     barangays: p.barangay_names || '',
     programStart: p.start_date || '',
@@ -1189,6 +1302,11 @@ window.ecRender = function(){
   }
 };
 
+window.ecCreateAnnouncement = function(programId){
+  closeModal('ecEventDialog');
+  window.location.href = 'staff-announcements.php?create_from_program=' + encodeURIComponent(programId);
+};
+
 window.ecOpenEvent = function(id){
   var ev = getEvents().filter(function(e){ return eventId(e) === id; })[0];
   if (!ev) return;
@@ -1214,7 +1332,15 @@ window.ecOpenEvent = function(id){
           '<div class="ec-field-row"><span class="ec-field-label">Barangay / Location</span><span class="ec-field-value">'+esc(ev.location || '-')+'</span></div>'+
         (ev.description ? '<div class="ec-notes-section"><div class="ec-sec-title">Description / Notes</div><div class="ec-notes-box">'+esc(ev.description)+'</div></div>' : '')+
       '</div>'+
-      '<div class="sd-dialog-footer"><a class="sd-btn sd-btn-outline" href="dashboard-staff.php#analytics" target="_blank" rel="noopener noreferrer">View Program</a><button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button></div>';
+      '<div class="sd-dialog-footer">'+
+        (ev.announcementId
+          ? '<a class="sd-btn sd-btn-default" href="staff-announcements.php?view_announcement='+encodeURIComponent(ev.announcementId)+'">View announcement</a>'
+          : (programStatus === 'scheduled' || programStatus === 'live'
+            ? '<button type="button" class="sd-btn sd-btn-default" onclick="ecCreateAnnouncement('+Number(ev.programId)+')">Create Announcement</button>'
+            : ''))+
+        '<a class="sd-btn sd-btn-outline" href="dashboard-staff.php#analytics" target="_blank" rel="noopener noreferrer">View Program</a>'+
+        '<button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button>'+
+      '</div>';
   } else if (ev.announcementId){
     var evStatus = ev.status || 'published';
     var evStatusColors = { published:['#dcfce7','#166534','#bbf7d0'], scheduled:['#FEF3C7','#92400e','#FDE68A'] };

@@ -16,7 +16,7 @@ function switchSection(sectionId) {
     'users':'Users','activity':'Activity Logs',
     'settings':'Settings','client-pets':'Client & Pet DB',
     'barangay':'Barangay Validation','geomapping':'Geo-Mapping','pet-listings':'Pet Listings',
-    'reports-all':'All Reports','reports-pending':'Pending Validation','reports-active':'Active Cases','reports-resolved':'Resolved Cases'
+    'reports-all':'All Reports','reports-pending':'Pending Validation','reports-accepted':'Accepted by Barangay','reports-active':'Active Cases','reports-resolved':'Resolved Cases'
   };
   var bc = document.getElementById('breadcrumbCurrent');
   var analyticsLabels = { engine:'Cases Analytics', intel:'Appointment Overview', architect:'Programs & Services', citydrives:'City Drives' };

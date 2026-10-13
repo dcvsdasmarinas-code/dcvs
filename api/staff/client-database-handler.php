@@ -318,6 +318,24 @@ function handleArchiveReport($conn, $staffId) {
     $exists->close();
     if (!$row) return ['success' => false, 'message' => 'Report not found'];
 
+    $turnover = $conn->prepare("SELECT turnover_task_id FROM report_turnover_tasks
+        WHERE report_id = ? AND status = 'pending' LIMIT 1");
+    if (!$turnover) {
+        error_log('Could not check report turnover before archive: ' . $conn->error);
+        return ['success' => false, 'message' => 'Could not verify whether turnover is complete. Please try again.'];
+    }
+    $turnover->bind_param('i', $reportId);
+    if (!$turnover->execute()) {
+        error_log('Could not check report turnover before archive: ' . $turnover->error);
+        $turnover->close();
+        return ['success' => false, 'message' => 'Could not verify whether turnover is complete. Please try again.'];
+    }
+    $turnoverPending = (bool)$turnover->get_result()->fetch_assoc();
+    $turnover->close();
+    if ($turnoverPending) {
+        return ['success' => false, 'message' => 'This report cannot be archived until DCVS confirms receipt of the animal.'];
+    }
+
     $stmt = $conn->prepare("UPDATE reports SET archived_at = NOW() WHERE report_id = ?");
     $stmt->bind_param("i", $reportId);
     if (!$stmt->execute()) {

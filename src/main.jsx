@@ -47,9 +47,9 @@ function initMapCN(containerId, options) {
   const zoom = opts.zoom || 12;
   const showOverlay = opts.barangayOverlay !== false;
   const maptilerKey = container.getAttribute('data-maptiler-key');
-  const style = maptilerKey
+  const style = opts.style || (maptilerKey
     ? `https://api.maptiler.com/maps/hybrid/style.json?key=${encodeURIComponent(maptilerKey)}`
-    : undefined;
+    : undefined);
 
   try {
     const root = createRoot(container);

@@ -11,6 +11,8 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -252,9 +254,9 @@ if (isset($_POST['action']) && $_POST['action'] === 'restore') {
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><?php echo htmlspecialchars($pageTitle); ?></title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-<link rel="stylesheet" href="assets/css/dashboard.css">
-<link rel="stylesheet" href="assets/css/responsive.css">
-<link rel="stylesheet" href="assets/css/sb2.css">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;}
@@ -266,6 +268,9 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 .sd-btn-primary{background:#18181b;color:#fff;border-color:#18181b;}
 .sd-btn-primary:hover{background:#27272a;}
 .appt-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;}
+.archive-table-wrap{width:100%;max-width:100%;min-width:0;overflow-x:auto;-webkit-overflow-scrolling:touch;}
+.archive-table-wrap .appt-table{width:100%;}
+.archive-toolbar{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-bottom:1rem;}
 .appt-card-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid #e4e4e7;}
 .appt-header-right{display:flex;align-items:center;gap:8px;}
 .appt-search-wrap{display:flex;align-items:center;gap:8px;}
@@ -318,6 +323,18 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 .appt-search-input::placeholder{color:#a1a1aa;}
 .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
 .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+@media(max-width:768px){
+  .main-content{box-sizing:border-box;width:100%;max-width:100%;min-width:0;}
+  .archive-toolbar{align-items:stretch;flex-direction:column;}
+  .archive-toolbar .appt-search-wrap,.archive-toolbar .appt-search-input,.archive-toolbar .appt-status-select{box-sizing:border-box;width:100%;max-width:none;min-width:0;}
+  .archive-toolbar .pet-action-btn{align-self:flex-start;min-height:36px;}
+  .archive-table-wrap .appt-table{min-width:760px;}
+}
+@media(max-width:480px){
+  .archive-toolbar{gap:10px;}
+  .archive-toolbar .pet-action-btn{width:100%;justify-content:center;}
+  .empty-state{padding:36px 16px;}
+}
 </style>
 </head>
 <body class="staff-theme" data-portal="staff">
@@ -325,7 +342,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 
 <main class="main-content">
 
-<div class="page-header" style="display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-bottom:1rem;">
+<div class="page-header archive-toolbar">
   <div class="appt-search-wrap">
     <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <input type="text" id="searchInput" class="appt-search-input" placeholder="Search..." value="<?php echo htmlspecialchars($search); ?>" />
@@ -396,7 +413,8 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 <?php if (empty($rows)): ?>
   <div class="empty-state"><i class="fas fa-archive" style="font-size:32px;display:block;margin-bottom:8px;opacity:.4;"></i><p><strong>No archived <?php echo htmlspecialchars($type); ?> found.</strong></p></div>
 <?php else: ?>
-  <table class="appt-table">
+  <div class="archive-table-wrap">
+  <table class="appt-table no-responsive">
     <thead>
       <tr>
 <?php if ($type === 'reports'): ?>
@@ -490,6 +508,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 <?php endforeach; ?>
     </tbody>
   </table>
+  </div>
 <?php endif; ?>
 </div>
 </main>

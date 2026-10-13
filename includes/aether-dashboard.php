@@ -779,8 +779,8 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 #ab-page-citydrives .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
 #ab-page-citydrives .kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:14px 16px; background:#fff; border:1px solid #E5E7EB; border-radius:14px; box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03); transition:all .2s cubic-bezier(.4,0,.2,1); font-family:'Inter','Segoe UI',sans-serif; }
 #ab-page-citydrives .kpi-card:hover{ border-color:#D1D5DB; box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03); }
-#ab-page-citydrives .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
-#ab-page-citydrives .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
+#ab-page-citydrives .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:0.85rem; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
+#ab-page-citydrives .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:1.75rem !important; font-weight:600; color:#18181b; letter-spacing:normal; line-height:1; margin:0 0 6px; }
 #ab-page-citydrives .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
 #ab-page-citydrives .dt-container{ min-height:var(--staff-table-min-height); }
 #ab-page-citydrives .dt-pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; }
@@ -916,7 +916,353 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 @media (max-width:1200px) { .ab-grid-4 { grid-template-columns:repeat(2,1fr); } .ab-grid-6 { grid-template-columns:repeat(3,1fr); } }
 @media (max-width:1024px) { .ab-grid-3 { grid-template-columns:1fr; } .ab-grid-2 { grid-template-columns:1fr; } }
-@media (max-width:640px) { .ab-grid-4 { grid-template-columns:1fr; } .ab-grid-6 { grid-template-columns:repeat(2,1fr); } .ab-page { padding:1rem; } }
+@media (max-width:640px) { .ab-grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); } .ab-grid-6 { grid-template-columns:repeat(2,minmax(0,1fr)); } .ab-page { padding:1rem; } }
+@media (max-width:480px) { .ab-grid-4, .ab-grid-6 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.aether-analytics,
+.aether-analytics .aether-dash,
+.aether-analytics .ab-page,
+.aether-analytics .ab-card,
+.aether-analytics .ab-chart-card {
+  min-width: 0;
+}
+.aether-analytics .ab-grid-4,
+.aether-analytics .ab-grid-3,
+.aether-analytics .ab-grid-2,
+.aether-analytics .ab-grid-6 {
+  min-width: 0;
+}
+.aether-analytics .ab-chart-canvas {
+  min-width: 0;
+}
+.aether-analytics .ab-spark-wrap {
+  width: 100%;
+  min-width: 0;
+}
+.aether-analytics .ab-chart-canvas canvas {
+  max-width: 100%;
+}
+.aether-analytics .ab-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width:768px) {
+  #ab-page-engine .ab-grid-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .aether-analytics .ab-head {
+    align-items: stretch;
+  }
+  .aether-analytics .ab-head > * {
+    min-width: 0;
+  }
+  .aether-analytics .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aether-analytics .ab-chart-head {
+    flex-wrap: wrap;
+  }
+  .aether-analytics .ab-chart-head > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+@media (max-width:480px) {
+  .aether-analytics .ab-grid-4,
+  .aether-analytics .ab-grid-6 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .aether-analytics .ab-page {
+    padding: 0.75rem;
+  }
+  .aether-analytics .ab-chart-card {
+    padding: 0.85rem;
+  }
+  .aether-analytics .ab-chart-canvas {
+    height: 260px;
+  }
+  .aether-analytics .ab-range {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .aether-analytics .ab-range-btn {
+    padding-inline: 0.5rem;
+  }
+  .aether-analytics .ab-legend {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+/* Appointment Overview responsive layout */
+#ab-page-intel,
+#ab-page-intel > *,
+#ab-page-intel .ab-card,
+#ab-page-intel .ab-chart-card,
+#ab-page-intel .ab-table-card {
+  min-width: 0;
+  max-width: 100%;
+}
+#ab-page-intel > div:first-child {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+#ab-page-intel .ab-chart-card h2 {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+#ab-page-intel .ab-donut-canvas {
+  height: clamp(12rem, 56vw, 16rem) !important;
+}
+#ab-page-intel .ab-chart-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+#ab-page-intel .ab-donut-canvas canvas {
+  max-width: 100%;
+  margin-inline: auto;
+}
+#ab-page-intel .ab-donut-legend {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+#ab-page-intel .ab-donut-legend-item {
+  flex: 1 1 8rem;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#ab-page-intel .ab-bar-label-row {
+  min-width: 0;
+  gap: 0.75rem;
+}
+#ab-page-intel .ab-bar-label-row span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#ab-page-intel .ab-bar-label-row span:last-child {
+  flex: 0 0 auto;
+}
+#ab-page-intel .ab-bar {
+  width: 100%;
+}
+#ab-page-intel .ab-table-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  contain: paint;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width:1024px) {
+  #ab-page-intel .ab-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width:768px) {
+  #ab-page-engine > div:first-child {
+    justify-content: flex-end !important;
+  }
+  #ab-page-engine > div:first-child .sd-btn {
+    flex: 0 1 auto;
+    width: auto;
+    justify-content: center;
+  }
+  #ab-page-intel .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-intel .ab-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #ab-page-intel .ab-stat {
+    width: 100%;
+  }
+  #ab-page-intel > div:first-child {
+    justify-content: stretch !important;
+  }
+  #ab-page-intel > div:first-child .sd-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  #ab-page-intel .ab-chart-card h2 {
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+  #ab-page-intel .ab-chart-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #ab-page-intel #abApptLocType {
+    width: 100%;
+    max-width: 100%;
+  }
+  #ab-page-intel .ab-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  #ab-page-intel .ab-table th,
+  #ab-page-intel .ab-table td {
+    padding: 0.6rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  #ab-page-intel .ab-table th:first-child,
+  #ab-page-intel .ab-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--ab-card);
+  }
+  #ab-page-intel .ab-table th:first-child {
+    z-index: 2;
+  }
+}
+@media (max-width:480px) {
+  #ab-page-intel .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-intel .ab-chart-card {
+    padding: 0.85rem;
+  }
+  #ab-page-intel .ab-chart-canvas:not(.ab-donut-canvas) {
+    height: 15rem !important;
+  }
+  #ab-page-intel .ab-donut-legend-item {
+    flex-basis: 7rem;
+  }
+  #ab-page-intel .ab-table th,
+  #ab-page-intel .ab-table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.7rem;
+  }
+}
+
+/* Programs & Services and City Drives responsive layout */
+#ab-page-architect,
+#ab-page-citydrives,
+#ab-page-architect > *,
+#ab-page-citydrives > *,
+#ab-page-architect .ab-card,
+#ab-page-citydrives .kpi-card {
+  min-width: 0;
+  max-width: 100%;
+}
+#ab-page-architect #abCampGrid {
+  min-width: 0;
+}
+#ab-page-architect .ab-gantt {
+  min-width: 0;
+}
+#ab-page-architect .ab-gantt-scroll {
+  max-width: 100%;
+  contain: paint;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#ab-page-architect .ab-gantt-head > *,
+#ab-page-architect .ab-gantt-legend,
+#ab-page-architect .ab-camp-card,
+#ab-page-architect .ab-camp-foot {
+  min-width: 0;
+}
+#ab-page-citydrives .kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#ab-page-citydrives .dt-container {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width:1024px) {
+  #ab-page-architect #abCampGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  #ab-page-citydrives .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-citydrives .dt-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    contain: paint;
+    -webkit-overflow-scrolling: touch;
+  }
+  #ab-page-citydrives table {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+@media (max-width:768px) {
+  #ab-page-architect #abCampGrid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #ab-page-architect > div[style*="justify-content:flex-end"] {
+    justify-content: stretch !important;
+  }
+  #ab-page-architect > div[style*="justify-content:flex-end"] .sd-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  #ab-page-architect > div[style*="justify-content:space-between"] {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  #ab-page-architect .ab-gantt-head {
+    align-items: flex-start;
+    padding: 0.85rem;
+  }
+  #ab-page-architect .ab-gantt-legend {
+    gap: 0.5rem 0.75rem;
+  }
+  #ab-page-architect .ab-camp-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  #ab-page-architect .ab-camp-foot > div {
+    flex-wrap: wrap;
+  }
+  #ab-page-citydrives .dt-pagination,
+  #ab-page-citydrives .dt-pagination-right {
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  #ab-page-citydrives .dt-pagination {
+    padding-inline: 0;
+  }
+}
+@media (max-width:480px) {
+  #ab-page-citydrives .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  #ab-page-citydrives .kpi-card {
+    width: 100%;
+  }
+  #ab-page-citydrives thead th,
+  #ab-page-citydrives tbody td {
+    padding: 0.65rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  #ab-page-citydrives .dt-rows {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  #ab-page-citydrives .dt-page-label {
+    width: auto;
+  }
+  #ab-page-architect .ab-camp-card {
+    padding: 0.85rem;
+  }
+}
 </style>
 
 <!-- ═══════════ ENGINE ═══════════ -->
@@ -1014,7 +1360,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
       <p style="margin:0;font-size:14px;font-weight:600;color:#991B1B;"><?php echo $aeth_highPriorityCount; ?> high-priority report<?php echo $aeth_highPriorityCount !== 1 ? 's' : ''; ?> require immediate attention.</p>
       <p style="margin:0.15rem 0 0;font-size:13px;color:#991B1B;opacity:0.85;">Review these reports to confirm and assign the appropriate action.</p>
     </div>
-    <a href="dashboard-staff.php#reports-pending" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
+    <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
   </div>
   <?php endif; ?>
 
@@ -1025,7 +1371,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
           <h2>Priority Reports</h2>
           <span style="font-size:12px;font-weight:500;padding:0.2rem 0.55rem;border-radius:4px;background:rgba(234,179,8,0.12);color:#92400e;border:1px solid rgba(234,179,8,0.4);font-family:'Inter','Segoe UI',sans-serif;"><?php echo $aeth_priorityTotal; ?> need attention</span>
         </div>
-        <a href="dashboard-staff.php#reports-pending" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
+        <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
       </div>
       <div style="padding:0.6rem 1.25rem;border-bottom:1px solid var(--ab-border);font-size:13px;color:var(--ab-muted-fg);font-family:'Inter','Segoe UI',sans-serif;">Reports requiring staff review and confirmation</div>
       <div class="ab-feed-list">
@@ -1048,7 +1394,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                   <?php echo htmlspecialchars($rpt['note']); ?> &middot; <?php echo htmlspecialchars($rpt['timeAgo']); ?>
                 </p>
               </div>
-              <a href="dashboard-staff.php#reports-pending" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
+              <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
             </div>
           <?php endforeach; ?>
         <?php endif; ?>
@@ -1072,7 +1418,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
   <div class="ab-grid-3" style="margin-bottom:1.5rem;">
     <div class="ab-card ab-chart-card">
       <h2>Appointment Type Distribution</h2>
-      <div class="ab-chart-canvas" style="height:256px;"><canvas id="abIntelAge"></canvas></div>
+      <div class="ab-chart-canvas ab-donut-canvas" style="height:256px;"><canvas id="abIntelAge"></canvas></div>
       <div class="ab-donut-legend">
         <?php foreach ($aeth_apptTypeLabels as $__i => $__label): ?>
           <div class="ab-donut-legend-item"><span class="ab-dot" style="background:<?php echo $aeth_apptTypeColors[$__i]; ?>;"></span><?php echo $__label; ?></div>
@@ -1147,7 +1493,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     <button type="button" class="sd-btn sd-btn-outline" onclick="aethExportAdoptionPdf()"><i class="fas fa-file-pdf"></i> Export PDF</button>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.5rem;">
+  <div class="ab-budget-overview" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.5rem;">
     <div class="ab-card" style="padding:1.25rem;">
       <h2 style="font-size:14px;font-weight:600;margin-bottom:1rem;">Annual Adoption Progress</h2>
       <div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
@@ -1530,7 +1876,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         <h2 class="sd-dialog-title">Create New Program</h2>
         <p class="sd-dialog-description">Set up a new city drive or veterinary program.</p>
       </div>
-      <form id="createProgramForm" method="POST" action="dashboard-staff.php#analytics" style="display:flex;flex-direction:column;gap:16px;">
+      <form id="createProgramForm" method="POST" action="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#analytics', ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;flex-direction:column;gap:16px;">
         <input type="hidden" name="create_program" value="1">
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Program Name <span style="color:#e53e3e;">*</span></label>
@@ -1669,7 +2015,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         <h2 class="sd-dialog-title">Log Program Progress</h2>
         <p class="sd-dialog-description" id="abLogProgName">Record animals served during this program.</p>
       </div>
-      <form method="POST" action="dashboard-staff.php#analytics" style="display:flex;flex-direction:column;gap:24px;">
+      <form method="POST" action="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#analytics', ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;flex-direction:column;gap:24px;">
         <input type="hidden" name="log_progress" value="1">
         <input type="hidden" name="program_id" id="abLogProgId">
         <div class="sd-field">
@@ -2093,7 +2439,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.barangayName = barangayName;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2114,7 +2460,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.locationTypeLabel = typeSelect && typeSelect.selectedOptions.length ? typeSelect.selectedOptions[0].textContent : 'All Types';
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2131,7 +2477,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.reportType = 'adoption';
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2160,11 +2506,47 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         data: { labels: APPT_LOCS.map(function(l) { return l[0]; }), datasets: [{ data: APPT_LOCS.map(function(l) { return l[1]; }), backgroundColor: '#18181b', borderRadius: 0, barThickness: 14 }] },
         options: Object.assign(baseOpts(), {
           indexAxis: 'y',
-          scales: { x: { beginAtZero: true, grid: { color: aethChartColors().grid }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 10 }, precision: 0 } }, y: { grid: { display: false }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 11 } } } }
+          layout: { padding: { left: 4, right: 4 } },
+          plugins: {
+            legend: { display: false },
+            tooltip: Object.assign(tooltipStyle(), {
+              callbacks: {
+                title: function(items) { return items.length ? items[0].label : ''; }
+              }
+            })
+          },
+          scales: {
+            x: { beginAtZero: true, grid: { color: aethChartColors().grid }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 10 }, precision: 0 } },
+            y: {
+              grid: { display: false },
+              ticks: {
+                color: aethChartColors().tick,
+                font: { family: 'Inter', size: 11 },
+                callback: function(value) {
+                  var label = String(this.getLabelForValue(value));
+                  var maxLength = window.innerWidth <= 768 ? 14 : (window.innerWidth <= 1024 ? 22 : 1000);
+                  return label.length > maxLength ? label.slice(0, maxLength - 3) + '...' : label;
+                }
+              }
+            }
+          }
         })
       });
     }
   }
+  var intelResizeFrame = 0;
+  window.addEventListener('resize', function() {
+    if (intelResizeFrame) cancelAnimationFrame(intelResizeFrame);
+    intelResizeFrame = requestAnimationFrame(function() {
+      intelResizeFrame = 0;
+      var intelPage = document.getElementById('ab-page-intel');
+      var analyticsSection = document.getElementById('analytics');
+      if (intelPage.classList.contains('active') && analyticsSection.getClientRects().length) {
+        if (charts['abIntelAge']) charts['abIntelAge'].resize();
+        if (charts['abIntelLoc']) charts['abIntelLoc'].resize();
+      }
+    });
+  });
   window.aethSetApptLoc = function(key) {
     var chart = charts['abIntelLoc'];
     if (!chart) return;
@@ -2277,6 +2659,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       : [[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0]];
     data.forEach(function(d, i) { initSpark('abSpark-' + i, d); });
   }
+  window.addEventListener('resize', function() {
+    Object.keys(charts).forEach(function(id) {
+      if (id.indexOf('abSpark-') === 0 && charts[id]) charts[id].resize();
+    });
+  });
   // Render KPI values immediately, with commas and decimals preserved.
   function aethCompact(n) {
     if (Number.isInteger(n)) return n.toLocaleString('en-US');
@@ -2338,7 +2725,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var targetReached = camp.target > 0 && (camp.completed || 0) >= camp.target;
     var canEditProgram = camp.status === 'scheduled' || camp.status === 'paused';
     var editProgramButton = canEditProgram
-      ? '<button type="button" class="ab-program-edit-icon" onclick="aethEditProgram(\'' + camp.id + '\')" aria-label="Edit program" title="Edit program"><img src="assets/images/edit%20icon.png" alt=""></button>'
+      ? '<button type="button" class="ab-program-edit-icon" onclick="aethEditProgram(\'' + camp.id + '\')" aria-label="Edit program" title="Edit program"><img src="' + window.dcvsStaffUrl('assets/images/edit%20icon.png') + '" alt=""></button>'
       : '';
     var logProgressButton = (camp.status === 'live' || camp.status === 'paused')
       ? '<button type="button" class="ab-program-log-icon" onclick="aethOpenLogProgress(\'' + camp.id + '\')" aria-label="Log progress" title="Log progress"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 3.5h6"></path><path d="M9 9h6"></path><path d="M9 13h6"></path><path d="M9 17h4"></path></svg></button>'
@@ -2586,7 +2973,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (!confirm(label + ' this program?')) return;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden';
     input.name = action + '_program';
@@ -2725,7 +3112,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'pause_program'; input.value = '1';
     form.appendChild(input);
@@ -2752,7 +3139,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'resume_program'; input.value = '1';
     form.appendChild(input);
@@ -2779,7 +3166,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'cancel_program'; input.value = '1';
     form.appendChild(input);
@@ -2806,7 +3193,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'mark_completed'; input.value = '1';
     form.appendChild(input);
@@ -2833,7 +3220,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'archive_program'; input.value = '1';
     form.appendChild(input);
@@ -2850,7 +3237,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var params = new URLSearchParams();
     params.set('create_from_program', String(id));
     try { localStorage.removeItem('sb2State'); } catch(e) {}
-    window.location.href = 'staff-announcements.php?' + params.toString();
+    window.location.href = window.dcvsStaffUrl('staff-announcements.php') + '?' + params.toString();
   };
 
   var abLogProgState = { target: 0, completed: 0 };
@@ -3159,7 +3546,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     });
     if (programId && programId.value) params.set('program_id', programId.value);
 
-    fetch('program-conflicts.php?' + params.toString())
+    fetch(window.dcvsStaffUrl('program-conflicts.php') + '?' + params.toString())
       .then(function(response) { return response.json(); })
       .then(function(data) {
         if (requestId !== abConflictRequest) return;
@@ -3456,7 +3843,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   function apLoadAnimals() {
     document.getElementById('apAnimalList').innerHTML = '<div class="ap-empty"><i class="fas fa-spinner fa-spin"></i>Loading...</div>';
-    fetch('geo-map/adoption-pool.php')
+    fetch(window.dcvsStaffUrl('geo-map/adoption-pool.php'))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         allAnimals = data.animals || [];
@@ -3493,7 +3880,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var statusClass = 'ap-tag-' + (a.status || 'rescued');
       var statusLabel = (a.status || 'rescued').charAt(0).toUpperCase() + (a.status || 'rescued').slice(1);
       var photoHtml = a.photo
-        ? '<img src="' + escH(a.photo) + '" alt="">'
+        ? '<img src="' + escH(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">'
         : '<i class="fas ' + speciesIcon + '"></i>';
       var actionHtml = '';
       if (a.status === 'rescued') {
@@ -3523,7 +3910,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var speciesIcon = a.species === 'dog' ? 'fa-dog' : a.species === 'cat' ? 'fa-cat' : 'fa-paw';
     var photoEl = document.getElementById('apDetailPhoto');
     if (a.photo) {
-      photoEl.innerHTML = '<img src="' + escH(a.photo) + '" alt="">';
+      photoEl.innerHTML = '<img src="' + escH(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">';
     } else {
       photoEl.innerHTML = '<i class="fas ' + speciesIcon + '"></i>';
     }
@@ -3552,7 +3939,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   window.apPromoteAnimal = function(id) {
     if (!confirm('Promote this animal to Available for adoption?')) return;
-    fetch('promote-pet-handler.php', {
+    fetch(window.dcvsStaffUrl('promote-pet-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pet_id: id, status: 'available' })
@@ -3586,7 +3973,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   window.poolLoad = function() {
     var el = document.getElementById('poolAnimalList');
     el.innerHTML = '<div style="text-align:center;padding:40px;color:#a1a1aa;font-size:13px;"><i class="fas fa-spinner fa-spin" style="font-size:20px;display:block;margin-bottom:8px;color:#d4d4d8;"></i>Loading...</div>';
-    fetch('geo-map/adoption-pool.php')
+    fetch(window.dcvsStaffUrl('geo-map/adoption-pool.php'))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         poolAnimals = data.animals || [];
@@ -3625,7 +4012,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var statusClass = 'ap-tag-' + (a.status || 'rescued');
       var statusLabel = (a.status || 'rescued').charAt(0).toUpperCase() + (a.status || 'rescued').slice(1);
       var photoHtml = a.photo
-        ? '<img src="' + escP(a.photo) + '" alt="">'
+        ? '<img src="' + escP(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">'
         : '<i class="fas ' + speciesIcon + '"></i>';
       var actionHtml = '';
       if (a.status === 'rescued') {
@@ -3653,7 +4040,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var speciesIcon = a.species === 'dog' ? 'fa-dog' : a.species === 'cat' ? 'fa-cat' : 'fa-paw';
     var photoEl = document.getElementById('poolDetailPhoto');
     if (a.photo) {
-      photoEl.innerHTML = '<img src="' + escP(a.photo) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
+      photoEl.innerHTML = '<img src="' + escP(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
     } else {
       photoEl.innerHTML = '<i class="fas ' + speciesIcon + '" style="font-size:40px;color:#d4d4d8;"></i>';
     }
@@ -3680,7 +4067,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   window.poolPromote = function(id) {
     if (!confirm('Promote this animal to Available for adoption?')) return;
-    fetch('promote-pet-handler.php', {
+    fetch(window.dcvsStaffUrl('promote-pet-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pet_id: id, status: 'available' })
@@ -3841,7 +4228,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       notes: document.getElementById('rrNotes').value
     };
 
-    fetch('record-rescue-handler.php', {
+    fetch(window.dcvsStaffUrl('record-rescue-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

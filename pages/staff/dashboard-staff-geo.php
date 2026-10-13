@@ -10,7 +10,10 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 require_once __DIR__ . '/../../includes/reports/location.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
@@ -64,14 +67,14 @@ $activePage = 'geo';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <!-- MapCN bundle -->
-  <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../../geo-map/map.css'); ?>">
-  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'); ?>">
-  <script src="dist/mapcn.umd.cjs"></script>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/geo-map/map.css?v=' . (int)filemtime(__DIR__ . '/../../geo-map/map.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/geo-drawer.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.umd.cjs?v=' . (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 
   <style>
     :root {
@@ -99,8 +102,8 @@ $activePage = 'geo';
     .geo-full-page #geoMap { height: auto !important; flex: 1; min-height: 0; }
 
     @media (max-width: 768px) {
-      .staff-main { margin-left: 0; padding: 1rem; }
-      .geo-full-page { margin: -1rem; }
+      body.staff-theme.sb2-active .staff-main { box-sizing: border-box; width: 100%; min-width: 0; margin-left: 0; padding-inline: 0 !important; }
+      .geo-full-page { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; margin: 0; }
     }
 
     /* Buttons */
@@ -458,9 +461,9 @@ document.addEventListener('DOMContentLoaded', function() {
 })();
 </script>
 <?php if ($reportPinsEnabled): ?>
-<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/report-map-pins.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php endif; ?>
-<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'); ?>"></script>
-<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/map-landmarks.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/map-basemap-toggle.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

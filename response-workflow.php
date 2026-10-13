@@ -71,10 +71,12 @@ if ($role === 'staff' && in_array($action, ['staff_decide', 'return_for_validati
 $stmt = $conn->prepare("SELECT r.report_id, r.reporter_id, r.report_type, r.animal_count, r.animal_behavior, r.urgency_level,
         r.description, r.status AS report_status, r.barangay_id, r.urgency_level,
         w.state, w.response_mode, w.holding_location, w.animal_condition,
-    w.response_deadline, w.turnover_deadline, w.barangay_proposed,
-    w.high_risk_override_by, w.high_risk_override_reason
+        w.response_deadline, w.turnover_deadline, w.barangay_proposed,
+        w.high_risk_override_by, w.high_risk_override_reason,
+        rr.animal_disposition
     FROM reports r
     LEFT JOIN report_response_workflow w ON w.report_id = r.report_id
+    LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
     WHERE r.report_id = ? AND r.archived_at IS NULL");
 if (!$stmt) responseWorkflowReply(500, ['success' => false, 'message' => 'Could not load this case.']);
 $stmt->bind_param('i', $reportId);
@@ -88,6 +90,8 @@ if ($role === 'barangay' && (!$barangayId || (int)$report['barangay_id'] !== $ba
 
 $state = (string)($report['state'] ?? '');
 $target = '';
+$isHandoverPlan = false;
+$isResolvedReceipt = false;
 $mode = (string)($report['response_mode'] ?? 'undecided');
 if ($role === 'barangay' && $mode !== 'barangay_response') {
     responseWorkflowReply(403, ['success' => false, 'message' => 'This case is not assigned to your barangay for response.']);
@@ -138,21 +142,44 @@ if ($action === 'authorize_high_risk_override') {
     $reason = 'Assigned to ' . $dispatchOfficerName . ($reason !== '' ? '. ' . $reason : '. DCVS dispatch selected.');
     $target = $mode;
 } else {
+    $isHandoverPlan = $action === 'set_handover_plan';
     $isResolvedReceipt = $action === 'confirm_turnover' && $report['report_status'] === 'resolved';
-    if ($isResolvedReceipt) {
-        if ($role !== 'staff' || $state !== 'resolved') {
-            responseWorkflowReply(409, ['success' => false, 'message' => 'Only authorized DCVS staff can confirm receipt for a resolved incident.']);
+    $isSiteVisit = $action === 'record_site_visit';
+    $isBarangayPreconfirmationAction = $role === 'barangay'
+        && $report['report_status'] === 'validated'
+        && in_array($action, ['start_response', 'record_site_visit', 'unable_to_secure', 'unable_to_locate', 'update_progress'], true);
+    if ($isHandoverPlan) {
+        if ($role !== 'barangay' || $report['report_status'] !== 'resolved' || $state !== 'resolved'
+            || !dcvsResponseRequiresTurnover((string)$report['report_type'], (string)($report['animal_disposition'] ?? ''))) {
+            responseWorkflowReply(409, ['success' => false, 'message' => 'A handover plan can only be set by the barangay for a resolved case.']);
         }
         $turnoverCheck = $conn->prepare("SELECT turnover_task_id FROM report_turnover_tasks WHERE report_id = ? AND status = 'pending' LIMIT 1");
         if (!$turnoverCheck) responseWorkflowReply(500, ['success' => false, 'message' => 'Could not load the pending turnover task.']);
         $turnoverCheck->bind_param('i', $reportId);
-        if (!$turnoverCheck->execute() || !$turnoverCheck->get_result()->fetch_assoc()) {
+        if (!$turnoverCheck->execute()) {
             $turnoverCheck->close();
-            responseWorkflowReply(409, ['success' => false, 'message' => 'There is no pending turnover task for this incident.']);
+            responseWorkflowReply(500, ['success' => false, 'message' => 'Could not verify the turnover task for this incident.']);
         }
         $turnoverCheck->close();
-    } elseif ($report['report_status'] !== 'confirmed') {
+    } elseif ($isResolvedReceipt) {
+        if ($role !== 'staff' || $state !== 'resolved') {
+            responseWorkflowReply(409, ['success' => false, 'message' => 'Only authorized DCVS staff can confirm receipt for a resolved incident.']);
+        }
+        $turnoverCheck = $conn->prepare("SELECT turnover_task_id FROM report_turnover_tasks WHERE report_id = ? AND status = 'pending' AND planned_at IS NOT NULL LIMIT 1");
+        if (!$turnoverCheck) responseWorkflowReply(500, ['success' => false, 'message' => 'Could not load the pending turnover task.']);
+        $turnoverCheck->bind_param('i', $reportId);
+        if (!$turnoverCheck->execute() || !$turnoverCheck->get_result()->fetch_assoc()) {
+            $turnoverCheck->close();
+            responseWorkflowReply(409, ['success' => false, 'message' => 'There is no pending handover plan for this incident.']);
+        }
+        $turnoverCheck->close();
+    } elseif (!$isHandoverPlan && !$isSiteVisit
+        && !$isBarangayPreconfirmationAction
+        && $report['report_status'] !== 'confirmed') {
         responseWorkflowReply(409, ['success' => false, 'message' => 'This report is not an active confirmed case.']);
+    }
+    if ($isSiteVisit && $report['report_status'] !== 'validated') {
+        responseWorkflowReply(409, ['success' => false, 'message' => 'This report already has a site visit result. Refresh the report to see its current status.']);
     }
     $transition = dcvsResponseTransition($action);
     if (!$transition || !dcvsResponseCanTransition($action, $role, $state)) {
@@ -178,10 +205,50 @@ if ($action === 'authorize_high_risk_override') {
     if ($action === 'update_progress' && (function_exists('mb_strlen') ? mb_strlen($reason, 'UTF-8') : strlen($reason)) > 2000) {
         responseWorkflowReply(400, ['success' => false, 'message' => 'Progress updates must be no longer than 2,000 characters.']);
     }
-    if ($action === 'resolve_barangay') {
+    if ($action === 'record_site_visit') {
+        $fieldStatus = is_string($_POST['field_status'] ?? null) ? trim($_POST['field_status']) : '';
+        $validSiteFindings = ['confirmed_on_site', 'urgent_response', 'animal_already_gone', 'wrong_or_unclear_location'];
+        if (!in_array($fieldStatus, $validSiteFindings, true)
+            || $reason === ''
+            || (function_exists('mb_strlen') ? mb_strlen($reason, 'UTF-8') : strlen($reason)) > 2000) {
+            responseWorkflowReply(400, ['success' => false, 'message' => 'Choose a valid site finding and enter notes of up to 2,000 characters.']);
+        }
+    }
+    if ($action === 'set_handover_plan') {
+        $handoverMethod = trim((string)($_POST['handover_method'] ?? ''));
+        $handoverDate = trim((string)($_POST['handover_date'] ?? ''));
+        $handoverTime = trim((string)($_POST['handover_time'] ?? ''));
+        $handlerName = trim((string)($_POST['handler_name'] ?? ''));
+        $contactNumber = trim((string)($_POST['contact_number'] ?? ''));
+        $pickupLocation = trim((string)($_POST['pickup_location'] ?? ''));
+        $safeTransport = ($_POST['safe_transport'] ?? '') === '1' ? 1 : 0;
+        $plannedAt = DateTime::createFromFormat('!Y-m-d H:i', $handoverDate . ' ' . $handoverTime, $workflowTimezone);
+        $dateErrors = DateTime::getLastErrors();
+        if (!in_array($handoverMethod, ['barangay_delivery', 'dcvs_pickup'], true)
+            || !$plannedAt || ($dateErrors && ($dateErrors['warning_count'] || $dateErrors['error_count']))
+            || $plannedAt->format('Y-m-d H:i') !== $handoverDate . ' ' . $handoverTime
+            || $plannedAt <= new DateTime('now', $workflowTimezone)) {
+            responseWorkflowReply(400, ['success' => false, 'message' => 'Choose a handover method and a valid future date and time.']);
+        }
+        if ($handlerName === '' || (function_exists('mb_strlen') ? mb_strlen($handlerName, 'UTF-8') : strlen($handlerName)) > 150
+            || $contactNumber === '' || strlen($contactNumber) > 40
+            || ($handoverMethod === 'dcvs_pickup' && $pickupLocation === '')
+            || (function_exists('mb_strlen') ? mb_strlen($pickupLocation, 'UTF-8') : strlen($pickupLocation)) > 500) {
+            responseWorkflowReply(400, ['success' => false, 'message' => 'Provide the barangay contact details and, for pickup, the animal pickup location.']);
+        }
+        $plannedAtValue = $plannedAt->format('Y-m-d H:i:s');
+        $handoverMethodLabel = $handoverMethod === 'barangay_delivery' ? 'Barangay delivery' : 'DCVS pickup requested';
+        $reason = $handoverMethodLabel . ' planned for ' . $plannedAt->format('M j, Y g:i A')
+            . '; handover contact: ' . $handlerName . ' (' . $contactNumber . ').'
+            . ($pickupLocation !== '' ? ' Pickup location: ' . $pickupLocation . '.' : '')
+            . ($safeTransport ? ' Animal will be transported in a carrier or safely secured.' : '');
+    } elseif ($action === 'resolve_barangay') {
         $resolutionDetails = trim((string)($_POST['resolution_details'] ?? ''));
         $animalDisposition = trim((string)($_POST['animal_disposition'] ?? ''));
-        $turnoverRequired = ($_POST['turnover_required'] ?? '') === '1';
+        $turnoverRequired = dcvsResponseRequiresTurnover(
+            (string)$report['report_type'],
+            $animalDisposition
+        );
         $validDispositions = [
             'rescued', 'reunited_with_owner', 'transferred_to_shelter',
             'under_veterinary_care', 'disposed_per_local_protocol', 'other',
@@ -190,8 +257,11 @@ if ($action === 'authorize_high_risk_override') {
             || !in_array($animalDisposition, $validDispositions, true)) {
             responseWorkflowReply(400, ['success' => false, 'message' => 'Provide resolution details and a valid animal disposition.']);
         }
-        if (strtolower((string)$report['report_type']) === 'dead'
-            && ($turnoverRequired || $animalDisposition !== 'disposed_per_local_protocol')) {
+        $isDeadAnimal = stripos((string)$report['report_type'], 'dead') !== false;
+        if (($isDeadAnimal
+                && $animalDisposition !== 'disposed_per_local_protocol')
+            || (!$isDeadAnimal
+                && $animalDisposition === 'disposed_per_local_protocol')) {
             responseWorkflowReply(400, ['success' => false, 'message' => 'Dead-animal cases use the documented disposition process and do not create live-animal turnover tasks.']);
         }
         if ($turnoverRequired && trim((string)($report['holding_location'] ?? '')) === '') {
@@ -347,7 +417,10 @@ try {
     } elseif ($action === 'resolve_barangay') {
         $resolutionDetails = trim((string)$_POST['resolution_details']);
         $animalDisposition = trim((string)$_POST['animal_disposition']);
-        $turnoverRequired = ($_POST['turnover_required'] ?? '') === '1';
+        $turnoverRequired = dcvsResponseRequiresTurnover(
+            (string)$report['report_type'],
+            $animalDisposition
+        );
         $reason = $resolutionDetails . ' Animal disposition: ' . $animalDisposition . '.';
         $resolvedAt = (new DateTimeImmutable('now', $workflowTimezone))->format('Y-m-d H:i:s');
         $resolution = $conn->prepare("INSERT INTO report_response_resolutions
@@ -397,6 +470,54 @@ try {
             }
             $turnover->close();
         }
+    } elseif ($isHandoverPlan) {
+        $taskCheck = $conn->prepare("SELECT turnover_task_id, status FROM report_turnover_tasks WHERE report_id = ? LIMIT 1 FOR UPDATE");
+        if (!$taskCheck) throw new RuntimeException('Could not verify the turnover task before saving the plan.');
+        $taskCheck->bind_param('i', $reportId);
+        if (!$taskCheck->execute()) throw new RuntimeException('Could not verify the turnover task before saving the plan.');
+        $task = $taskCheck->get_result()->fetch_assoc();
+        $taskCheck->close();
+        if (!$task) {
+            $turnoverHours = (int)env('DCVS_TURNOVER_TARGET_HOURS', '24');
+            if ($turnoverHours < 1 || $turnoverHours > 720) $turnoverHours = 24;
+            $createTask = $conn->prepare("INSERT INTO report_turnover_tasks
+                (report_id, status, animal_count, holding_location, animal_disposition, task_notes, due_at, requested_by, requested_at)
+                SELECT r.report_id, 'pending', r.animal_count, rw.holding_location,
+                    COALESCE(NULLIF(rr.animal_disposition, ''), 'other'),
+                    COALESCE(rr.resolution_details, ''),
+                    DATE_ADD(NOW(), INTERVAL ? HOUR), ?, NOW()
+                FROM reports r
+                LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
+                LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
+                WHERE r.report_id = ? AND r.status = 'resolved'
+                    AND LOWER(r.report_type) NOT LIKE '%dead%'
+                    AND (rr.animal_disposition IS NULL OR rr.animal_disposition NOT IN
+                        ('reunited_with_owner', 'transferred_to_shelter', 'disposed_per_local_protocol'))");
+            if (!$createTask) throw new RuntimeException('Could not prepare the turnover task for this resolved case.');
+            $createTask->bind_param('iii', $turnoverHours, $userId, $reportId);
+            if (!$createTask->execute() || $createTask->affected_rows !== 1) {
+                throw new RuntimeException('A turnover task could not be created for this resolved case.');
+            }
+            $createTask->close();
+        } elseif ($task['status'] !== 'pending') {
+            throw new RuntimeException('This turnover task has already been completed or cancelled.');
+        }
+        $plan = $conn->prepare("UPDATE report_turnover_tasks
+            SET handover_method = ?, planned_at = ?, handler_name = ?, contact_number = ?,
+                pickup_location = ?, safe_transport = ?
+            WHERE report_id = ? AND status = 'pending'");
+        if (!$plan) throw new RuntimeException('Could not prepare the handover plan update.');
+        $plan->bind_param('sssssii', $handoverMethod, $plannedAtValue, $handlerName, $contactNumber, $pickupLocation, $safeTransport, $reportId);
+        if (!$plan->execute()) throw new RuntimeException('The pending handover plan could not be saved.');
+        if ($plan->affected_rows !== 1) {
+            $pendingTask = $conn->prepare("SELECT turnover_task_id FROM report_turnover_tasks WHERE report_id = ? AND status = 'pending' LIMIT 1");
+            if (!$pendingTask) throw new RuntimeException('Could not verify the saved handover plan.');
+            $pendingTask->bind_param('i', $reportId);
+            $saved = $pendingTask->execute() && (bool)$pendingTask->get_result()->fetch_assoc();
+            $pendingTask->close();
+            if (!$saved) throw new RuntimeException('The pending handover plan could not be saved.');
+        }
+        $plan->close();
     } elseif ($isResolvedReceipt) {
         $receipt = $conn->prepare("UPDATE report_turnover_tasks SET status = 'receipt_confirmed', received_by = ?, received_at = NOW()
             WHERE report_id = ? AND status = 'pending'");
@@ -404,6 +525,36 @@ try {
         $receipt->bind_param('ii', $userId, $reportId);
         if (!$receipt->execute() || $receipt->affected_rows !== 1) throw new RuntimeException('The turnover task was already completed or cancelled.');
         $receipt->close();
+    } elseif ($action === 'record_site_visit') {
+        $fieldStatus = trim((string)$_POST['field_status']);
+        $reportUpdate = $conn->prepare("UPDATE reports
+            SET barangay_validation_status = ?, barangay_validation_notes = ?,
+                status = IF(? = 'confirmed_on_site', 'confirmed', status),
+                confirmed_by = IF(? = 'confirmed_on_site', ?, confirmed_by),
+                confirmed_at = IF(? = 'confirmed_on_site', NOW(), confirmed_at)
+            WHERE report_id = ? AND status = 'validated'");
+        if (!$reportUpdate) throw new RuntimeException('Could not prepare the site visit result.');
+        $reportUpdate->bind_param('ssssisi', $fieldStatus, $reason, $fieldStatus, $fieldStatus, $userId, $fieldStatus, $reportId);
+        if (!$reportUpdate->execute() || $reportUpdate->affected_rows !== 1) {
+            throw new RuntimeException('The site visit result was not saved.');
+        }
+        $reportUpdate->close();
+        if ($fieldStatus === 'confirmed_on_site') {
+            $activeCase = $conn->prepare("INSERT INTO confirmed_cases
+                    (report_id, case_type, location_address, coordinates_lat, coordinates_long, barangay_id, urgency_level, status, confirmed_at)
+                SELECT r.report_id, r.report_type, r.location_address, r.coordinates_lat, r.coordinates_long,
+                       r.barangay_id, r.urgency_level, 'active', NOW()
+                FROM reports r
+                WHERE r.report_id = ? AND NOT EXISTS (
+                    SELECT 1 FROM confirmed_cases existing WHERE existing.report_id = r.report_id
+                )");
+            if (!$activeCase) throw new RuntimeException('Could not prepare the confirmed map case.');
+            $activeCase->bind_param('i', $reportId);
+            if (!$activeCase->execute() || $activeCase->affected_rows !== 1) {
+                throw new RuntimeException('The confirmed map case could not be created.');
+            }
+            $activeCase->close();
+        }
     } elseif ($action === 'mark_secured' && $storedPhoto) {
         $progressHours = (int)env('DCVS_PROGRESS_TARGET_HOURS', '48');
         if ($progressHours < 1 || $progressHours > 720) $progressHours = 48;
@@ -509,8 +660,10 @@ if (function_exists('createNotification')) {
         'return_for_validation' => 'Report Returned for More Information',
         'reject_report' => 'Report Rejected by DCVS',
         'start_response' => 'Barangay Response Started',
+        'record_site_visit' => 'Barangay Site Visit Recorded',
         'mark_secured' => 'Animal Secured by Barangay',
         'request_pickup' => 'DCVS Pickup Requested',
+        'set_handover_plan' => 'Animal Handover Plan Set',
         'unable_to_secure' => 'Urgent DCVS Escalation',
         'unable_to_locate' => 'Animal Could Not Be Located',
         'confirm_turnover' => 'Turnover Received by DCVS',
@@ -530,10 +683,14 @@ if (function_exists('createNotification')) {
         $message = 'DCVS approved the barangay response. The barangay is preparing to respond.';
     } elseif ($action === 'start_response') {
         $message = 'Barangay started responding to this incident. ' . $reason;
+    } elseif ($action === 'record_site_visit') {
+        $message = 'Barangay site visit result: ' . $reason;
     } elseif ($action === 'update_progress') {
         $message = 'Barangay response progress: ' . $reason;
     } elseif ($action === 'resolve_barangay') {
         $message = 'The barangay resolved the incident. ' . $reason;
+    } elseif ($action === 'set_handover_plan') {
+        $message = 'Barangay handover plan: ' . $reason . ' Keep the animal safe until DCVS confirms receipt.';
     } elseif ($action === 'confirm_turnover' && $isResolvedReceipt) {
         $title = 'Animal Turnover Receipt Confirmed';
         $message = 'DCVS confirmed receipt of the animal. The incident remains resolved.';

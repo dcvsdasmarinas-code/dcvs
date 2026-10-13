@@ -75,7 +75,7 @@
     document.getElementById('geoDrawer').classList.add('open');
     document.body.style.overflow = 'hidden';
 
-    fetch('geo-map/barangay-detail.php?sess=DCVS_BARANGAY_SESSION', {
+    fetch((window.DCVS_APP_BASE_URL || '') + '/geo-map/barangay-detail.php?sess=DCVS_BARANGAY_SESSION', {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' }
     }).then(function(response) {

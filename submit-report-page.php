@@ -1219,7 +1219,7 @@ $pageTitle = 'Submit Report';
 
     reportMapLoadPromise = new Promise(function(resolve, reject) {
       var script = document.createElement('script');
-      script.src = 'dist/mapcn.umd.cjs';
+      script.src = 'dist/mapcn.umd.cjs?v=<?php echo (int)filemtime(__DIR__ . '/dist/mapcn.umd.cjs'); ?>';
       script.onload = function() {
         if (window.MapCN && typeof window.MapCN.init === 'function') resolve();
         else reject(new Error('The report map library did not initialize.'));

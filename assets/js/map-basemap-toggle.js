@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var STREET_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
   var SATELLITE_STYLE = 'https://api.maptiler.com/maps/hybrid/style.json?key=';
   var CUSTOM_SOURCE_IDS = [
@@ -8,6 +16,7 @@
     'brgy-labels',
     'report-pins',
     'report-pin-accuracy',
+    'public-report-pins',
     'dcvs-landmarks',
     'dcvs-city-perimeter',
     'dcvs-city-mask',
@@ -31,6 +40,9 @@
     'report-pins-clusters',
     'report-pins-cluster-count',
     'report-pins-points',
+    'public-report-pins-clusters',
+    'public-report-pins-cluster-count',
+    'public-report-pins-points',
     'dcvs-landmark-points',
     'dcvs-landmark-codes',
     'dcvs-landmark-labels',
@@ -242,7 +254,7 @@
 
     function loadCityBoundaryOutline() {
       if (!hasCityBoundary) return Promise.resolve();
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();
@@ -482,7 +494,7 @@
     function addSatelliteContext() {
       if (isBarangayMap) return addBarangaySatelliteContext(scopedBarangayFeature);
 
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();

@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/barangay-app-base.php';
+$barangayAppBaseUrl = dcvsBarangayAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'barangay') {
     header('Location: login-barangay.php');
@@ -58,6 +60,7 @@ if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
 
 $fullName = $_SESSION['full_name'] ?? 'Barangay Officer';
 $activePage = 'geo';
+$barangaySidebarStylesheetInHead = true;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -69,27 +72,30 @@ $activePage = 'geo';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <link rel="stylesheet" href="dist/mapcn.css">
-  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../../geo-map/map.css'); ?>">
-  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'); ?>">
-  <script src="dist/mapcn.umd.cjs"></script>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/geo-map/map.css?v=' . (int)filemtime(__DIR__ . '/../../geo-map/map.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/geo-drawer.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/dist/mapcn.umd.cjs?v=' . (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'), ENT_QUOTES, 'UTF-8'); ?>"></script>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #f8fafc; color: #0f172a; font-family: Inter, "Segoe UI", sans-serif; }
-    .geo-page { min-height: 100vh; margin-left: var(--sidebar-w, 256px); transition: margin-left .2s ease; }
-    .geo-topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; height: 64px; padding: 0 24px; border-bottom: 1px solid #e2e8f0; background: #fff; }
-    .geo-topbar-left { display: flex; align-items: center; gap: 14px; }
+    .geo-page { min-height: 100vh; min-width: 0; margin-left: var(--sidebar-w, 256px); transition: margin-left .2s ease; }
+    .geo-topbar { position: sticky; top: 0; z-index: 30; display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 64px; padding: 0 24px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+    .geo-topbar-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
     .geo-topbar-toggle { display: none; width: 36px; height: 36px; align-items: center; justify-content: center; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; color: #334155; }
-    .geo-breadcrumb { display: flex; align-items: center; gap: 9px; font-size: 14px; }
+    .geo-breadcrumb { display: flex; align-items: center; gap: 9px; min-width: 0; font-size: 14px; white-space: nowrap; }
     .geo-breadcrumb a { color: #166534; text-decoration: none; font-weight: 600; }
     .geo-breadcrumb span { color: #64748b; }
-    .geo-topbar-user { color: #475569; font-size: 13px; font-weight: 600; }
+    .geo-breadcrumb span:last-child { overflow: hidden; text-overflow: ellipsis; }
+    .geo-topbar-user { min-width: 0; overflow: hidden; color: #475569; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
     .geo-map-stage { height: calc(100vh - 64px); min-height: 420px; display: flex; flex-direction: column; }
-    .geo-map-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #e2e8f0; background: #fff; }
-    .geo-map-heading h1 { margin: 0; font-size: 17px; font-weight: 700; }
+    .geo-map-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 20px; border-bottom: 1px solid #e2e8f0; background: #fff; }
+    .geo-map-heading > div { min-width: 0; }
+    .geo-map-heading h1 { margin: 0; font-size: 17px; font-weight: 700; overflow-wrap: anywhere; }
     .geo-map-heading p { margin: 4px 0 0; color: #64748b; font-size: 13px; }
     .geo-map-back { color: #166534; font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
-    #geoMap { position: relative; flex: 1; width: 100%; min-height: 0; }
+    #geoMap { position: relative; flex: 1; width: 100%; height: auto; min-height: 0; }
     .geo-map-error { position: absolute; z-index: 10; bottom: 14px; left: 50%; max-width: calc(100% - 28px); padding: 9px 12px; border: 1px solid #fecaca; border-radius: 7px; background: #fff; color: #991b1b; font-size: 13px; transform: translateX(-50%); }
     .geo-map-error[hidden] { display: none; }
     @media (max-width: 768px) {
@@ -97,8 +103,15 @@ $activePage = 'geo';
       .geo-topbar { padding: 0 14px; }
       .geo-topbar-toggle { display: inline-flex; }
       .geo-map-heading { padding: 12px 14px; }
-      .geo-map-stage { height: calc(100dvh - 64px); }
+      .geo-map-stage { height: calc(100dvh - 64px); min-height: 320px; }
       .geo-topbar-user { display: none; }
+    }
+    @media (max-width: 480px) {
+      .geo-topbar { gap: 8px; padding: 0 10px; }
+      .geo-topbar-left { gap: 8px; }
+      .geo-breadcrumb { gap: 6px; font-size: 12px; }
+      .geo-map-heading { flex-direction: column; gap: 8px; }
+      .geo-map-back { white-space: normal; }
     }
   </style>
 </head>
@@ -125,7 +138,7 @@ $activePage = 'geo';
       <a class="geo-map-back" href="dashboard-barangay.php">Back to Overview</a>
     </div>
     <div id="geoMap" data-map-landmarks-session="DCVS_BARANGAY_SESSION" data-map-risk-overlay="true"
-         data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}'
+         data-mapcn='<?php echo htmlspecialchars(json_encode(["center" => [120.968, 14.306], "zoom" => 12, "barangayOverlay" => true, "geojsonUrl" => $barangayAppBaseUrl . "/geo-map/barangays-public.geojson.php", "style" => "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"], JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>'
          data-map-scope="barangay"
          data-map-barangay-id="<?php echo $barangayId; ?>"
          data-map-basemap-toggle="true"
@@ -148,7 +161,7 @@ $activePage = 'geo';
   mapElement.addEventListener('mapcn:load', function(event) {
     var map = event.detail && event.detail.map;
     if (!map) return;
-    fetch('geo-map/barangays-public.geojson.php', { credentials: 'same-origin' })
+    fetch(<?php echo json_encode($barangayAppBaseUrl . '/geo-map/barangays-public.geojson.php', JSON_UNESCAPED_SLASHES); ?>, { credentials: 'same-origin' })
       .then(function(response) {
         if (!response.ok) throw new Error('Barangay map request failed with HTTP ' + response.status + '.');
         return response.json();
@@ -191,11 +204,11 @@ $activePage = 'geo';
   }, { once: true });
 })();
 </script>
-<script src="assets/js/barangay-geo-drawer.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/barangay-geo-drawer.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/barangay-geo-drawer.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/barangay-geo-drawer.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php if ($reportPinsEnabled): ?>
-<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/report-map-pins.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php endif; ?>
-<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'); ?>"></script>
-<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/map-landmarks.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/map-basemap-toggle.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

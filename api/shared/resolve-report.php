@@ -56,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $resolvedAt = $resolvedDateTime->format('Y-m-d H:i:s');
 
     // Fetch confirmed case details
-    $stmt = $conn->prepare("SELECT cc.*, r.report_id, r.reporter_id, r.barangay_id, r.report_type, u.full_name AS reporter_name FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id LEFT JOIN users u ON u.user_id = r.reporter_id WHERE cc.case_id = ? AND cc.status = 'active'");
+    $stmt = $conn->prepare("SELECT cc.*, r.report_id, r.reporter_id, r.barangay_id, r.report_type, r.animal_count, u.full_name AS reporter_name FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id LEFT JOIN users u ON u.user_id = r.reporter_id WHERE cc.case_id = ? AND cc.status = 'active'");
     $stmt->bind_param("i", $caseId);
     $stmt->execute();
     $case = $stmt->get_result()->fetch_assoc();
@@ -100,6 +100,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $updateReportStmt->bind_param("i", $reportId);
         if (!$updateReportStmt->execute()) throw new RuntimeException('Could not update the report status.');
         $updateReportStmt->close();
+        if (stripos((string)$case['report_type'], 'dead') === false) {
+            $turnoverExists = $conn->prepare("SELECT turnover_task_id FROM report_turnover_tasks
+                WHERE report_id = ? LIMIT 1 FOR UPDATE");
+            if (!$turnoverExists) throw new RuntimeException('Could not check whether the turnover task already exists.');
+            $turnoverExists->bind_param('i', $reportId);
+            if (!$turnoverExists->execute()) throw new RuntimeException('Could not check whether the turnover task already exists.');
+            $existingTurnover = $turnoverExists->get_result()->fetch_assoc();
+            $turnoverExists->close();
+            if (!$existingTurnover) {
+                $turnoverHours = (int)env('DCVS_TURNOVER_TARGET_HOURS', '24');
+                if ($turnoverHours < 1 || $turnoverHours > 720) $turnoverHours = 24;
+                $turnoverTask = $conn->prepare("INSERT INTO report_turnover_tasks
+                    (report_id, status, animal_count, animal_disposition, task_notes, due_at, requested_by, requested_at)
+                    VALUES (?, 'pending', ?, 'other', ?, DATE_ADD(NOW(), INTERVAL ? HOUR), ?, NOW())");
+                if (!$turnoverTask) throw new RuntimeException('Could not prepare the animal turnover task.');
+                $animalCount = (string)($case['animal_count'] ?? '');
+                $turnoverTask->bind_param('issii', $reportId, $animalCount, $resolutionNotes, $turnoverHours, $_SESSION['user_id']);
+                if (!$turnoverTask->execute()) throw new RuntimeException('Could not create the animal turnover task.');
+                $turnoverTask->close();
+            }
+        }
         if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
             $workflowStmt = $conn->prepare("UPDATE report_response_workflow SET state = 'resolved' WHERE report_id = ? AND state NOT IN ('resolved', 'closed_not_actionable')");
             if (!$workflowStmt) throw new RuntimeException('Could not update response workflow.');
