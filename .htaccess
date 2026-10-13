@@ -73,8 +73,8 @@ RewriteRule ^logout-staff\.php$ api/staff/logout-staff.php [END]
 
 # Staff compatibility routes.
 RewriteRule ^register-staff\.php$ pages/staff/register-staff.php [END]
-RewriteRule ^staff-announcements-handler\.php$ pages/staff/staff-announcements.php [END]
-RewriteRule ^staff-announcements\.php$ api/staff/staff-announcements-handler.php [END]
+RewriteRule ^staff-announcements-handler\.php$ api/staff/staff-announcements-handler.php [END]
+RewriteRule ^staff-announcements\.php$ pages/staff/staff-announcements.php [END]
 RewriteRule ^staff-communication\.php$ pages/staff/staff-communication.php [END]
 RewriteRule ^staff-filter-kpi\.php$ api/staff/staff-filter-kpi.php [END]
 RewriteRule ^staff-get-history\.php$ api/staff/staff-get-owner-profile.php [END]
