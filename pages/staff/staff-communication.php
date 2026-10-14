@@ -522,8 +522,8 @@ if ($barangayResult) {
     .log-empty i { font-size: 2.4rem; display: block; margin-bottom: 0.6rem; color: #cbd5e1; }
 
     /* ── Compose dialog (shadcn style) ── */
-    #composeDialog { z-index: 10000; padding: 0; background: rgba(0,0,0,0.5); }
-    #composeDialog .comm-compose-dialog-content { position: relative; box-sizing: border-box; width: 100%; height: 100vh; height: 100dvh; max-width: none; max-height: none; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 0; border-radius: 0; background: #fff; box-shadow: none; animation: none; font-family:'Inter','Segoe UI',sans-serif; }
+    #composeDialog { z-index: 10000; padding: 16px; background: rgba(0,0,0,0.5); }
+    #composeDialog .comm-compose-dialog-content { position: relative; box-sizing: border-box; width: min(520px,100%); max-width: 520px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 20px 25px rgba(15,23,32,.18); animation: none; font-family:'Inter','Segoe UI',sans-serif; }
     .comm-compose-header { display: flex; flex-direction: column; gap: 6px; padding-right: 32px; }
     .comm-compose-header h2 { margin: 0; color: #18181b; font-size: 18px; font-weight: 600; line-height: 1; letter-spacing: -0.025em; }
     .comm-compose-header p { margin: 0; color: #71717a; font-size: 14px; font-weight: 400; line-height: 1.5; }
@@ -579,9 +579,13 @@ if ($barangayResult) {
 
     @media (max-width: 640px) {
       .comm-card .sd-data-table-wrap { min-height: 24rem; }
-      #composeDialog .comm-compose-dialog-content { padding: 20px; }
+      #composeDialog { padding: 0 !important; align-items: stretch !important; justify-content: stretch !important; }
+      #composeDialog .comm-compose-dialog-content { width: 100%; max-width: none; height: 100vh; height: 100dvh; max-height: none; padding: 20px; border: 0; border-radius: 0; box-shadow: none; }
       .toast-container { left: 1rem; right: 1rem; }
       .toast { min-width: 0; max-width: 100%; }
+    }
+    @media (min-width: 641px) and (max-width: 768px) {
+      #composeDialog { padding: 16px !important; align-items: center !important; justify-content: center !important; }
     }
 
     /* ── Dialog font + button style (shadcn) — Communication ── */

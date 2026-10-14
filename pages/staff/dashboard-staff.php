@@ -2772,7 +2772,7 @@ if (!empty($_GET['waitlist_booking'])) {
       <div class="cpd row-menu-pop" id="rowMenuPop"></div>
 
       <!-- Client Profile Drawer (right drawer, appointments style) -->
-      <div id="clientProfileModal" class="modal cpd cd-drawer">
+      <div id="clientProfileModal" class="modal cpd cd-drawer staff-detail-drawer">
         <div class="sd-dialog">
           <div class="sd-dialog-content" role="dialog" aria-modal="true">
             <button type="button" class="sd-dialog-close" onclick="closeModal('clientProfileModal')" aria-label="Close">
@@ -2855,6 +2855,15 @@ if (!empty($_GET['waitlist_booking'])) {
         #addClientModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
         @media (min-width:640px){ #addClientModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
         @media (max-width:560px){ #addClientModal .sd-form-grid{ grid-template-columns:1fr; } #addClientModal .sd-field-full{ grid-column:auto; } }
+        @media (max-width:640px){
+          #addClientModal.modal{ position:fixed; inset:0; align-items:stretch; justify-content:stretch; padding:0; }
+          #addClientModal .sd-dialog{ width:100%; height:100vh; height:100dvh; min-height:0; }
+          #addClientModal .sd-dialog-content{
+            box-sizing:border-box; width:100%; max-width:none; height:100vh; height:100dvh;
+            max-height:none; border:0; border-radius:0; padding:20px;
+            padding-bottom:calc(20px + env(safe-area-inset-bottom)); overflow-y:auto;
+          }
+        }
       </style>
       <div id="addClientModal" class="modal">
         <form id="addClientForm" class="sd-dialog" enctype="multipart/form-data">
@@ -6289,7 +6298,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 <!-- Schedule Appointment Modal -->
 <!-- Review Appointment Request Modal (shadcn Dialog) -->
 <style>
-  /* Shared fixed right drawer for report details and appointment details. */
+  /* Shared fixed right drawer for report, client profile, and appointment details. */
   .staff-detail-drawer.modal{
     position:fixed;
     inset:0;

@@ -2510,9 +2510,16 @@ function syncEventDateConstraints(){
   const eventDate = document.getElementById('eventDate');
   const eventEndDate = document.getElementById('eventEndDate');
   const responseDeadline = document.getElementById('eventResponseDeadline');
-  eventDate.min = formatLocalDateTime(now).slice(0, 10);
+  const isEditing = parseInt(document.getElementById('formId').value, 10) > 0;
+  const earliestEventDate = formatLocalDateTime(now).slice(0, 10);
+  eventDate.min = isEditing && eventDate.value && eventDate.value < earliestEventDate
+    ? eventDate.value
+    : earliestEventDate;
   eventEndDate.min = eventDate.value || eventDate.min;
-  responseDeadline.min = formatLocalDateTime(now);
+  const earliestResponseDeadline = formatLocalDateTime(now);
+  responseDeadline.min = isEditing && responseDeadline.value && responseDeadline.value < earliestResponseDeadline
+    ? responseDeadline.value
+    : earliestResponseDeadline;
   const eventDateValue = eventDate.value;
   const eventStartTime = document.getElementById('eventStartTime').value;
   if (eventDateValue && eventStartTime) {

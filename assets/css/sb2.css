@@ -872,6 +872,29 @@ body.sb2-active .sd-dialog-content textarea {
     padding: 0;
   }
 
+  body.adoption-pool-page #add-pool-modal,
+  body.adoption-pool-page #record-rescue-modal,
+  body.adoption-pool-page #multi-rescue-modal {
+    align-items: stretch;
+    justify-content: stretch;
+    overflow: hidden;
+  }
+
+  body.adoption-pool-page #add-pool-modal .sd-dialog-content,
+  body.adoption-pool-page #record-rescue-modal .sd-dialog-content,
+  body.adoption-pool-page #multi-rescue-modal .sd-dialog-content {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: none;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    margin: 0;
+    padding: 20px;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    border-radius: 0;
+  }
+
   body.adoption-pool-page .sd-dialog-content {
     width: 100%;
     max-width: 100%;

@@ -9,7 +9,7 @@ require_once __DIR__ . '/includes/bootstrap.php';
 $host = '127.0.0.1';
 $username = 'root';
 $password = '';
-$database = 'dcvs_system_recovered_20261008';
+$database = 'dcvs';
 
 // Create connection
 $conn = new mysqli($host, $username, $password, $database);
