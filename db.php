@@ -1,15 +1,17 @@
 <?php
 /**
  * Database Connection File
- * Connects to dcvs_system MySQL database
+ * Connects to the configured DCVS MySQL database.
  */
 
+require_once __DIR__ . '/env.php';
+loadDcvsEnv();
 require_once __DIR__ . '/includes/bootstrap.php';
 
-$host = '127.0.0.1';
-$username = 'root';
-$password = '';
-$database = 'dcvs';
+$host = trim((string)env('DB_HOST', '127.0.0.1'));
+$username = (string)env('DB_USER', 'root');
+$password = (string)env('DB_PASS', '');
+$database = trim((string)env('DB_NAME', 'dcvs'));
 
 // Create connection
 $conn = new mysqli($host, $username, $password, $database);

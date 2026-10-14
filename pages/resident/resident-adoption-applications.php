@@ -17,7 +17,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESS
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 
 $residentId = (int)$_SESSION['user_id'];
 $applyListingId = (int)($_GET['apply'] ?? 0);
@@ -61,8 +61,8 @@ $pageTitle = 'Adoption Application';
   <title>Adoption Application - DCVS Resident Portal</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <link rel="stylesheet" href="assets/css/dashboard.css">
-  <link rel="stylesheet" href="assets/css/responsive.css">
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>">
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>">
   <style>
     #adoptionApplicationDialog.modal{z-index:2000;background:rgba(0,0,0,.8);padding:1rem}
     #adoptionApplicationDialog .sd-dialog{width:100%;display:flex;justify-content:center}
@@ -112,8 +112,9 @@ $pageTitle = 'Adoption Application';
     #adoptionApplicationDialog .application-notice.error{border-color:#fecaca;background:#fef2f2;color:#991b1b}
     @media(max-width:640px){#adoptionApplicationDialog.modal{padding:0}#adoptionApplicationDialog .sd-dialog-content{max-height:100dvh;border-radius:0;padding:16px}#adoptionApplicationDialog .pet-summary img{width:64px;height:64px;flex-basis:64px}#adoptionApplicationDialog .application-grid,#adoptionApplicationDialog .check-grid{grid-template-columns:1fr}#adoptionApplicationDialog .application-field.full{grid-column:auto}#adoptionApplicationDialog .sd-dialog-footer{flex-wrap:wrap}#adoptionApplicationDialog .application-footer-note{flex-basis:100%}#adoptionApplicationDialog .sd-dialog-footer .sd-btn{flex:1}}
   </style>
+  <link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>">
 </head>
-<body class="resident-portal">
+<body class="resident-portal sb2-active">
 <?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 <div class="modal active" id="adoptionApplicationDialog">
   <div class="sd-dialog">

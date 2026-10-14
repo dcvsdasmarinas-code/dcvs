@@ -1,7 +1,7 @@
 -- Pet Resume Profile: Migration
 -- Run this once to add missing columns and tables for the Pet Resume feature.
 
-USE dcvs_system;
+USE dcvs;
 
 -- 1. Add missing columns to `pets` table
 ALTER TABLE pets

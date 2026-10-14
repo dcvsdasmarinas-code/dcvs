@@ -24,7 +24,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 $pageTitle = 'Pet Listings';
 $activePage = 'pet-listings';
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 
 $listings = [];
 $lq = $conn->query(
@@ -866,7 +866,33 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
                   <input type="text" name="exam" id="formExam" class="sd-input" placeholder="mm/dd/yyyy">
                 </div>
                 <div class="sd-field sd-field-full">
-                  <label class="sd-label" for="formVax">Vaccinations</label>
+                  <label class="sd-label" for="formVaccinationStatus">Vaccination Status</label>
+                  <select name="vaccination_status" id="formVaccinationStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="vaccinated">Vaccinated</option>
+                    <option value="partially_vaccinated">Partially vaccinated</option>
+                    <option value="not_vaccinated">Not vaccinated</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formSterilizationStatus">Spay / Neuter Status</label>
+                  <select name="sterilization_status" id="formSterilizationStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="spayed">Spayed</option>
+                    <option value="neutered">Neutered</option>
+                    <option value="not_sterilized">Not yet spayed / neutered</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formDewormingStatus">Deworming Status</label>
+                  <select name="deworming_status" id="formDewormingStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="dewormed">Dewormed</option>
+                    <option value="not_dewormed">Not dewormed</option>
+                  </select>
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formVax">Vaccination Details</label>
                   <textarea name="vaccinations" id="formVax" class="sd-input" placeholder="Rabies, Tetanus..."></textarea>
                 </div>
                 <div class="sd-field">
@@ -1586,6 +1612,11 @@ function openEdit(id){
         document.getElementById('formRescued').value = p.rescued_date;
         document.getElementById('formDesc').value = p.description;
         document.getElementById('formStatus').value = p.status;
+        document.getElementById('formVaccinationStatus').value = p.vaccination_status || 'unknown';
+        document.getElementById('formSterilizationStatus').value = p.sterilization_status || 'unknown';
+        document.getElementById('formDewormingStatus').value = p.deworming_status || 'unknown';
+        document.getElementById('formVax').value = p.vaccinations || '';
+        document.getElementById('formTemperament').value = p.temperament || '';
 
         if(p.photo_url){
           const preview = document.getElementById('photoPreview');

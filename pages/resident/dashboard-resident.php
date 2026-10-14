@@ -25,7 +25,13 @@ if ($_SESSION['role'] !== 'resident') {
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
+$adoptionClockResult = $conn->query('SELECT UNIX_TIMESTAMP(NOW()) AS server_now');
+if (!$adoptionClockResult) {
+    throw new RuntimeException('The adoption reservation clock could not be loaded.');
+}
+$adoptionServerNow = (int)$adoptionClockResult->fetch_assoc()['server_now'];
+$adoptionClockResult->free();
 
 if (!empty($_SESSION['adoption_apply_listing_id'])) {
     $pendingAdoptionListingId = (int)$_SESSION['adoption_apply_listing_id'];
@@ -392,11 +398,16 @@ $residentAdoptionApplications = [];
 $applicationStmt = $conn->prepare("
     SELECT aa.application_id, aa.application_date, aa.status, aa.pet_listing_id, aa.resulting_pet_id,
            pl.name AS pet_name, pl.species, pl.breed, pl.age, pl.gender, pl.photo_url,
-           aa.approved_pickup_at, aa.finalized_at
+           aa.approved_pickup_at, aa.reserved_at, aa.response_deadline, aa.confirmed_at,
+           aa.pickup_deadline, aa.decline_reason, aa.rejection_reason, aa.finalized_at,
+           DATE_FORMAT(aa.response_deadline, '%M %e, %Y') AS response_deadline_display,
+           DATE_FORMAT(aa.pickup_deadline, '%M %e, %Y') AS pickup_deadline_display,
+           UNIX_TIMESTAMP(aa.response_deadline) AS response_deadline_epoch,
+           UNIX_TIMESTAMP(aa.pickup_deadline) AS pickup_deadline_epoch
     FROM adoption_applications aa
     JOIN pet_listings pl ON pl.listing_id = aa.pet_listing_id
     WHERE aa.applicant_id = ?
-      AND aa.status IN ('pending','under_review','needs_info','approved','adopted','expired')
+      AND aa.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired','rejected')
     ORDER BY aa.application_date DESC, aa.application_id DESC
 ");
 if (!$applicationStmt) {
@@ -513,8 +524,9 @@ $annResult = $annStmt->get_result();
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>" />
   <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=2" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
@@ -1290,15 +1302,62 @@ $annResult = $annStmt->get_result();
   .resident-rework .toast-popup.show{opacity:1;transform:translateY(0);pointer-events:auto}
   .resident-rework .toast-icon{color:#10B981;flex-shrink:0}
   .resident-rework .rework-empty{padding:28px 0;text-align:center;color:var(--text-muted);font-size:12px}
-  @media(max-width:1200px){.resident-rework .dashboard-workflow-layout{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:1200px){.resident-rework .dashboard-workflow-layout{grid-template-columns:minmax(0,1fr)}.resident-rework .primary-vertical-column,.resident-rework .secondary-vertical-column,.resident-rework .card-box{min-width:0}.resident-rework .pets-cards-flow{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:860px){.resident-rework .dashboard-content{padding:16px 12px 48px}.resident-rework .metrics-grid{grid-template-columns:1fr}.resident-rework .reports-cards-grid{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:1fr}}
 </style>
-<link rel="stylesheet" href="assets/css/resident-overview.css" />
+<link rel="stylesheet" href="assets/css/resident-overview.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/resident-overview.css'); ?>" />
+<style>
+  .adoption-countdown{display:inline-block;margin-left:5px;font-size:12px;font-weight:600;color:#92400e}
+  .adoption-confirm-row{margin-top:5px;padding:4px 10px;font-size:12px;white-space:nowrap}
+  .adoption-confirm-pet{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+  .adoption-confirm-pet img{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#f4f4f5}
+  .adoption-confirm-warning{padding:12px;border:1px solid #fecaca;border-radius:6px;background:#fef2f2;color:#991b1b;font-weight:500}
+  .adoption-confirm-error{color:#b91c1c}
+</style>
 <style>
   html, body.dashboard, body.dashboard .main-content { background: #ffffff !important; }
 </style>
+<link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>" />
+<style>
+  @media (max-width: 1024px) {
+    html.resident-portal,
+    body.resident-portal {
+      max-width: 100%;
+      overflow-x: clip;
+    }
+
+    body.resident-portal.sb2-active { --sidebar-w: 0px; }
+    body.resident-portal.sb2-active .topbar { left: 0 !important; right: 0; }
+    body.resident-portal.sb2-active .main-content {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      margin-left: 0 !important;
+      padding: clamp(12px, 3vw, 32px);
+    }
+
+    .resident-portal .resident-rework,
+    .resident-portal .resident-rework > *,
+    .resident-portal .resident-rework .primary-vertical-column,
+    .resident-portal .resident-rework .secondary-vertical-column,
+    .resident-portal .resident-rework .card-box,
+    .resident-portal .resident-rework .metric-card {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .resident-portal .resident-rework .metrics-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+</style>
 </head>
-<body class="dashboard resident-portal" data-realtime-page="resident">
+<body class="dashboard resident-portal sb2-active" data-realtime-page="resident">
 
 <?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 
@@ -2984,8 +3043,19 @@ include __DIR__ . '/../../includes/portal-toast.php';
     <?php
     $knownReportTypes = ['stray' => 'Stray Animal', 'rabies' => 'Rabies Case', 'injured' => 'Injured Animal', 'dead' => 'Dead Animal', 'other' => 'Other'];
     function rptStatusLabel($s, $responseState = '') {
-        if ($responseState === 'barangay_response_approved') return 'Accepted by Barangay';
-        if ($responseState === 'escalated_to_dcvs') return 'Escalated to DCVS';
+        $responseLabels = [
+            'barangay_response_approved' => 'Accepted by Barangay',
+            'barangay_responding' => 'Barangay Responding',
+            'animal_secured' => 'Animal Secured',
+            'awaiting_turnover' => 'Awaiting Turnover',
+            'turned_over' => 'Turned Over to DCVS',
+            'dcvs_processing' => 'DCVS Processing',
+            'dcvs_dispatch' => 'DCVS Dispatched',
+            'escalated_to_dcvs' => 'Escalated to DCVS',
+            'returned_to_barangay' => 'Returned to Barangay',
+            'closed_not_actionable' => 'Closed - Not Actionable',
+        ];
+        if (isset($responseLabels[$responseState])) return $responseLabels[$responseState];
         switch ($s) {
         case 'pending': return 'Pending Barangay Review';
         case 'validated': return 'Pending DCVS Review';
@@ -2996,7 +3066,12 @@ include __DIR__ . '/../../includes/portal-toast.php';
             default: return ucfirst(str_replace('_', ' ', $s));
         }
     }
-    function rptStatusClass($s) {
+    function rptStatusClass($s, $responseState = '') {
+        if (in_array($responseState, [
+            'barangay_response_approved', 'barangay_responding', 'animal_secured',
+            'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
+            'escalated_to_dcvs', 'returned_to_barangay',
+        ], true)) return 'st-review';
         switch ($s) {
             case 'pending': return 'st-pending';
           case 'validated': return 'st-awaiting';
@@ -3063,9 +3138,17 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $rType = $report['report_type'];
             $rTypeLabel = $knownReportTypes[strtolower($rType)] ?? ucfirst($rType);
             $rStatus = $report['status'];
-            $rStatusLabel = rptStatusLabel($rStatus, $report['response_state'] ?? '');
-            $rStatusClass = rptStatusClass($rStatus);
+            $rResponseState = $report['response_state'] ?? '';
+            $rStatusLabel = rptStatusLabel($rStatus, $rResponseState);
+            $rStatusClass = rptStatusClass($rStatus, $rResponseState);
             $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
+            if (in_array($rResponseState, [
+                'barangay_response_approved', 'barangay_responding', 'animal_secured',
+                'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
+                'escalated_to_dcvs', 'returned_to_barangay',
+            ], true)) {
+                $rsc = ['bg' => '#EFF6FF', 'color' => '#1E40AF', 'border' => '#BFDBFE'];
+            }
             $incidentAt = !empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'];
             $rDate = date('M d, Y', strtotime($incidentAt));
             $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
@@ -3130,6 +3213,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .rpt-evidence-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px; }
     #rptDrawer .rpt-evidence-thumb { width:100%;aspect-ratio:1;border:1px solid #e4e4e7;border-radius:7px;overflow:hidden;background:#f4f4f5;padding:0;cursor:pointer; }
     #rptDrawer .rpt-evidence-thumb img { width:100%;height:100%;object-fit:cover;display:block; }
+    #rptDrawer #rdYourPhotos .rpt-evidence-grid { display:flex;flex-wrap:wrap; }
+    #rptDrawer #rdYourPhotos .rpt-evidence-thumb { width:88px;height:88px;flex:0 0 88px;aspect-ratio:auto; }
     #rptDrawer .response-steps { display:flex;align-items:flex-start;padding:8px 2px 16px; }
     #rptDrawer .response-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
     #rptDrawer .response-step:not(:last-child)::after { position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
@@ -3149,8 +3234,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .rpt-updates-entry-date { flex:0 0 auto;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.4;text-align:right; }
     #rptDrawer .rpt-updates-entry-actor { display:inline-block;margin:0 0 6px;padding:1px 7px;border:1px solid #e4e4e7;border-radius:4px;background:#fafafa;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.35; }
     #rptDrawer .rpt-updates-entry-copy { margin:0 0 8px;color:#27272a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.45; }
-    #rptDrawer .rpt-updates-photo-grid { display:flex;flex-wrap:wrap;gap:8px; }
-    #rptDrawer .rpt-updates-photo { width:74px;height:74px;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer; }
+    #rptDrawer .rpt-updates-photo-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;margin-top:10px; }
+    #rptDrawer .rpt-updates-photo { width:100%;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer; }
     #rptDrawer .rpt-updates-photo img { display:block;width:100%;height:100%;object-fit:cover; }
     #rptDrawer .rpt-evidence-caption { color:#18181b;font-size:13px;font-weight:500;margin:7px 0 2px; }
     .rpt-evidence-lightbox { position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(24,24,27,.88); }
@@ -4113,7 +4198,7 @@ if (!empty($adoptionListings)) {
         $applicationProgress = $application
             ? ($application['status'] === 'adopted' ? 'Adopted' : 'Approved')
             : '';
-        $applicationDate = $application ? date('M d, Y', strtotime($application['application_date'])) : '';
+        $applicationDate = $application ? date('F j, Y', strtotime($application['application_date'])) : '';
         $vetPets[] = array(
             'id' => $id,
             'resultingPetId' => $pid,
@@ -4153,7 +4238,7 @@ if (!empty($adoptionListings)) {
             'appointments' => $apptElem,
             'documents' => array(),
             'timeline' => $tl,
-            'adoptedDate' => ($adoptionDate !== '') ? date('M d, Y', strtotime($adoptionDate)) : '',
+            'adoptedDate' => ($adoptionDate !== '') ? date('F j, Y', strtotime($adoptionDate)) : '',
             'readiness' => array(
                 'vaccination' => 'Partially vaccinated',
                 'health' => 'Cleared',
@@ -4179,11 +4264,15 @@ foreach ($residentAdoptionApplications as $application) {
     }
     $applicationStatus = strtolower(trim((string)$application['status']));
     $statusMeta = array(
-        'pending' => array('key' => 'reserved', 'progress' => 'Pending Application'),
-        'under_review' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'needs_info' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'approved' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'expired' => array('key' => 'available', 'progress' => 'Expired / Unclaimed'),
+        'pending' => array('key' => 'pending', 'progress' => 'DCVS staff are reviewing your application.', 'about' => 'DCVS staff are reviewing your application.'),
+        'under_review' => array('key' => 'pending', 'progress' => 'DCVS staff are reviewing your application.', 'about' => 'DCVS staff are reviewing your application.'),
+        'needs_info' => array('key' => 'review', 'progress' => 'Action needed', 'about' => 'DCVS staff requested more information. Please review the request in your application.'),
+        'reserved' => array('key' => 'reserved', 'progress' => 'Action needed', 'about' => 'Your application was approved. Confirm before the response deadline to begin your pickup period.'),
+        'approved' => array('key' => 'reserved', 'progress' => 'Action needed', 'about' => 'Your application was approved. Confirm your reservation to begin your pickup period.'),
+        'confirmed' => array('key' => 'confirmed', 'progress' => 'Ready for Pickup', 'about' => 'Your reservation is confirmed. Pick up your pet before the deadline.'),
+        'declined' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
+        'expired' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
+        'rejected' => array('key' => 'declined', 'progress' => 'Declined', 'about' => 'Your application was declined by DCVS staff.'),
     );
     if (!isset($statusMeta[$applicationStatus])) {
         continue;
@@ -4193,11 +4282,28 @@ foreach ($residentAdoptionApplications as $application) {
     $ageNum = isset($ageMatch[0]) ? (int)$ageMatch[0] : 0;
     $species = ucfirst(strtolower(trim((string)($application['species'] ?? ''))));
     $applicationName = trim((string)($application['pet_name'] ?? '')) ?: 'Pet';
-    $applicationDate = date('M d, Y', strtotime($application['application_date']));
+    $applicationDate = date('F j, Y', strtotime($application['application_date']));
     $applicationId = (int)$application['application_id'];
     $applicationListingId = (int)$application['pet_listing_id'];
     if ($resultingPetId > 0) {
-        $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted');
+        $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted', 'about' => 'This adoption has been completed.');
+    }
+    $declineReason = trim((string)($application['decline_reason'] ?? ''));
+    if (in_array($applicationStatus, array('declined', 'expired'), true)) {
+        $statusMeta[$applicationStatus]['progress'] = 'Expired — You didn’t respond / pick up within the allotted time.';
+        $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
+    } elseif ($applicationStatus === 'rejected') {
+        $declineReason = trim((string)($application['rejection_reason'] ?? ''));
+        if ($declineReason !== '') {
+            $statusMeta[$applicationStatus]['progress'] = 'Declined: ' . $declineReason;
+            $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
+        }
+    } elseif ($applicationStatus === 'reserved' || $applicationStatus === 'approved') {
+        if (!empty($application['response_deadline_display'])) {
+            $statusMeta[$applicationStatus]['progress'] = 'Reserved for you. Respond before ' . $application['response_deadline_display'];
+        }
+    } elseif ($applicationStatus === 'confirmed' && !empty($application['pickup_deadline_display'])) {
+        $statusMeta[$applicationStatus]['progress'] = 'Pick up before ' . $application['pickup_deadline_display'];
     }
     $vetPets[] = array(
         'id' => 'APP-' . str_pad((string)$applicationId, 4, '0', STR_PAD_LEFT),
@@ -4212,7 +4318,16 @@ foreach ($residentAdoptionApplications as $application) {
         'color' => "\u{2014}",
         'photo' => (string)($application['photo_url'] ?? ''),
         'status' => $statusMeta[$applicationStatus]['key'],
+        'statusLabel' => $applicationStatus === 'declined' || $applicationStatus === 'expired' ? 'Expired' : ($applicationStatus === 'rejected' ? 'Declined' : null),
         'applicationProgress' => $statusMeta[$applicationStatus]['progress'],
+        'declineReason' => $declineReason,
+        'applicationStatus' => $applicationStatus,
+        'responseDeadline' => (string)($application['response_deadline'] ?? ''),
+        'responseDeadlineDisplay' => (string)($application['response_deadline_display'] ?? ''),
+        'responseDeadlineEpoch' => (int)($application['response_deadline_epoch'] ?? 0),
+        'pickupDeadline' => (string)($application['pickup_deadline'] ?? ''),
+        'pickupDeadlineDisplay' => (string)($application['pickup_deadline_display'] ?? ''),
+        'pickupDeadlineEpoch' => (int)($application['pickup_deadline_epoch'] ?? 0),
         'applicationDate' => $applicationDate,
         'applicationPending' => $resultingPetId <= 0,
         'applicationId' => $applicationId,
@@ -4222,7 +4337,7 @@ foreach ($residentAdoptionApplications as $application) {
         'added' => $applicationDate,
         'fee' => "\u{2014}",
         'location' => 'Dasmariñas City Veterinary Services',
-        'about' => 'Your adoption application is being processed. Track its progress here.',
+        'about' => $statusMeta[$applicationStatus]['about'] ?? 'Track your adoption application here.',
         'tags' => array(),
         'requirements' => array(),
         'temperament' => array(),
@@ -4337,9 +4452,10 @@ foreach ($residentAdoptionApplications as $application) {
       <select id="cvStatusFilter" class="appt-status-select">
         <option value="all">All Status</option>
         <option value="available">Available</option>
-        <option value="pending">Pending Application</option>
-        <option value="review">In Progress</option>
-        <option value="approved">Approved</option>
+        <option value="pending">Under Review</option>
+        <option value="review">Action needed</option>
+        <option value="confirmed">Ready for Pickup</option>
+        <option value="expired">Expired</option>
         <option value="adopted">Adopted</option>
         <option value="unavailable">Not Available</option>
       </select>
@@ -4401,6 +4517,32 @@ foreach ($residentAdoptionApplications as $application) {
   <div class="cv-drawer-foot" id="cvDrawerFoot"></div>
 </aside>
 
+<div class="modal fade" id="adoptionConfirmModal" tabindex="-1" aria-labelledby="adoptionConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="adoptionConfirmTitle">Confirm your adoption pickup</h2>
+        <button type="button" class="btn-close" id="adoptionConfirmClose" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="adoption-confirm-pet">
+          <img id="adoptionConfirmPhoto" alt="">
+          <strong id="adoptionConfirmPetName"></strong>
+        </div>
+        <p><strong>Pickup location:</strong> Dasmariñas City Veterinary Services</p>
+        <p><strong>Confirm before:</strong> <span id="adoptionConfirmResponseDeadline"></span></p>
+        <p><strong>Pickup deadline if you confirm now:</strong> <span id="adoptionConfirmDeadline"></span></p>
+        <p class="adoption-confirm-warning">If your pet is not picked up and marked adopted within 3 days, your application will be automatically declined and the animal will be returned to the adoption list.</p>
+        <p class="adoption-confirm-error" id="adoptionConfirmError" role="alert" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="adoptionConfirmCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="adoptionConfirmSubmit">Confirm, I'll pick up</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Archive Confirm Dialog -->
 <div class="sd-dialog-overlay" id="cvArchiveModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:none;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:8px;box-shadow:0 16px 48px rgba(0,0,0,0.15);width:100%;max-width:400px;padding:24px;">
@@ -4415,13 +4557,22 @@ foreach ($residentAdoptionApplications as $application) {
 
 <div class="cv-toast" id="cvToast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
 (function(){
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
   var PETS=<?php echo json_encode($vetPets, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
+  var ADOPTION_CSRF=<?php echo json_encode(csrfToken(), JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
+  var ADOPTION_SERVER_TIME=<?php echo $adoptionServerNow; ?>;
+  var adoptionClockStarted=performance.now();
+  var adoptionConfirmModalElement=document.getElementById('adoptionConfirmModal');
+  var adoptionConfirmModal=window.bootstrap ? new bootstrap.Modal(adoptionConfirmModalElement) : null;
+  var adoptionConfirmApplicationId=0;
+  var adoptionConfirmButton=document.getElementById('adoptionConfirmSubmit');
+  var adoptionConfirmError=document.getElementById('adoptionConfirmError');
 
-  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Reserved',icon:'hourglass'},pending:{label:'Pending Application',icon:'hourglass'},review:{label:'In Progress',icon:'clipboard'},approved:{label:'Approved',icon:'check'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
+  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Action needed',icon:'hourglass'},pending:{label:'Under Review',icon:'hourglass'},review:{label:'Action needed',icon:'clipboard'},confirmed:{label:'Ready for Pickup',icon:'check'},expired:{label:'Expired',icon:'minus'},declined:{label:'Declined',icon:'minus'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
   var ICONS={edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',search:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',cal:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',clock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',weight:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.5L6 21h12l-4-10.5c1.2-.7 2-2 2-3.5a4 4 0 0 0-4-4z"/></svg>',pin:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',species:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.172C10 3.782 8.423 2.679 6.5 3c-2.823.47-4.113 6.006-4 7 .08.703 1.725 1.722 3.656 1 1.261-.472 1.96-1.45 2.344-2.5M14 5.172c0-1.39 1.577-2.493 3.5-2.172 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.344-2.5M8 14v.5M16 14v.5M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444c0-1.061-.162-2.2-.493-3.309m-9.243-6.082A8.801 8.801 0 0 1 12 5c.78 0 1.5.108 2.161.306"/></svg>',breed:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',plus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',doc:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',download:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
 
   var state={status:'all',search:'',sort:'recent',species:'',page:1,perPage:10,activeTab:'overview'};
@@ -4448,10 +4599,11 @@ foreach ($residentAdoptionApplications as $application) {
     return a;
   }
 
-  function statusPillHTML(status){
-    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+  function statusPillHTML(status,label){
+    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var c=colors[status]||['#f4f4f5','#71717a','#e4e4e7'];
     var m=STATUS_META[status]||{label:status||'Unknown'};
+    if(label) m={label:label};
     return '<span class="appt-status-pill" style="background:'+c[0]+';color:'+c[1]+';border-color:'+c[2]+';">'+esc(m.label)+'</span>';
   }
 
@@ -4473,8 +4625,11 @@ foreach ($residentAdoptionApplications as $application) {
         '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
         '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
         '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
-        '<td class="sd-td">'+statusPillHTML(p.status)+'</td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+'</div></td>'+
+        '<td class="sd-td">'+statusPillHTML(p.status,p.statusLabel)+'</td>'+
+        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+
+          (p.status==='reserved' ? ' <button type="button" class="sd-btn sd-btn-primary adoption-confirm-row" data-application-id="'+esc(p.applicationId)+'">Yes, I\'m In</button>' : '')+
+          (p.status==='confirmed' ? ' <span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span>' : '')+
+          '</div></td>'+
         '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
         '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
       '</tr>';
@@ -4530,7 +4685,10 @@ foreach ($residentAdoptionApplications as $application) {
       '</div>'+
       sec('Details')+
       '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
-        ir(p.applicationPending?'Application Submitted':'Adoption Progress',esc(p.applicationPending?(p.applicationDate||'\u2014'):(p.applicationProgress||p.adoptedDate||'\u2014')))+
+        ir(p.applicationStatus?'Adoption Status':'Application Submitted',esc(p.applicationStatus?(p.applicationProgress||'\u2014'):(p.applicationDate||'\u2014')))+
+        (p.applicationStatus==='reserved' ? ir('Response deadline',esc(p.responseDeadlineDisplay||'\u2014')+' <span class="adoption-countdown" data-countdown="response" data-deadline="'+Number(p.responseDeadlineEpoch||0)+'"></span>') : '')+
+        (p.applicationStatus==='confirmed' ? ir('Pickup deadline',esc(p.pickupDeadlineDisplay||'\u2014')+' <span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span>') : '')+
+        (p.status==='expired' ? ir('Reason',esc(p.applicationProgress)) : '')+
         ir('Location',esc(p.location))+
         ir('Health Status',esc(ready?'Cleared':'For review'))+
       '</div>'+
@@ -4549,9 +4707,9 @@ foreach ($residentAdoptionApplications as $application) {
     els.drawerTitle.textContent='Pet Details';
     els.drawerRef.textContent='View and review this pet\u2019s adoption information, care history, and current records.';
     var petPhoto=p.photo? '<img src="'+esc(p.photo)+'" alt="" style="width:85px;height:85px;border-radius:8px;object-fit:cover;">' : '<div style="width:85px;height:85px;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
-    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],approved:['#dcebe0','#045e1f','#bbf7d0'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],reserved:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var adoptColors=statusColors[p.status]||['#f4f4f5','#71717a','#e4e4e7'];
-    var statusLabel=STATUS_META[p.status]?STATUS_META[p.status].label:p.status;
+    var statusLabel=p.statusLabel || (STATUS_META[p.status]?STATUS_META[p.status].label:p.status);
     var adoptPill='<span style="font-size:13px;font-weight:500;color:'+adoptColors[1]+';background:'+adoptColors[0]+';border:1px solid '+adoptColors[2]+';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">'+esc(statusLabel)+'</span>';
     var header='<div class="cv-pet-summary" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">'+
       '<div class="cv-pet-summary-photo" style="flex-shrink:0;">'+petPhoto+'</div>'+
@@ -4564,6 +4722,7 @@ foreach ($residentAdoptionApplications as $application) {
     '</div>';
     els.drawerBody.innerHTML=header+body;
     els.drawerFoot.innerHTML='<button type="button" class="sd-btn sd-btn-outline" onclick="window.__cvCloseDrawer()">Close</button>'+
+      (p.status==='reserved' ? '<button type="button" class="sd-btn sd-btn-primary" onclick="window.openAdoptionConfirm(\''+esc(p.id)+'\')">Yes, I\'m In</button>' : '')+
       (p.applicationPending?'':'<button type="button" class="sd-btn sd-btn-danger" onclick="window.__cvArchive(\''+esc(p.id)+'\',\''+esc(p.name)+'\')"><i class="fas fa-archive"></i> Archive</button>');
     openDrawer();
   }
@@ -4647,6 +4806,90 @@ foreach ($residentAdoptionApplications as $application) {
   function toast(msg){ els.toast.innerHTML=ICONS.check+' '+esc(msg); els.toast.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(function(){els.toast.classList.remove('show');},2200); }
 
   window.__cvOpenDetail=function(id){ openDetailModal(id); };
+
+  function serverNowMs(){
+    return ADOPTION_SERVER_TIME*1000+(performance.now()-adoptionClockStarted);
+  }
+  function countdownText(deadline){
+    var remaining=Math.floor(Number(deadline)*1000-serverNowMs());
+    if(remaining<=0) return '';
+    var minutes=Math.floor(remaining/60000);
+    var days=Math.floor(minutes/1440);
+    var hours=Math.floor((minutes%1440)/60);
+    return days+'d '+hours+'h '+(minutes%60)+'m remaining';
+  }
+  function updateAdoptionCountdowns(){
+    var hasExpired=false;
+    document.querySelectorAll('.adoption-countdown[data-deadline]').forEach(function(node){
+      var deadline=Number(node.getAttribute('data-deadline')||0);
+      var text=countdownText(deadline);
+      if(text) node.textContent=' · '+text;
+      else if(deadline>0) hasExpired=true;
+    });
+    if(hasExpired) window.location.reload();
+  }
+  function setConfirmModalVisible(visible){
+    if(adoptionConfirmModal){
+      if(visible) adoptionConfirmModal.show();
+      else adoptionConfirmModal.hide();
+      return;
+    }
+    adoptionConfirmModalElement.style.display=visible?'block':'none';
+    adoptionConfirmModalElement.classList.toggle('show',visible);
+    adoptionConfirmModalElement.setAttribute('aria-hidden',String(!visible));
+  }
+  window.openAdoptionConfirm=function(petId){
+    var pet=PETS.find(function(item){return item.id===petId;});
+    if(!pet||pet.status!=='reserved'||!pet.applicationId) return;
+    adoptionConfirmApplicationId=Number(pet.applicationId);
+    document.getElementById('adoptionConfirmPetName').textContent=pet.name;
+    var photo=document.getElementById('adoptionConfirmPhoto');
+    photo.src=pet.photo||'';
+    photo.alt=pet.name;
+    photo.hidden=!pet.photo;
+    document.getElementById('adoptionConfirmResponseDeadline').textContent=pet.responseDeadlineDisplay||'the response deadline';
+    document.getElementById('adoptionConfirmDeadline').textContent=new Date(serverNowMs()+3*24*60*60*1000).toLocaleString('en-US',{
+      month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'
+    });
+    adoptionConfirmError.hidden=true;
+    adoptionConfirmError.textContent='';
+    setConfirmModalVisible(true);
+  };
+  document.getElementById('cvTableBody').addEventListener('click',function(event){
+    var button=event.target.closest('.adoption-confirm-row');
+    if(!button) return;
+    event.stopPropagation();
+    window.openAdoptionConfirm(PETS.find(function(pet){return Number(pet.applicationId)===Number(button.getAttribute('data-application-id'));})?.id);
+  });
+  ['adoptionConfirmClose','adoptionConfirmCancel'].forEach(function(id){
+    document.getElementById(id).addEventListener('click',function(){setConfirmModalVisible(false);});
+  });
+  adoptionConfirmButton.addEventListener('click',function(){
+    if(!adoptionConfirmApplicationId) return;
+    adoptionConfirmButton.disabled=true;
+    adoptionConfirmError.hidden=true;
+    var body=new FormData();
+    body.append('application_id',String(adoptionConfirmApplicationId));
+    body.append('csrf_token',ADOPTION_CSRF);
+    fetch('../../api/resident/confirm_adoption.php',{method:'POST',body:body,credentials:'same-origin'})
+      .then(function(response){return response.json().then(function(data){return {ok:response.ok,data:data};});})
+      .then(function(result){
+        if(!result.ok||!result.data.success){
+          adoptionConfirmError.textContent=result.data.message||'Your confirmation could not be completed.';
+          adoptionConfirmError.hidden=false;
+          adoptionConfirmButton.disabled=false;
+          return;
+        }
+        window.location.reload();
+      })
+      .catch(function(){
+        adoptionConfirmError.textContent='Your confirmation could not be sent. Check your connection and try again.';
+        adoptionConfirmError.hidden=false;
+        adoptionConfirmButton.disabled=false;
+      });
+  });
+  window.setInterval(updateAdoptionCountdowns,1000);
+  updateAdoptionCountdowns();
 
   var _activeCvMenu=null;
   function closeCvMenu(){if(_activeCvMenu){_activeCvMenu.remove();_activeCvMenu=null;}document.removeEventListener('click',closeCvMenu);}
@@ -5526,8 +5769,6 @@ window.__petList = <?php
       <div id="rdUpdates"></div>
       <p class="pet-drawer-section-title">Your photos</p>
       <div class="rpt-photos" id="rdYourPhotos"></div>
-      <p class="pet-drawer-section-title" id="rdBarangayPhotosTitle" style="margin-top:22px;">From your barangay</p>
-      <div class="rpt-photos" id="rdBarangayPhotos"></div>
       <p class="pet-drawer-section-title" style="margin-top:22px;">From DCVS</p>
       <div class="rpt-photos" id="rdStaffPhotos"></div>
     </div>
@@ -5602,7 +5843,7 @@ window.__reportList = <?php
           'video' => $report['video_url'] ?? '',
           'status' => $report['status'],
           'statusLabel' => rptStatusLabel($report['status'], $report['response_state'] ?? ''),
-          'statusClass' => rptStatusClass($report['status']),
+          'statusClass' => rptStatusClass($report['status'], $report['response_state'] ?? ''),
           'resolution' => (string)($report['resolution_details'] ?? ''),
           'responseState' => (string)($report['response_state'] ?? ''),
           'responseMode' => (string)($report['response_mode'] ?? ''),
@@ -5658,17 +5899,17 @@ window.__reportList = <?php
     var turnoverRequired = !!report.turnoverRequired
       || report.turnoverStatus === 'pending'
       || report.turnoverStatus === 'receipt_confirmed';
-    var completedStage = report.status === 'pending' || report.status === 'validated' ? 0
-      : (state === 'barangay_response_approved' ? 0
-        : (state === 'barangay_responding' || state === 'escalated_to_dcvs'
-          || state === 'dcvs_dispatch' || state === 'dcvs_processing' ? 1
-          : (state === 'animal_secured' ? 2
-            : (report.status === 'resolved'
-              ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
+    var completedStage = state === 'barangay_response_approved' ? 0
+      : (state === 'barangay_responding' || state === 'escalated_to_dcvs'
+        || state === 'dcvs_dispatch' || state === 'dcvs_processing' ? 1
+        : (state === 'animal_secured' ? 2
+          : (report.status === 'resolved'
+            ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
+            : (report.status === 'pending' || report.status === 'validated' ? 0
               : (report.status === 'confirmed' || report.status === 'scheduled' ? 1 : -1)))));
     var labels = [
-      report.status === 'pending' ? 'Barangay review'
-        : (report.status === 'validated' ? 'DCVS review' : 'Accepted'),
+      completedStage > 0 ? 'Accepted'
+        : (report.status === 'pending' || report.status === 'validated' ? 'Barangay review' : 'Accepted'),
       'Responding',
       'Secured',
       'Resolved'
@@ -5847,12 +6088,8 @@ window.__reportList = <?php
       var imageIndex = evidenceLightboxItems.push(item) - 1;
       return evidenceThumb(item, imageIndex);
     }).join('');
-    var brgyPhotos = casePhotos.filter(function(item) { return item.role === 'barangay'; });
     var staffPhotos = casePhotos.filter(function(item) { return item.role !== 'barangay'; });
     document.getElementById('rdYourPhotos').innerHTML = ownPhotoHtml || '<p class="rpt-photo-none">You have not attached any photos.</p>';
-    var barangayTitle = brgyPhotos.length ? brgyPhotos[0].actor : 'From your barangay';
-    document.getElementById('rdBarangayPhotosTitle').textContent = barangayTitle;
-    document.getElementById('rdBarangayPhotos').innerHTML = renderEvidenceItems(brgyPhotos, 'No photos have been shared by your barangay.');
     document.getElementById('rdStaffPhotos').innerHTML = renderEvidenceItems(staffPhotos, 'No photos have been shared by DCVS.');
   }
 
@@ -8351,7 +8588,7 @@ function switchSection(sectionId) {
   document.body.classList.toggle('page-white', sectionId === 'my-pets' || sectionId === 'my-reports' || sectionId === 'appointments' || sectionId === 'book-appt' || sectionId === 'archive' || sectionId === 'account-settings');
   localStorage.setItem('activeSection', sectionId);
   window.location.hash = sectionId;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -8407,18 +8644,51 @@ document.addEventListener('dcvs:realtime', function(e) {
               'pending': 'Pending Barangay Review', 'validated': 'Pending DCVS Review', 'confirmed': 'In Progress',
               'scheduled': 'In Progress', 'resolved': 'Resolved', 'rejected': 'Closed'
             };
+            var responseStateLabels = {
+              barangay_response_approved: 'Accepted by Barangay',
+              barangay_responding: 'Barangay Responding',
+              animal_secured: 'Animal Secured',
+              awaiting_turnover: 'Awaiting Turnover',
+              turned_over: 'Turned Over to DCVS',
+              dcvs_processing: 'DCVS Processing',
+              dcvs_dispatch: 'DCVS Dispatched',
+              escalated_to_dcvs: 'Escalated to DCVS',
+              returned_to_barangay: 'Returned to Barangay',
+              closed_not_actionable: 'Closed - Not Actionable'
+            };
+            var activeResponseStates = [
+              'barangay_response_approved', 'barangay_responding', 'animal_secured',
+              'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
+              'escalated_to_dcvs', 'returned_to_barangay'
+            ];
+            var realtimeStatusClasses = {
+              pending:'st-pending', validated:'st-awaiting', confirmed:'st-review',
+              scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected'
+            };
+            function realtimeReportStatusLabel(report) {
+              return responseStateLabels[report.response_state]
+                || rLabels[report.status]
+                || (report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : '');
+            }
+            function realtimeReportStatusClass(report) {
+              return activeResponseStates.indexOf(report.response_state) !== -1
+                ? 'st-review'
+                : (realtimeStatusClasses[report.status] || 'st-pending');
+            }
+            function realtimeReportStatusStyle(report) {
+              return activeResponseStates.indexOf(report.response_state) !== -1
+                ? ['#EFF6FF', '#1E40AF', '#BFDBFE']
+                : (rColors[report.status] || ['#f1f5f9', '#64748b', '#e4e4e7']);
+            }
             var rKnownTypes = {'stray':'Stray Animal','rabies':'Rabies Case','injured':'Injured Animal','dead':'Dead Animal','other':'Other'};
             data.reports.forEach(function(rpt) {
               var existing = rtable.querySelector('tr[data-id="' + rpt.report_id + '"]');
               if (existing) {
                 var existingStatus = existing.querySelector('.appt-status-pill');
-                var existingColor = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var existingLabel = rpt.response_state === 'barangay_response_approved'
-                  ? 'Accepted by Barangay'
-                  : (rpt.response_state === 'escalated_to_dcvs'
-                    ? 'Escalated to DCVS'
-                    : (rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '')));
+                var existingColor = realtimeReportStatusStyle(rpt);
+                var existingLabel = realtimeReportStatusLabel(rpt);
                 existing.setAttribute('data-status', rpt.status);
+                existing.setAttribute('data-statuscls', realtimeReportStatusClass(rpt));
                 if (existingStatus) {
                   existingStatus.classList.toggle('report-status-resolved', rpt.status === 'resolved');
                   existingStatus.textContent = existingLabel;
@@ -8435,8 +8705,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                   reportItem.status = rpt.status;
                   reportItem.statusLabel = existingLabel;
                   reportItem.responseState = rpt.response_state || reportItem.responseState;
-                  var reportStatusClasses = { pending:'st-pending', validated:'st-awaiting', confirmed:'st-review', scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected' };
-                  reportItem.statusClass = reportStatusClasses[rpt.status] || 'st-pending';
+                  reportItem.statusClass = realtimeReportStatusClass(rpt);
                   if (rpt.status === 'resolved') reportItem.resolution = 'This report has been resolved by DCVS.';
                 }
                 if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
@@ -8449,12 +8718,8 @@ document.addEventListener('dcvs:realtime', function(e) {
                 return;
               }
                 var ref = rpt.reference_id || '#RPT-' + String(rpt.report_id).padStart(4, '0');
-                var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var rlab = rpt.response_state === 'barangay_response_approved'
-                  ? 'Accepted by Barangay'
-                  : (rpt.response_state === 'escalated_to_dcvs'
-                    ? 'Escalated to DCVS'
-                    : (rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '')));
+                var rc = realtimeReportStatusStyle(rpt);
+                var rlab = realtimeReportStatusLabel(rpt);
                 var typeLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report') + ' Report';
                 var catLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report');
                 var incidentAt = rpt.incident_at || rpt.created_at || '';
@@ -8470,6 +8735,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                 rtr.className = 'sd-tr';
                 rtr.setAttribute('data-id', rpt.report_id);
                 rtr.setAttribute('data-status', rpt.status);
+                rtr.setAttribute('data-statuscls', realtimeReportStatusClass(rpt));
                 rtr.setAttribute('data-type', typeLabel.toLowerCase());
                 rtr.setAttribute('data-location', (rpt.location_address || '').toLowerCase());
                 rtr.setAttribute('data-date', String(incidentAt ? Math.floor(new Date(incidentAt.replace(' ', 'T')).getTime() / 1000) : '0'));

@@ -95,8 +95,19 @@ function handleSave($conn, $userId) {
     $color = trim($_POST['color'] ?? '');
     $rescuedDate = trim($_POST['rescued_date'] ?? '');
     $description = trim($_POST['description'] ?? '');
+    $vaccinationStatus = $_POST['vaccination_status'] ?? 'unknown';
+    $sterilizationStatus = $_POST['sterilization_status'] ?? 'unknown';
+    $dewormingStatus = $_POST['deworming_status'] ?? 'unknown';
+    $vaccinations = trim($_POST['vaccinations'] ?? '');
+    $temperament = trim($_POST['temperament'] ?? '');
     $status = $_POST['status'] ?? 'available';
     $saveMode = $_POST['save_mode'] ?? '';
+
+    if (!in_array($vaccinationStatus, ['vaccinated', 'partially_vaccinated', 'not_vaccinated', 'unknown'], true)
+        || !in_array($sterilizationStatus, ['spayed', 'neutered', 'not_sterilized', 'unknown'], true)
+        || !in_array($dewormingStatus, ['dewormed', 'not_dewormed', 'unknown'], true)) {
+        return ['success' => false, 'message' => 'Invalid pet care status'];
+    }
 
     if ($saveMode === 'draft') {
         $status = 'draft';
@@ -141,11 +152,11 @@ function handleSave($conn, $userId) {
     }
 
     if ($id > 0) {
-        $stmt = $conn->prepare("UPDATE pet_listings SET name=?, species=?, breed=?, age=?, gender=?, weight=?, color=?, rescued_date=?, description=?, photo_url=?, status=? WHERE listing_id=? AND status NOT IN ('reserved','adopted')");
-        $stmt->bind_param("sssssssssssi", $name, $species, $breed, $age, $gender, $weight, $color, $rescuedDate, $description, $photoUrl, $status, $id);
+        $stmt = $conn->prepare("UPDATE pet_listings SET name=?, species=?, breed=?, age=?, gender=?, weight=?, color=?, rescued_date=?, description=?, photo_url=?, status=?, vaccination_status=?, sterilization_status=?, deworming_status=?, vaccinations=?, temperament=? WHERE listing_id=? AND status NOT IN ('reserved','adopted')");
+        $stmt->bind_param("sssssssssssssssi", $name, $species, $breed, $age, $gender, $weight, $color, $rescuedDate, $description, $photoUrl, $status, $vaccinationStatus, $sterilizationStatus, $dewormingStatus, $vaccinations, $temperament, $id);
     } else {
-        $stmt = $conn->prepare("INSERT INTO pet_listings (name, species, breed, age, gender, weight, color, rescued_date, description, photo_url, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssssssssi", $name, $species, $breed, $age, $gender, $weight, $color, $rescuedDate, $description, $photoUrl, $status, $userId);
+        $stmt = $conn->prepare("INSERT INTO pet_listings (name, species, breed, age, gender, weight, color, rescued_date, description, photo_url, status, vaccination_status, sterilization_status, deworming_status, vaccinations, temperament, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sssssssssssssssi", $name, $species, $breed, $age, $gender, $weight, $color, $rescuedDate, $description, $photoUrl, $status, $vaccinationStatus, $sterilizationStatus, $dewormingStatus, $vaccinations, $temperament, $userId);
     }
 
     if ($stmt->execute()) {
@@ -256,7 +267,7 @@ function handleMarkAdopted($conn) {
 
     $applicationStmt = $conn->prepare(
         "SELECT resulting_pet_id FROM adoption_applications
-         WHERE pet_listing_id = ? AND applicant_id = ? AND status = 'approved'
+         WHERE pet_listing_id = ? AND applicant_id = ? AND status = 'adopted'
            AND resulting_pet_id IS NOT NULL LIMIT 1"
     );
     $applicationStmt->bind_param("ii", $listingId, $adopterId);
@@ -371,7 +382,7 @@ function handleSyncFromPool($conn, $userId) {
              JOIN adoption_listings al ON al.source_listing_id = a.pet_listing_id
                  AND al.pet_id = a.resulting_pet_id
              JOIN pet_listings pl ON pl.listing_id = a.pet_listing_id
-             WHERE a.pet_listing_id = ? AND a.status = 'approved'
+             WHERE a.pet_listing_id = ? AND a.status = 'adopted'
                AND a.resulting_pet_id IS NOT NULL AND pl.status = 'adopted'"
         );
         $approvedStmt->bind_param('i', $existingListingId);
@@ -430,8 +441,8 @@ function handleSyncFromPool($conn, $userId) {
 }
 
 function handleGetAll($conn) {
-    adoptionReleaseExpiredReservations($conn);
-    $result = $conn->query("SELECT p.*, ri.source AS rescue_source, ri.rescue_date AS intake_rescue_date, adopter.full_name AS adopter_name, adopter.reference_id AS adopter_reference_id, adopter_barangay.barangay_name AS adopter_barangay, application.application_id AS adoption_application_id, application.status AS adoption_application_status, application.approved_pickup_at, application.finalized_at FROM pet_listings p LEFT JOIN rescue_intakes ri ON ri.intake_id = p.rescue_intake_id LEFT JOIN users adopter ON adopter.user_id = COALESCE(p.adopted_by, (SELECT adopted_pet.owner_id FROM pets adopted_pet JOIN adoption_listings adopted_listing ON adopted_listing.pet_id = adopted_pet.pet_id WHERE LOWER(TRIM(adopted_pet.pet_name)) = LOWER(TRIM(p.name)) AND LOWER(TRIM(adopted_pet.pet_type)) = LOWER(TRIM(p.species)) ORDER BY adopted_listing.created_at DESC, adopted_listing.listing_id DESC LIMIT 1)) LEFT JOIN barangays adopter_barangay ON adopter_barangay.barangay_id = adopter.barangay_id LEFT JOIN adoption_applications application ON application.application_id = (SELECT latest.application_id FROM adoption_applications latest WHERE latest.pet_listing_id = p.listing_id AND latest.status IN ('approved','adopted','expired') ORDER BY latest.application_date DESC, latest.application_id DESC LIMIT 1) ORDER BY p.created_at DESC");
+    expireAdoptionReservations($conn);
+    $result = $conn->query("SELECT p.*, ri.source AS rescue_source, ri.rescue_date AS intake_rescue_date, adopter.full_name AS adopter_name, adopter.reference_id AS adopter_reference_id, adopter_barangay.barangay_name AS adopter_barangay, application.application_id AS adoption_application_id, application.status AS adoption_application_status, application.approved_pickup_at, application.reserved_at, application.response_deadline, application.confirmed_at, application.pickup_deadline, application.decline_reason, application.finalized_at FROM pet_listings p LEFT JOIN rescue_intakes ri ON ri.intake_id = p.rescue_intake_id LEFT JOIN users adopter ON adopter.user_id = COALESCE(p.adopted_by, (SELECT adopted_pet.owner_id FROM pets adopted_pet JOIN adoption_listings adopted_listing ON adopted_listing.pet_id = adopted_pet.pet_id WHERE LOWER(TRIM(adopted_pet.pet_name)) = LOWER(TRIM(p.name)) AND LOWER(TRIM(adopted_pet.pet_type)) = LOWER(TRIM(p.species)) ORDER BY adopted_listing.created_at DESC, adopted_listing.listing_id DESC LIMIT 1)) LEFT JOIN barangays adopter_barangay ON adopter_barangay.barangay_id = adopter.barangay_id LEFT JOIN adoption_applications application ON application.application_id = (SELECT latest.application_id FROM adoption_applications latest WHERE latest.pet_listing_id = p.listing_id AND latest.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired','rejected') ORDER BY latest.application_date DESC, latest.application_id DESC LIMIT 1) ORDER BY p.created_at DESC");
     if (!$result) {
         return ['success' => false, 'message' => 'Could not load adoption pool: ' . $conn->error];
     }

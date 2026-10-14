@@ -22,12 +22,13 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 $adoptionApplications = [];
 $applicationResult = $conn->query(
     "SELECT a.application_id, a.status, a.application_date, a.date_of_birth,
             a.residency_proof_file, a.requested_info,
-            a.resident_response, a.info_deadline, a.approved_pickup_at, a.finalized_at,
+            a.resident_response, a.info_deadline, a.approved_pickup_at, a.reserved_at,
+            a.response_deadline, a.confirmed_at, a.pickup_deadline, a.decline_reason, a.finalized_at,
             a.housing_type, a.landlord_permission,
             a.home_type, a.has_fenced_yard, a.household_members, a.has_other_pets,
             a.other_pets_details, a.pet_care_experience, a.reason_for_adoption,
@@ -39,7 +40,7 @@ $applicationResult = $conn->query(
      LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
      JOIN pet_listings p ON p.listing_id = a.pet_listing_id
      WHERE a.pet_listing_id IS NOT NULL
-       AND a.status IN ('pending','under_review','needs_info','approved','adopted','expired')
+       AND a.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired')
      ORDER BY a.application_date ASC, a.application_id ASC"
 );
 if (!$applicationResult) {
@@ -3538,15 +3539,17 @@ $activePage = 'adoption-pool';
        JAVASCRIPT DATA & LOGIC
        ========================================================================== -->
   <script>
-    window.adoptionPickupPeriodLabel = function (approvedPickupAt, applicationStatus) {
-      if (applicationStatus === 'expired') return 'Expired / Unclaimed';
-      if (applicationStatus !== 'approved' || !approvedPickupAt) return '—';
-      const scheduledAt = new Date(String(approvedPickupAt).replace(' ', 'T'));
-      if (Number.isNaN(scheduledAt.getTime())) return '—';
-      const remaining = scheduledAt.getTime() + 3 * 24 * 60 * 60 * 1000 - Date.now();
-      if (remaining <= 0) return 'Pickup period expired';
-      const daysRemaining = Math.min(3, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
-      return daysRemaining + (daysRemaining === 1 ? ' day remaining' : (daysRemaining === 3 ? ' days allotted' : ' days remaining'));
+    window.adoptionPickupPeriodLabel = function (responseDeadline, pickupDeadline, applicationStatus) {
+      if (applicationStatus === 'expired' || applicationStatus === 'declined') return 'Expired';
+      const deadline = applicationStatus === 'reserved' ? responseDeadline
+        : (applicationStatus === 'confirmed' ? pickupDeadline : '');
+      if (!deadline) return '—';
+      const date = new Date(String(deadline).replace(' ', 'T'));
+      if (Number.isNaN(date.getTime())) return '—';
+      const formatted = date.toLocaleString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+      return (applicationStatus === 'reserved' ? 'Respond by ' : 'Pick up by ') + formatted;
     };
 
     const APP_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -3744,11 +3747,22 @@ $activePage = 'adoption-pool';
       // Format a DB timestamp/date (YYYY-MM-DD...) as "MMM DD, YYYY" (matches PHP date('M d, Y'))
       function fmtAdoptedDate(s) {
         if (!s) return '';
-        const p = String(s).slice(0, 10).split('-');
-        if (p.length < 3 || !p[0] || !p[1] || !p[2]) return '';
-        const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const mi = parseInt(p[1], 10) - 1;
-        return (M[mi] || p[1]) + ' ' + p[2] + ', ' + p[0];
+        const datePart = String(s).slice(0, 10);
+        const date = new Date(datePart + 'T00:00:00');
+        return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+          month: 'long', day: 'numeric', year: 'numeric'
+        });
+      }
+
+      function formatPoolDate(value) {
+        if (!value) return '—';
+        const text = String(value);
+        const date = /^\d{4}-\d{2}-\d{2}/.test(text)
+          ? new Date(text.slice(0, 10) + 'T00:00:00')
+          : new Date(text);
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('en-US', {
+          month: 'long', day: 'numeric', year: 'numeric'
+        });
       }
 
       // Pull adoption status + adopted date from DB for pets adopted via
@@ -3790,6 +3804,11 @@ $activePage = 'adoption-pool';
               if (Number(p.adoptionApplicationId || 0) !== applicationId) { p.adoptionApplicationId = applicationId; changed = true; }
               if (p.adoptionApplicationStatus !== applicationStatus) { p.adoptionApplicationStatus = applicationStatus; changed = true; }
               if ((p.approvedPickupAt || '') !== (row.approved_pickup_at || '')) { p.approvedPickupAt = row.approved_pickup_at || ''; changed = true; }
+              if ((p.adoptedAtRaw || '') !== (row.adopted_at || '')) { p.adoptedAtRaw = row.adopted_at || ''; changed = true; }
+              ['responseDeadline', 'pickupDeadline', 'confirmedAt'].forEach(function (key) {
+                const field = key.replace(/[A-Z]/g, function (letter) { return '_' + letter.toLowerCase(); });
+                if ((p[key] || '') !== (row[field] || '')) { p[key] = row[field] || ''; changed = true; }
+              });
               if (Number(row.rescue_intake_id) > 0 && Number(p.rescueIntakeId) !== Number(row.rescue_intake_id)) {
                 p.rescueIntakeId = Number(row.rescue_intake_id);
                 changed = true;
@@ -3805,6 +3824,7 @@ $activePage = 'adoption-pool';
                 if (p.adoptionStatus !== 'Reserved') { p.adoptionStatus = 'Reserved'; changed = true; }
                 if (p.listingStatus !== 'Not Listed') { p.listingStatus = 'Not Listed'; changed = true; }
                 if (p.adoptedDate) { p.adoptedDate = ''; changed = true; }
+                if (p.adoptedAtRaw) { p.adoptedAtRaw = ''; changed = true; }
                 if (p.adopterName) { p.adopterName = ''; changed = true; }
                 if (p.adopterReferenceId) { p.adopterReferenceId = ''; changed = true; }
                 if (p.adopterBarangay) { p.adopterBarangay = ''; changed = true; }
@@ -3814,6 +3834,7 @@ $activePage = 'adoption-pool';
                 p.adoptionStatus = 'Available';
                 p.listingStatus = 'Published';
                 p.adoptedDate = '';
+                p.adoptedAtRaw = '';
                 p.adopterName = '';
                 p.adopterReferenceId = '';
                 p.adopterBarangay = '';
@@ -3879,6 +3900,10 @@ $activePage = 'adoption-pool';
                   adoptionApplicationId: Number(row.adoption_application_id || 0),
                   adoptionApplicationStatus: row.adoption_application_status || '',
                   approvedPickupAt: row.approved_pickup_at || '',
+                  responseDeadline: row.response_deadline || '',
+                  pickupDeadline: row.pickup_deadline || '',
+                  confirmedAt: row.confirmed_at || '',
+                  adoptedAtRaw: row.adopted_at || '',
                   adopterName: row.adopter_name || '',
                   adopterReferenceId: row.adopter_reference_id || '',
                   adopterBarangay: row.adopter_barangay || '',
@@ -3996,8 +4021,10 @@ $activePage = 'adoption-pool';
         if (sortCol) {
           var dir = sortDir === 'desc' ? -1 : 1;
           filtered.sort(function(a, b) {
-            var av = a[sortCol] || '';
-            var bv = b[sortCol] || '';
+            var av = sortCol === 'rescueDate' ? (a.fullRescueDate || a.rescueDate || '')
+              : (sortCol === 'adoptedDate' ? (a.adoptedAtRaw || a.confirmedAt || a.adoptedDate || '') : (a[sortCol] || ''));
+            var bv = sortCol === 'rescueDate' ? (b.fullRescueDate || b.rescueDate || '')
+              : (sortCol === 'adoptedDate' ? (b.adoptedAtRaw || b.confirmedAt || b.adoptedDate || '') : (b[sortCol] || ''));
             if (typeof av === 'string') av = av.toLowerCase();
             if (typeof bv === 'string') bv = bv.toLowerCase();
             return av < bv ? -dir : av > bv ? dir : 0;
@@ -4018,8 +4045,8 @@ $activePage = 'adoption-pool';
           rows.push([
             pet.name, pet.gender, pet.breed, pet.age, pet.species, pet.rescueSource,
             pet.rescueDate, pet.adoptionStatus,
-            pet.adoptedDate || '—',
-            adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus),
+            formatPoolDate(pet.adoptedAtRaw || pet.confirmedAt || pet.adoptedDate),
+            adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus),
             pet.listingStatus === 'Published' ? 'Published' : 'Not Listed'
           ].map(csvCell).join(','));
         });
@@ -4083,12 +4110,12 @@ $activePage = 'adoption-pool';
             <td>${pet.age}</td>
             <td>${pet.species}</td>
             <td>${pet.rescueSource}</td>
-            <td>${pet.rescueDate}</td>
+            <td data-sort="${pet.fullRescueDate || pet.rescueDate || ''}">${formatPoolDate(pet.fullRescueDate || pet.rescueDate)}</td>
             <td>
               <span class="status-pill ${adStatusClass}">${pet.adoptionStatus}</span>
             </td>
-            <td>${pet.adoptedDate || '—'}</td>
-            <td>${adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus)}</td>
+            <td data-sort="${pet.adoptedAtRaw || pet.confirmedAt || ''}">${formatPoolDate(pet.adoptedAtRaw || pet.confirmedAt || pet.adoptedDate)}</td>
+            <td>${adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus)}</td>
             <td>${listStatusLabel}</td>
             <td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" data-pet-id="${pet.id}"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>
           `;
@@ -4908,7 +4935,7 @@ $activePage = 'adoption-pool';
             <div class="drawer-info-item"><span class="drawer-info-label">Age</span><span class="drawer-info-val">${pet.age}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Availability</span><span class="drawer-info-val">${pet.scheduledDate ? 'Will be available on ' + pet.scheduledDate : (pet.readyDate || '—')}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Adoption Status</span><span class="drawer-info-val">${pet.adoptionStatus}</span></div>
-            ${(pet.adoptionApplicationStatus === 'approved' || pet.adoptionApplicationStatus === 'expired') ? `
+            ${(['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(pet.adoptionApplicationStatus) !== -1) ? `
               <div class="drawer-info-item"><span class="drawer-info-label">Scheduled Pickup</span><span class="drawer-info-val" id="drawer-scheduled-pickup"></span></div>
               <div class="drawer-info-item"><span class="drawer-info-label">Pickup Period</span><span class="drawer-info-val" id="drawer-pickup-period"></span></div>
             ` : ''}
@@ -4936,12 +4963,12 @@ $activePage = 'adoption-pool';
         if (scheduledPickup) {
           const pickupDate = pet.approvedPickupAt ? new Date(String(pet.approvedPickupAt).replace(' ', 'T')) : null;
           scheduledPickup.textContent = pickupDate && !Number.isNaN(pickupDate.getTime())
-            ? pickupDate.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+            ? pickupDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
             : '—';
         }
         const pickupPeriod = document.getElementById('drawer-pickup-period');
         if (pickupPeriod) {
-          pickupPeriod.textContent = window.adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus);
+          pickupPeriod.textContent = window.adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus);
         }
         const adoptedDate = document.getElementById('drawer-adopted-date');
         if (adoptedDate) adoptedDate.textContent = pet.adoptedDate || '—';
@@ -4968,7 +4995,7 @@ $activePage = 'adoption-pool';
         let footerHtml = '';
         if (isAdopted) {
           footerHtml = `<button type="button" class="sd-btn sd-btn-outline" id="drawer-archive-btn">Archive</button><button type="button" class="sd-btn sd-btn-outline" onclick="closePetDrawer()">Close</button>`;
-        } else if (isReserved && pet.adoptionApplicationStatus === 'approved' && Number(pet.adoptionApplicationId) > 0) {
+        } else if (isReserved && pet.adoptionApplicationStatus === 'confirmed' && Number(pet.adoptionApplicationId) > 0) {
           footerHtml = `<button type="button" class="sd-btn sd-btn-default" id="drawer-finalize-adoption-btn">Mark Adopted</button><button type="button" class="sd-btn sd-btn-outline" onclick="closePetDrawer()">Close</button>`;
         } else if (isPending) {
           footerHtml = `
@@ -6195,8 +6222,8 @@ $activePage = 'adoption-pool';
       var applicantAge = item.date_of_birth ? calculateAge(item.date_of_birth) + ' yrs' : 'age not provided';
       addText(heading, 'p', 'Applicant: ' + item.full_name + ' (' + applicantAge + ') · Brgy. ' + (item.barangay_name || 'Not provided'), 'adoption-review-applicant');
       addText(heading, 'p', 'Submitted: ' + readableDate(item.application_date) + ' · Phone: ' + (item.phone || 'Not provided'), 'adoption-review-submitted');
-      if (item.status === 'approved' || item.status === 'expired') {
-        addText(heading, 'p', 'Pickup period: ' + window.adoptionPickupPeriodLabel(item.approved_pickup_at, item.status), 'adoption-review-submitted');
+      if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
+        addText(heading, 'p', 'Pickup period: ' + window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status), 'adoption-review-submitted');
       }
       var mobileFacts = document.createElement('div');
       mobileFacts.className = 'adoption-review-mobile-facts';
@@ -6212,21 +6239,21 @@ $activePage = 'adoption-pool';
       addMobileFact('Barangay', item.barangay_name);
       addMobileFact('Submitted', readableDate(item.application_date));
       addMobileFact('Phone', item.phone);
-      if (item.status === 'approved' || item.status === 'expired') {
-        addMobileFact('Pickup period', window.adoptionPickupPeriodLabel(item.approved_pickup_at, item.status));
+      if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
+        addMobileFact('Pickup period', window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status));
       }
       heading.appendChild(mobileFacts);
       cardHeader.appendChild(heading);
 
       var summaryActions = document.createElement('div');
       summaryActions.className = 'adoption-review-summary-actions';
-      var statusLabels = {pending: 'Pending Application', under_review: 'Under Review', needs_info: 'Needs Info', approved: 'In Progress', adopted: 'Adopted', expired: 'Expired / Unclaimed'};
+      var statusLabels = {pending: 'Under Review', under_review: 'Under Review', needs_info: 'Action needed', reserved: 'Action needed', confirmed: 'Ready for Pickup', approved: 'Action needed', adopted: 'Adopted', declined: 'Expired', expired: 'Expired', rejected: 'Declined'};
       var statusText = statusLabels[item.status] || item.status.replace(/_/g, ' ');
       var statusLabel = addText(summaryActions, 'span', statusText, 'adoption-review-status');
       if (item.status === 'pending') statusLabel.classList.add('pending');
       if (item.status === 'under_review') statusLabel.classList.add('active');
       if (item.status === 'needs_info') statusLabel.classList.add('needs-info');
-      if (item.status === 'approved') statusLabel.classList.add('active');
+      if (item.status === 'reserved' || item.status === 'confirmed' || item.status === 'approved') statusLabel.classList.add('active');
       if (item.status === 'adopted') statusLabel.classList.add('active');
       if (item.status === 'expired') statusLabel.classList.add('needs-info');
       var details = document.createElement('div');
@@ -6272,9 +6299,10 @@ $activePage = 'adoption-pool';
       addFact('Contact details', (item.phone || 'No phone') + ' / ' + (item.email || 'No email'));
       addFact('Current application status', statusText);
       if (item.approved_pickup_at) addFact('Scheduled DCVS visit', readableDate(item.approved_pickup_at));
-      if (item.status === 'approved' || item.status === 'expired') {
-        addFact('Pickup period', window.adoptionPickupPeriodLabel(item.approved_pickup_at, item.status));
+      if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
+        addFact('Pickup period', window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status));
       }
+      if (item.decline_reason) addFact('Decline reason', item.decline_reason === 'expired' ? 'You didn’t respond / pick up within the allotted time.' : item.decline_reason);
       if (item.finalized_at) addFact('Confirmed/Adopted Date', readableDate(item.finalized_at));
       details.appendChild(facts);
       var reasonSummary = document.createElement('div');
@@ -6353,7 +6381,7 @@ $activePage = 'adoption-pool';
           sendReview(formData, button);
         }, decision === 'approved');
       }
-      if (item.status !== 'approved' && item.status !== 'adopted') {
+      if (['reserved', 'confirmed', 'approved', 'adopted', 'declined', 'expired', 'rejected'].indexOf(item.status) === -1) {
       addButton(actions, 'Approve & Schedule Visit', '', function (event) {
         submitDecision('approved', event.currentTarget);
       });
@@ -6377,8 +6405,10 @@ $activePage = 'adoption-pool';
       confirmRejectButton.style.display = 'none';
       requestButton.addEventListener('click', function () { sendRequestButton.style.display = 'inline-flex'; confirmRejectButton.style.display = 'none'; });
       rejectButton.addEventListener('click', function () { confirmRejectButton.style.display = 'inline-flex'; sendRequestButton.style.display = 'none'; });
-      } else if (item.status === 'approved') {
-        addText(actions, 'span', 'The visit is scheduled. Finalize the adoption from the Adoption Pool drawer after pickup.', 'adoption-review-submitted');
+      } else if (item.status === 'reserved') {
+        addText(actions, 'span', 'The resident must confirm within the response period before pickup can be finalized.', 'adoption-review-submitted');
+      } else if (item.status === 'confirmed') {
+        addText(actions, 'span', 'The resident has confirmed. Mark the animal as adopted from the Adoption Pool drawer after pickup.', 'adoption-review-submitted');
       }
       details.appendChild(actions);
       card.appendChild(details);

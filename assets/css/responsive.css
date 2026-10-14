@@ -773,6 +773,7 @@ body.dashboard.resident-portal {
     width: 100%;
     max-width: 100%;
     min-width: 0;
+    position: relative;
     overflow-x: auto !important;
     overflow-y: hidden;
     overscroll-behavior-x: contain;
@@ -1193,16 +1194,14 @@ body.dashboard.resident-portal {
   }
 
   .resident-portal #my-reports .appt-db-table-area,
-  .resident-portal #appointments .appt-db-table-area,
-  .resident-portal #my-pets .appt-db-table-area {
+  .resident-portal #appointments .appt-db-table-area {
     width: 100%;
     max-width: 100%;
     overflow-x: hidden !important;
     overflow-y: hidden;
   }
   .resident-portal #my-reports #reportTable,
-  .resident-portal #appointments #apptTable,
-  .resident-portal #my-pets #petTable {
+  .resident-portal #appointments #apptTable {
     display: table !important;
     width: 100% !important;
     min-width: 0 !important;

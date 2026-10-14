@@ -113,6 +113,14 @@ $activePage = 'geo';
     .sd-btn-primary:hover{background:#27272a;}
     .sd-btn-outline{background:#ffffff;border-color:#e4e4e7;color:#18181b;}
     .sd-btn-outline:hover{background:#f4f4f5;}
+    .geo-search-status{flex-basis:100%;min-height:0;color:#64748b;font-size:12px;}
+    .geo-search-status:empty{display:none;}
+    .geo-search-wrap{position:relative;z-index:90;}
+    .geo-search-results{position:absolute;top:calc(100% + 4px);right:0;left:0;z-index:100;max-height:260px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;background:#fff;box-shadow:0 8px 20px rgba(15,23,42,.14);}
+    .geo-search-results[hidden]{display:none;}
+    .geo-search-option{display:block;width:100%;padding:9px 12px;border:0;border-bottom:1px solid #f1f5f9;background:#fff;color:#18181b;text-align:left;font:400 13px Inter,'Segoe UI',sans-serif;cursor:pointer;}
+    .geo-search-option:last-child{border-bottom:0;}
+    .geo-search-option:hover,.geo-search-option[aria-selected="true"]{background:#ecfdf3;color:#166534;}
   </style>
 </head>
 <body class="staff-theme">
@@ -132,8 +140,10 @@ $activePage = 'geo';
           <span class="geo-summary-item"><i class="fas fa-sync-alt" style="color:#94a3b8;"></i> Updated: <strong id="geoLastRefresh">--</strong></span>
           <span class="geo-search-wrap">
             <i class="fas fa-search"></i>
-            <input type="text" id="geoSearch" placeholder="Search barangay..." oninput="MapCN.barangayOverlay.search(this.value)">
+            <input type="search" id="geoSearch" placeholder="Search barangay..." role="combobox" aria-autocomplete="list" aria-controls="geoSearchResults" aria-expanded="false" aria-label="Search barangays and press Enter">
+            <div class="geo-search-results" id="geoSearchResults" role="listbox" aria-label="Barangay search results" hidden></div>
           </span>
+          <span id="geoSearchStatus" class="geo-search-status" role="status" aria-live="polite"></span>
         </div>
         <!-- Map container -->
         <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" data-report-route-enabled="<?php echo $reportRoutingEnabled ? '1' : '0'; ?>" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;position:relative;">
@@ -173,6 +183,130 @@ $activePage = 'geo';
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+  var geoSearch = document.getElementById('geoSearch');
+  var geoSearchStatus = document.getElementById('geoSearchStatus');
+  var geoSearchResults = document.getElementById('geoSearchResults');
+  var searchSuggestions = [];
+  var activeSuggestionIndex = -1;
+  var pendingSearchName = null;
+
+  function closeSearchSuggestions() {
+    geoSearchResults.hidden = true;
+    geoSearchResults.replaceChildren();
+    geoSearch.setAttribute('aria-expanded', 'false');
+    activeSuggestionIndex = -1;
+  }
+
+  function selectBarangay(name) {
+    geoSearch.value = name;
+    searchSuggestions = [];
+    activeSuggestionIndex = -1;
+    var result = MapCN.barangayOverlay.search(name);
+    closeSearchSuggestions();
+    if (result === null) {
+      pendingSearchName = name;
+      geoSearchStatus.textContent = 'Map data is loading. Your search will run when it is ready.';
+    } else if (result) {
+      pendingSearchName = null;
+      geoSearchStatus.textContent = 'Showing ' + name + ' on the map.';
+    } else {
+      pendingSearchName = null;
+      geoSearchStatus.textContent = 'No barangay found matching "' + name + '".';
+    }
+  }
+
+  function renderSearchSuggestions() {
+    var query = geoSearch.value.trim();
+    geoSearchStatus.textContent = '';
+    geoSearchResults.replaceChildren();
+    activeSuggestionIndex = -1;
+
+    if (!query) {
+      searchSuggestions = [];
+      closeSearchSuggestions();
+      MapCN.barangayOverlay.search('');
+      return;
+    }
+
+    searchSuggestions = MapCN.barangayOverlay.suggest(query);
+    if (searchSuggestions === null) {
+      geoSearchStatus.textContent = 'Loading barangay list...';
+      closeSearchSuggestions();
+      return;
+    }
+
+    if (!searchSuggestions.length) {
+      geoSearchStatus.textContent = 'No close barangay match found.';
+      closeSearchSuggestions();
+      return;
+    }
+
+    searchSuggestions.forEach(function(suggestion, index) {
+      var option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'geo-search-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', 'false');
+      option.textContent = suggestion.name;
+      option.addEventListener('click', function() {
+        selectBarangay(suggestion.name);
+      });
+      geoSearchResults.appendChild(option);
+    });
+    geoSearchResults.hidden = false;
+    geoSearch.setAttribute('aria-expanded', 'true');
+  }
+
+  if (geoSearch) {
+    geoSearch.addEventListener('input', function() {
+      pendingSearchName = null;
+      MapCN.barangayOverlay.cancelPendingSearch();
+      renderSearchSuggestions();
+    });
+    geoSearch.addEventListener('keydown', function(event) {
+      var options = geoSearchResults.querySelectorAll('.geo-search-option');
+      if (event.key === 'ArrowDown' && options.length) {
+        event.preventDefault();
+        activeSuggestionIndex = (activeSuggestionIndex + 1) % options.length;
+      } else if (event.key === 'ArrowUp' && options.length) {
+        event.preventDefault();
+        activeSuggestionIndex = (activeSuggestionIndex - 1 + options.length) % options.length;
+      } else if (event.key === 'Escape') {
+        closeSearchSuggestions();
+        return;
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        var query = geoSearch.value.trim();
+        if (!query) {
+          MapCN.barangayOverlay.search('');
+          geoSearchStatus.textContent = 'Enter a barangay name to search.';
+          closeSearchSuggestions();
+          return;
+        }
+        if (!searchSuggestions || !searchSuggestions.length) renderSearchSuggestions();
+        if (searchSuggestions && searchSuggestions.length) {
+          var selected = searchSuggestions[Math.max(activeSuggestionIndex, 0)];
+          selectBarangay(selected.name);
+        } else {
+          selectBarangay(query);
+        }
+        return;
+      } else {
+        return;
+      }
+      Array.prototype.forEach.call(options, function(option, index) {
+        option.setAttribute('aria-selected', index === activeSuggestionIndex ? 'true' : 'false');
+      });
+    });
+    document.addEventListener('click', function(event) {
+      if (!event.target.closest('.geo-search-wrap')) closeSearchSuggestions();
+    });
+    document.addEventListener('dcvs:barangaysready', function() {
+      renderSearchSuggestions();
+      if (pendingSearchName) selectBarangay(pendingSearchName);
+    });
+  }
+
   var mapEl = document.getElementById('geoMap');
   if (!mapEl) return;
   function addGeoLabels(map) {
