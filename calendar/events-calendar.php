@@ -8,7 +8,9 @@ $calYear = (int)date('Y');
 $calAppointments = [];
 if (isset($conn) && !$conn->connect_error) {
     $calStmt = $conn->prepare("
-        SELECT a.appointment_id, a.reference_id, a.pet_id, a.preferred_date, a.preferred_time,
+        SELECT a.appointment_id, a.reference_id, a.pet_id,
+               COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+               COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
                a.status, a.appointment_type, a.notes, a.created_at,
                COALESCE(NULLIF(a.pet_name,''), p.pet_name) AS pet_name,
                p.pet_type, p.breed, p.photo_url AS pet_photo, p.reference_id AS pet_ref,
@@ -18,9 +20,9 @@ if (isset($conn) && !$conn->connect_error) {
         LEFT JOIN pets p ON a.pet_id = p.pet_id
         LEFT JOIN barangays b ON u.barangay_id = b.barangay_id
         WHERE a.archived_at IS NULL
-          AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
-          AND YEAR(a.preferred_date) = ?
-        ORDER BY a.preferred_date, a.preferred_time
+          AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+          AND YEAR(COALESCE(a.scheduled_date, a.preferred_date)) = ?
+        ORDER BY COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)
     ");
     if ($calStmt) {
         $calStmt->bind_param('i', $calYear);
@@ -1504,8 +1506,9 @@ window.ecDoApprove = function(id){
     .then(function(r){ return r.json().catch(function(){ return {success:false,message:'Invalid response'}; }); })
     .then(function(res){
       if (res && res.success){
-        ev.status = 'scheduled';
-        ecToast('Appointment Approved', esc(ev.resident||'')+'\'s appointment has been approved and scheduled.');
+        ev.status = res.status || 'scheduled';
+        ecToast(ev.status === 'waitlisted' ? 'Appointment Waitlisted' : 'Appointment Scheduled',
+          ev.message || (esc(ev.resident||'') + '\'s appointment has been updated.'));
         ecRender();
       } else {
         ecToast('Approval Failed', (res&&res.message)||'Could not approve this appointment.', true);

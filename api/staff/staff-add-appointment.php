@@ -119,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pet_name = $pet['pet_name'];
     }
 
-    $capacityStatuses = ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress'];
+    $capacityStatuses = ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress', 'action_needed'];
     $reservesSlot = in_array($status, $capacityStatuses, true);
 
     // Slot capacity check

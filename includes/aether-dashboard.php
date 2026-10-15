@@ -412,7 +412,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     $aeth_apptSummary = ['total_30d' => 0, 'upcoming' => 0, 'completed_30d' => 0, 'no_show_30d' => 0];
     $__r = $conn->query("SELECT
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS total_30d,
-      SUM(CASE WHEN archived_at IS NULL AND preferred_date >= CURDATE() AND status IN ('pending','approved','scheduled','rescheduled') THEN 1 ELSE 0 END) AS upcoming,
+      SUM(CASE WHEN archived_at IS NULL AND preferred_date >= CURDATE() AND status IN ('pending','approved','scheduled','rescheduled','action_needed') THEN 1 ELSE 0 END) AS upcoming,
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'completed' THEN 1 ELSE 0 END) AS completed_30d,
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'no_show' THEN 1 ELSE 0 END) AS no_show_30d
       FROM appointments");
@@ -1878,6 +1878,8 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       </div>
       <form id="createProgramForm" method="POST" action="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#analytics', ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;flex-direction:column;gap:16px;">
         <input type="hidden" name="create_program" value="1">
+        <?php echo csrfField(); ?>
+        <input type="hidden" name="reschedule_offers_json" id="abRescheduleOffersJson" value="[]">
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Program Name <span style="color:#e53e3e;">*</span></label>
           <input class="ab-input" name="program_name" placeholder="e.g. Free Kapon Drive" required>
@@ -1911,11 +1913,31 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
             <input class="ab-input" type="date" name="end_date" required>
           </div>
         </div>
-        <div id="abProgramConflictSummary" role="status" aria-live="polite" hidden style="padding:10px 12px;border-radius:6px;font-size:13px;line-height:1.5;"></div>
-        <label id="abNotifyAffectedWrap" hidden style="align-items:flex-start;gap:8px;font-size:13px;line-height:1.45;color:#991b1b;">
-          <input type="checkbox" name="notify_affected" value="1" style="margin-top:2px;">
-          <span>Notify affected residents through their DCVS portal and registered email/SMS. Their appointments will not be moved or cancelled automatically.</span>
-        </label>
+        <div id="abProgramConflictSummary" role="status" aria-live="polite" hidden style="padding:12px 14px;border:1px solid #e5e7eb;border-top:2px solid #b45309;border-radius:8px;font-size:13px;line-height:1.5;"></div>
+        <div id="abProgramConflictChoices" hidden style="border-top:1px solid #e5e7eb;">
+          <label style="display:flex;align-items:flex-start;gap:12px;padding:10px 4px;border-bottom:1px solid #e5e7eb;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="reschedule" id="abRescheduleAppointmentsChoice" style="flex:0 0 auto;margin-top:3px;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Reschedule affected appointments</strong>
+              <span>Set a new date and time for each affected appointment. Residents have 3 days to accept or decline.</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid #e5e7eb;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="notify" id="abKeepAppointmentsChoice" style="flex:0 0 auto;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Keep appointments as they are</strong>
+              <span>Appointments remain unchanged.</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;padding:10px 4px;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="adjust_hours" id="abChangeProgramHoursChoice" style="flex:0 0 auto;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Change program hours</strong>
+              <span>Adjust Operating Time above. Conflicts are recalculated when the hours change.</span>
+            </span>
+          </label>
+          <input type="checkbox" name="notify_affected" id="abNotifyAffectedInput" value="1" hidden>
+        </div>
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Operating Time</label>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -1927,11 +1949,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <input type="hidden" name="program_start_time" id="abProgramStartTime">
           <input type="hidden" name="program_end_time" id="abProgramEndTime">
         </div>
-        <div class="ab-field" style="margin-bottom:0;">
-          <label class="ab-label">Staff Required <span style="color:#e53e3e;">*</span></label>
-          <input class="ab-input" type="number" name="staff_required_count" id="abStaffRequiredCount" min="1" max="<?php echo max(1, dcvsActiveStaffCount($conn)); ?>" value="1" required>
-          <div style="font-size:12px;color:#71717a;margin-top:4px;">Available routine appointment capacity is reduced by this number during program hours.</div>
-        </div>
+        <input type="hidden" name="staff_required_count" id="abStaffRequiredCount" value="1">
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Coverage / Barangay <span style="color:#e53e3e;">*</span></label>
           <div style="display:flex;gap:12px;margin-bottom:8px;">
@@ -3522,16 +3540,29 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var startTime = form.querySelector('input[name="program_start_time"]').value;
     var endTime = form.querySelector('input[name="program_end_time"]').value;
     var staffRequired = form.querySelector('input[name="staff_required_count"]').value;
-    var notifyWrap = document.getElementById('abNotifyAffectedWrap');
-    var notifyInput = notifyWrap ? notifyWrap.querySelector('input[name="notify_affected"]') : null;
+    var conflictChoices = document.getElementById('abProgramConflictChoices');
+    var notifyInput = document.getElementById('abNotifyAffectedInput');
+    var keepChoice = document.getElementById('abKeepAppointmentsChoice');
+    var hoursChoice = document.getElementById('abChangeProgramHoursChoice');
+    var rescheduleChoice = document.getElementById('abRescheduleAppointmentsChoice');
+    var offersInput = document.getElementById('abRescheduleOffersJson');
     if (!start || !end || !startTime || !endTime || !staffRequired) {
       summary.hidden = true;
-      if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+      if (conflictChoices) conflictChoices.hidden = true;
       if (notifyInput) notifyInput.checked = false;
+      if (keepChoice) keepChoice.checked = false;
+      if (hoursChoice) hoursChoice.checked = false;
+      if (rescheduleChoice) rescheduleChoice.checked = false;
+      if (offersInput) offersInput.value = '[]';
       return;
     }
 
     var requestId = ++abConflictRequest;
+    if (keepChoice) keepChoice.checked = false;
+    if (hoursChoice) hoursChoice.checked = false;
+    if (rescheduleChoice) rescheduleChoice.checked = false;
+    if (notifyInput) notifyInput.checked = false;
+    if (offersInput) offersInput.value = '[]';
     summary.hidden = false;
     summary.style.background = '#f4f4f5';
     summary.style.color = '#52525b';
@@ -3555,28 +3586,138 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         var appointments = data.appointments || [];
         var reports = data.reports || [];
         if (appointments.length) {
-          summary.style.background = '#fef2f2';
-          summary.style.color = '#991b1b';
-          var intro = document.createElement('div');
-          intro.textContent = appointments.length + ' appointment(s) would exceed the remaining staff capacity during the program hours. Reschedule them first or choose to notify the affected residents.';
-          summary.appendChild(intro);
-          var appointmentList = document.createElement('ul');
-          appointmentList.style.cssText = 'margin:6px 0 0;padding-left:20px;';
-          appointments.slice(0, 8).forEach(function(item) {
-            var li = document.createElement('li');
-            li.textContent = item.preferred_date + ' ' + item.preferred_time + ' · ' + (item.reference_id || 'Appointment') + ' · ' + item.full_name;
-            appointmentList.appendChild(li);
+          summary.style.background = '#fff';
+          summary.style.color = '#1e293b';
+          summary.style.borderColor = '#dbe3ec';
+          var statusCounts = {};
+          appointments.forEach(function(item) {
+            var label = String(item.status || 'active').replace(/_/g, ' ');
+            label = label.charAt(0).toUpperCase() + label.slice(1);
+            statusCounts[label] = (statusCounts[label] || 0) + 1;
           });
-          summary.appendChild(appointmentList);
-          if (notifyWrap) { notifyWrap.hidden = false; notifyWrap.style.display = 'flex'; }
+          var heading = document.createElement('div');
+          heading.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-weight:600;color:#18181b;';
+          var headingText = document.createElement('span');
+          headingText.textContent = appointments.length + ' appointment' + (appointments.length === 1 ? '' : 's') + ' affected';
+          var headingCount = document.createElement('span');
+          headingCount.style.cssText = 'font-size:12px;font-weight:400;color:#64748b;white-space:nowrap;';
+          headingCount.textContent = Object.keys(statusCounts).map(function(label) {
+            return statusCounts[label] + ' ' + label;
+          }).join(' · ');
+          heading.appendChild(headingText);
+          heading.appendChild(headingCount);
+          summary.appendChild(heading);
+
+          var context = document.createElement('p');
+          context.style.cssText = 'margin:4px 0 10px;color:#334155;';
+          var remainingRoutineCapacity = appointments.reduce(function(minimum, item) {
+            return Math.min(minimum, Number(item.slot_capacity_after) || 0);
+          }, Number.POSITIVE_INFINITY);
+          context.textContent = 'This program is from ' + formatProgramTime(startTime) + ' to ' + formatProgramTime(endTime) + ' on '
+            + formatProgramDate(start) + ' to ' + formatProgramDate(end) + ', leaving '
+            + remainingRoutineCapacity + ' for routine appointments at the affected times.';
+          summary.appendChild(context);
+
+          var grouped = {};
+          appointments.forEach(function(item) {
+            if (!grouped[item.schedule_date]) grouped[item.schedule_date] = [];
+            grouped[item.schedule_date].push(item);
+          });
+          Object.keys(grouped).sort().forEach(function(date) {
+            var items = grouped[date];
+            var card = document.createElement('div');
+            card.style.cssText = 'border:1px solid #e2e8f0;border-radius:7px;margin-top:7px;padding:8px 10px;background:#fff;';
+            var dayHeader = document.createElement('div');
+            dayHeader.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-weight:600;';
+            var dayDate = document.createElement('span');
+            dayDate.textContent = formatProgramDate(date);
+            var dayCount = document.createElement('span');
+            dayCount.style.cssText = 'font-weight:400;color:#64748b;';
+            dayCount.textContent = items.length + ' appointment' + (items.length === 1 ? '' : 's');
+            dayHeader.appendChild(dayDate);
+            dayHeader.appendChild(dayCount);
+            card.appendChild(dayHeader);
+
+            items.forEach(function(item) {
+              var row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding-top:8px;margin-top:6px;border-top:1px solid #f1f5f9;';
+              var time = document.createElement('span');
+              time.style.cssText = 'flex:0 0 66px;color:#475569;white-space:nowrap;';
+              time.textContent = formatProgramTime(item.schedule_time);
+              var detail = document.createElement('div');
+              detail.style.cssText = 'flex:1;min-width:0;';
+              var primary = document.createElement('div');
+              primary.style.cssText = 'color:#334155;';
+              var service = document.createElement('span');
+              var serviceName = String(item.appointment_type || 'Appointment').replace(/_/g, ' ');
+              serviceName = serviceName.charAt(0).toUpperCase() + serviceName.slice(1);
+              service.textContent = serviceName + (item.pet_name ? ' for ' + item.pet_name : '');
+              primary.appendChild(service);
+              detail.appendChild(primary);
+              var resident = document.createElement('div');
+              resident.style.cssText = 'display:flex;flex-wrap:wrap;gap:0 5px;font-size:12px;color:#64748b;';
+              var residentName = document.createElement('span');
+              residentName.textContent = item.full_name || 'Resident';
+              var reference = document.createElement('span');
+              reference.textContent = item.reference_id || 'Appointment';
+              resident.appendChild(residentName);
+              resident.appendChild(reference);
+              detail.appendChild(resident);
+              var badge = document.createElement('span');
+              badge.style.cssText = 'flex-shrink:0;padding:2px 7px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:11px;';
+              badge.textContent = String(item.status || 'pending').replace(/_/g, ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); });
+              row.appendChild(time);
+              row.appendChild(detail);
+              row.appendChild(badge);
+              card.appendChild(row);
+
+              var proposal = document.createElement('div');
+              proposal.className = 'ab-reschedule-proposal';
+              proposal.setAttribute('data-appointment-id', item.appointment_id);
+              proposal.style.cssText = 'display:none;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 2px 76px;';
+              var proposedDate = document.createElement('input');
+              proposedDate.type = 'date';
+              proposedDate.required = false;
+              proposedDate.setAttribute('aria-label', 'Proposed date for ' + (item.reference_id || 'appointment'));
+              proposedDate.min = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+              proposedDate.style.cssText = 'width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cbd5e1;border-radius:6px;font:13px Inter,sans-serif;';
+              var proposedTime = document.createElement('select');
+              proposedTime.required = false;
+              proposedTime.setAttribute('aria-label', 'Proposed time for ' + (item.reference_id || 'appointment'));
+              proposedTime.style.cssText = proposedDate.style.cssText;
+              [
+                ['', 'Choose time'],
+                ['09:00', '9:00 AM'],
+                ['10:00', '10:00 AM'],
+                ['11:00', '11:00 AM'],
+                ['14:00', '2:00 PM'],
+                ['15:00', '3:00 PM']
+              ].forEach(function(optionData) {
+                var option = document.createElement('option');
+                option.value = optionData[0];
+                option.textContent = optionData[1];
+                proposedTime.appendChild(option);
+              });
+              proposal.appendChild(proposedDate);
+              proposal.appendChild(proposedTime);
+              card.appendChild(proposal);
+            });
+            summary.appendChild(card);
+          });
+          if (conflictChoices) conflictChoices.hidden = false;
         } else {
           summary.style.background = reports.length ? '#fffbeb' : '#f0fdf4';
           summary.style.color = reports.length ? '#92400e' : '#166534';
+          summary.style.borderColor = reports.length ? '#fde68a' : '#bbf7d0';
           var clear = document.createElement('div');
           clear.textContent = reports.length ? 'No appointment staffing conflicts found.' : 'No appointment or report conflicts found.';
           summary.appendChild(clear);
-          if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+          if (conflictChoices) conflictChoices.hidden = true;
           if (notifyInput) notifyInput.checked = false;
+          if (keepChoice) keepChoice.checked = false;
+          if (hoursChoice) hoursChoice.checked = false;
+          if (rescheduleChoice) rescheduleChoice.checked = false;
+          if (offersInput) offersInput.value = '[]';
         }
         if (reports.length) {
           var reportWarning = document.createElement('div');
@@ -3598,14 +3739,95 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         summary.style.background = '#fffbeb';
         summary.style.color = '#92400e';
         summary.textContent = error.message + ' The server will validate conflicts when saving.';
-        if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+        if (conflictChoices) conflictChoices.hidden = true;
+        if (notifyInput) notifyInput.checked = false;
       });
   }
 
+  function formatProgramDate(value) {
+    var parts = String(value || '').substring(0, 10).split('-');
+    if (parts.length !== 3) return value || '';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+  }
+
+  function formatProgramTime(value) {
+    var parts = String(value || '').split(':');
+    if (parts.length < 2) return value || '';
+    var date = new Date();
+    date.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return isNaN(date.getTime()) ? value : date.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  }
+
+  function syncProgramRescheduleOffers() {
+    var selected = document.getElementById('abRescheduleAppointmentsChoice');
+    var notify = document.getElementById('abNotifyAffectedInput');
+    var offersInput = document.getElementById('abRescheduleOffersJson');
+    var proposals = Array.prototype.slice.call(document.querySelectorAll('.ab-reschedule-proposal'));
+    var active = !!(selected && selected.checked);
+    proposals.forEach(function(proposal) {
+      proposal.style.display = active ? 'grid' : 'none';
+      proposal.querySelectorAll('input, select').forEach(function(field) {
+        field.required = active;
+      });
+    });
+    var keepChoice = document.getElementById('abKeepAppointmentsChoice');
+    if (notify) notify.checked = active || !!(keepChoice && keepChoice.checked);
+    if (!offersInput) return;
+    var offers = proposals.map(function(proposal) {
+      var fields = proposal.querySelectorAll('input, select');
+      return {
+        appointment_id: Number(proposal.getAttribute('data-appointment-id')),
+        date: fields[0].value,
+        time: fields[1].value
+      };
+    });
+    offersInput.value = JSON.stringify(offers);
+  }
+
   if (programForm) {
+    var keepAppointmentsChoice = document.getElementById('abKeepAppointmentsChoice');
+    var changeProgramHoursChoice = document.getElementById('abChangeProgramHoursChoice');
+    var rescheduleAppointmentsChoice = document.getElementById('abRescheduleAppointmentsChoice');
+    var notifyAffectedInput = document.getElementById('abNotifyAffectedInput');
+    if (keepAppointmentsChoice) {
+      keepAppointmentsChoice.addEventListener('change', function() {
+        syncProgramRescheduleOffers();
+      });
+    }
+    if (rescheduleAppointmentsChoice) {
+      rescheduleAppointmentsChoice.addEventListener('change', syncProgramRescheduleOffers);
+    }
+    if (changeProgramHoursChoice) {
+      changeProgramHoursChoice.addEventListener('change', function() {
+        if (!changeProgramHoursChoice.checked) return;
+        if (notifyAffectedInput) notifyAffectedInput.checked = false;
+        var startTimeControl = document.getElementById('abTimeStart');
+        if (startTimeControl) {
+          startTimeControl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          startTimeControl.focus();
+          if (typeof startTimeControl.showPicker === 'function') startTimeControl.showPicker();
+        }
+      });
+    }
     programForm.addEventListener('input', aethSaveProgramDraft);
     programForm.addEventListener('change', aethSaveProgramDraft);
     programForm.addEventListener('submit', aethSaveProgramDraft);
+    programForm.addEventListener('input', syncProgramRescheduleOffers);
+    programForm.addEventListener('change', syncProgramRescheduleOffers);
+    programForm.addEventListener('submit', function(event) {
+      syncProgramRescheduleOffers();
+      if (!rescheduleAppointmentsChoice || !rescheduleAppointmentsChoice.checked) return;
+      var proposals = Array.prototype.slice.call(document.querySelectorAll('.ab-reschedule-proposal'));
+      var incomplete = proposals.some(function(proposal) {
+        var fields = proposal.querySelectorAll('input, select');
+        return !fields[0].value || !fields[1].value;
+      });
+      if (!proposals.length || incomplete) {
+        event.preventDefault();
+        alert('Choose a proposed date and time for every affected appointment.');
+      }
+    });
     var startDateInput = programForm.querySelector('input[name="start_date"]');
     var endDateInput = programForm.querySelector('input[name="end_date"]');
     if (startDateInput) {
@@ -3615,7 +3837,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (endDateInput) {
       endDateInput.addEventListener('focus', function() { aethSetProgramDateLimits(!!programForm.querySelector('input[name="create_program"]')); });
     }
-    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], input[name="staff_required_count"]').forEach(function(input) {
+    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], input[name="staff_required_count"], #abTimeStart, #abTimeEnd').forEach(function(input) {
       input.addEventListener('change', aethCheckProgramConflicts);
     });
   }

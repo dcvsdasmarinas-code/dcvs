@@ -28,11 +28,14 @@ $lastDay = date('Y-m-t', strtotime($firstDay));
 
 // Aggregate booked counts per date + time slot for the requested month.
 $capacityStatuses = "'" . implode("','", dcvsCapacityStatuses()) . "'";
-$stmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level, COUNT(*) AS c FROM appointments
-                        WHERE preferred_date >= ? AND preferred_date <= ?
+$stmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                               COALESCE(scheduled_time, preferred_time) AS slot_time,
+                               urgency_level, COUNT(*) AS c FROM appointments
+                        WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
                                                     AND status IN ($capacityStatuses)
                           AND archived_at IS NULL
-                        GROUP BY preferred_date, preferred_time, urgency_level");
+                        GROUP BY COALESCE(scheduled_date, preferred_date),
+                                 COALESCE(scheduled_time, preferred_time), urgency_level");
 $stmt->bind_param("ss", $firstDay, $lastDay);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -41,8 +44,8 @@ $slots = [];
 $routineSlots = [];
 $urgentSlots = [];
 while ($row = $result->fetch_assoc()) {
-    $time = substr($row['preferred_time'], 0, 5);
-    $date = $row['preferred_date'];
+    $time = substr($row['slot_time'], 0, 5);
+    $date = $row['slot_date'];
     $count = (int)$row['c'];
     $slots[$date][$time] = ($slots[$date][$time] ?? 0) + $count;
     if ($row['urgency_level'] === 'urgent') {
@@ -54,23 +57,25 @@ while ($row = $result->fetch_assoc()) {
 $stmt->close();
 
 // Held slots: any active appointment locks the slot against other residents.
-$heldStmt = $conn->prepare("SELECT preferred_date, preferred_time FROM appointments
-                            WHERE preferred_date >= ? AND preferred_date <= ?
-                              AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+$heldStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                                   COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
+                            WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
+                              AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
                               AND archived_at IS NULL");
 $heldStmt->bind_param("ss", $firstDay, $lastDay);
 $heldStmt->execute();
 $heldResult = $heldStmt->get_result();
 $held = [];
 while ($row = $heldResult->fetch_assoc()) {
-    $held[$row['preferred_date']][substr($row['preferred_time'], 0, 5)] = true;
+    $held[$row['slot_date']][substr($row['slot_time'], 0, 5)] = true;
 }
 $heldStmt->close();
 
 // Locked slots: only confirmed appointments (scheduled/rescheduled/approved) —
 // these staff cannot toggle to unavailable in the Availability page.
-$lockStmt = $conn->prepare("SELECT preferred_date, preferred_time FROM appointments
-                            WHERE preferred_date >= ? AND preferred_date <= ?
+$lockStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                                   COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
+                            WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
                               AND status IN ('scheduled','rescheduled','approved')
                               AND archived_at IS NULL");
 $lockStmt->bind_param("ss", $firstDay, $lastDay);
@@ -78,7 +83,7 @@ $lockStmt->execute();
 $lockResult = $lockStmt->get_result();
 $locked = [];
 while ($row = $lockResult->fetch_assoc()) {
-    $locked[$row['preferred_date']][substr($row['preferred_time'], 0, 5)] = true;
+    $locked[$row['slot_date']][substr($row['slot_time'], 0, 5)] = true;
 }
 $lockStmt->close();
 

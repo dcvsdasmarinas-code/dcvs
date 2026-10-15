@@ -76,7 +76,7 @@ if ($mode === 'weekly') {
     $held = $conn->query("SELECT WEEKDAY(preferred_date) + 1 AS day_of_week, preferred_date, LEFT(preferred_time, 5) AS slot_time
                           FROM appointments
                           WHERE preferred_date >= CURDATE()
-                            AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+                            AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
                             AND archived_at IS NULL");
     if (!$held) {
         echo json_encode(['ok' => false, 'error' => 'Could not verify existing appointments before saving.']);

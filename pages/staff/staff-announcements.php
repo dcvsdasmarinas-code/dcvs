@@ -2303,6 +2303,7 @@ async function openCreateAnnouncement(options){
     document.getElementById('formProgramId').value = String(program.program_id);
     document.getElementById('formCategory').value = 'event';
     document.getElementById('formTitle').value = program.title || '';
+    document.getElementById('formProgramLocation').value = program.location || '';
     document.getElementById('formContent').value = program.content || '';
     document.getElementById('eventDate').value = program.event_date || '';
     document.getElementById('eventEndDate').value = program.end_date || '';

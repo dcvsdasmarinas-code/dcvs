@@ -1926,8 +1926,8 @@ $activePage = 'adoption-pool';
       color: #18181b;
       margin: 0;
     }
-    .info-card-head .pool-edit-icon { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; cursor:pointer; }
-    .info-card-head .pool-edit-icon img { display:block; width:16px; height:16px; object-fit:contain; }
+    .info-card-head .pool-edit-icon { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; cursor:pointer; }
+    .info-card-head .pool-edit-icon svg { display:block; width:16px; height:16px; stroke:currentColor; }
     .info-card-head .pool-edit-icon:hover { border-color:#18181b; background:#f4f4f5; }
 
     .drawer-info-grid {
@@ -2448,8 +2448,8 @@ $activePage = 'adoption-pool';
       }
 
       .drawer-info-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 12px;
       }
 
       .readiness-table {
@@ -4925,7 +4925,7 @@ $activePage = 'adoption-pool';
 
           <div class="adoption-progress">${progressHtml}</div>
 
-          <div class="info-card-head"><h3>Pet information</h3>${!isAdopted && !isReserved ? '<button type="button" class="pool-edit-icon" id="drawer-edit-btn" aria-label="Edit pet" title="Edit pet"><img src="../../assets/images/edit%20icon.png" alt=""></button>' : ''}</div>
+          <div class="info-card-head"><h3>Pet information</h3>${!isAdopted && !isReserved ? '<button type="button" class="pool-edit-icon" id="drawer-edit-btn" aria-label="Edit pet" title="Edit pet"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></button>' : ''}</div>
           <div class="drawer-info-grid">
             <div class="drawer-info-item"><span class="drawer-info-label">Rescue Source</span><span class="drawer-info-val">${pet.rescueSource}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Rescue Date</span><span class="drawer-info-val">${pet.fullRescueDate || pet.rescueDate}</span></div>

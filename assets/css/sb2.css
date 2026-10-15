@@ -637,6 +637,18 @@ body.sb2-active .sd-dialog-content {
   box-shadow: 0 10px 15px rgba(0, 0, 0, .1), 0 4px 6px rgba(0, 0, 0, .1);
 }
 
+body.sb2-active #abNewCampModal .sd-dialog-content {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+body.sb2-active #abNewCampModal .sd-dialog-content > form {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow: visible;
+}
+
 body.sb2-active #record-rescue-modal .sd-dialog-content {
   max-width: 640px;
 }

@@ -12,6 +12,7 @@ session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -26,6 +27,7 @@ if ($_SESSION['role'] !== 'resident') {
 }
 
 expireAdoptionReservations($conn);
+dcvsExpireAppointmentRescheduleOffers($conn);
 $adoptionClockResult = $conn->query('SELECT UNIX_TIMESTAMP(NOW()) AS server_now');
 if (!$adoptionClockResult) {
     throw new RuntimeException('The adoption reservation clock could not be loaded.');
@@ -201,7 +203,15 @@ $stmt->close();
 
 // Fetch user's appointments from database (excluding archived)
 $appointments = [];
-$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
+$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level,
+    a.preferred_date, a.preferred_time, a.scheduled_date, a.scheduled_time,
+    a.original_schedule_date, a.original_schedule_time, a.reschedule_response_deadline,
+    a.cancelled_by, a.cancellation_reason, a.status,
+    a.pet_id, a.notes, a.created_at,
+    TIMESTAMP(COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)) > DATE_ADD(NOW(), INTERVAL 24 HOUR) AS can_cancel,
+    COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo
+    FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id
+    WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -399,15 +409,13 @@ $applicationStmt = $conn->prepare("
     SELECT aa.application_id, aa.application_date, aa.status, aa.pet_listing_id, aa.resulting_pet_id,
            pl.name AS pet_name, pl.species, pl.breed, pl.age, pl.gender, pl.photo_url,
            aa.approved_pickup_at, aa.reserved_at, aa.response_deadline, aa.confirmed_at,
-           aa.pickup_deadline, aa.decline_reason, aa.rejection_reason, aa.finalized_at,
-           DATE_FORMAT(aa.response_deadline, '%M %e, %Y') AS response_deadline_display,
-           DATE_FORMAT(aa.pickup_deadline, '%M %e, %Y') AS pickup_deadline_display,
+           aa.pickup_deadline, aa.decline_reason, aa.rejection_reason, aa.finalized_at, aa.reviewed_at,
            UNIX_TIMESTAMP(aa.response_deadline) AS response_deadline_epoch,
            UNIX_TIMESTAMP(aa.pickup_deadline) AS pickup_deadline_epoch
     FROM adoption_applications aa
     JOIN pet_listings pl ON pl.listing_id = aa.pet_listing_id
     WHERE aa.applicant_id = ?
-      AND aa.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired','rejected')
+      AND aa.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired','rejected','withdrawn')
     ORDER BY aa.application_date DESC, aa.application_id DESC
 ");
 if (!$applicationStmt) {
@@ -527,7 +535,7 @@ $annResult = $annStmt->get_result();
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>" />
-  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=2" />
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=9" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -1309,6 +1317,34 @@ $annResult = $annStmt->get_result();
 <style>
   .adoption-countdown{display:inline-block;margin-left:5px;font-size:12px;font-weight:600;color:#92400e}
   .adoption-confirm-row{margin-top:5px;padding:4px 10px;font-size:12px;white-space:nowrap}
+  .adoption-progress{min-width:180px;max-width:290px}
+  .adoption-progress-bars{display:grid;grid-template-columns:repeat(5,minmax(16px,1fr));gap:4px;margin-bottom:7px}
+  .adoption-progress-segment{height:5px;border-radius:99px;background:#e4e4e7}
+  .adoption-progress-segment.is-done{background:#0e8131}
+  .adoption-progress-segment.is-current{background:#0e8131}
+  .adoption-progress-segment.is-terminal{background:#dc2626}
+  .adoption-progress-heading{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .adoption-progress-title{font-size:13px;font-weight:600;color:#18181b}
+  .adoption-progress-step{font-size:11px;color:#71717a;white-space:nowrap}
+  .adoption-progress-note{font-size:12px;line-height:1.4;color:#71717a;margin-top:3px}
+  .adoption-progress .adoption-confirm-row{margin-top:7px}
+  .adoption-timeline{position:relative;margin:0 0 20px;padding:0;list-style:none}
+  .adoption-timeline::before{content:"";position:absolute;left:8px;top:10px;bottom:12px;width:2px;background:#e4e4e7}
+  .adoption-timeline-item{position:relative;display:flex;gap:12px;padding-bottom:18px}
+  .adoption-timeline-item:last-child{padding-bottom:0}
+  .adoption-timeline-dot{position:relative;z-index:1;width:18px;height:18px;flex:0 0 18px;border:2px solid #d4d4d8;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}
+  .adoption-timeline-item.is-done .adoption-timeline-dot,
+  .adoption-timeline-item.is-current .adoption-timeline-dot{border-color:#0e8131;background:#0e8131}
+  .adoption-timeline-item.is-terminal .adoption-timeline-dot{border-color:#dc2626;background:#dc2626}
+  .adoption-timeline-item.is-done .adoption-timeline-dot::after,
+  .adoption-timeline-item.is-current .adoption-timeline-dot::after,
+  .adoption-timeline-item.is-terminal .adoption-timeline-dot::after{content:"";width:4px;height:7px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+  .adoption-timeline-copy{min-width:0;flex:1}
+  .adoption-timeline-title{font-size:14px;font-weight:600;color:#18181b}
+  .adoption-timeline-date{font-size:12px;color:#71717a;margin-top:2px}
+  .adoption-timeline-note{font-size:13px;line-height:1.45;color:#52525b;margin-top:4px}
+  .adoption-browse-link{display:inline-flex;align-items:center;margin:4px 0 18px;color:#0e8131;font-size:13px;font-weight:600;text-decoration:none}
+  .adoption-browse-link:hover{text-decoration:underline}
   .adoption-confirm-pet{display:flex;align-items:center;gap:12px;margin-bottom:16px}
   .adoption-confirm-pet img{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#f4f4f5}
   .adoption-confirm-warning{padding:12px;border:1px solid #fecaca;border-radius:6px;background:#fef2f2;color:#991b1b;font-weight:500}
@@ -3118,7 +3154,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
       </a>
     </div>
 
-    <div class="appt-db-table-area dt-container">
+    <div class="appt-db-table-area table-responsive dt-container">
       <table class="appt-table" id="reportTable">
         <thead>
           <tr class="sd-tr">
@@ -3271,8 +3307,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #apptDrawer .rpt-drawer-body { padding-top:18px; }
     #apptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
     .rpt-divider { border:0; border-top:1px solid #e4e4e7; margin:20px 0; }
-    #apptDrawer .rpt-drawer-foot { justify-content:center; }
-    #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 0 auto; }
+    #apptDrawer .rpt-drawer-foot { justify-content:flex-end; }
+    #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 1 auto; min-width:0; white-space:nowrap; }
     /* drawer status badge + timeline */
     .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border:1px solid transparent; border-radius:20px; white-space:nowrap; }
     .rpt-status-badge .st-dot { width:7px; height:7px; border-radius:50%; }
@@ -3293,6 +3329,45 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .rpt-next-title { font-family:'Inter',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:8px; }
     .rpt-next ol { margin:0; padding-left:1.15rem; }
     .rpt-next li { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    #apptDrawer .appt-status-notice { margin:-2px 0 22px; padding:0; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-status-notice[hidden] { display:none; }
+    #apptDrawer .appt-status-notice strong { display:block; margin-bottom:3px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-status-notice p { margin:0; color:#475569; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-action-needed { margin:-2px 0 22px; padding:0; border:0 !important; box-shadow:none !important; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-action-needed::before,
+    #apptDrawer .appt-action-needed::after { display:none !important; content:none !important; }
+    #apptDrawer .appt-action-needed[hidden] { display:none; }
+    #apptDrawer .appt-action-needed h3 { margin:0 0 4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-action-needed p { margin:0; color:#475569; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-reschedule-times { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:10px 0; font-size:13px; }
+    #apptDrawer .appt-reschedule-times span { display:block; margin-bottom:2px; color:#64748b; }
+    #apptDrawer .appt-reschedule-times strong { display:block; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-times .requested strong { text-decoration:line-through; text-decoration-thickness:1px; }
+    #apptDrawer .appt-reschedule-actions { display:flex; gap:8px; margin:8px 0; }
+    #apptDrawer .appt-reschedule-actions .sd-btn { justify-content:center; }
+    #apptDrawer .appt-response-deadline { margin-top:6px !important; color:#334155 !important; font-size:13px !important; }
+    #apptDrawer .appt-scheduled-notice { margin:-2px 0 22px; padding:12px 14px; border:1px solid #dbeafe; border-radius:8px; background:#eff6ff; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-scheduled-notice[hidden] { display:none; }
+    #apptDrawer .appt-scheduled-notice strong { display:block; margin-bottom:4px; color:#1e3a8a; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-scheduled-notice p { margin:0; color:#334155; font-size:13px; line-height:1.5; }
+    #apptDrawer .appt-cancel-cutoff { margin:-14px 0 18px; color:#92400e; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-cancel-cutoff[hidden] { display:none; }
+    #apptDrawer .appt-footer-reschedule { display:flex; flex-direction:column; align-items:stretch; gap:4px; }
+    #apptDrawer .appt-reschedule-soon { color:#71717a; font-size:12px; line-height:1.3; text-align:center; }
+    #apptDrawer .appt-progress { margin-top:38px; }
+    #apptDrawer .appt-progress-title { margin-bottom:12px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-progress-list { margin:0; padding:0; list-style:none; }
+    #apptDrawer .appt-progress-step { position:relative; min-height:38px; padding:0 0 10px 26px; color:#64748b; font-size:14px; line-height:1.35; }
+    #apptDrawer .appt-progress-step:last-child { min-height:0; padding-bottom:0; }
+    #apptDrawer .appt-progress-step::before { position:absolute; top:1px; left:0; width:14px; height:14px; box-sizing:border-box; border:2px solid #d6ddd8; border-radius:50%; background:#fff; content:''; }
+    #apptDrawer .appt-progress-step:not(:last-child)::after { position:absolute; top:15px; bottom:-1px; left:6px; width:2px; background:#d6ddd8; content:''; }
+    #apptDrawer .appt-progress-step.done { color:#18181b; }
+    #apptDrawer .appt-progress-step.done::before { border-color:#15803d; background:#15803d; }
+    #apptDrawer .appt-progress-step.done:not(:last-child)::after { background:#15803d; }
+    #apptDrawer .appt-progress-step.current { color:#18181b; font-weight:600; }
+    #apptDrawer .appt-progress-step.current::before { border-color:#15803d; background:#fff; box-shadow:inset 0 0 0 3px #fff; outline:2px solid #15803d; outline-offset:-4px; }
+    #apptDrawer .appt-progress-step-title { display:block; }
+    #apptDrawer .appt-progress-step-detail { display:block; margin-top:2px; color:#64748b; font-size:13px; font-weight:400; }
     .rpt-drawer-foot { display:flex; gap:8px; padding:16px 24px; border-top:1px solid #e4e4e7; align-items:center; }
     .rpt-drawer-foot .sd-btn { flex:1; justify-content:center; }
     .rpt-more-wrap { position:relative; }
@@ -3318,8 +3393,12 @@ include __DIR__ . '/../../includes/portal-toast.php';
       .rpt-drawer-head, .rpt-drawer-body { padding-left:20px; padding-right:20px; }
       .rpt-drawer-foot { padding-left:20px; padding-right:20px; }
       #apptDrawer .pet-drawer-info { grid-template-columns:1fr; }
-      #apptDrawer .rpt-drawer-foot { flex-wrap:wrap; }
-      #apptDrawer .rpt-drawer-foot .sd-btn { flex:1 1 100%; }
+      #apptDrawer .rpt-drawer-foot { align-items:stretch; flex-direction:column; gap:8px; }
+      #apptDrawer .rpt-drawer-foot .sd-btn { box-sizing:border-box; width:100%; flex:0 0 auto; min-height:42px; }
+      #apptDrawer .appt-footer-reschedule { width:100%; }
+      #apptDrawer .appt-reschedule-soon { text-align:left; }
+      #apptDrawer .appt-reschedule-actions { flex-direction:column; }
+      #apptDrawer .appt-reschedule-times { grid-template-columns:1fr; gap:8px; }
     }
 
     /* ï¿½"?ï¿½"? Submit Report wizard ï¿½"?ï¿½"? */
@@ -3590,9 +3669,13 @@ include __DIR__ . '/../../includes/portal-toast.php';
         'pending'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
         'scheduled'   => ['bg' => '#0E8131', 'color' => '#ffffff', 'border' => '#0E8131'],
         'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
+        'action_needed' => ['bg' => '#ffedd5', 'color' => '#9a3412', 'border' => '#fed7aa'],
+        'expired' => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
         'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+        'rejected'    => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+        'waitlisted'  => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     ];
     ?>
     <?php if (empty($appointments)): ?>
@@ -3612,10 +3695,14 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <select id="apptStatusSelect" class="appt-status-select">
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
+          <option value="action_needed">Action needed</option>
           <option value="scheduled">Scheduled</option>
+          <option value="waitlisted">Waitlisted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
           <option value="rescheduled">Rescheduled</option>
+          <option value="no_show">No Show</option>
+          <option value="rejected">Rejected</option>
         </select>
       </div>
       <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()" style="margin-left:auto;">
@@ -3630,8 +3717,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
             <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="APPT.sortBy('ref')">Request ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="service" onclick="APPT.sortBy('service')">Service<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="pet" onclick="APPT.sortBy('pet')">Pet<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="APPT.sortBy('date')">Preferred Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="APPT.sortBy('time')">Preferred Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="APPT.sortBy('date')">Appointment Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="APPT.sortBy('time')">Appointment Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="submitted" onclick="APPT.sortBy('submitted')">Submitted Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="submittedtime" onclick="APPT.sortBy('submittedtime')">Submitted Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="APPT.sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -3644,12 +3731,18 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $ast = $appt['status'];
             $asc = $apptStatusColors[$ast] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
             $astLabel = ucfirst(str_replace('_', ' ', $ast));
-            $aDate = date('M d, Y', strtotime($appt['preferred_date']));
-            $aTime = date('g:i A', strtotime($appt['preferred_time']));
+            if ($ast === 'action_needed') $astLabel = 'Action needed';
+            elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $astLabel = 'Expired';
+            elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $astLabel = 'Declined';
+            elseif ($ast === 'cancelled' && $appt['cancelled_by'] === 'resident') $astLabel = 'Cancelled by Resident';
+            $scheduledDate = $appt['scheduled_date'] ?: $appt['preferred_date'];
+            $scheduledTime = $appt['scheduled_time'] ?: $appt['preferred_time'];
+            $aDate = date('F j, Y', strtotime($scheduledDate));
+            $aTime = date('g:i A', strtotime($scheduledTime));
             $aCreatedDate = date('M d, Y', strtotime($appt['created_at']));
             $aCreatedTime = date('g:i A', strtotime($appt['created_at']));
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($ast); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($appt['preferred_date']); ?>" data-time="<?php echo (int)strtotime($appt['preferred_time']); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($ast); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($scheduledDate); ?>" data-time="<?php echo (int)strtotime($scheduledTime); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($aptRef); ?></div></td>
             <td class="sd-td">
               <div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div>
@@ -4135,7 +4228,7 @@ if (!empty($adoptionListings)) {
 
         $ref = isset($l['pet_ref_id']) && $l['pet_ref_id'] !== '' ? $l['pet_ref_id'] : ('#PET-' . str_pad((string)$pid, 4, '0', STR_PAD_LEFT));
         $id = preg_replace('/^#/', '', $ref);
-        $regOn = isset($l['created_at']) && $l['created_at'] !== '' ? date('M j, Y', strtotime($l['created_at'])) : $dash;
+        $regOn = isset($l['created_at']) && $l['created_at'] !== '' ? date('F j, Y', strtotime($l['created_at'])) : $dash;
         $about = trim((string)($l['description'] ?? ''));
         if ($about === '') {
             $sd = trim((string)($l['source_description'] ?? ''));
@@ -4213,6 +4306,12 @@ if (!empty($adoptionListings)) {
             'photo' => $photo,
             'status' => $st,
             'applicationProgress' => $applicationProgress,
+            'applicationStatus' => $application ? ((int)($application['resulting_pet_id'] ?? 0) > 0 ? 'adopted' : strtolower((string)$application['status'])) : '',
+            'declineReason' => $application ? (string)($application['decline_reason'] ?? '') : '',
+            'reviewedAt' => $application && !empty($application['reviewed_at']) ? date('F j, Y', strtotime($application['reviewed_at'])) : '',
+            'reservedAt' => $application && !empty($application['reserved_at']) ? date('F j, Y', strtotime($application['reserved_at'])) : '',
+            'confirmedAt' => $application && !empty($application['confirmed_at']) ? date('F j, Y', strtotime($application['confirmed_at'])) : '',
+            'finalizedAt' => $application && !empty($application['finalized_at']) ? date('F j, Y', strtotime($application['finalized_at'])) : '',
             'applicationDate' => $applicationDate,
             'applicationPending' => false,
             'registered' => $regOn,
@@ -4273,6 +4372,7 @@ foreach ($residentAdoptionApplications as $application) {
         'declined' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
         'expired' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
         'rejected' => array('key' => 'declined', 'progress' => 'Declined', 'about' => 'Your application was declined by DCVS staff.'),
+        'withdrawn' => array('key' => 'cancelled', 'progress' => 'Cancelled', 'about' => 'You withdrew this application.'),
     );
     if (!isset($statusMeta[$applicationStatus])) {
         continue;
@@ -4283,27 +4383,31 @@ foreach ($residentAdoptionApplications as $application) {
     $species = ucfirst(strtolower(trim((string)($application['species'] ?? ''))));
     $applicationName = trim((string)($application['pet_name'] ?? '')) ?: 'Pet';
     $applicationDate = date('F j, Y', strtotime($application['application_date']));
+    $responseDeadlineDisplay = !empty($application['response_deadline']) ? date('F j, Y', strtotime($application['response_deadline'])) : '';
+    $pickupDeadlineDisplay = !empty($application['pickup_deadline']) ? date('F j, Y', strtotime($application['pickup_deadline'])) : '';
     $applicationId = (int)$application['application_id'];
     $applicationListingId = (int)$application['pet_listing_id'];
     if ($resultingPetId > 0) {
         $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted', 'about' => 'This adoption has been completed.');
+    } elseif ($applicationStatus === 'declined' && strtolower(trim((string)($application['decline_reason'] ?? ''))) !== 'expired') {
+        $statusMeta[$applicationStatus] = array('key' => 'declined', 'progress' => 'Declined', 'about' => 'Your application was declined.');
+    } elseif (in_array($applicationStatus, array('declined', 'expired'), true)) {
+        $statusMeta[$applicationStatus]['progress'] = 'You didn’t respond / pick up within the allotted time.';
+        $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
     }
     $declineReason = trim((string)($application['decline_reason'] ?? ''));
-    if (in_array($applicationStatus, array('declined', 'expired'), true)) {
-        $statusMeta[$applicationStatus]['progress'] = 'Expired — You didn’t respond / pick up within the allotted time.';
-        $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
-    } elseif ($applicationStatus === 'rejected') {
+    if ($resultingPetId <= 0 && $applicationStatus === 'rejected') {
         $declineReason = trim((string)($application['rejection_reason'] ?? ''));
         if ($declineReason !== '') {
             $statusMeta[$applicationStatus]['progress'] = 'Declined: ' . $declineReason;
             $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
         }
-    } elseif ($applicationStatus === 'reserved' || $applicationStatus === 'approved') {
-        if (!empty($application['response_deadline_display'])) {
-            $statusMeta[$applicationStatus]['progress'] = 'Reserved for you. Respond before ' . $application['response_deadline_display'];
+    } elseif ($resultingPetId <= 0 && ($applicationStatus === 'reserved' || $applicationStatus === 'approved')) {
+        if ($responseDeadlineDisplay !== '') {
+            $statusMeta[$applicationStatus]['progress'] = 'Reserved for you. Respond before ' . $responseDeadlineDisplay;
         }
-    } elseif ($applicationStatus === 'confirmed' && !empty($application['pickup_deadline_display'])) {
-        $statusMeta[$applicationStatus]['progress'] = 'Pick up before ' . $application['pickup_deadline_display'];
+    } elseif ($resultingPetId <= 0 && $applicationStatus === 'confirmed' && $pickupDeadlineDisplay !== '') {
+        $statusMeta[$applicationStatus]['progress'] = 'Pick up before ' . $pickupDeadlineDisplay;
     }
     $vetPets[] = array(
         'id' => 'APP-' . str_pad((string)$applicationId, 4, '0', STR_PAD_LEFT),
@@ -4318,15 +4422,19 @@ foreach ($residentAdoptionApplications as $application) {
         'color' => "\u{2014}",
         'photo' => (string)($application['photo_url'] ?? ''),
         'status' => $statusMeta[$applicationStatus]['key'],
-        'statusLabel' => $applicationStatus === 'declined' || $applicationStatus === 'expired' ? 'Expired' : ($applicationStatus === 'rejected' ? 'Declined' : null),
+        'statusLabel' => $statusMeta[$applicationStatus]['key'] === 'expired' ? 'Expired' : ($statusMeta[$applicationStatus]['key'] === 'declined' ? 'Declined' : ($statusMeta[$applicationStatus]['key'] === 'cancelled' ? 'Cancelled' : null)),
         'applicationProgress' => $statusMeta[$applicationStatus]['progress'],
         'declineReason' => $declineReason,
-        'applicationStatus' => $applicationStatus,
+        'applicationStatus' => $resultingPetId > 0 ? 'adopted' : $applicationStatus,
+        'reviewedAt' => !empty($application['reviewed_at']) ? date('F j, Y', strtotime($application['reviewed_at'])) : '',
+        'reservedAt' => !empty($application['reserved_at']) ? date('F j, Y', strtotime($application['reserved_at'])) : '',
+        'confirmedAt' => !empty($application['confirmed_at']) ? date('F j, Y', strtotime($application['confirmed_at'])) : '',
+        'finalizedAt' => !empty($application['finalized_at']) ? date('F j, Y', strtotime($application['finalized_at'])) : '',
         'responseDeadline' => (string)($application['response_deadline'] ?? ''),
-        'responseDeadlineDisplay' => (string)($application['response_deadline_display'] ?? ''),
+        'responseDeadlineDisplay' => $responseDeadlineDisplay,
         'responseDeadlineEpoch' => (int)($application['response_deadline_epoch'] ?? 0),
         'pickupDeadline' => (string)($application['pickup_deadline'] ?? ''),
-        'pickupDeadlineDisplay' => (string)($application['pickup_deadline_display'] ?? ''),
+        'pickupDeadlineDisplay' => $pickupDeadlineDisplay,
         'pickupDeadlineEpoch' => (int)($application['pickup_deadline_epoch'] ?? 0),
         'applicationDate' => $applicationDate,
         'applicationPending' => $resultingPetId <= 0,
@@ -4456,6 +4564,8 @@ foreach ($residentAdoptionApplications as $application) {
         <option value="review">Action needed</option>
         <option value="confirmed">Ready for Pickup</option>
         <option value="expired">Expired</option>
+        <option value="declined">Declined</option>
+        <option value="cancelled">Cancelled</option>
         <option value="adopted">Adopted</option>
         <option value="unavailable">Not Available</option>
       </select>
@@ -4474,8 +4584,8 @@ foreach ($residentAdoptionApplications as $application) {
     </div>
   </div>
 
-  <div class="appt-db-table-area dt-container">
-    <table class="appt-table" id="cvTable">
+  <div class="appt-db-table-area table-responsive dt-container">
+    <table class="appt-table no-responsive" id="cvTable">
       <thead>
         <tr class="sd-tr">
           <th class="sd-th">Pet</th>
@@ -4572,7 +4682,7 @@ foreach ($residentAdoptionApplications as $application) {
   var adoptionConfirmButton=document.getElementById('adoptionConfirmSubmit');
   var adoptionConfirmError=document.getElementById('adoptionConfirmError');
 
-  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Action needed',icon:'hourglass'},pending:{label:'Under Review',icon:'hourglass'},review:{label:'Action needed',icon:'clipboard'},confirmed:{label:'Ready for Pickup',icon:'check'},expired:{label:'Expired',icon:'minus'},declined:{label:'Declined',icon:'minus'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
+  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Action needed',icon:'hourglass'},pending:{label:'Under Review',icon:'hourglass'},review:{label:'Action needed',icon:'clipboard'},confirmed:{label:'Ready for Pickup',icon:'check'},expired:{label:'Expired',icon:'minus'},declined:{label:'Declined',icon:'minus'},cancelled:{label:'Cancelled',icon:'minus'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
   var ICONS={edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',search:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',cal:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',clock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',weight:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.5L6 21h12l-4-10.5c1.2-.7 2-2 2-3.5a4 4 0 0 0-4-4z"/></svg>',pin:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',species:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.172C10 3.782 8.423 2.679 6.5 3c-2.823.47-4.113 6.006-4 7 .08.703 1.725 1.722 3.656 1 1.261-.472 1.96-1.45 2.344-2.5M14 5.172c0-1.39 1.577-2.493 3.5-2.172 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.344-2.5M8 14v.5M16 14v.5M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444c0-1.061-.162-2.2-.493-3.309m-9.243-6.082A8.801 8.801 0 0 1 12 5c.78 0 1.5.108 2.161.306"/></svg>',breed:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',plus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',doc:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',download:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
 
   var state={status:'all',search:'',sort:'recent',species:'',page:1,perPage:10,activeTab:'overview'};
@@ -4600,11 +4710,99 @@ foreach ($residentAdoptionApplications as $application) {
   }
 
   function statusPillHTML(status,label){
-    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],cancelled:['#f4f4f5','#71717a','#e4e4e7'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var c=colors[status]||['#f4f4f5','#71717a','#e4e4e7'];
     var m=STATUS_META[status]||{label:status||'Unknown'};
     if(label) m={label:label};
     return '<span class="appt-status-pill" style="background:'+c[0]+';color:'+c[1]+';border-color:'+c[2]+';">'+esc(m.label)+'</span>';
+  }
+
+  function applicationProgress(p){
+    var status=p.applicationStatus||'';
+    if(!status) return null;
+    var declinedExpired=status==='declined'&&String(p.declineReason||'').toLowerCase()==='expired';
+    var terminal=status==='withdrawn'?'cancelled':(status==='rejected'||(status==='declined'&&!declinedExpired)?'declined':((status==='expired'||declinedExpired)?'expired':''));
+    var index=({pending:1,under_review:1,needs_info:1,reserved:2,approved:2,confirmed:3,adopted:4})[status];
+    if(terminal) index=terminal==='cancelled'?0:(terminal==='declined'?1:((p.confirmedAt||p.pickupDeadline)?3:2));
+    if(status==='adopted'||p.resultingPetId) { status='adopted'; terminal=''; index=4; }
+    if(index==null) return null;
+    var title=terminal==='expired'?'Expired':(terminal==='declined'?'Declined':(terminal==='cancelled'?'Cancelled':({
+      pending:'Under Review',under_review:'Under Review',needs_info:'Action needed',reserved:'Action needed',approved:'Action needed',confirmed:'Ready for Pickup',adopted:'Adopted'
+    })[status]||'Application progress'));
+    var note=terminal==='expired'
+      ? 'You didn’t respond / pick up within the allotted time.'
+      : terminal==='declined'
+        ? (p.declineReason||'DCVS staff declined this application.')
+        : terminal==='cancelled'
+          ? 'You withdrew this application.'
+          : status==='pending'||status==='under_review'
+            ? 'DCVS staff are reviewing your application.'
+            : status==='needs_info'
+              ? 'DCVS staff requested more information.'
+              : status==='reserved'||status==='approved'
+                ? (p.responseDeadlineDisplay?'Reserved for you. Respond before '+p.responseDeadlineDisplay:'Reserved for you. Respond before the deadline.')
+                : status==='confirmed'
+                  ? (p.pickupDeadlineDisplay?'Pick up before '+p.pickupDeadlineDisplay:'Pick up before the deadline.')
+                  : status==='adopted'?'The adoption is complete.':'';
+    return {status:status,terminal:terminal,index:index,title:title,note:note};
+  }
+
+  function progressBarsHTML(progress){
+    return '<div class="adoption-progress-bars" aria-hidden="true">'+[0,1,2,3,4].map(function(index){
+      var cls=index<progress.index?'is-done':(index===progress.index?(progress.terminal?'is-terminal':'is-current'):'');
+      return '<span class="adoption-progress-segment '+cls+'"></span>';
+    }).join('')+'</div>';
+  }
+
+  function applicationProgressHTML(p){
+    var progress=applicationProgress(p);
+    if(!progress) return '<div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+'</div>';
+    var step='Step '+(progress.index+1)+' of 5';
+    return '<div class="adoption-progress">'+progressBarsHTML(progress)+
+      '<div class="adoption-progress-heading"><span class="adoption-progress-title">'+esc(progress.title)+'</span><span class="adoption-progress-step">'+step+'</span></div>'+
+      '<div class="adoption-progress-note">'+esc(progress.note)+'</div>'+
+      (p.status==='reserved' ? '<button type="button" class="sd-btn sd-btn-primary adoption-confirm-row" data-application-id="'+esc(p.applicationId)+'">Yes, I\'m In</button>' : '')+
+      (p.status==='confirmed' ? '<div class="adoption-progress-note">Time remaining<span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span></div>' : '')+
+      '</div>';
+  }
+
+  function applicationTimelineHTML(p){
+    var progress=applicationProgress(p);
+    if(!progress) return '';
+    var dates=[p.applicationDate||'',p.reviewedAt||'',p.reservedAt||'',p.confirmedAt||'',p.finalizedAt||''];
+    var labels=['Submitted','Under review','Reserved','Pickup','Adopted'];
+    var notes=[
+      'Your application was submitted.',
+      progress.status==='pending'||progress.status==='under_review'?'DCVS staff are reviewing your application.':'',
+      progress.status==='reserved'||progress.status==='approved'?(p.responseDeadlineDisplay?'Reserved for you. Respond before '+p.responseDeadlineDisplay:'Reserved for you.'): '',
+      progress.status==='confirmed'?(p.pickupDeadlineDisplay?'Pick up before '+p.pickupDeadlineDisplay:'Your reservation is confirmed.'): '',
+      progress.status==='adopted'?'The adoption is complete.':''
+    ];
+    if(progress.status==='needs_info') notes[1]='DCVS staff requested more information.';
+    if(progress.terminal==='expired') {
+      var expiredStep=progress.index;
+      labels[expiredStep]='Expired';
+      notes[expiredStep]=expiredStep===3?'You didn’t pick up within the allotted time.':'You didn’t respond within the allotted time.';
+      dates[expiredStep]=expiredStep===3?(p.pickupDeadlineDisplay||''):(p.responseDeadlineDisplay||'');
+    } else if(progress.terminal==='declined') {
+      labels[1]='Declined';
+      notes[1]=p.declineReason||'DCVS staff declined this application.';
+    } else if(progress.terminal==='cancelled') {
+      labels[0]='Cancelled';
+      notes[0]='You withdrew this application.';
+      dates[0]='';
+    }
+    return '<ol class="adoption-timeline">'+labels.map(function(label,index){
+      var cls=index<progress.index?'is-done':(index===progress.index?(progress.terminal?'is-terminal':'is-current'):'');
+      if(progress.status==='adopted') cls='is-done';
+      return '<li class="adoption-timeline-item '+cls+'"><span class="adoption-timeline-dot"></span><div class="adoption-timeline-copy">'+
+        '<div class="adoption-timeline-title">'+esc(label)+'</div>'+
+        (dates[index]?'<div class="adoption-timeline-date">'+esc(dates[index])+'</div>':'')+
+        (notes[index]?'<div class="adoption-timeline-note">'+esc(notes[index])+'</div>':'')+
+        (index===3&&progress.status==='confirmed'?'<div class="adoption-timeline-note">Time remaining<span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span></div>':'')+
+      '</div></li>';
+    }).join('')+'</ol>'+
+      (progress.terminal?'<a class="adoption-browse-link" href="/dcvs/petlist.php">Browse available pets</a>':'');
   }
 
   function renderList(){
@@ -4615,23 +4813,20 @@ foreach ($residentAdoptionApplications as $application) {
     var pages=Math.max(1,Math.ceil(total/state.perPage));
     if(state.page>pages) state.page=pages;
     var start=(state.page-1)*state.perPage; var rows=sortable.slice(start,start+state.perPage);
-    if(!rows.length){ els.tableBody.innerHTML='<tr><td colspan="10"><div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div></td></tr>'; renderPagination(total,pages); return; }
+    if(!rows.length){ els.tableBody.innerHTML='<tr class="adoption-empty-row"><td colspan="10"><div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div></td></tr>'; renderPagination(total,pages); return; }
     els.tableBody.innerHTML=rows.map(function(p){
       var photoHtml=p.photo? '<img src="'+esc(p.photo)+'" alt="">': esc((p.name||'P').charAt(0).toUpperCase());
       return '<tr class="sd-tr" onclick="window.__cvOpenDetail(\''+esc(p.id)+'\')">'+
-        '<td class="sd-td"><div class="client-cell"><div class="pet-avatar-box">'+photoHtml+'</div><div class="pet-cell-main"><div class="client-name">'+esc(p.name)+'</div></div></div></td>'+
-        '<td class="sd-td"><div class="pet-id-label">'+esc(p.id)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.species)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
-        '<td class="sd-td">'+statusPillHTML(p.status,p.statusLabel)+'</td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+
-          (p.status==='reserved' ? ' <button type="button" class="sd-btn sd-btn-primary adoption-confirm-row" data-application-id="'+esc(p.applicationId)+'">Yes, I\'m In</button>' : '')+
-          (p.status==='confirmed' ? ' <span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span>' : '')+
-          '</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
-        '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
+        '<td class="sd-td" data-label="Pet"><div class="client-cell"><div class="pet-avatar-box">'+photoHtml+'</div><div class="pet-cell-main"><div class="client-name">'+esc(p.name)+'</div></div></div></td>'+
+        '<td class="sd-td" data-label="'+(p.applicationPending?'Application ID':'Pet ID')+'"><div class="pet-id-label">'+esc(p.id)+'</div></td>'+
+        '<td class="sd-td" data-label="Species"><div class="contact-main contact-normal">'+esc(p.species)+'</div></td>'+
+        '<td class="sd-td" data-label="Breed"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
+        '<td class="sd-td" data-label="Gender"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
+        '<td class="sd-td" data-label="Age"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
+        '<td class="sd-td" data-label="Adoption Status">'+statusPillHTML(p.status,p.statusLabel)+'</td>'+
+        '<td class="sd-td" data-label="Application Progress">'+applicationProgressHTML(p)+'</td>'+
+        '<td class="sd-td" data-label="Submitted / Added"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
+        '<td class="sd-td sd-td-action" data-label="Actions" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
       '</tr>';
     }).join('');
     renderPagination(total,pages);
@@ -4673,6 +4868,7 @@ foreach ($residentAdoptionApplications as $application) {
     var ready=rdOk(rd.vaccination) && rd.health==='Cleared' && rdOk(rd.spayNeuter) && rdOk(rd.temperament);
     function rdRow(label,val){var v=val||'Not specified';return '<tr><td>'+esc(label)+'</td><td>'+esc(v)+(rdOk(v)?' \u2713':'')+'</td></tr>';}
     var body=
+      (p.applicationStatus ? sec('Application Progress')+applicationTimelineHTML(p) : '')+
       sec('Pet Information')+
       '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
         ir('Species',esc(p.species))+
@@ -4707,7 +4903,7 @@ foreach ($residentAdoptionApplications as $application) {
     els.drawerTitle.textContent='Pet Details';
     els.drawerRef.textContent='View and review this pet\u2019s adoption information, care history, and current records.';
     var petPhoto=p.photo? '<img src="'+esc(p.photo)+'" alt="" style="width:85px;height:85px;border-radius:8px;object-fit:cover;">' : '<div style="width:85px;height:85px;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
-    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],reserved:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],reserved:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],cancelled:['#f4f4f5','#71717a','#e4e4e7'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var adoptColors=statusColors[p.status]||['#f4f4f5','#71717a','#e4e4e7'];
     var statusLabel=p.statusLabel || (STATUS_META[p.status]?STATUS_META[p.status].label:p.status);
     var adoptPill='<span style="font-size:13px;font-weight:500;color:'+adoptColors[1]+';background:'+adoptColors[0]+';border:1px solid '+adoptColors[2]+';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">'+esc(statusLabel)+'</span>';
@@ -4859,8 +5055,9 @@ foreach ($residentAdoptionApplications as $application) {
     var button=event.target.closest('.adoption-confirm-row');
     if(!button) return;
     event.stopPropagation();
-    window.openAdoptionConfirm(PETS.find(function(pet){return Number(pet.applicationId)===Number(button.getAttribute('data-application-id'));})?.id);
-  });
+    var pet=PETS.find(function(item){return Number(item.applicationId)===Number(button.getAttribute('data-application-id'));});
+    if(pet) window.openAdoptionConfirm(pet.id);
+  },true);
   ['adoptionConfirmClose','adoptionConfirmCancel'].forEach(function(id){
     document.getElementById(id).addEventListener('click',function(){setConfirmModalVisible(false);});
   });
@@ -4972,11 +5169,13 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
     var status=tr?tr.getAttribute('data-status'):'';
     var edit='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
     var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
-    var items=[];
+    var eye='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var items=[_mi(eye,'View Appointment','','APPT.view('+id+');closeCvMenu()')];
     if (status === 'pending') items.push(_mi(edit,'Edit','','APPT.editById('+id+');closeCvMenu()'));
-    items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
-    var archiveLabel = status === 'scheduled' || status === 'completed' ? 'Archive' : 'Cancel';
-    items.push(_mi(trash,archiveLabel,'red','APPT.archive('+id+');closeCvMenu()'));
+    if (['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(status) !== -1) {
+      items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
+      items.push(_mi(trash,'Cancel Appointment','red','APPT.archive('+id+');closeCvMenu()'));
+    }
     var menu=_buildRowMenu(items);
     _positionMenu(menu,ev.currentTarget);
   };
@@ -6477,6 +6676,19 @@ window.APPT = window.APPT || {};
 
   window.APPT.archive = function(id) { archiveAppointment(id); };
   var apptIndex = null;
+  function formatAppointmentDate(value) {
+    var parts = String(value || '').substring(0, 10).split('-');
+    if (parts.length !== 3) return value || '';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+  }
+  function formatAppointmentTime(value) {
+    var parts = String(value || '').split(':');
+    if (parts.length < 2) return value || '';
+    var date = new Date();
+    date.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return isNaN(date.getTime()) ? value : date.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  }
   function getAppt(id) {
     if (!apptIndex) {
       apptIndex = {};
@@ -6538,9 +6750,13 @@ window.APPT = window.APPT || {};
     'pending': ['#fef3c7', '#92400e'],
     'scheduled': ['#0E8131', '#ffffff', '#0E8131'],
     'rescheduled': ['#ede9fe', '#6d28d9'],
+    'action_needed': ['#ffedd5', '#9a3412', '#fed7aa'],
+    'expired': ['#fee2e2', '#991b1b', '#fecaca'],
     'completed': ['#dbeafe', '#1e40af', '#bfdbfe'],
     'cancelled': ['#fee2e2', '#991b1b'],
-    'no_show': ['#fef3c7', '#92400e']
+    'no_show': ['#fef3c7', '#92400e'],
+    'rejected': ['#fee2e2', '#991b1b', '#fecaca'],
+    'waitlisted': ['#fef3c7', '#92400e', '#fde68a']
   };
 
   window.APPT.view = function(id) {
@@ -6575,30 +6791,78 @@ window.APPT = window.APPT || {};
       hp.style.color = c[1];
       hp.style.borderColor = c[2] || '#e4e4e7';
     }
+    var statusNotice = document.getElementById('adStatusNotice');
+    if (statusNotice) statusNotice.hidden = a.status !== 'pending';
+    var actionNeededNotice = document.getElementById('adActionNeeded');
+    if (actionNeededNotice) actionNeededNotice.hidden = a.status !== 'action_needed';
+    if (a.status === 'action_needed') {
+      var originalDate = formatAppointmentDate(a.originalDateRaw);
+      var originalTime = formatAppointmentTime(a.originalTimeRaw);
+      var proposedDate = formatAppointmentDate(a.scheduledDateRaw);
+      var proposedTime = formatAppointmentTime(a.scheduledTimeRaw);
+      set('adOriginalAppointmentTime', originalDate + ', ' + originalTime);
+      set('adProposedAppointmentTime', proposedDate + ', ' + proposedTime);
+      set('adRescheduleDeadline', 'Please respond before ' + (a.rescheduleDeadlineLabel || 'the deadline') + '. Without a response, the request will close.');
+      set('adRescheduleRequestedAt', (a.createdLong || a.created || '') + (a.createdTime ? ', ' + a.createdTime : ''));
+    }
+    var scheduledNotice = document.getElementById('adScheduledNotice');
+    if (scheduledNotice) scheduledNotice.hidden = a.status !== 'scheduled' && a.status !== 'rescheduled' && a.status !== 'approved';
+    var requestedAt = document.getElementById('adRequestedAt');
+    if (requestedAt) requestedAt.textContent = (a.createdLong || a.created || '') + (a.createdTime ? ', ' + a.createdTime : '');
     var nextEl = document.getElementById('adNextList');
     if (nextEl) {
       var steps = apptNextSteps(a.status);
       nextEl.innerHTML = steps.map(function(t) { return '<li>' + t + '</li>'; }).join('');
+      nextEl.closest('.rpt-next').hidden = a.status === 'pending' || a.status === 'action_needed';
     }
     var changeButton = document.getElementById('apptChangeBtn');
+    var rescheduleHint = document.getElementById('apptRescheduleSoon');
+    var rescheduleAction = document.getElementById('apptRescheduleAction');
+    var bookAgainButton = document.getElementById('apptBookAgainBtn');
     if (changeButton) {
       var canEdit = a.status === 'pending';
-      changeButton.style.display = canEdit ? '' : 'none';
-      changeButton.textContent = 'Edit Appointment';
-      changeButton.setAttribute('data-action', 'edit');
+      var canRequestReschedule = a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'approved';
+      var isFinal = a.status === 'completed' || a.status === 'rejected' || a.status === 'cancelled' || a.status === 'no_show';
+      changeButton.style.display = canEdit || canRequestReschedule ? '' : 'none';
+      changeButton.textContent = canRequestReschedule ? 'Request to reschedule' : 'Edit Appointment';
+      changeButton.disabled = canRequestReschedule;
+      changeButton.setAttribute('data-action', canRequestReschedule ? 'request-reschedule' : 'edit');
+      if (rescheduleHint) rescheduleHint.hidden = !canRequestReschedule;
+      if (rescheduleAction) rescheduleAction.style.display = canEdit || canRequestReschedule ? '' : 'none';
+      if (bookAgainButton) bookAgainButton.style.display = isFinal ? '' : 'none';
     }
     var archiveButton = document.getElementById('apptArchiveBtn');
+    var cancelCutoff = document.getElementById('apptCancelCutoff');
+    var canCancelStatus = ['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
+    var hasCancellationWindow = a.status === 'pending' || a.canCancel;
     if (archiveButton) {
-      var canArchiveOrCancel = ['pending', 'scheduled', 'rescheduled', 'completed'].indexOf(a.status) !== -1;
-      archiveButton.style.display = canArchiveOrCancel ? '' : 'none';
-      archiveButton.textContent = a.status === 'scheduled' || a.status === 'completed' ? 'Archive Appointment' : 'Cancel Appointment';
+      archiveButton.style.display = canCancelStatus && hasCancellationWindow ? '' : 'none';
+      archiveButton.textContent = 'Cancel Appointment';
     }
+    if (cancelCutoff) cancelCutoff.hidden = !canCancelStatus || hasCancellationWindow || a.status === 'pending';
+    var notesItem = document.getElementById('adNotesItem');
+    if (notesItem) notesItem.hidden = !a.notes || a.notes === 'No notes added';
     document.getElementById('apptDrawer').classList.add('open');
     document.getElementById('apptDrawerOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
   };
 
   function apptNextSteps(status) {
+    if (status === 'action_needed') {
+      return ['Review the proposed appointment time above and respond before the deadline.'];
+    }
+    if (status === 'waitlisted') {
+      return [
+        'Your appointment request has been added to the waitlist because the selected date or time was full.',
+        'DCVS staff will contact you if a slot becomes available.'
+      ];
+    }
+    if (status === 'rejected') {
+      return [
+        'Your appointment request was rejected by DCVS staff.',
+        'Review the staff note for the reason, or submit a new request if needed.'
+      ];
+    }
     if (status === 'completed') {
       return [
         'Your appointment has been completed.',
@@ -6626,6 +6890,88 @@ window.APPT = window.APPT || {};
     if (!a || a.status !== 'pending') return;
     closeApptDrawer();
     window.openAppointmentForm(a, 'edit');
+  };
+  window.APPT.requestReschedule = function() {
+    alert('Resident reschedule requests are not available yet. Please contact DCVS staff for assistance.');
+  };
+  var pendingRescheduleResponse = '';
+  window.APPT.confirmReschedule = function(response) {
+    var id = Number(window.__currentApptId || 0);
+    if (!id || (response !== 'accept' && response !== 'decline')) return;
+    var appointment = getAppt(id);
+    if (!appointment || appointment.status !== 'action_needed') return;
+    pendingRescheduleResponse = response;
+    var title = document.getElementById('appointmentRescheduleConfirmTitle');
+    var message = document.getElementById('appointmentRescheduleConfirmMessage');
+    var confirmButton = document.getElementById('appointmentRescheduleConfirmButton');
+    var proposedDate = formatAppointmentDate(appointment.scheduledDateRaw);
+    var proposedTime = formatAppointmentTime(appointment.scheduledTimeRaw);
+    if (response === 'accept') {
+      title.textContent = 'Accept the new appointment time?';
+      message.textContent = 'Confirm the proposed time for ' + appointment.pet + ': ' + proposedDate + ' at ' + proposedTime + '.';
+      confirmButton.textContent = 'Confirm new time';
+      confirmButton.classList.remove('sd-btn-danger');
+      confirmButton.classList.add('sd-btn-primary');
+    } else {
+      title.textContent = 'Decline the proposed time?';
+      message.textContent = 'Declining will close this appointment request. You will need to book again if you still need this service.';
+      confirmButton.textContent = 'Decline appointment';
+      confirmButton.classList.remove('sd-btn-primary');
+      confirmButton.classList.add('sd-btn-danger');
+    }
+    openModal('appointmentRescheduleConfirm');
+  };
+  window.APPT.cancelRescheduleConfirmation = function() {
+    pendingRescheduleResponse = '';
+    closeModal('appointmentRescheduleConfirm');
+  };
+  window.APPT.submitRescheduleResponse = function() {
+    var response = pendingRescheduleResponse;
+    var id = Number(window.__currentApptId || 0);
+    if (!id || (response !== 'accept' && response !== 'decline')) return;
+    var acceptButton = document.getElementById('adAcceptReschedule');
+    var declineButton = document.getElementById('adDeclineReschedule');
+    var confirmButton = document.getElementById('appointmentRescheduleConfirmButton');
+    if (acceptButton) acceptButton.disabled = true;
+    if (declineButton) declineButton.disabled = true;
+    if (confirmButton) confirmButton.disabled = true;
+    var body = new URLSearchParams();
+    body.append('appointment_id', String(id));
+    body.append('response', response);
+    body.append('csrf_token', window.__APPT_CSRF || '');
+    fetch('../../api/resident/respond-reschedule.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).then(function(result) {
+      return result.json().then(function(data) {
+        if (!result.ok || !data.success) throw new Error(data.message || 'Could not save your response.');
+        closeModal('appointmentRescheduleConfirm');
+        window.location.reload();
+      });
+    }).catch(function(error) {
+      alert(error.message || 'Could not save your response.');
+      if (acceptButton) acceptButton.disabled = false;
+      if (declineButton) declineButton.disabled = false;
+      if (confirmButton) confirmButton.disabled = false;
+    });
+  };
+  window.APPT.bookAgain = function() {
+    var a = getAppt(window.__currentApptId);
+    if (!a) return;
+    closeApptDrawer();
+    openBookApptModal();
+    var type = document.getElementById('apptTypeSelect');
+    var pet = document.getElementById('petSelect');
+    if (type) {
+      type.value = String(a.service || '').toLowerCase();
+      type.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (pet) {
+      pet.value = a.petId || '';
+      pet.dispatchEvent(new Event('change', { bubbles: true }));
+    }
   };
 
   window.closeApptDrawer = function() {
@@ -6770,6 +7116,7 @@ window.APPT = window.APPT || {};
       dateRaw: appt.preferred_date,
       timeRaw: appt.preferred_time,
       created: submittedDate,
+      createdLong: submitted.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }),
       createdTime: submittedTime,
       status: 'pending',
       statusLabel: 'Pending',
@@ -6821,7 +7168,7 @@ window.APPT = window.APPT || {};
     var total = rows.length, pending = 0, scheduled = 0, completed = 0;
     rows.forEach(function(r) {
       var st = r.getAttribute('data-status');
-      if (st === 'pending') pending++;
+      if (st === 'pending' || st === 'action_needed') pending++;
       else if (st === 'scheduled' || st === 'rescheduled') scheduled++;
       else if (st === 'completed') completed++;
     });
@@ -6971,6 +7318,66 @@ window.APPT = window.APPT || {};
       </div>
       <span id="adHeadStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;border:1px solid #e4e4e7;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
     </div>
+    <section id="adActionNeeded" class="appt-action-needed" hidden>
+      <h3>Staff suggested another time</h3>
+      <p>The time you asked for is not available.</p>
+      <div class="appt-reschedule-times">
+        <div class="requested"><span>You requested</span><strong id="adOriginalAppointmentTime"></strong></div>
+        <div><span>Staff suggests</span><strong id="adProposedAppointmentTime"></strong></div>
+      </div>
+      <div class="appt-reschedule-actions">
+        <button type="button" id="adAcceptReschedule" class="sd-btn sd-btn-primary" onclick="APPT.confirmReschedule('accept')">Accept new time</button>
+        <button type="button" id="adDeclineReschedule" class="sd-btn sd-btn-outline" onclick="APPT.confirmReschedule('decline')">Decline</button>
+      </div>
+      <p class="appt-response-deadline" id="adRescheduleDeadline"></p>
+      <div class="appt-progress">
+        <div class="appt-progress-title">Progress</div>
+        <ol class="appt-progress-list">
+          <li class="appt-progress-step done">
+            <span class="appt-progress-step-title">Requested</span>
+            <span class="appt-progress-step-detail" id="adRescheduleRequestedAt"></span>
+          </li>
+          <li class="appt-progress-step current">
+            <span class="appt-progress-step-title">Under review</span>
+            <span class="appt-progress-step-detail">Staff suggested a new time. Your answer is needed.</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Scheduled</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Completed</span>
+          </li>
+        </ol>
+      </div>
+    </section>
+    <div id="adStatusNotice" class="appt-status-notice" hidden>
+      <strong>Waiting for DCVS staff</strong>
+      <p>Your request is under review. You will get a notification once staff approves it or suggests another time. Please do not go to the office yet.</p>
+      <div class="appt-progress">
+        <div class="appt-progress-title">Progress</div>
+        <ol class="appt-progress-list">
+          <li class="appt-progress-step done">
+            <span class="appt-progress-step-title">Requested</span>
+            <span class="appt-progress-step-detail" id="adRequestedAt"></span>
+          </li>
+          <li class="appt-progress-step current">
+            <span class="appt-progress-step-title">Under review</span>
+            <span class="appt-progress-step-detail">Waiting for a decision</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Scheduled</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Completed</span>
+          </li>
+        </ol>
+      </div>
+    </div>
+    <div id="adScheduledNotice" class="appt-scheduled-notice" hidden>
+      <strong>Before your appointment</strong>
+      <p>Location details: Dasmariñas City Veterinary Services. Please confirm the service location with DCVS staff before traveling. Bring your pet and any relevant vaccination or service records, and arrive before your scheduled appointment time.</p>
+    </div>
+    <p id="apptCancelCutoff" class="appt-cancel-cutoff" hidden>This appointment is within the 24-hour cancellation cutoff, so it can no longer be cancelled here. Please contact DCVS staff for assistance.</p>
     <p class="pet-drawer-section-title">Appointment Information</p>
     <div class="pet-drawer-info">
       <div class="pet-drawer-info-item"><div class="k">Request ID</div><div class="v" id="adRef"></div></div>
@@ -6980,7 +7387,7 @@ window.APPT = window.APPT || {};
       <div class="pet-drawer-info-item"><div class="k">Appointment Date</div><div class="v" id="adDate"></div></div>
       <div class="pet-drawer-info-item"><div class="k">Appointment Time</div><div class="v" id="adTime"></div></div>
       <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Submitted</div><div class="v" id="adCreated"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Notes</div><div class="v appt-notes" id="adNotes"></div></div>
+      <div class="pet-drawer-info-item pet-drawer-info-item-full" id="adNotesItem"><div class="k">Notes</div><div class="v appt-notes" id="adNotes"></div></div>
     </div>
 
     <div class="rpt-next">
@@ -6989,16 +7396,50 @@ window.APPT = window.APPT || {};
     </div>
   </div>
   <div class="rpt-drawer-foot">
-    <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit Appointment</button>
+    <div id="apptRescheduleAction" class="appt-footer-reschedule">
+      <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit Appointment</button>
+      <span id="apptRescheduleSoon" class="appt-reschedule-soon" hidden>Reschedule request coming soon</span>
+    </div>
+    <button type="button" id="apptBookAgainBtn" class="sd-btn sd-btn-primary" style="display:none;" onclick="APPT.bookAgain()">Book again</button>
     <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel Appointment</button>
     <button type="button" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
   </div>
 </aside>
 
+<style>
+  #appointmentRescheduleConfirm.modal { background:rgba(0,0,0,.55); padding:1rem; z-index:1100; }
+  #appointmentRescheduleConfirm .sd-dialog { width:100%; display:flex; justify-content:center; }
+  #appointmentRescheduleConfirm .sd-dialog-content { position:relative; width:100%; max-width:420px; box-sizing:border-box; padding:24px; display:flex; flex-direction:column; gap:16px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; box-shadow:0 10px 30px rgba(0,0,0,.18); }
+  #appointmentRescheduleConfirm .sd-dialog-header { display:flex; flex-direction:column; gap:8px; text-align:left; }
+  #appointmentRescheduleConfirm .sd-dialog-title { margin:0; color:#18181b; font:600 18px/1.3 Inter,'Segoe UI',sans-serif; }
+  #appointmentRescheduleConfirm .sd-dialog-description { margin:0; color:#475569; font:14px/1.5 Inter,'Segoe UI',sans-serif; }
+  #appointmentRescheduleConfirm .sd-dialog-footer { display:flex; justify-content:flex-end; gap:8px; }
+  @media(max-width:480px) { #appointmentRescheduleConfirm .sd-dialog-footer { flex-direction:column-reverse; } #appointmentRescheduleConfirm .sd-dialog-footer .sd-btn { width:100%; justify-content:center; } }
+</style>
+<div class="modal" id="appointmentRescheduleConfirm">
+  <div class="sd-dialog">
+    <div class="sd-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="appointmentRescheduleConfirmTitle" aria-describedby="appointmentRescheduleConfirmMessage">
+      <div class="sd-dialog-header">
+        <h2 class="sd-dialog-title" id="appointmentRescheduleConfirmTitle">Confirm appointment response</h2>
+        <p class="sd-dialog-description" id="appointmentRescheduleConfirmMessage"></p>
+      </div>
+      <div class="sd-dialog-footer">
+        <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.cancelRescheduleConfirmation()">Cancel</button>
+        <button type="button" id="appointmentRescheduleConfirmButton" class="sd-btn sd-btn-primary" onclick="APPT.submitRescheduleResponse()">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 window.__apptList = <?php
   $jsonAppts = [];
   foreach ($appointments as $appt) {
+      $appointmentStatusLabel = ucfirst(str_replace('_', ' ', $appt['status']));
+      if ($appt['status'] === 'action_needed') $appointmentStatusLabel = 'Action needed';
+      elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $appointmentStatusLabel = 'Expired';
+      elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $appointmentStatusLabel = 'Declined';
+      elseif ($appt['status'] === 'cancelled' && $appt['cancelled_by'] === 'resident') $appointmentStatusLabel = 'Cancelled by Resident';
       $jsonAppts[] = [
           'id' => (int)$appt['appointment_id'],
           'ref' => $appt['reference_id'] ?? '#APT-' . str_pad($appt['appointment_id'], 4, '0', STR_PAD_LEFT),
@@ -7007,19 +7448,29 @@ window.__apptList = <?php
           'pet' => $appt['pet_name'] ?? '-',
           'petId' => $appt['pet_id'] ?? '',
           'petPhoto' => $appt['pet_photo'] ?? '',
-          'date' => date('M d, Y', strtotime($appt['preferred_date'])),
-          'time' => date('g:i A', strtotime($appt['preferred_time'])),
+          'date' => date('F j, Y', strtotime($appt['scheduled_date'] ?: $appt['preferred_date'])),
+          'time' => date('g:i A', strtotime($appt['scheduled_time'] ?: $appt['preferred_time'])),
           'dateRaw' => $appt['preferred_date'],
           'timeRaw' => $appt['preferred_time'],
+          'scheduledDateRaw' => $appt['scheduled_date'] ?: $appt['preferred_date'],
+          'scheduledTimeRaw' => $appt['scheduled_time'] ?: $appt['preferred_time'],
+          'originalDateRaw' => $appt['original_schedule_date'] ?: $appt['preferred_date'],
+          'originalTimeRaw' => $appt['original_schedule_time'] ?: $appt['preferred_time'],
+          'rescheduleDeadlineRaw' => $appt['reschedule_response_deadline'] ?? '',
+          'rescheduleDeadlineLabel' => !empty($appt['reschedule_response_deadline'])
+            ? date('F j, Y', strtotime($appt['reschedule_response_deadline'])) : '',
           'created' => date('M d, Y', strtotime($appt['created_at'])),
+          'createdLong' => date('F j, Y', strtotime($appt['created_at'])),
           'createdTime' => date('g:i A', strtotime($appt['created_at'])),
           'status' => $appt['status'],
-          'statusLabel' => ucfirst(str_replace('_', ' ', $appt['status'])),
-          'notes' => $appt['notes'] ?? '-',
+          'canCancel' => (bool)$appt['can_cancel'],
+          'statusLabel' => $appointmentStatusLabel,
+          'notes' => trim((string)($appt['notes'] ?? '')) !== '' ? $appt['notes'] : 'No notes added',
       ];
   }
   echo json_encode($jsonAppts);
 ?>;
+window.__APPT_CSRF = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 </script>
 
 <!-- Edit Appointment Modal -->
@@ -7189,6 +7640,9 @@ window.__apptList = <?php
   #confirmModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
   #confirmModal .sd-dialog-description { margin:0; font-family:'Inter',sans-serif; font-size:14px; color:#71717a; line-height:1.5; }
   #confirmModal .sd-dialog-footer { display:flex; justify-content:center; gap:8px; }
+  #cancelAppointmentReasonWrap { width:100%; margin:14px 0; text-align:left; }
+  #cancelAppointmentReasonWrap[hidden] { display:none; }
+  #cancelAppointmentReason { box-sizing:border-box; width:100%; min-height:82px; margin-top:6px; padding:9px 10px; border:1px solid #d4d4d8; border-radius:6px; font:14px 'Inter','Segoe UI',sans-serif; resize:vertical; }
   #confirmModal .sd-btn-danger { background:#dc2626; border-color:#dc2626; color:#fff; }
   #confirmModal .sd-btn-danger:hover { background:#b91c1c; border-color:#b91c1c; }
 </style>
@@ -7198,6 +7652,10 @@ window.__apptList = <?php
       <div class="sd-dialog-header">
         <h2 class="sd-dialog-title" id="confirmTitle">Confirm</h2>
         <p class="sd-dialog-description" id="confirmMessage">Are you sure?</p>
+      </div>
+      <div id="cancelAppointmentReasonWrap" hidden>
+        <label for="cancelAppointmentReason" class="sd-label">Reason for cancelling <span style="font-weight:400;color:#71717a;">(optional)</span></label>
+        <textarea id="cancelAppointmentReason" maxlength="1000" placeholder="Share a reason, if you’d like."></textarea>
       </div>
       <div class="sd-dialog-footer">
         <a id="confirmYesBtn" href="#" class="sd-btn sd-btn-danger">Yes</a>
@@ -7264,6 +7722,8 @@ function editPet(btn) {
 }
 
 function archivePet(id) {
+    document.getElementById('cancelAppointmentReasonWrap').hidden = true;
+    document.getElementById('confirmYesBtn').onclick = null;
     document.getElementById('confirmTitle').textContent = 'Archive Pet';
     document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this pet?';
     document.getElementById('confirmYesBtn').href = 'archive-pet.php?id=' + id;
@@ -7295,6 +7755,8 @@ function editReport(btn) {
 }
 
 function archiveReport(id) {
+    document.getElementById('cancelAppointmentReasonWrap').hidden = true;
+    document.getElementById('confirmYesBtn').onclick = null;
     document.getElementById('confirmTitle').textContent = 'Archive Report';
     document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this report?';
     document.getElementById('confirmYesBtn').href = 'archive-report.php?id=' + id;
@@ -7313,9 +7775,35 @@ function editAppointment(btn) {
 }
 
 function archiveAppointment(id) {
-    document.getElementById('confirmTitle').textContent = 'Archive Appointment';
-    document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this appointment?';
-    document.getElementById('confirmYesBtn').href = 'archive-appointment.php?id=' + id;
+    document.getElementById('confirmTitle').textContent = 'Cancel Appointment';
+    document.getElementById('confirmMessage').textContent = 'Are you sure you want to cancel this appointment? Cancelling may release the slot for another resident.';
+    document.getElementById('cancelAppointmentReasonWrap').hidden = false;
+    document.getElementById('cancelAppointmentReason').value = '';
+    var confirmButton = document.getElementById('confirmYesBtn');
+    confirmButton.href = '#';
+    confirmButton.onclick = function (event) {
+      event.preventDefault();
+      confirmButton.disabled = true;
+      var body = new URLSearchParams();
+      body.append('appointment_id', id);
+      body.append('csrf_token', ADOPTION_CSRF);
+      body.append('cancellation_reason', document.getElementById('cancelAppointmentReason').value.trim());
+      fetch('cancel-resident-appointment.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      }).then(function (response) { return response.json(); })
+        .then(function (result) {
+          if (!result || !result.success) throw new Error((result && result.message) || 'Could not cancel this appointment.');
+          closeModal('confirmModal');
+          closeApptDrawer();
+          location.reload();
+        }).catch(function (error) {
+          alert(error.message || 'Could not cancel this appointment.');
+        }).then(function () {
+          confirmButton.disabled = false;
+        });
+    };
     openModal('confirmModal');
 }
 
@@ -7580,9 +8068,16 @@ function checkSlot() {
     status.style.color = '#92400e';
     status.textContent = 'Checking availability...';
     var exclude = prefix ? (document.getElementById('editAppointmentId')?.value || 0) : 0;
+    var requestId = Number(status.dataset.checkRequestId || 0) + 1;
+    status.dataset.checkRequestId = String(requestId);
     fetch('includes/check_slot.php?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude + '&urgency=' + encodeURIComponent(urgency))
         .then(function(r) { return r.json(); })
         .then(function(d) {
+            if (status.dataset.checkRequestId !== String(requestId)
+                || dateEl.value !== date
+                || timeEl.value !== time
+                || (prefix && (document.getElementById('editAppointmentId')?.value || 0) != exclude)
+                || (urgencyEl && urgencyEl.value !== urgency)) return;
             var submitBtn = form ? form.querySelector('button[type="submit"]') : null;
             if (d.error) {
                 status.style.background = '#fef2f2';
@@ -7601,7 +8096,7 @@ function checkSlot() {
                 status.style.color = '#991b1b';
                 var msg = d.program_blocked ? 'All clinic staff are assigned to a program during this time.'
                                     : (d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
-                                    : (d.held ? 'This time slot is already reserved by another resident.'
+                                    : (d.held ? 'This time slot is already in use.'
                                               : 'This slot is no longer available.'));
                 if (d.nearest_slot) {
                     var nearest = d.nearest_slot.split(' ');
@@ -7613,6 +8108,11 @@ function checkSlot() {
             }
         })
         .catch(function(error) {
+            if (status.dataset.checkRequestId !== String(requestId)
+                || dateEl.value !== date
+                || timeEl.value !== time
+                || (prefix && (document.getElementById('editAppointmentId')?.value || 0) != exclude)
+                || (urgencyEl && urgencyEl.value !== urgency)) return;
             console.error('Appointment slot availability check failed:', error);
             status.style.display = 'block';
             status.style.background = '#fef2f2';
@@ -8588,7 +9088,12 @@ function switchSection(sectionId) {
   document.body.classList.toggle('page-white', sectionId === 'my-pets' || sectionId === 'my-reports' || sectionId === 'appointments' || sectionId === 'book-appt' || sectionId === 'archive' || sectionId === 'account-settings');
   localStorage.setItem('activeSection', sectionId);
   window.location.hash = sectionId;
-  window.scrollTo({ left: 0, top: 0, behavior: 'smooth' });
+  window.scrollTo(0, 0);
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  requestAnimationFrame(function() {
+    window.dispatchEvent(new Event('resize'));
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -8609,6 +9114,14 @@ window.addEventListener('hashchange', function() {
   if (hash && document.getElementById(hash)) {
     switchSection(hash);
   }
+});
+
+window.addEventListener('pageshow', function() {
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  requestAnimationFrame(function() {
+    window.dispatchEvent(new Event('resize'));
+  });
 });
 </script>
 <?php if ($showAdoptModal): ?>

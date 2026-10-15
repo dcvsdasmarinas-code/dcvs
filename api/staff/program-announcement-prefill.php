@@ -61,6 +61,7 @@ if (!in_array($program['status'], ['scheduled', 'live'], true)) {
 }
 
 $targets = [];
+$programLocations = [];
 $unmatched = [];
 $unavailable = [];
 $targetStmt = $conn->prepare(
@@ -88,6 +89,7 @@ $targetResult = $targetStmt->get_result();
 $hasLinkedTargets = false;
 while ($target = $targetResult->fetch_assoc()) {
     $hasLinkedTargets = true;
+    $programLocations[] = (string)$target['barangay_name'];
     if ((int)$target['psgc_mapping_approved'] === 1 && $target['psgc_code'] !== null) {
         $targets[] = [
             'barangay_id' => (int)$target['barangay_id'],
@@ -103,6 +105,7 @@ if (!$hasLinkedTargets) {
     $locationNames = array_filter(array_map('trim', explode(',', (string)$program['venue'])), static function (string $name): bool {
         return $name !== '';
     });
+    $programLocations = array_values($locationNames);
     if ($locationNames) {
         $barangayResult = $conn->query('SELECT barangay_id, barangay_name FROM barangays');
         if (!$barangayResult) {
@@ -205,6 +208,7 @@ echo json_encode([
         'end_date' => (string)$program['end_date'] !== (string)$program['start_date'] ? (string)$program['end_date'] : '',
         'event_start_time' => $startTime,
         'event_end_time' => $endTime,
+        'location' => $programLocations ? implode(', ', $programLocations) : (string)($program['venue'] ?? ''),
         'barangays' => $targets,
         'unmatched_barangays' => $unmatched,
         'unavailable_barangays' => $unavailable,

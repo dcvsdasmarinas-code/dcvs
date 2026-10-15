@@ -32,12 +32,14 @@ $lastDay = date('Y-m-d', strtotime($date . ' +90 days'));
 $staffCount = dcvsActiveStaffCount($conn);
 $programStaffing = dcvsProgramStaffingMap($conn, $firstDay, $lastDay);
 $counts = [];
-$countStmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level, COUNT(*) AS appointment_count
+$countStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+        COALESCE(scheduled_time, preferred_time) AS slot_time, urgency_level, COUNT(*) AS appointment_count
     FROM appointments
-    WHERE preferred_date BETWEEN ? AND ?
-      AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+    WHERE COALESCE(scheduled_date, preferred_date) BETWEEN ? AND ?
+      AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
       AND archived_at IS NULL" . ($excludeId ? " AND appointment_id != ?" : "") . "
-    GROUP BY preferred_date, preferred_time, urgency_level");
+    GROUP BY COALESCE(scheduled_date, preferred_date),
+        COALESCE(scheduled_time, preferred_time), urgency_level");
 if (!$countStmt) {
     error_log('Failed to prepare slot availability count: ' . $conn->error);
     http_response_code(500);
@@ -56,8 +58,8 @@ if (!$countStmt->execute()) {
 $countResult = $countStmt->get_result();
 $dayCounts = [];
 while ($row = $countResult->fetch_assoc()) {
-    $slotDate = $row['preferred_date'];
-    $slotTime = substr($row['preferred_time'], 0, 5);
+    $slotDate = $row['slot_date'];
+    $slotTime = substr($row['slot_time'], 0, 5);
     $level = $row['urgency_level'] ?? 'routine';
     $count = (int)$row['appointment_count'];
     $counts[$slotDate][$slotTime][$level] = $count;

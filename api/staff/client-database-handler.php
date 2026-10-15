@@ -496,14 +496,17 @@ function handleArchiveAppointment($conn, $staffId) {
     $apptId = (int)($_POST['appointment_id'] ?? 0);
     if ($apptId <= 0) return ['success' => false, 'message' => 'Invalid appointment ID'];
 
-    $exists = $conn->prepare("SELECT appointment_id, reference_id FROM appointments WHERE appointment_id = ? AND archived_at IS NULL");
+    $exists = $conn->prepare("SELECT appointment_id, reference_id, status FROM appointments WHERE appointment_id = ? AND archived_at IS NULL");
     $exists->bind_param("i", $apptId);
     $exists->execute();
     $row = $exists->get_result()->fetch_assoc();
     $exists->close();
     if (!$row) return ['success' => false, 'message' => 'Appointment not found'];
+    if (!in_array($row['status'], ['completed', 'no_show', 'cancelled', 'rejected'], true)) {
+        return ['success' => false, 'message' => 'Only completed, no-show, cancelled, or rejected appointments can be archived'];
+    }
 
-    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id = ?");
+    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id = ? AND status IN ('completed','no_show','cancelled','rejected')");
     $stmt->bind_param("i", $apptId);
     if (!$stmt->execute()) {
         $stmt->close();

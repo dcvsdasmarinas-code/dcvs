@@ -37,11 +37,13 @@ RewriteRule ^archive-appointment\.php$ api/staff/archive-appointment.php [END]
 RewriteRule ^edit-appointment\.php$ api/staff/edit-appointment.php [END]
 RewriteRule ^reject-appointment\.php$ api/staff/reject-appointment.php [END]
 RewriteRule ^request-appointment\.php$ api/resident/request-appointment.php [END]
+RewriteRule ^cancel-resident-appointment\.php$ api/resident/cancel-appointment.php [END]
 RewriteRule ^resident-request-appointment\.php$ api/resident/resident-request-appointment.php [END]
 RewriteRule ^staff-add-appointment\.php$ api/staff/staff-add-appointment.php [END]
 RewriteRule ^staff-archive-appointment\.php$ api/staff/staff-archive-appointment.php [END]
 RewriteRule ^staff-create-appointment\.php$ api/staff/staff-create-appointment.php [END]
 RewriteRule ^staff-get-appointment-request\.php$ api/staff/staff-get-appointment-request.php [END]
+RewriteRule ^appointment-slot-capacity\.php$ api/staff/appointment-slot-capacity.php [END]
 RewriteRule ^update-appointment-status\.php$ api/staff/update-appointment-status.php [END]
 
 # Archive compatibility routes.
