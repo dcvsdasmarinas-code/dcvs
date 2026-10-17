@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -32,8 +34,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     :root {
       --av-border: #e4e4e7;
@@ -580,12 +582,52 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     @media (max-width: 1024px) {
       .av-columns { flex-direction: column; }
       .av-col-left, .av-col-right { flex: 0 0 100%; max-width: 100%; border-left: none; padding-left: 0; }
+      .bulk-layout { flex-direction: column; }
+      .bulk-summary { flex: 0 0 auto; }
     }
     @media (max-width: 640px) {
       .av-page { padding: 1rem; }
-      .av-day-label { width: 8rem; min-width: 8rem; }
-      .av-time-select { width: 110px; }
-      .av-footer { padding: 0.75rem 1rem; }
+      .av-tip-box { display: none; }
+      .av-day-row { align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; }
+      .av-day-label { width: 100%; min-width: 0; }
+      .av-time-blocks { flex: 1 1 100%; min-width: 0; }
+      .av-time-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) repeat(3, 1.75rem);
+        gap: 0.25rem;
+      }
+      .av-time-select, .av-time-select select { width: 100%; min-width: 0; }
+      .av-time-select select { padding: 0 1.25rem 0 0.375rem; font-size: 0.8125rem; }
+      .av-icon-btn { width: 1.75rem; min-width: 1.75rem; }
+      .ov-time-range-row { flex-wrap: wrap; }
+      .ov-time-select { flex: 1 1 0; min-width: 0; }
+      .ov-time-select select { width: 100%; min-width: 0; padding-right: 1.5rem; }
+      .ov-range-actions { flex-shrink: 0; }
+      .ov-editor-actions { flex-wrap: wrap; padding-right: 1rem; padding-left: 1rem; }
+      .ov-editor-foot { flex-wrap: wrap; gap: 0.5rem; padding-right: 1rem; padding-left: 1rem; }
+      .ov-editor-foot-text { flex: 1 1 100%; }
+      .ov-editor-foot-btns { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+      .bulk-card { padding: 1rem; }
+      .bulk-date-row { gap: 0.375rem; }
+      .bulk-date-row input[type="date"] { width: 0; min-width: 0; flex: 1 1 0; padding: 0 0.25rem; font-size: 0.8125rem; }
+      .bulk-date-arrow { flex: 0 0 auto; }
+      .bulk-segmented button { min-width: 0; padding: 0.5rem 0.25rem; font-size: 0.8125rem; line-height: 1.2; }
+      .bulk-sum-card { position: static; padding: 1rem; }
+      .pv-cal { padding: 0.875rem; }
+      .pv-cal-legend { flex-wrap: wrap; gap: 0.5rem 0.75rem; }
+      .pv-detail-head, .pv-detail-body, .pv-detail-nav { padding-right: 1rem; padding-left: 1rem; }
+      .pv-detail-badge { margin-left: 0.25rem; }
+      .av-footer { left: 0; right: 0; padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom)); gap: 0.5rem; }
+      .av-footer-text { min-width: 0; font-size: 0.8125rem; }
+      .av-footer-actions { gap: 0.375rem; }
+      .av-footer-actions .sd-btn { padding: 0 0.625rem; font-size: 0.8125rem; }
+      .av-toast-container { left: 1rem; right: 1rem; bottom: 1rem; }
+      .av-toast { min-width: 0; max-width: none; }
+      .av-modal-overlay { padding: 0.75rem; }
+      .av-modal { max-width: 100%; max-height: calc(100vh - 1.5rem); padding: 1.25rem; }
+      .av-modal-actions { flex-wrap: wrap; }
+      .bulk-modal { max-width: calc(100vw - 1.5rem); max-height: calc(100vh - 1.5rem); }
+      .bulk-modal-foot { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -961,7 +1003,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
   <!-- Toast container -->
   <div class="av-toast-container" id="avToastContainer"></div>
-  <script src="assets/js/availability-utils.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/availability-utils.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
   <script>
   (function() {
     'use strict';
@@ -1440,7 +1482,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var panel = new URLSearchParams(window.location.search).get('panel') || '';
       var y = year || (panel === 'overrides' && typeof ovCalYear === 'number' ? ovCalYear : panel === 'preview' && typeof pvCalYear === 'number' ? pvCalYear : now.getFullYear());
       var m = month || (panel === 'overrides' && typeof ovCalMonth === 'number' ? ovCalMonth + 1 : panel === 'preview' && typeof pvCalMonth === 'number' ? pvCalMonth + 1 : now.getMonth() + 1);
-      fetch('appointment-availability.php?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
+      fetch(<?php echo json_encode($appBaseUrl . '/api/shared/appointment-availability.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> + '?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
         .then(function(r) { return r.json(); })
         .then(function(data) {
           if (!data.ok) return;

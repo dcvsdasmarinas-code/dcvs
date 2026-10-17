@@ -4,11 +4,18 @@ require_once __DIR__ . '/../appointments/availability.php';
 /** Return active appointments that overlap a proposed program's date range. */
 function dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $excludeProgramId = 0, $startTime = '09:00', $endTime = '15:00', $staffRequired = 1) {
     $statuses = implode("','", dcvsHeldStatuses());
-    $stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.urgency_level, a.created_at, u.user_id, u.full_name, u.email, u.phone
+    $stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type,
+            COALESCE(a.scheduled_date, a.preferred_date) AS schedule_date,
+            COALESCE(a.scheduled_time, a.preferred_time) AS schedule_time,
+            a.preferred_date, a.preferred_time, a.status, a.urgency_level, a.created_at,
+            u.user_id, u.full_name, u.email, u.phone, COALESCE(a.pet_name, p.pet_name, '') AS pet_name
         FROM appointments a JOIN users u ON u.user_id = a.user_id
-        WHERE a.preferred_date BETWEEN ? AND ? AND a.status IN ('$statuses') AND a.archived_at IS NULL
+        LEFT JOIN pets p ON p.pet_id = a.pet_id
+        WHERE COALESCE(a.scheduled_date, a.preferred_date) BETWEEN ? AND ? AND a.status IN ('$statuses')
+          AND a.status <> 'action_needed' AND a.archived_at IS NULL
           AND a.urgency_level = 'routine'
-        ORDER BY a.preferred_date, a.preferred_time, a.created_at, a.appointment_id");
+        ORDER BY COALESCE(a.scheduled_date, a.preferred_date),
+            COALESCE(a.scheduled_time, a.preferred_time), a.created_at, a.appointment_id");
     if (!$stmt) {
         error_log('Failed to prepare program appointment conflict lookup: ' . $conn->error);
         throw new RuntimeException('Could not check appointments affected by this program.');
@@ -22,6 +29,20 @@ function dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $excludePr
     $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $stmt->close();
 
+    $programStart = substr($startTime, 0, 5);
+    $programEnd = substr($endTime, 0, 5);
+    $appointmentSlots = [];
+    foreach ($rows as $row) {
+        $time = substr($row['schedule_time'], 0, 5);
+        $slotStart = strtotime($row['schedule_date'] . ' ' . $time . ':00');
+        $slotEnd = $slotStart + 3600;
+        $programSlotStart = strtotime($row['schedule_date'] . ' ' . $programStart . ':00');
+        $programSlotEnd = strtotime($row['schedule_date'] . ' ' . $programEnd . ':00');
+        if ($programSlotStart < $slotEnd && $programSlotEnd > $slotStart) {
+            $appointmentSlots[$row['schedule_date']][$time][] = $row;
+        }
+    }
+
     $program = [
         'program_id' => 0,
         'start_date' => $startDate,
@@ -30,17 +51,28 @@ function dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $excludePr
         'program_end_time' => $endTime,
         'staff_required_count' => $staffRequired,
     ];
-    $staffing = dcvsProgramStaffingMap($conn, $startDate, $endDate, $excludeProgramId, $program);
+    $staffingBefore = dcvsProgramStaffingMap($conn, $startDate, $endDate, $excludeProgramId);
+    $staffingAfter = dcvsProgramStaffingMap($conn, $startDate, $endDate, $excludeProgramId, $program);
     $staffCount = dcvsActiveStaffCount($conn);
-    $bySlot = [];
-    foreach ($rows as $row) $bySlot[$row['preferred_date']][substr($row['preferred_time'], 0, 5)][] = $row;
 
     $conflicts = [];
-    foreach ($bySlot as $date => $times) {
+    foreach ($appointmentSlots as $date => $times) {
         foreach ($times as $time => $appointments) {
-            $capacity = max(0, $staffCount - (int)($staffing[$date][$time] ?? 0));
-            if (count($appointments) > $capacity) {
-                foreach (array_slice($appointments, $capacity) as $appointment) $conflicts[] = $appointment;
+            $staffingCountBefore = (int)($staffingBefore[$date][$time] ?? 0);
+            $staffingCountAfter = (int)($staffingAfter[$date][$time] ?? 0);
+            $capacityBefore = max(0, $staffCount - $staffingCountBefore);
+            $capacityAfter = max(0, $staffCount - $staffingCountAfter);
+            $affectedCount = min(count($appointments), $capacityBefore) - $capacityAfter;
+            if ($affectedCount > 0) {
+                foreach (array_slice($appointments, $capacityAfter, $affectedCount) as $appointment) {
+                    $appointment['active_staff_count'] = $staffCount;
+                    $appointment['program_staffing_before'] = $staffingCountBefore;
+                    $appointment['program_staffing_after'] = $staffingCountAfter;
+                    $appointment['slot_capacity_before'] = $capacityBefore;
+                    $appointment['slot_capacity_after'] = $capacityAfter;
+                    $appointment['appointments_in_slot'] = count($appointments);
+                    $conflicts[] = $appointment;
+                }
             }
         }
     }

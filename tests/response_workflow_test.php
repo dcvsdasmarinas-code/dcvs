@@ -12,6 +12,7 @@ $allowedTransitions = [
     ['return_for_validation', 'staff', 'awaiting_dcvs_decision'],
     ['reject_report', 'staff', 'awaiting_dcvs_decision'],
     ['start_response', 'barangay', 'barangay_response_approved'],
+    ['record_site_visit', 'barangay', 'barangay_responding'],
     ['mark_secured', 'barangay', 'barangay_responding'],
     ['update_progress', 'barangay', 'barangay_responding'],
     ['update_progress', 'barangay', 'animal_secured'],
@@ -21,6 +22,7 @@ $allowedTransitions = [
     ['unable_to_locate', 'barangay', 'barangay_responding'],
     ['mark_secured', 'barangay', 'barangay_responding'],
     ['request_pickup', 'barangay', 'animal_secured'],
+    ['set_handover_plan', 'barangay', 'resolved'],
     ['revoke_approval', 'staff', 'barangay_response_approved'],
     ['revoke_approval', 'staff', 'barangay_responding'],
     ['confirm_turnover', 'staff', 'awaiting_turnover'],
@@ -54,7 +56,11 @@ $deniedTransitions = [
     ['resume_barangay_response', 'staff', 'returned_to_barangay'],
     ['dispatch_escalation', 'barangay', 'escalated_to_dcvs'],
     ['request_pickup', 'barangay', 'barangay_responding'],
+    ['set_handover_plan', 'staff', 'resolved'],
+    ['set_handover_plan', 'barangay', 'animal_secured'],
     ['start_response', 'barangay', 'barangay_responding'],
+    ['record_site_visit', 'staff', 'barangay_responding'],
+    ['record_site_visit', 'barangay', 'barangay_response_approved'],
     ['mark_secured', 'barangay', 'barangay_response_approved'],
     ['resolve_barangay', 'barangay', 'barangay_responding'],
     ['update_progress', 'barangay', 'awaiting_turnover'],
@@ -72,6 +78,13 @@ expectResponseWorkflowCondition(dcvsResponseCanResolveCase('staff', 'dcvs_dispat
 expectResponseWorkflowCondition(dcvsResponseCanResolveCase('staff', 'dcvs_processing'), 'DCVS may resolve a processed turnover.');
 expectResponseWorkflowCondition(!dcvsResponseCanResolveCase('staff', 'awaiting_turnover'), 'A case awaiting turnover must not be resolved.');
 expectResponseWorkflowCondition(!dcvsResponseCanResolveCase('barangay', 'dcvs_processing'), 'Barangay may not resolve a DCVS case.');
+expectResponseWorkflowCondition(dcvsResponseRequiresTurnover('injured_animal', 'rescued'), 'A rescued live animal requires turnover.');
+expectResponseWorkflowCondition(dcvsResponseRequiresTurnover('stray_animal', 'under_veterinary_care'), 'A live animal under veterinary care requires turnover.');
+expectResponseWorkflowCondition(dcvsResponseRequiresTurnover('stray_animal', ''), 'A resolved live-animal case without a legacy disposition still requires turnover.');
+expectResponseWorkflowCondition(dcvsResponseRequiresTurnover('stray_animal', 'legacy_unknown_disposition'), 'A resolved live-animal case with a legacy disposition still requires turnover.');
+expectResponseWorkflowCondition(!dcvsResponseRequiresTurnover('dead_animal', 'disposed_per_local_protocol'), 'A dead animal does not require live-animal turnover.');
+expectResponseWorkflowCondition(!dcvsResponseRequiresTurnover('injured_animal', 'reunited_with_owner'), 'An animal reunited with its owner does not require DCVS turnover.');
+expectResponseWorkflowCondition(!dcvsResponseRequiresTurnover('injured_animal', 'transferred_to_shelter'), 'An animal already transferred to a shelter does not require DCVS turnover.');
 expectResponseWorkflowCondition(dcvsResponseHasBarangayProposal(['barangay_proposed' => 1]), 'Legacy proposal rows should remain identifiable during migration.');
 expectResponseWorkflowCondition(
     dcvsResponseHasBarangayProposal([

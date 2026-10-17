@@ -36,6 +36,35 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  function isTurnoverPending(report) {
+    return String(report.statusRaw || '').toLowerCase() === 'resolved'
+      && String(report.turnoverStatus || '').toLowerCase() === 'pending';
+  }
+
+  function turnoverFooterHtml(report) {
+    if (!isTurnoverPending(report)) return '';
+    var planned = !!report.turnoverMethod && !!report.turnoverPlannedAtRaw;
+    var reportId = Number(report.id);
+    var confirm = planned
+      ? '<button type="button" class="sd-btn rpt-turnover-confirm" onclick="responseWorkflowAction(' + reportId + ',\'confirm_turnover\')">Confirm Turnover Received</button>'
+      : '<button type="button" class="sd-btn rpt-turnover-confirm" disabled title="Barangay must set the handover plan first">Awaiting Handover Plan</button>';
+    return confirm + '<button type="button" class="sd-btn sd-btn-outline rpt-turnover-archive" disabled title="Archive is available after DCVS confirms receipt">Archive (turnover pending)</button>';
+  }
+
+  function ensureTurnoverQueueButton() {
+    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED) return;
+    var reportsToolbar = document.querySelector('#reports-all .db-toolbar');
+    if (!reportsToolbar || document.getElementById('rptAwaitingTurnoverFilter')) return;
+    var turnoverButton = document.createElement('button');
+    turnoverButton.id = 'rptAwaitingTurnoverFilter';
+    turnoverButton.type = 'button';
+    turnoverButton.className = 'sd-btn sd-btn-outline';
+    turnoverButton.textContent = 'Awaiting Turnover (' + ALL.filter(function (r) { return r.responseState === 'awaiting_turnover'; }).length + ')';
+    turnoverButton.setAttribute('aria-pressed', 'false');
+    turnoverButton.addEventListener('click', window.rptToggleTurnoverQueue);
+    reportsToolbar.appendChild(turnoverButton);
+  }
+
   function parseDateCol(d) {
     if (!d || d === '—') return { day: '—', month: '' };
     var m = new Date(d);
@@ -157,7 +186,7 @@
   }
 
   function avatarHtml(r) {
-    return r.avatar ? '<img src="' + esc(r.avatar) + '" alt="">' : esc(initials(r.reporter));
+    return r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="">' : esc(initials(r.reporter));
   }
 
   function renderTable(rows) {
@@ -446,12 +475,15 @@
     var items = rptSelectedItems();
     if (!items.length) { rptToast('Select Reports', 'Select at least one report first.'); return; }
     var pending = items.filter(function (r) { return r.status === 'pending'; });
-    var eligible = items.filter(function (r) { return r.status !== 'pending'; });
+    var turnoverPending = items.filter(function (r) { return isTurnoverPending(r); });
+    var eligible = items.filter(function (r) { return r.status !== 'pending' && !isTurnoverPending(r); });
     if (!eligible.length) {
-      rptToast('Cannot Archive', 'This report must be validated first by the barangay before it can be archived.');
+      rptToast('Cannot Archive', turnoverPending.length
+        ? 'Pending turnover reports cannot be archived until DCVS confirms receipt.'
+        : 'This report must be validated first by the barangay before it can be archived.');
       return;
     }
-    rptBulk = { type: 'archive', queue: eligible.slice(), total: eligible.length, skipped: pending.length, applied: [], failed: 0 };
+    rptBulk = { type: 'archive', queue: eligible.slice(), total: eligible.length, skipped: pending.length + turnoverPending.length, applied: [], failed: 0 };
     showRptArchiveStep();
   };
 
@@ -693,7 +725,6 @@
       if (window.DCVS_BARANGAY_RESPONSE_ENABLED) {
         formData.set('action', 'staff_decide'); formData.set('response_mode', 'dcvs_dispatch');
         formData.set('report_id', report.id); formData.set('csrf_token', window.DCVS_RESPONSE_CSRF || '');
-        formData.set('dispatch_officer_id', String(window.DCVS_CURRENT_STAFF_ID || ''));
       } else {
         formData.set('ajax', '1'); formData.set('report_id', report.id); formData.set('scheduled_at', ''); formData.set('dcvs_notes', '');
       }
@@ -799,19 +830,8 @@
     var s1 = document.getElementById('rptMainSearch');
     if (s2 && s2.value !== v) s2.value = v;
     if (s1 && s1.value !== v) s1.value = v;
-    if (window.DCVS_BARANGAY_RESPONSE_ENABLED) {
-      var reportsToolbar = document.querySelector('#reports-all .db-toolbar');
-      if (reportsToolbar && !document.getElementById('rptAwaitingTurnoverFilter')) {
-        var turnoverButton = document.createElement('button');
-        turnoverButton.id = 'rptAwaitingTurnoverFilter';
-        turnoverButton.type = 'button';
-        turnoverButton.className = 'sd-btn sd-btn-outline';
-        turnoverButton.textContent = 'Awaiting Turnover (' + ALL.filter(function (r) { return r.responseState === 'awaiting_turnover'; }).length + ')';
-        turnoverButton.setAttribute('aria-pressed', 'false');
-        turnoverButton.addEventListener('click', window.rptToggleTurnoverQueue);
-        reportsToolbar.appendChild(turnoverButton);
-      }
-    }
+    ensureTurnoverQueueButton();
+    ensureTurnoverQueueButton();
     render();
   };
   window.rptSetDate = function () {
@@ -902,7 +922,9 @@
       (r.photo || r.video ? '<button class="row-menu-item" onclick="rptViewPhoto(\'' + esc(r.photo || r.video) + '\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>View Attachments</button>' : '') +
       '<button class="row-menu-item" onclick="rptViewLocation(\'' + esc(r.brgy) + '\',' + Number(r.id) + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13-s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>View Location</button>' +
       '<button class="row-menu-item" onclick="rptSelect(' + id + ');closeActions()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>View History</button>' +
-      '<button class="row-menu-item danger" onclick="archiveReport(' + id + ');closeActions()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive Report</button>';
+      (isTurnoverPending(r)
+        ? '<button class="row-menu-item danger" disabled title="Archive is available after DCVS confirms receipt">Archive Report — turnover pending</button>'
+        : '<button class="row-menu-item danger" onclick="archiveReport(' + id + ');closeActions()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive Report</button>');
     var rect = ev.currentTarget.getBoundingClientRect();
     pop.style.top = (rect.bottom + 6) + 'px';
     pop.style.left = Math.min(rect.left, window.innerWidth - 220) + 'px';
@@ -968,11 +990,6 @@
       : (r.responseMode === 'dcvs_dispatch' ? 'DCVS Dispatch' : 'Undecided');
     var deadline = r.responseDeadline || r.progressDeadline || '';
     var overdue = deadline && new Date(deadline.replace(' ', 'T')).getTime() < Date.now();
-    var turnoverLabels = { pending: 'For Turnover — awaiting DCVS receipt', receipt_confirmed: 'Turnover Completed', cancelled: 'Turnover Cancelled' };
-    var turnoverStatus = turnoverLabels[r.turnoverStatus] || '';
-    var turnoverAction = window.DCVS_RESPONSE_ROLE === 'staff' && r.turnoverStatus === 'pending'
-      ? '<button type="button" class="sd-btn sd-btn-default" onclick="responseWorkflowAction(' + Number(r.id) + ',\'confirm_turnover\')">Confirm Animal Receipt</button>'
-      : '';
     return '<section class="rpt-col rpt-full-col rpt-response-custody-section"><div class="rpt-section-title">Response &amp; Custody</div>' +
       '<div class="info-rows info-rows-2col rpt-response-custody-grid">' +
       infoRow('activity', 'Response Status', status) +
@@ -984,11 +1001,8 @@
       (r.animalCondition ? infoRow('activity', 'Animal Condition', r.animalCondition) : '') +
       (r.resolutionDetails ? infoRow('activity', 'Resolution Details', r.resolutionDetails) : '') +
       (r.animalDisposition ? infoRow('activity', 'Animal Disposition', r.animalDisposition.replace(/_/g, ' ')) : '') +
-      (turnoverStatus ? infoRow('activity', 'Turnover Task', turnoverStatus) : '') +
-      (r.turnoverDueAt && r.turnoverStatus === 'pending' ? infoRow('cal', 'Turnover Due', r.turnoverDueAt) : '') +
-      (r.turnoverReceiptAt ? infoRow('cal', 'Receipt Confirmed', r.turnoverReceiptAt) : '') +
-      (r.turnoverRequestedAt ? infoRow('cal', 'Pickup Requested', r.turnoverRequestedAt) : '') +
-      '</div>' + turnoverAction + '</section>';
+      '</div>' +
+      '</section>';
   }
 
   function rptResponseDecisionFooter(r) {
@@ -1065,39 +1079,16 @@
 
     var typeTag = r.typeLabel || r.type || 'Report';
     var statusStyle = statusBadgeStyle(r);
-    var history = [];
-    history.push({ t: esc(typeTag) + ' report submitted', a: esc(r.reporter || 'Resident'), d: r.date });
-    if (r.statusRaw === 'validated') history.push({ t: 'Verified by Barangay', a: 'Barangay', d: r.date });
-    if (r.confirmed) history.push({ t: 'Confirmed by DCVS Staff', a: 'DCVS Staff', d: r.confirmed });
-    if (r.scheduled) history.push({ t: 'Scheduled for action', a: 'DCVS Staff', d: r.scheduled });
-    if (r.resolved) history.push({ t: 'Resolved by DCVS Staff', a: 'DCVS Staff', d: r.resolved });
-    (Array.isArray(r.responseHistory) ? r.responseHistory : []).forEach(function (entry) {
-      history.push({
-        t: String(entry.action || 'case action').replace(/_/g, ' '),
-        a: entry.actor || 'DCVS Staff',
-        d: entry.createdAt || '',
-        reason: entry.reason || ''
-      });
-    });
-
-    var photoHtml = (r.photo || r.video)
-      ? '<div class="rpt-photo-box">' +
-        (r.photo ? '<div class="rpt-photo-thumb" onclick="rptViewPhoto(\'' + esc(r.photo) + '\')"><img src="' + esc(r.photo) + '" alt="Report attachment"></div>' : '') +
-        (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + esc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
-        '</div>'
-      : '<p class="rpt-photo-none">No attachments.</p>';
-
     if (r.structured) {
       var structuredStatus = r.statusLabel || r.status || '-';
       box.innerHTML = '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="rptDetailGo(\'details\')">Details</button>' +
-        '<button class="rpt-tab" data-tab="attachments" onclick="rptDetailGo(\'attachments\')">Attachments</button>' +
-        '<button class="rpt-tab" data-tab="history" onclick="rptDetailGo(\'history\')">History</button>' +
+        '<button class="rpt-tab" data-tab="updates" onclick="rptDetailGo(\'updates\')">Updates</button>' +
         '</div>' +
         '<div class="rpt-detail-body" data-tab="details">' +
 
         '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
-        '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
+        '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.reporter || '\u2014') + '</span>' +
@@ -1110,12 +1101,11 @@
         priorityPill(r.urgency) +
         '</div>' +
 
-        casBarangayValidationDetails(r) +
         rptResponseRiskPanel(r) +
         rptResponseWorkflowDetails(r) +
 
         '<div class="rpt-detail-grid">' +
-        '<div class="rpt-col rpt-full-col"><div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="assets/images/edit%20icon.png" alt=""></button>' : '') + '</div><div class="info-rows info-rows-2col">' +
+        '<div class="rpt-col rpt-full-col"><div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="' + esc(window.dcvsStaffUrl('assets/images/edit%20icon.png')) + '" alt=""></button>' : '') + '</div><div class="info-rows info-rows-2col">' +
         infoRow('cal', 'Date Submitted', r.submitted || r.date || '-') +
         infoRow('cal', 'Incident Date', r.incidentDate || r.date || '-') +
         infoRow('home2', 'Location', r.location || '-') +
@@ -1138,10 +1128,9 @@
         '</div></div>' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Incident Details</div><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0 0 6px;">Description</p><div class="rpt-desc-box" style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">' + (r.desc ? esc(r.desc) : 'No description provided.') + '</div></div>' +
         '</div></div>' +
-        '<div class="rpt-detail-body" data-tab="attachments" style="display:none;"><div class="rpt-section-title">Attached Photos</div>' + photoHtml + '</div>' +
-        '<div class="rpt-detail-body" data-tab="history" style="display:none;"><div class="rpt-section-title">Activity Timeline</div><div class="rpt-history">' + history.map(function (h) {
-            return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + esc(h.t) + '</div><div class="rpt-h-meta">by ' + esc(h.a) + (h.d ? ' - ' + esc(h.d) : '') + '</div>' + (h.reason ? '<div class="rpt-response-history-reason">' + esc(h.reason) + '</div>' : '') + '</div></div>';
-        }).join('') + '</div></div>';
+        '<div class="rpt-detail-body" data-tab="updates" style="display:none;">' +
+        (typeof window.casReportCaseUpdatesHtml === 'function' ? window.casReportCaseUpdatesHtml(r) : '') +
+        '</div>';
       rptDetailRefreshTabs();
       var structuredFooter = document.getElementById('rptDetailFooter');
       if (structuredFooter) {
@@ -1153,7 +1142,8 @@
           structuredFooterHtml += '<button class="sd-btn sd-btn-outline" onclick="rptViewLocation(\'' + esc(r.brgy) + '\',' + Number(r.id) + ')">View Location</button>';
           structuredFooterHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
         } else {
-          structuredFooterHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
+          structuredFooterHtml += turnoverFooterHtml(r);
+          if (!isTurnoverPending(r)) structuredFooterHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
         }
         structuredFooter.innerHTML = structuredFooterHtml;
       }
@@ -1166,14 +1156,13 @@
     box.innerHTML =
       '<div class="rpt-tabs">' +
       '<button class="rpt-tab" data-tab="details" onclick="rptDetailGo(\'details\')">Details</button>' +
-      '<button class="rpt-tab" data-tab="attachments" onclick="rptDetailGo(\'attachments\')">Attachments</button>' +
-      '<button class="rpt-tab" data-tab="history" onclick="rptDetailGo(\'history\')">History</button>' +
+      '<button class="rpt-tab" data-tab="updates" onclick="rptDetailGo(\'updates\')">Updates</button>' +
       '</div>' +
 
       '<div class="rpt-detail-body" data-tab="details">' +
 
       '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
-      '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
+      '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
       '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.reporter || '—') + '</span>' +
@@ -1186,14 +1175,13 @@
       priorityPill(r.urgency) +
       '</div>' +
 
-      casBarangayValidationDetails(r) +
       rptResponseRiskPanel(r) +
       rptResponseWorkflowDetails(r) +
 
       '<div class="rpt-detail-grid">' +
 
       '<div class="rpt-col rpt-full-col">' +
-      '<div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="assets/images/edit%20icon.png" alt=""></button>' : '') + '</div>' +
+      '<div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="' + esc(window.dcvsStaffUrl('assets/images/edit%20icon.png')) + '" alt=""></button>' : '') + '</div>' +
       '<div class="info-rows info-rows-2col">' +
       infoRow('cal', 'Date Submitted', r.submitted || r.reported || r.date || '-') +
       infoRow('cal', 'Incident Date', r.incidentDate || r.date || '-') +
@@ -1246,15 +1234,8 @@
       '</div>' +
       '</div>' +
 
-      '<div class="rpt-detail-body" data-tab="attachments" style="display:none;">' +
-      '<div class="rpt-section-title">Attachments</div>' + photoHtml +
-      '</div>' +
-
-      '<div class="rpt-detail-body" data-tab="history" style="display:none;">' +
-      '<div class="rpt-section-title">Activity Timeline</div>' +
-      '<div class="rpt-history">' + history.map(function (h) {
-        return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + esc(h.t) + '</div><div class="rpt-h-meta">by ' + esc(h.a) + (h.d ? ' \u00b7 ' + esc(h.d) : '') + '</div>' + (h.reason ? '<div class="rpt-response-history-reason">' + esc(h.reason) + '</div>' : '') + '</div></div>';
-      }).join('') + '</div>' +
+      '<div class="rpt-detail-body" data-tab="updates" style="display:none;">' +
+      (typeof window.casReportCaseUpdatesHtml === 'function' ? window.casReportCaseUpdatesHtml(r) : '') +
       '</div>';
 
     rptDetailRefreshTabs();
@@ -1269,7 +1250,8 @@
         footerHtml += '<button class="sd-btn sd-btn-outline" onclick="rptViewLocation(\'' + esc(r.brgy) + '\',' + Number(r.id) + ')">View Location</button>';
         footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
       } else {
-        footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
+        footerHtml += turnoverFooterHtml(r);
+        if (!isTurnoverPending(r)) footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveReport(' + r.id + ')">Archive</button>';
       }
       footer.innerHTML = footerHtml;
     }

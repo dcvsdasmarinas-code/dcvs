@@ -16,7 +16,10 @@ require_once __DIR__ . '/../../includes/staff-formatters.php';
 require_once __DIR__ . '/../../includes/reports/staff-data.php';
 require_once __DIR__ . '/../../includes/programs/conflicts.php';
 require_once __DIR__ . '/../../includes/availability.php';
+require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 // Fresh login â�?��?T force Analytics tab on first dashboard load
 $freshDashboard = !empty($_SESSION['fresh_dashboard']);
@@ -24,12 +27,12 @@ if ($freshDashboard) unset($_SESSION['fresh_dashboard']);
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
-    header('Location: login-staff.php');
+    header('Location: ' . $appBaseUrl . '/login-staff.php');
     exit;
 }
 // Check if user has staff role
 if ($_SESSION['role'] !== 'staff') {
-    header('Location: login-staff.php');
+    header('Location: ' . $appBaseUrl . '/login-staff.php');
     exit;
 }
 
@@ -42,11 +45,12 @@ if ($roleRow = $roleResult->fetch_assoc()) {
     if ($roleRow['role'] !== $_SESSION['role']) {
         $_SESSION = array();
         session_destroy();
-        header('Location: login-staff.php');
+        header('Location: ' . $appBaseUrl . '/login-staff.php');
         exit;
     }
 }
 $roleCheck->close();
+dcvsExpireAppointmentRescheduleOffers($conn);
 
 loadDcvsEnv();
 if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
@@ -154,6 +158,18 @@ if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
                     $barangayRecipients->close();
                 } else {
                     error_log('Could not prepare barangay recipients for an overdue turnover task: ' . $conn->error);
+                }
+                $overdueHistory = $conn->prepare("INSERT INTO report_response_history
+                    (report_id, actor_id, actor_role, action, from_state, to_state, reason)
+                    VALUES (?, NULL, 'system', 'turnover_overdue', 'resolved', 'resolved', ?)");
+                if ($overdueHistory) {
+                    $overdueHistory->bind_param('is', $reportIdForTurnover, $notice);
+                    if (!$overdueHistory->execute()) {
+                        error_log('Could not record overdue turnover event in report history: ' . $overdueHistory->error);
+                    }
+                    $overdueHistory->close();
+                } else {
+                    error_log('Could not prepare overdue turnover event in report history: ' . $conn->error);
                 }
                 $remindTask = $conn->prepare("UPDATE report_turnover_tasks SET last_reminded_at = NOW() WHERE turnover_task_id = ? AND status = 'pending'");
                 if ($remindTask) {
@@ -291,7 +307,7 @@ if ($cpdCq) {
             'ts'       => strtotime($r['created_at']),
             'date'     => date('M d, Y', strtotime($r['created_at'])),
             'initials' => cpdInitials($r['full_name']),
-            'avatar'   => (string)$r['avatar_url'],
+            'avatar'   => dcvsStaffReportMediaUrl($r['avatar_url']),
         ];
     }
 }
@@ -323,7 +339,7 @@ if ($cpdPq) {
             'gender'    => cpdGenderLabel($r['gender']),
             'vax'       => $vax,
             'vaxOk'     => cpdVaxOk($vax),
-            'photo'     => (string)$r['photo_url'],
+            'photo'     => dcvsStaffReportMediaUrl($r['photo_url']),
             'ownerId'   => (int)$r['owner_id'],
             'ownerName' => $r['owner_name'],
             'ownerRef'  => $r['owner_ref'] ?: '',
@@ -375,7 +391,10 @@ if ($apptSearchFilter !== '') {
 }
 
 $pendingQuery = $conn->query("
-  SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.created_at, a.reference_id, u.user_id, u.reference_id AS user_ref, u.full_name, u.email, u.phone, u.avatar_url, p.pet_name, p.photo_url, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status
+  SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
+         COALESCE(a.scheduled_date, a.preferred_date) AS scheduled_date,
+         COALESCE(a.scheduled_time, a.preferred_time) AS scheduled_time,
+         a.cancelled_by, a.status, a.created_at, a.reference_id, u.user_id, u.reference_id AS user_ref, u.full_name, u.email, u.phone, u.avatar_url, p.pet_name, p.photo_url, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status
     FROM appointments a
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
@@ -384,6 +403,8 @@ $pendingQuery = $conn->query("
 ");
 if ($pendingQuery) {
     while($row = $pendingQuery->fetch_assoc()) {
+        $row['avatar_url'] = dcvsStaffReportMediaUrl($row['avatar_url']);
+        $row['photo_url'] = dcvsStaffReportMediaUrl($row['photo_url']);
         $pendingAppts[] = $row;
     }
 }
@@ -395,17 +416,19 @@ $statusColors = [
     'scheduled'   => ['bg' => '#0E8131', 'color' => '#ffffff', 'border' => '#0E8131'],
     'approved'    => ['bg' => '#dcebe0', 'color' => '#045e1f', 'border' => '#bbf7d0'],
     'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
+    'action_needed' => ['bg' => '#ffedd5', 'color' => '#9a3412', 'border' => '#fed7aa'],
     'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
     'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
     'rejected'    => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+    'waitlisted'  => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
 ];
 
 // KPI counts for the appointments overview
 $apptCounts = ['all' => $pendingTotal, 'pending' => 0, 'scheduled' => 0, 'completed' => 0];
 foreach ($pendingAppts as $ar) {
     $as = $ar['status'] ?? '';
-    if ($as === 'pending') $apptCounts['pending']++;
+    if ($as === 'pending' || $as === 'action_needed') $apptCounts['pending']++;
     elseif ($as === 'scheduled' || $as === 'rescheduled') $apptCounts['scheduled']++;
     elseif ($as === 'completed') $apptCounts['completed']++;
 }
@@ -413,7 +436,10 @@ foreach ($pendingAppts as $ar) {
 // Fetch ALL appointments for calendar initialization
 $calendarAppointments = [];
 $apptsQuery = $conn->query("
-    SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.notes, a.reference_id, u.full_name, p.pet_name
+    SELECT a.appointment_id, a.appointment_type, a.urgency_level,
+           COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+           COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
+           a.status, a.notes, a.reference_id, u.full_name, p.pet_name
     FROM appointments a
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
@@ -500,14 +526,17 @@ $calendarEventsJSON = json_encode($calendarAppointments);
 // Fetch upcoming appointments for the calendar reminder panel
 $upcomingAppts = [];
 $upQ = $conn->query("
-    SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.reference_id, u.full_name, p.pet_name
+    SELECT a.appointment_id, a.appointment_type, a.urgency_level,
+           COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+           COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
+           a.status, a.reference_id, u.full_name, p.pet_name
     FROM appointments a
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
     WHERE a.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
-      AND a.preferred_date >= CURDATE()
+      AND COALESCE(a.scheduled_date, a.preferred_date) >= CURDATE()
       AND a.status IN ('pending','scheduled','rescheduled')
-    ORDER BY a.preferred_date ASC, a.preferred_time ASC
+    ORDER BY COALESCE(a.scheduled_date, a.preferred_date) ASC, COALESCE(a.scheduled_time, a.preferred_time) ASC
     LIMIT 8
 ");
 if ($upQ) {
@@ -517,12 +546,15 @@ if ($upQ) {
 // Fetch completed appointments for the calendar reminder panel
 $completedAppts = [];
 $cpQ = $conn->query("
-    SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.reference_id, u.full_name, p.pet_name
+    SELECT a.appointment_id, a.appointment_type, a.urgency_level,
+           COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+           COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
+           a.status, a.reference_id, u.full_name, p.pet_name
     FROM appointments a
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
     WHERE a.archived_at IS NULL AND a.status = 'completed' AND u.status = 'active' AND u.deleted_at IS NULL
-    ORDER BY a.preferred_date DESC, a.preferred_time DESC
+    ORDER BY COALESCE(a.scheduled_date, a.preferred_date) DESC, COALESCE(a.scheduled_time, a.preferred_time) DESC
     LIMIT 6
 ");
 if ($cpQ) {
@@ -566,18 +598,27 @@ if ($rcq) {
 
 $validationEvidenceByReportId = [];
 $validationEvidenceQuery = $conn->query("
-    SELECT report_id, attachment_type, attachment_source, file_url, mime_type
-    FROM report_attachments
-    WHERE attachment_source IN ('barangay_validation', 'barangay_secured', 'barangay_turnover')
-    ORDER BY report_id, display_order, attachment_id
+    SELECT a.attachment_id, a.report_id, a.attachment_type, a.attachment_source, a.file_url, a.uploaded_by,
+           a.mime_type, a.caption, a.response_history_id
+    FROM report_attachments a
+    WHERE attachment_source IN ('barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action', 'staff_action')
+    ORDER BY a.report_id, a.display_order, a.attachment_id
 ");
 if ($validationEvidenceQuery) {
     while ($attachment = $validationEvidenceQuery->fetch_assoc()) {
         $validationEvidenceByReportId[(int)$attachment['report_id']][] = [
             'type' => (string)$attachment['attachment_type'],
-            'url' => (string)$attachment['file_url'],
+            'url' => in_array((string)$attachment['attachment_source'], ['barangay_action', 'staff_action'], true)
+                ? $appBaseUrl . '/api/shared/report-evidence-file.php?id=' . (int)$attachment['attachment_id'] . '&sess=DCVS_STAFF_SESSION'
+                : dcvsStaffReportMediaUrl($attachment['file_url']),
             'mimeType' => (string)$attachment['mime_type'],
             'stage' => (string)$attachment['attachment_source'],
+            'caption' => (string)($attachment['caption'] ?? ''),
+            'responseHistoryId' => (int)($attachment['response_history_id'] ?? 0),
+            'isMine' => (int)($attachment['uploaded_by'] ?? 0) === (int)$_SESSION['user_id'],
+            'role' => in_array((string)$attachment['attachment_source'], ['barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action'], true)
+                ? 'barangay'
+                : 'staff',
         ];
     }
 } else {
@@ -587,7 +628,7 @@ if ($validationEvidenceQuery) {
 $responseHistoryByReportId = [];
 if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
     $responseHistoryQuery = $conn->query("
-        SELECT h.report_id, h.actor_role, h.action, h.from_state, h.to_state, h.reason,
+        SELECT h.history_id, h.report_id, h.actor_role, h.action, h.from_state, h.to_state, h.reason,
                h.created_at, u.full_name AS actor_name
         FROM report_response_history h
         LEFT JOIN users u ON u.user_id = h.actor_id
@@ -596,12 +637,15 @@ if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
     if ($responseHistoryQuery) {
         while ($entry = $responseHistoryQuery->fetch_assoc()) {
             $responseHistoryByReportId[(int)$entry['report_id']][] = [
+                'id' => (int)$entry['history_id'],
                 'actor' => (string)($entry['actor_name'] ?: ucfirst((string)$entry['actor_role'])),
+                'actorRole' => (string)$entry['actor_role'],
                 'action' => (string)$entry['action'],
                 'fromState' => (string)($entry['from_state'] ?? ''),
                 'toState' => (string)$entry['to_state'],
                 'reason' => (string)($entry['reason'] ?? ''),
                 'createdAt' => date('M d, Y h:i A', strtotime($entry['created_at'])),
+                'createdAtRaw' => (string)$entry['created_at'],
             ];
         }
     } else {
@@ -620,12 +664,15 @@ if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
             $afterValues = json_decode((string)$entry['after_values'], true);
             $changedFields = is_array($afterValues) ? implode(', ', array_keys($afterValues)) : 'report details';
             $responseHistoryByReportId[(int)$entry['report_id']][] = [
+                'id' => 0,
                 'actor' => (string)($entry['actor_name'] ?: 'DCVS Staff'),
+                'actorRole' => 'staff',
                 'action' => 'report_correction',
                 'fromState' => '',
                 'toState' => '',
                 'reason' => 'Reason: ' . (string)$entry['reason'] . ' Changed fields: ' . $changedFields . '.',
                 'createdAt' => date('M d, Y h:i A', strtotime($entry['created_at'])),
+                'createdAtRaw' => (string)$entry['created_at'],
             ];
         }
     } else {
@@ -633,21 +680,16 @@ if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
     }
 }
 
-$responseDispatchOfficers = [];
-if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
-    $officerQuery = $conn->query("SELECT user_id, full_name FROM users
-        WHERE role = 'staff' AND status = 'active' AND deleted_at IS NULL
-        ORDER BY full_name");
-    if ($officerQuery) {
-        while ($officer = $officerQuery->fetch_assoc()) {
-            $responseDispatchOfficers[] = [
-                'id' => (int)$officer['user_id'],
-                'name' => (string)$officer['full_name'],
-            ];
-        }
-    } else {
-        error_log('Could not load active DCVS officers for response decisions: ' . $conn->error);
+function dcvsStaffReportMediaUrl($url) {
+    global $appBaseUrl;
+    $url = trim((string)$url);
+    if ($url === '' || preg_match('~^(?:[a-z][a-z0-9+.-]*:|//)~i', $url)) {
+        return $url;
     }
+    if ($appBaseUrl !== '' && ($url === $appBaseUrl || strpos($url, $appBaseUrl . '/') === 0)) {
+        return $url;
+    }
+    return $appBaseUrl . '/' . preg_replace('~^(?:/|\.{1,2}/)+~', '', $url);
 }
 
 $reportItems = [];
@@ -673,21 +715,31 @@ if ($rptQ) {
             'submittedTs' => strtotime($r['created_at']) * 1000,
             'status'   => rptReportStatus($r['status'], $r['scheduled_at']),
             'statusRaw'=> strtolower((string)$r['status']),
-            'statusLabel' => strtolower((string)$r['status']) === 'validated' ? 'Pending DCVS Review' : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at'])),
+            'statusLabel' => (string)($r['response_state'] ?? '') === 'barangay_response_approved'
+                ? 'Accepted by Barangay'
+                : ((string)($r['response_state'] ?? '') === 'barangay_responding' && strtolower((string)$r['status']) === 'validated'
+                    ? 'Barangay Responding'
+                : ((string)($r['response_state'] ?? '') === 'escalated_to_dcvs'
+                    ? 'Escalated to DCVS'
+                    : ((string)($r['response_state'] ?? '') === 'unable_to_locate'
+                        ? 'Unable to Locate'
+                        : (in_array(strtolower((string)$r['status']), ['pending', 'validated'], true)
+                            ? 'Pending Barangay Review'
+                            : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at'])))))),
 'scheduled' => $r['scheduled_at'] ? date('M d, Y h:i A', strtotime($r['scheduled_at'])) : '',
            'validated'=> $r['validated_at'] ? date('M d, Y h:i A', strtotime($r['validated_at'])) : '',
            'vts'      => $r['validated_at'] ? strtotime($r['validated_at']) : 0,
             'urgency'  => rptUrgencyLabel($r['urgency_level']),
             'urgencyRaw' => strtolower((string)($r['urgency_level'] ?: 'medium')),
-            'photo'    => (string)$r['photo_url'],
-            'video'    => (string)$r['video_url'],
+            'photo'    => dcvsStaffReportMediaUrl($r['photo_url']),
+            'video'    => dcvsStaffReportMediaUrl($r['video_url']),
             'reporter' => $r['reporter_name'],
             'reporterStatus' => strtolower((string)$r['reporter_status']),
             'reporterId' => (int)$r['reporter_id'],
             'reporterRef' => $r['reporter_ref'] ?: '#RES-' . fallbackRefId('#RES-', (int)$r['reporter_id']),
             'phone'    => (string)$r['reporter_phone'],
             'email'    => (string)$r['reporter_email'],
-            'avatar'   => (string)$r['avatar_url'],
+            'avatar'   => dcvsStaffReportMediaUrl($r['avatar_url']),
             'assigned' => $r['confirmed_staff'] ?: ($r['validated_staff'] ?: ''),
             'typeShort'=> strtok(rptTypeLabel($r['report_type']), ' '),
             'brgyNotes'=> (string)$r['barangay_notes'],
@@ -708,6 +760,7 @@ if ($rptQ) {
             'responseDeadline' => (string)($r['response_deadline'] ?? ''),
             'progressDeadline' => (string)($r['progress_deadline'] ?? ''),
             'lastProgressAt' => (string)($r['last_progress_at'] ?? ''),
+            'securedAt' => !empty($r['secured_at']) ? date('M d, Y g:i A', strtotime($r['secured_at'])) : '',
             'turnoverDeadline' => (string)($r['turnover_deadline'] ?? ''),
             'urgentEscalatedAt' => (string)($r['urgent_escalated_at'] ?? ''),
             'highRiskOverrideAuthorized' => (int)($r['high_risk_override_by'] ?? 0) === (int)$_SESSION['user_id']
@@ -727,12 +780,25 @@ if ($rptQ) {
             'turnoverTaskId' => (int)($r['turnover_task_id'] ?? 0),
             'turnoverStatus' => (string)($r['turnover_status'] ?? ''),
             'turnoverDueAt' => (string)($r['turnover_due_at'] ?? ''),
+            'turnoverDueAtDisplay' => !empty($r['turnover_due_at']) ? date('M d, Y g:i A', strtotime($r['turnover_due_at'])) : '',
+            'turnoverMethod' => (string)($r['turnover_method'] ?? ''),
+            'turnoverPlannedAt' => !empty($r['turnover_planned_at']) ? date('M d, Y h:i A', strtotime($r['turnover_planned_at'])) : '',
+            'turnoverPlannedAtRaw' => (string)($r['turnover_planned_at'] ?? ''),
+            'turnoverHandlerName' => (string)($r['turnover_handler_name'] ?? ''),
+            'turnoverContactNumber' => (string)($r['turnover_contact_number'] ?? ''),
+            'turnoverPickupLocation' => (string)($r['turnover_pickup_location'] ?? ''),
+            'turnoverSafeTransport' => (bool)($r['turnover_safe_transport'] ?? false),
             'turnoverReceiptAt' => (string)($r['turnover_receipt_at'] ?? ''),
+            'turnoverReceivedAtDisplay' => !empty($r['turnover_receipt_at']) ? date('M d, Y g:i A', strtotime($r['turnover_receipt_at'])) : '',
             'turnoverReceiver' => (string)($r['turnover_receiver'] ?? ''),
             'ts'       => strtotime($reportedAt),
             'date'     => date('M d, Y', strtotime($reportedAt)),
             'incidentDate' => date('M d, Y', strtotime($reportedAt)),
             'submitted'=> $r['created_at'] ? date('M d, Y g:i A', strtotime($r['created_at'])) : '',
+            'validatedRaw' => (string)($r['validated_at'] ?? ''),
+            'confirmedRaw' => (string)($r['confirmed_at'] ?? ''),
+            'scheduledRaw' => (string)($r['scheduled_at'] ?? ''),
+            'resolvedRaw' => (string)($r['resolved_at'] ?? ''),
         ];
     }
 }
@@ -743,30 +809,74 @@ foreach ($activeResidentReportItems as $ri) {
     if (isset($rptCounts[$ri['status']])) $rptCounts[$ri['status']]++;
 }
 
-// Pending cases include reports still with the barangay and reports forwarded to DCVS.
+$staffBarangayResponseStates = [
+    'barangay_response_approved',
+    'barangay_responding',
+    'animal_secured',
+    'returned_to_barangay',
+];
+
+// Forwarded reports stay pending until DCVS confirms them; Barangay-owned cases use their own queue.
 $pendingItems = [];
 $pendingCounts = ['all' => 0, 'high' => 0, 'week' => 0, 'awaiting' => 0];
 $pendingWeekStart = time() - 7 * 86400;
 foreach ($activeResidentReportItems as $ri) {
   if (!in_array($ri['statusRaw'], ['pending', 'validated'], true)) continue;
+  if (in_array((string)($ri['responseState'] ?? ''), $staffBarangayResponseStates, true)) continue;
   $awaitingConfirmation = $ri['statusRaw'] === 'validated';
-    $ri['status'] = 'pending';
+  $ri['status'] = 'pending';
   $ri['statusLabel'] = $awaitingConfirmation ? 'Pending DCVS Review' : 'Pending Barangay Review';
-    $ri['caseId'] = null;
-    $pendingItems[] = $ri;
-    $pendingCounts['all']++;
+  $ri['caseId'] = null;
+  $pendingItems[] = $ri;
+  $pendingCounts['all']++;
   if ($awaitingConfirmation) $pendingCounts['awaiting']++;
-    if (stripos($ri['urgency'], 'high') !== false || stripos($ri['urgency'], 'critical') !== false) $pendingCounts['high']++;
-    if ($ri['vts'] >= $pendingWeekStart) $pendingCounts['week']++;
+  if (stripos($ri['urgency'], 'high') !== false || stripos($ri['urgency'], 'critical') !== false) $pendingCounts['high']++;
+  if ($ri['vts'] >= $pendingWeekStart) $pendingCounts['week']++;
 }
 
-// �"?�"? ACTIVE CASES (confirmed cases being handled) �"?�"?
+// Active cases require a confirmed DCVS case.
+$barangayResponseItems = [];
+$barangayResponseCounts = ['all' => 0, 'accepted' => 0, 'responding' => 0, 'secured' => 0, 'high' => 0];
+foreach ($activeResidentReportItems as $ri) {
+    $responseState = (string)($ri['responseState'] ?? '');
+    if (!in_array($responseState, $staffBarangayResponseStates, true)) continue;
+    if (in_array($ri['statusRaw'], ['resolved', 'rejected'], true)) continue;
+    $ri['status'] = 'active';
+    $ri['statusLabel'] = [
+        'barangay_response_approved' => 'Accepted by Barangay',
+        'barangay_responding' => 'Barangay Responding',
+        'animal_secured' => 'Animal Secured',
+        'returned_to_barangay' => 'Returned to Barangay',
+    ][$responseState];
+    $ri['caseId'] = $ri['caseId'] ?? (int)$ri['id'];
+    $barangayResponseItems[] = $ri;
+    $barangayResponseCounts['all']++;
+    if (in_array($responseState, ['barangay_response_approved', 'returned_to_barangay'], true)) {
+        $barangayResponseCounts['accepted']++;
+    } elseif ($responseState === 'barangay_responding') {
+        $barangayResponseCounts['responding']++;
+    } elseif ($responseState === 'animal_secured') {
+        $barangayResponseCounts['secured']++;
+    }
+    if (stripos($ri['urgency'], 'high') !== false || stripos($ri['urgency'], 'critical') !== false) {
+        $barangayResponseCounts['high']++;
+    }
+}
+
 $activeItems = [];
 $activeCounts = ['all' => 0, 'high' => 0, 'sched' => 0, 'overdue' => 0];
 foreach ($activeResidentReportItems as $ri) {
-    if ($ri['caseStatus'] !== 'active') continue;
+    if ($ri['caseStatus'] !== 'active' || !in_array($ri['statusRaw'], ['confirmed', 'scheduled'], true)) continue;
+    $responseState = (string)($ri['responseState'] ?? '');
+    if (in_array($responseState, $staffBarangayResponseStates, true)) continue;
     $ri['status'] = 'active';
-    $ri['statusLabel'] = 'Active';
+    $ri['statusLabel'] = [
+        'dcvs_dispatch' => 'DCVS Dispatch',
+        'dcvs_processing' => 'DCVS Processing',
+        'escalated_to_dcvs' => 'Escalated to DCVS',
+        'unable_to_locate' => 'Unable to Locate',
+        'turned_over' => 'Turned over to DCVS',
+    ][$responseState] ?? 'Active';
     $ri['caseId'] = $ri['caseId'] ?? (int)$ri['id'];
     $activeItems[] = $ri;
     $activeCounts['all']++;
@@ -794,6 +904,11 @@ foreach ($activeResidentReportItems as $ri) {
 
 // ── Handle Program Creation (POST) ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        $_SESSION['program_error'] = 'Your session could not be verified. Refresh the page and try again.';
+        header('Location: dashboard-staff.php#analytics');
+        exit;
+    }
     $progName    = trim($_POST['program_name'] ?? '');
     $progType    = $_POST['program_type'] ?? 'kapon';
     $progDesc    = trim($_POST['program_description'] ?? '');
@@ -803,6 +918,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     $programEndTime = $_POST['program_end_time'] ?? '';
     $staffRequired = (int)($_POST['staff_required_count'] ?? 0);
     $notifyAffected = ($_POST['notify_affected'] ?? '') === '1';
+    $conflictChoice = (string)($_POST['program_conflict_choice'] ?? '');
+    $rescheduleOffersJson = (string)($_POST['reschedule_offers_json'] ?? '[]');
     $operTime    = trim($_POST['operating_time'] ?? '');
     $locMode     = $_POST['location_mode'] ?? 'single';
     $venue       = trim($_POST['venue'] ?? '');
@@ -815,6 +932,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
         : [];
     $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
     $activeStaffCount = dcvsActiveStaffCount($conn);
+    $rescheduleOffers = null;
+    $rescheduleOffersError = '';
+    if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
+      $rescheduleOffersError = 'There are no affected appointments to reschedule.';
+    }
 
     $validTypes = ['kapon', 'vaccination', 'checkup', 'deworming', 'adoption', 'rabies_prevention', 'microchipping', 'other'];
     $today = (new DateTimeImmutable('now', new DateTimeZone('Asia/Manila')))->format('Y-m-d');
@@ -829,8 +951,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
     } elseif ($staffRequired < 1 || $staffRequired > $activeStaffCount) {
       $_SESSION['program_error'] = "The required program staff count must be between 1 and the " . $activeStaffCount . " active staff account(s).";
-    } elseif (!empty($appointmentConflicts) && !$notifyAffected) {
-      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Reschedule them first or choose to notify the affected residents.";
+    } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
+      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
+    } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
+      $_SESSION['program_error'] = $rescheduleOffersError;
     } elseif (!in_array($progType, $validTypes)) {
         $_SESSION['program_error'] = "Invalid program type.";
     } elseif (!in_array($locMode, ['single', 'multiple'], true)) {
@@ -844,6 +968,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     } else {
         $staffId = $_SESSION['user_id'];
         $progStatus = 'scheduled';
+        $conn->begin_transaction();
         $stmt = $conn->prepare("INSERT INTO programs (program_name, program_type, description, status, start_date, end_date, program_start_time, program_end_time, staff_required_count, operating_time, location_mode, venue, target_reach, dogs_target, cats_target, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->bind_param("ssssssssisssiiii", $progName, $progType, $progDesc, $progStatus, $startDate, $endDate, $programStartTime, $programEndTime, $staffRequired, $operTime, $locMode, $venue, $targetReach, $dogsTarget, $catsTarget, $staffId);
         if ($stmt->execute()) {
@@ -862,15 +987,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
                 $bStmt->close();
             }
 
+            $releasedAppointmentSlots = [];
+            try {
+                if ($conflictChoice === 'reschedule') {
+                    $rescheduleOffers = dcvsValidateAppointmentRescheduleOffers($conn, $appointmentConflicts, $rescheduleOffersJson, $rescheduleOffersError);
+                    if ($rescheduleOffers === false) {
+                        throw new RuntimeException($rescheduleOffersError);
+                    }
+                    $releasedAppointmentSlots = dcvsCreateAppointmentRescheduleOffers($conn, $appointmentConflicts, $rescheduleOffers);
+                }
+                $conn->commit();
+                foreach ($releasedAppointmentSlots as $slot) {
+                    dcvsNotifyWaitlistForSlot($conn, $slot['date'], $slot['time'], $slot['appointment_type'], $slot['urgency_level']);
+                }
+            } catch (Throwable $error) {
+                $conn->rollback();
+                $_SESSION['program_error'] = 'The program could not be saved with the appointment reschedule offers. Please recheck the conflicts and try again.';
+                error_log('Program creation with reschedule offers failed: ' . $error->getMessage());
+                header('Location: dashboard-staff.php#analytics');
+                exit;
+            }
+
             $_SESSION['program_success'] = "Program \"" . htmlspecialchars($progName) . "\" created successfully.";
             $_SESSION['program_created'] = true;
-            if ($appointmentConflicts && $notifyAffected) {
+            if ($appointmentConflicts && $conflictChoice === 'reschedule') {
+                $_SESSION['program_success'] .= ' ' . count($appointmentConflicts) . ' resident(s) asked to respond to a new appointment time within 3 days.';
+            } elseif ($appointmentConflicts && $notifyAffected) {
                 require_once __DIR__ . '/../../includes/program-notifications.php';
                 $notifiedCount = dcvsNotifyProgramAffectedAppointments($conn, $appointmentConflicts, $progName, $staffId);
                 $_SESSION['program_success'] .= ' ' . $notifiedCount . ' affected resident(s) notified.';
             }
             if ($reportWarnings) $_SESSION['program_success'] .= ' Review ' . count($reportWarnings) . ' report(s) dated in this range on the Reports calendar.';
         } else {
+            $conn->rollback();
             $_SESSION['program_error'] = "Failed to create program. Please try again.";
         }
     }
@@ -881,6 +1030,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
 
 // ── Handle Program Edit (POST) ──
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        $_SESSION['program_error'] = 'Your session could not be verified. Refresh the page and try again.';
+        header('Location: dashboard-staff.php#analytics');
+        exit;
+    }
     $progId      = intval($_POST['program_id'] ?? 0);
     $progName    = trim($_POST['program_name'] ?? '');
     $progType    = $_POST['program_type'] ?? 'kapon';
@@ -891,6 +1045,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     $programEndTime = $_POST['program_end_time'] ?? '';
     $staffRequired = (int)($_POST['staff_required_count'] ?? 0);
     $notifyAffected = ($_POST['notify_affected'] ?? '') === '1';
+    $conflictChoice = (string)($_POST['program_conflict_choice'] ?? '');
+    $rescheduleOffersJson = (string)($_POST['reschedule_offers_json'] ?? '[]');
     $operTime    = trim($_POST['operating_time'] ?? '');
     $locMode     = $_POST['location_mode'] ?? 'single';
     $venue       = trim($_POST['venue'] ?? '');
@@ -911,6 +1067,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
         : [];
     $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
     $activeStaffCount = dcvsActiveStaffCount($conn);
+    $rescheduleOffers = null;
+    $rescheduleOffersError = '';
+    if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
+      $rescheduleOffersError = 'There are no affected appointments to reschedule.';
+    }
 
     $validTypes = ['kapon', 'vaccination', 'checkup', 'deworming', 'adoption', 'rabies_prevention', 'microchipping', 'other'];
 
@@ -926,8 +1087,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
     } elseif ($staffRequired < 1 || $staffRequired > $activeStaffCount) {
       $_SESSION['program_error'] = "The required program staff count must be between 1 and the " . $activeStaffCount . " active staff account(s).";
-    } elseif (!empty($appointmentConflicts) && !$notifyAffected) {
-      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Reschedule them first or choose to notify the affected residents.";
+    } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
+      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
+    } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
+      $_SESSION['program_error'] = $rescheduleOffersError;
     } elseif (!in_array($progType, $validTypes)) {
         $_SESSION['program_error'] = "Invalid program type.";
     } elseif (!in_array($locMode, ['single', 'multiple'], true)) {
@@ -939,14 +1102,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     } elseif ($targetReach > 0 && ($dogsTarget + $catsTarget) > $targetReach) {
         $_SESSION['program_error'] = "Dogs + Cats cannot exceed Target Reach.";
     } else {
+        $conn->begin_transaction();
         $stmt = $conn->prepare("UPDATE programs SET program_name=?, program_type=?, description=?, start_date=?, end_date=?, program_start_time=?, program_end_time=?, staff_required_count=?, operating_time=?, location_mode=?, venue=?, target_reach=?, dogs_target=?, cats_target=?, updated_at=NOW() WHERE program_id=?");
         $stmt->bind_param("sssssssisssiiii", $progName, $progType, $progDesc, $startDate, $endDate, $programStartTime, $programEndTime, $staffRequired, $operTime, $locMode, $venue, $targetReach, $dogsTarget, $catsTarget, $progId);
         if ($stmt->execute()) {
             $stmt->close();
 
-            if ($existingProgram) {
-                dcvsNotifyWaitlistForDateRange($conn, min($existingProgram['start_date'], $startDate), max($existingProgram['end_date'], $endDate));
-            }
             $conn->query("DELETE FROM program_barangays WHERE program_id = " . $progId);
 
             if ($locMode === 'multiple' && !empty($barangayIds)) {
@@ -961,14 +1122,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
                 $bStmt->close();
             }
 
+            $releasedAppointmentSlots = [];
+            try {
+              if ($conflictChoice === 'reschedule') {
+                $rescheduleOffers = dcvsValidateAppointmentRescheduleOffers($conn, $appointmentConflicts, $rescheduleOffersJson, $rescheduleOffersError);
+                if ($rescheduleOffers === false) {
+                  throw new RuntimeException($rescheduleOffersError);
+                }
+                $releasedAppointmentSlots = dcvsCreateAppointmentRescheduleOffers($conn, $appointmentConflicts, $rescheduleOffers);
+              }
+              $conn->commit();
+              if ($existingProgram) {
+                dcvsNotifyWaitlistForDateRange($conn, min($existingProgram['start_date'], $startDate), max($existingProgram['end_date'], $endDate));
+              }
+              foreach ($releasedAppointmentSlots as $slot) {
+                dcvsNotifyWaitlistForSlot($conn, $slot['date'], $slot['time'], $slot['appointment_type'], $slot['urgency_level']);
+              }
+            } catch (Throwable $error) {
+              $conn->rollback();
+              $_SESSION['program_error'] = 'The program could not be saved with the appointment reschedule offers. Please recheck the conflicts and try again.';
+              error_log('Program update with reschedule offers failed: ' . $error->getMessage());
+              header('Location: dashboard-staff.php#analytics');
+              exit;
+            }
+
             $_SESSION['program_success'] = "Program \"" . htmlspecialchars($progName) . "\" updated successfully.";
-            if ($appointmentConflicts && $notifyAffected) {
+            if ($appointmentConflicts && $conflictChoice === 'reschedule') {
+              $_SESSION['program_success'] .= ' ' . count($appointmentConflicts) . ' resident(s) asked to respond to a new appointment time within 3 days.';
+            } elseif ($appointmentConflicts && $notifyAffected) {
                 require_once __DIR__ . '/../../includes/program-notifications.php';
                 $notifiedCount = dcvsNotifyProgramAffectedAppointments($conn, $appointmentConflicts, $progName, $_SESSION['user_id']);
                 $_SESSION['program_success'] .= ' ' . $notifiedCount . ' affected resident(s) notified.';
             }
             if ($reportWarnings) $_SESSION['program_success'] .= ' Review ' . count($reportWarnings) . ' report(s) dated in this range on the Reports calendar.';
         } else {
+            $conn->rollback();
             $_SESSION['program_error'] = "Failed to update program. Please try again.";
         }
     }
@@ -1174,19 +1362,20 @@ if (!empty($_GET['waitlist_booking'])) {
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <script>window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl); ?>; window.dcvsStaffUrl = function(path) { path = String(path || '').trim(); return /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(path) ? path : window.DCVS_APP_BASE_URL + '/' + path.replace(/^\.?\/*/, ''); };</script>
   
   <!-- Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <?php if ($freshDashboard): ?>
   <script>try { localStorage.removeItem('activeSection'); } catch (e) {}</script>
   <?php endif; ?>
-  <script src="assets/js/dashboard.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/dashboard.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
   <!-- MapCN bundle -->
-  <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css" />
-  <script src="dist/mapcn.umd.cjs"></script>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/geo-map/map.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.umd.cjs?v=' . (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'), ENT_QUOTES, 'UTF-8'); ?>"></script>
   
   <style>
     #pdfExportHeader { display: none; }
@@ -1361,6 +1550,17 @@ if (!empty($_GET['waitlist_booking'])) {
     .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
     #account-settings { background:#fff !important; min-height:100vh; }
     .main-content { background:#fff; }
+    @media (max-width: 640px) {
+      #account-settings .profile-settings-wrapper { width:100%; max-width:100%; min-width:0; }
+      #account-settings .ps-card { padding:18px 16px; }
+      #account-settings .ps-profile-left { min-width:0; align-items:flex-start; gap:12px; }
+      #account-settings .ps-profile-left > div:last-child { min-width:0; overflow-wrap:anywhere; }
+      #account-settings .ps-profile-name { line-height:1.25; }
+      #account-settings .ps-card-header { gap:12px; }
+      #account-settings .ps-card-header h2 { line-height:1.25; }
+      #account-settings .ps-footer-actions { flex-direction:column; }
+      #account-settings .ps-footer-actions .ps-btn { width:100%; min-height:42px; }
+    }
 
     /* �"?�"? Client & Pet Database (CPD) �"?�"? */
     .cpd{ --green-50:#eef6f0; --green-100:#dcebe0; --green-200:#b8d1c0;
@@ -1411,8 +1611,63 @@ if (!empty($_GET['waitlist_booking'])) {
     .cpd .panel{ background:var(--white); border:1px solid var(--border); }
 
     /* Full-page database (no container look) */
-    #client-pets, #reports-pending, #reports-active, #reports-resolved{ margin:-1.75rem -2rem; width:calc(100% + 4rem); max-width:none; }
-    #reports-all thead th, #reports-pending thead th, #reports-active thead th, #reports-resolved thead th, #client-pets thead th{ background:#fafafa; border-bottom:1px solid var(--border); }
+    #client-pets, #reports-pending, #reports-accepted, #reports-active, #reports-resolved{ margin:-1.75rem -2rem; width:calc(100% + 4rem); max-width:none; }
+    @media(max-width:768px){
+      #reports-pending,#reports-accepted,#reports-active,#reports-resolved{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        margin:-1.75rem 0;
+      }
+      #client-pets{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        margin:-1.75rem 0;
+      }
+      #client-pets .layout,
+      #client-pets .db-panel,
+      #client-pets .db-table-area,
+      #client-pets #tableWrap{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+      #client-pets .db-toolbar{
+        align-items:stretch;
+      }
+      #client-pets .search-grow-wrap,
+      #client-pets .toolbar-filters{
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+      #client-pets .toolbar-filters{
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+      #client-pets .toolbar-filters .tf-select{
+        width:100%;
+        min-width:0;
+      }
+      #client-pets .db-toolbar-actions{
+        width:100%;
+        margin-left:0;
+      }
+      #client-pets .db-toolbar-actions .sd-btn{
+        flex:1 1 0;
+        justify-content:center;
+        min-width:0;
+        padding-right:8px;
+        padding-left:8px;
+      }
+      #client-pets .bulk-bar,
+      #client-pets .bulk-actions{
+        flex-wrap:wrap;
+      }
+    }
+    #reports-all thead th, #reports-pending thead th, #reports-accepted thead th, #reports-active thead th, #reports-resolved thead th, #client-pets thead th{ background:#fafafa; border-bottom:1px solid var(--border); }
     .reports-fullpage{ background:var(--white); min-height:calc(100vh - var(--topbar-h, 64px)); }
     .reports-fullpage .cpd-app{ padding:0; }
     .reports-fullpage .layout{ min-height:calc(100vh - var(--topbar-h, 64px)); grid-template-rows:1fr; }
@@ -1422,14 +1677,27 @@ if (!empty($_GET['waitlist_booking'])) {
     .reports-fullpage .profile-panel{ border-left:none; }
 
     /* Reports pages: full-width table + right drawer detail panel (appointments style) */
-    #reports-all .layout, #reports-pending .layout, #reports-active .layout, #reports-resolved .layout, #client-pets .layout{ grid-template-columns:minmax(0,1fr); }
-    #reports-all .db-panel, #reports-pending .db-panel, #reports-active .db-panel, #reports-resolved .db-panel, #client-pets .db-panel{ border-right:none; }
+    #reports-all .layout, #reports-pending .layout, #reports-accepted .layout, #reports-active .layout, #reports-resolved .layout, #client-pets .layout{ grid-template-columns:minmax(0,1fr); }
+    #reports-all .db-panel, #reports-pending .db-panel, #reports-accepted .db-panel, #reports-active .db-panel, #reports-resolved .db-panel, #client-pets .db-panel{ border-right:none; }
+    @media(max-width:1024px){
+      #mainContent #client-pets.content-section{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        margin-left:0;
+        margin-right:0;
+      }
+      #client-pets #tableWrap{ contain:paint; }
+    }
     .cd-drawer.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
     .cd-drawer.modal.active{ opacity:1; visibility:visible; }
     .cd-drawer .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
-    .cd-drawer .sd-dialog-content{ max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; }
+    .cd-drawer .sd-dialog-content{ box-sizing:border-box; min-height:0; max-width:min(560px,96vw); width:min(560px,96vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; overflow:hidden; }
     .cd-drawer.active .sd-dialog-content{ transform:translateX(0); }
     .cd-drawer .sd-field-group{ flex:1; min-height:0; overflow-x:hidden; overflow-y:auto; }
+    .cd-drawer .sd-dialog-footer{ box-sizing:border-box; flex-shrink:0; }
+    .cd-drawer #rptDetailFooter{ flex-wrap:wrap; }
+    .cd-drawer #rptDetailFooter .sd-btn{ flex:0 1 auto; white-space:nowrap; }
     #rptDetailsModal.rpt-bulk-dialog.modal{ position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; padding:16px; background:rgba(0,0,0,.5); opacity:0; visibility:hidden; transition:opacity .2s ease,visibility .2s ease; }
     #rptDetailsModal.rpt-bulk-dialog.modal.active{ opacity:1; visibility:visible; }
     #rptDetailsModal.rpt-bulk-dialog .sd-dialog{ width:100%; height:auto; display:flex; justify-content:center; }
@@ -1438,17 +1706,15 @@ if (!empty($_GET['waitlist_booking'])) {
     #rptDetailsModal.rpt-bulk-dialog .sd-field-group{ flex:1; min-height:0; overflow-y:auto; }
     @media(max-width:600px){ #rptDetailsModal.rpt-bulk-dialog .sd-dialog-content{ padding:18px; } }
 
-    /* Pending/Active/Resolved: KPI cards on top, toolbar styled like All Reports */
-    #reports-pending .db-toolbar, #reports-active .db-toolbar, #reports-resolved .db-toolbar{ justify-content:flex-start; }
-    #reports-pending .search-grow-wrap input, #reports-active .search-grow-wrap input, #reports-resolved .search-grow-wrap input{ height:36px; width:100%; padding:0 12px 0 36px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; font-size:14px; color:#18181b; outline:none; font-family:inherit; }
-    #reports-pending .search-grow-wrap input:focus, #reports-active .search-grow-wrap input:focus, #reports-resolved .search-grow-wrap input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-    #reports-pending .search-grow-wrap input::placeholder, #reports-active .search-grow-wrap input::placeholder, #reports-resolved .search-grow-wrap input::placeholder{ color:#a1a1aa; }
-    #reports-pending .search-grow-wrap svg, #reports-active .search-grow-wrap svg, #reports-resolved .search-grow-wrap svg{ color:#71717a; }
-    #reports-pending .tf-select, #reports-active .tf-select, #reports-resolved .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background-color:#fff; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
-    #reports-pending .tf-select:focus, #reports-active .tf-select:focus, #reports-resolved .tf-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-    #reports-pending .kpi-label, #reports-active .kpi-label, #reports-resolved .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; }
-    #reports-pending .kpi-value, #reports-active .kpi-value, #reports-resolved .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
-    #reports-pending .kpi-sub, #reports-active .kpi-sub, #reports-resolved .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
+    #reports-pending .search-grow-wrap input, #reports-accepted .search-grow-wrap input, #reports-active .search-grow-wrap input, #reports-resolved .search-grow-wrap input{ height:36px; width:100%; padding:0 12px 0 36px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; font-size:14px; color:#18181b; outline:none; font-family:inherit; }
+    #reports-pending .search-grow-wrap input:focus, #reports-accepted .search-grow-wrap input:focus, #reports-active .search-grow-wrap input:focus, #reports-resolved .search-grow-wrap input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #reports-pending .search-grow-wrap input::placeholder, #reports-accepted .search-grow-wrap input::placeholder, #reports-active .search-grow-wrap input::placeholder, #reports-resolved .search-grow-wrap input::placeholder{ color:#a1a1aa; }
+    #reports-pending .search-grow-wrap svg, #reports-accepted .search-grow-wrap svg, #reports-active .search-grow-wrap svg, #reports-resolved .search-grow-wrap svg{ color:#71717a; }
+    #reports-pending .tf-select, #reports-accepted .tf-select, #reports-active .tf-select, #reports-resolved .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background-color:#fff; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
+    #reports-pending .tf-select:focus, #reports-accepted .tf-select:focus, #reports-active .tf-select:focus, #reports-resolved .tf-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    #reports-pending .kpi-label, #reports-accepted .kpi-label, #reports-active .kpi-label, #reports-resolved .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; }
+    #reports-pending .kpi-value, #reports-accepted .kpi-value, #reports-active .kpi-value, #reports-resolved .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
+    #reports-pending .kpi-sub, #reports-accepted .kpi-sub, #reports-active .kpi-sub, #reports-resolved .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
 
     /* Left filters sidebar rail */
     .cpd .filters{ padding:20px 16px; display:flex; flex-direction:column; border-right:1px solid var(--border); position:sticky; top:0; overflow-y:auto; }
@@ -1572,6 +1838,32 @@ if (!empty($_GET['waitlist_booking'])) {
     /* toolbar filter selects */
     #client-pets .tf-select{ height:36px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; box-shadow:0 1px 2px 0 rgba(0,0,0,0.05); }
     #client-pets .tf-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+
+    #reports-accepted{ font-family:'Inter','Segoe UI',sans-serif; }
+    #reports-accepted .db-panel .kpis{ grid-template-columns:repeat(4,minmax(0,1fr)); }
+    #reports-accepted .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #reports-accepted table{ width:100%; border-collapse:collapse; color:#18181b; font-size:14px; }
+    #reports-accepted thead tr{ border-bottom:1px solid #e4e4e7; }
+    #reports-accepted thead th{ height:40px; padding:0 8px; text-align:left; vertical-align:middle; font-size:14px; font-weight:500; color:#71717a; white-space:nowrap; background:#fafafa; border-bottom:none; }
+    #reports-accepted thead th.sd-th-action{ text-align:right; }
+    #reports-accepted tbody tr{ border-bottom:1px solid #e4e4e7; transition:background .15s; cursor:pointer; }
+    #reports-accepted tbody tr:last-child{ border-bottom:none; }
+    #reports-accepted tbody tr:hover{ background:#fafafa; }
+    #reports-accepted tbody tr.selected, #reports-accepted tbody tr.selected:hover{ background:#f4f4f5; }
+    #reports-accepted tbody td{ padding:8px; vertical-align:middle; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
+    #reports-accepted tbody td.sd-td-action{ text-align:right; }
+    #reports-accepted .client-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    #reports-accepted .contact-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
+    #reports-accepted .contact-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:12.5px; font-weight:400; color:#71717a; line-height:1.4; margin-top:2px; word-break:break-word; }
+    #reports-accepted .contact-main.report-id, #reports-accepted .client-name.report-id{ font-weight:400; }
+    #reports-accepted .th-sort{ display:inline-flex; align-items:center; gap:6px; height:28px; margin-left:-12px; padding:0 12px; border-radius:6px; background:transparent; border:none; font-size:14px; font-weight:500; color:#71717a; cursor:pointer; white-space:nowrap; font-family:inherit; }
+    #reports-accepted .th-sort:hover{ background:#f4f4f5; color:#18181b; }
+    #reports-accepted .th-sort.th-sorted{ color:#18181b; }
+    #reports-accepted .th-sort-icon{ width:16px; height:16px; color:#71717a; flex-shrink:0; }
+    #reports-accepted .th-sorted .th-sort-icon{ color:#18181b; }
+    #reports-accepted .sd-row-actions{ width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:transparent; border:none; color:#71717a; cursor:pointer; }
+    #reports-accepted .sd-row-actions:hover{ background:#f4f4f5; color:#18181b; }
+    @media(max-width:900px){ #reports-accepted .db-panel .kpis{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
 
     /* dialog font style applied across the clients page */
     #client-pets{ font-family:'Inter','Segoe UI',sans-serif; }
@@ -1752,14 +2044,68 @@ if (!empty($_GET['waitlist_booking'])) {
     .cpd .rpt-detail-grid .info-rows.info-rows-2col{ display:grid; grid-template-columns:1fr 1fr; gap:16px 18px; align-items:start; }
     .cpd .rpt-response-custody-grid{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 18px; align-items:start; margin-bottom:0; }
     .cpd .rpt-response-custody-section{ margin-bottom:10px; }
+    .cpd .response-steps{ display:flex;align-items:flex-start;padding:3px 0 11px; }
+    .cpd .response-step{ position:relative;display:flex;flex:1;min-width:0;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
+    .cpd .response-step:not(:last-child)::after{ position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
+    .cpd .response-step.is-complete:not(:last-child)::after{ background:#22c55e; }
+    .cpd .response-step-dot{ position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
+    .cpd .response-step.is-complete .response-step-dot{ border-color:#16a34a;background:#16a34a; }
+    .cpd .response-step.is-current{ color:#18181b;font-weight:600; }
+    .cpd .response-step.is-current .response-step-dot{ border-color:#16a34a;background:#fff; }
+    .cpd .response-step.is-overdue .response-step-dot{ border-color:#ef4444;background:#fff; }
+    .cpd .response-step>span:last-child{ max-width:100%;overflow-wrap:anywhere; }
+    #brgDetailsModal .brg-drawer-reporter{ display:flex;align-items:center;gap:10px;margin-bottom:14px; }
+    #brgDetailsModal .brg-drawer-photo{ width:85px;height:85px;flex:0 0 85px;overflow:hidden;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:#64748b; }
+    #brgDetailsModal .brg-drawer-reporter-copy{ display:flex;min-width:0;flex-direction:column;gap:2px; }
+    #brgDetailsModal .brg-drawer-reporter-copy span{ color:#71717a;font-size:12px; }
+    #brgDetailsModal .brg-drawer-reporter-copy strong{ overflow:hidden;color:#18181b;font-size:18px;font-weight:600;text-overflow:ellipsis;white-space:nowrap; }
+    #brgDetailsModal .brg-drawer-status{ margin-left:auto;flex:0 0 auto;padding:5px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:500;white-space:nowrap; }
+    #brgDetailsModal .brg-drawer-priority{ display:flex;align-items:center;gap:7px;margin:0 0 16px;font-size:14px;font-weight:500;color:#18181b; }
+    #brgDetailsModal .brg-response-card{ overflow:hidden;margin:0 0 18px;border:1px solid #e4e4e7;border-radius:10px;background:#fff; }
+    #brgDetailsModal .brg-response-heading{ display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 8px; }
+    #brgDetailsModal .brg-response-heading>div{ display:flex;min-width:0;flex-direction:column;gap:3px; }
+    #brgDetailsModal .brg-response-heading strong{ font-size:14px;font-weight:600;color:#18181b; }
+    #brgDetailsModal .brg-response-heading>div>span{ color:#71717a;font-size:12px; }
+    #brgDetailsModal .brg-response-deadline{ flex:0 0 auto;padding:4px 8px;border-radius:6px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:500;text-align:right; }
+    #brgDetailsModal .brg-response-deadline.is-overdue{ background:#fff7ed;color:#9a3412; }
+    #brgDetailsModal .response-steps{ padding:3px 12px 11px; }
+    #brgDetailsModal .brg-response-note{ display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.5; }
+    #brgDetailsModal .brg-response-note>span:first-child{ flex:0 0 auto;font-size:14px;font-weight:700; }
+    #brgDetailsModal .brg-response-map-link{ width:100%;padding:8px 12px;border:0;background:#fff;color:#2563eb;font-family:inherit;font-size:12px;font-weight:600;text-align:left;cursor:pointer; }
+    #brgDetailsModal .brg-response-map-link:hover{ background:#fafafa;text-decoration:underline; }
+    #brgDetailsModal .brg-custody-section{ margin:0 0 16px; }
+    #brgDetailsModal .brg-custody-section .rpt-section-title{ margin:0 0 14px; }
+    @media(max-width:480px){ #brgDetailsModal .brg-drawer-photo{ width:64px;height:64px;flex-basis:64px; } #brgDetailsModal .brg-drawer-status{ white-space:normal;text-align:center; } #brgDetailsModal .brg-response-heading{ flex-direction:column; } }
+    #penDetailsModal .profile-footer{ border-top:0; }
+    .cpd .handover-plan-card{ margin:12px 0;border:1px solid #f59e0b;border-left:4px solid #f59e0b;border-radius:10px;overflow:hidden;background:#fff; }
+    .cpd .handover-plan-card.is-planned{ border-color:#60a5fa;border-left-color:#60a5fa; }
+    .cpd .handover-plan-card.is-overdue{ border-color:#ef4444;border-left-color:#ef4444; }
+    .cpd .handover-plan-heading{ display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;background:#fffbeb; }
+    .cpd .handover-plan-card.is-planned .handover-plan-heading{ background:#eff6ff; }
+    .cpd .handover-plan-heading>div{ display:flex;min-width:0;flex-direction:column;gap:2px; }
+    .cpd .handover-plan-heading strong{ font-size:14px;color:#18181b; }
+    .cpd .handover-plan-heading span{ font-size:12px;color:#71717a; }
+    .cpd .handover-plan-status{ flex:0 0 auto;padding:3px 8px;border:1px solid #fde68a;border-radius:6px;background:#fef3c7;color:#92400e!important;font-size:12px!important;font-weight:600; }
+    .cpd .handover-plan-card.is-planned .handover-plan-status{ border-color:#bfdbfe;background:#dbeafe;color:#1d4ed8!important; }
+    .cpd .handover-plan-body{ padding:8px 12px; }
+    .cpd .handover-plan-row{ display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:13px;line-height:1.5; }
+    .cpd .handover-plan-row span{ flex:0 0 38%;color:#71717a;font-size:13px;font-weight:600; }
+    .cpd .handover-plan-row strong{ min-width:0;color:#18181b;font-size:15px;font-weight:400;text-align:right;overflow-wrap:anywhere; }
+    .cpd .handover-plan-note{ margin:0;padding:9px 12px;border-top:1px solid #e4e4e7;background:#f4f4f5;color:#52525b;font-size:12px;line-height:1.5; }
+    .rpt-turnover-confirm{ border:1px solid #18181b;background:#18181b;color:#fff; }
+    .rpt-turnover-confirm:hover:not(:disabled){ background:#27272a; }
+    .rpt-turnover-confirm:disabled,.rpt-turnover-archive:disabled{ cursor:not-allowed;opacity:.55; }
     .cpd .rpt-full-col{ grid-column:1 / -1; }
     .cpd .rpt-detail-grid + .rpt-full-col, .cpd .rpt-detail-grid ~ .rpt-full-col{ margin-top:6px; }
     #penDetailsModal .pen-reporter-row{ display:flex;align-items:center;gap:12px;margin-bottom:14px; }
     #penDetailsModal .pen-reporter-avatar{ width:42px;height:42px;border-radius:50%;flex:0 0 auto;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#64748b; }
     #penDetailsModal .pen-reporter-avatar img{ width:100%;height:100%;object-fit:cover; }
     #penDetailsModal .pen-reporter-status{ margin-left:auto;white-space:nowrap; }
+    #penDetailsModal .rpt-status{ display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7; }
+    #penDetailsModal .rpt-status.pending{background:#fef3c7;color:#92400e;border-color:#fde68a;}
+    #penDetailsModal .rpt-status.validated{background:#dcebe0;color:#045e1f;border-color:#bbf7d0;}
     #penDetailsModal .pen-attachment-count{ display:inline-flex;min-width:18px;height:18px;align-items:center;justify-content:center;margin-left:5px;padding:0 5px;border-radius:999px;background:#eef6f0;color:#045e1f;font-size:11px;font-weight:600;line-height:1;vertical-align:middle; }
-    #rptDetailsModal .pen-validation-card,#penDetailsModal .pen-validation-card,#actDetailsModal .pen-validation-card,#resDetailsModal .pen-validation-card{ margin:0 0 18px;border:1px solid #16a34a;border-left:4px solid #16a34a;border-radius:12px;overflow:hidden;background:#fff; }
+    #rptDetailsModal .pen-validation-card,#penDetailsModal .pen-validation-card,#actDetailsModal .pen-validation-card,#resDetailsModal .pen-validation-card{ margin:0 0 18px;border:1px solid #16a34a;border-left:4px solid #16a34a;border-radius:12px;overflow:hidden;background:#fff;font-family:'Inter','Segoe UI',sans-serif; }
     #rptDetailsModal .pen-validation-heading,#penDetailsModal .pen-validation-heading,#actDetailsModal .pen-validation-heading,#resDetailsModal .pen-validation-heading{ display:flex;align-items:center;gap:10px;padding:12px 14px;background:#f0fdf4; }
     #rptDetailsModal .pen-validation-heading-icon,#penDetailsModal .pen-validation-heading-icon,#actDetailsModal .pen-validation-heading-icon,#resDetailsModal .pen-validation-heading-icon{ width:18px;height:18px;flex:0 0 auto;color:#15803d; }
     #rptDetailsModal .pen-validation-heading-copy,#penDetailsModal .pen-validation-heading-copy,#actDetailsModal .pen-validation-heading-copy,#resDetailsModal .pen-validation-heading-copy{ min-width:0; }
@@ -1767,15 +2113,16 @@ if (!empty($_GET['waitlist_booking'])) {
     #rptDetailsModal .pen-validation-meta,#penDetailsModal .pen-validation-meta,#actDetailsModal .pen-validation-meta,#resDetailsModal .pen-validation-meta{ margin-top:2px;font-size:12px;font-weight:400;color:#71717a; }
     #rptDetailsModal .pen-validation-status,#penDetailsModal .pen-validation-status,#actDetailsModal .pen-validation-status,#resDetailsModal .pen-validation-status{ display:inline-flex;align-items:center;margin-left:auto;padding:3px 10px;border-radius:6px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;line-height:1.4;white-space:nowrap; }
     #rptDetailsModal .pen-validation-content,#penDetailsModal .pen-validation-content,#actDetailsModal .pen-validation-content,#resDetailsModal .pen-validation-content{ display:flex;flex-direction:column;gap:10px;padding:12px 14px 14px; }
-    #rptDetailsModal .pen-validation-label,#penDetailsModal .pen-validation-label,#actDetailsModal .pen-validation-label,#resDetailsModal .pen-validation-label{ margin-bottom:6px;font-size:12px;font-weight:500;color:#71717a; }
-    #rptDetailsModal .pen-validation-message,#penDetailsModal .pen-validation-message,#actDetailsModal .pen-validation-message,#resDetailsModal .pen-validation-message{ padding:10px 12px;border-radius:9px;background:#f4f4f5;font-size:14px;font-weight:500;line-height:1.5;color:#18181b;white-space:pre-wrap; }
+    #rptDetailsModal .pen-validation-message-field-label{ display:inline;margin:0;font-size:13px;font-weight:600;line-height:1.5;color:#71717a; }
+    #rptDetailsModal .pen-validation-message-field-value{ display:inline;font-size:15px;font-weight:400;line-height:1.5;color:#18181b;overflow-wrap:anywhere; }
+    #rptDetailsModal .pen-validation-label,#penDetailsModal .pen-validation-label,#actDetailsModal .pen-validation-label,#resDetailsModal .pen-validation-label{ margin-bottom:6px;font-size:13px;font-weight:600;color:#71717a; }
+    #rptDetailsModal .pen-validation-message,#penDetailsModal .pen-validation-message,#actDetailsModal .pen-validation-message,#resDetailsModal .pen-validation-message{ padding:10px 12px;border-radius:9px;background:#f4f4f5;font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;line-height:1.5;color:#18181b;white-space:pre-wrap; }
     #rptDetailsModal .pen-validation-evidence-grid,#penDetailsModal .pen-validation-evidence-grid,#actDetailsModal .pen-validation-evidence-grid,#resDetailsModal .pen-validation-evidence-grid{ display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,112px));gap:8px; }
     #rptDetailsModal .pen-validation-evidence,#penDetailsModal .pen-validation-evidence,#actDetailsModal .pen-validation-evidence,#resDetailsModal .pen-validation-evidence{ position:relative;width:100%;aspect-ratio:1/1;padding:0;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;background:#f4f4f5;cursor:pointer; }
     #rptDetailsModal .pen-validation-evidence img,#rptDetailsModal .pen-validation-evidence video,#penDetailsModal .pen-validation-evidence img,#penDetailsModal .pen-validation-evidence video,#actDetailsModal .pen-validation-evidence img,#actDetailsModal .pen-validation-evidence video,#resDetailsModal .pen-validation-evidence img,#resDetailsModal .pen-validation-evidence video{ display:block;width:100%;height:100%;object-fit:cover; }
     #rptDetailsModal .pen-validation-evidence video,#penDetailsModal .pen-validation-evidence video,#actDetailsModal .pen-validation-evidence video,#resDetailsModal .pen-validation-evidence video{ background:#18181b; }
     #rptDetailsModal .pen-validation-evidence:focus-visible,#penDetailsModal .pen-validation-evidence:focus-visible,#actDetailsModal .pen-validation-evidence:focus-visible,#resDetailsModal .pen-validation-evidence:focus-visible{ outline:2px solid #16a34a;outline-offset:2px; }
     #rptDetailsModal .pen-response-proposal{ display:flex;align-items:flex-start;gap:8px;padding:10px 11px;border:1px solid #bfdbfe;border-radius:9px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.45; }
-    #rptDetailsModal.cd-drawer .sd-dialog-content{ box-sizing:border-box;max-width:min(440px,92vw);width:min(440px,92vw);padding:20px 16px; }
     #rptDetailsModal .pen-response-proposal>span{ flex:0 0 auto;font-size:15px; }
     #rptDetailsModal .pen-response-proposal strong,#rptDetailsModal .pen-response-proposal div>span{ display:block; }
     #rptDetailsModal .pen-response-proposal strong{ font-weight:700; }
@@ -1845,11 +2192,29 @@ if (!empty($_GET['waitlist_booking'])) {
     #penDetailsModal .rpt-response-more-menu[hidden]{ display:none; }
     #penDetailsModal .rpt-response-more-menu button{ display:block;width:100%;padding:8px 9px;border:0;border-radius:5px;background:none;text-align:left;font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;font-size:14px;font-weight:500;line-height:1.4;color:#18181b;cursor:pointer; }
     #penDetailsModal .rpt-response-more-menu button.is-danger{ color:#b91c1c; }
-    #responseWorkflowModal{ position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.55); }
+    #responseWorkflowModal{ position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.55); }
+    #responseWorkflowModal.active{ display:flex; }
     #responseWorkflowModal .response-workflow-dialog{ width:min(440px,calc(100vw - 32px));max-width:min(440px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:22px;border:1px solid #e4e4e7;border-radius:12px;background:#fff;box-shadow:0 18px 48px rgba(0,0,0,.24); }
     #responseWorkflowModal .response-workflow-field{ display:block;margin:0 0 12px;font-size:13px;font-weight:600;color:#27272a; }
     #responseWorkflowModal .response-workflow-field textarea,#responseWorkflowModal .response-workflow-field input,#responseWorkflowModal .response-workflow-field select{ display:block;width:100%;min-height:38px;margin-top:5px;padding:8px;border:1px solid #d4d4d8;border-radius:7px;background:#fff;color:#18181b;font:inherit; }
     #responseWorkflowModal .response-workflow-field textarea{ min-height:82px;resize:vertical; }
+    #responseWorkflowModal .handover-pickup-location[hidden]{ display:none; }
+    #responseWorkflowModal .handover-method-options{ display:grid;gap:8px;margin:0 0 14px;padding:0;border:0; }
+    #responseWorkflowModal .handover-method-options legend{ margin-bottom:6px;font-size:13px;font-weight:600;color:#27272a; }
+    #responseWorkflowModal .handover-method-options label{ display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid #d4d4d8;border-radius:8px;cursor:pointer; }
+    #responseWorkflowModal .handover-method-options label:has(input:checked){ border-color:#16a34a;background:#f0fdf4;box-shadow:inset 0 0 0 1px #16a34a; }
+    #responseWorkflowModal .handover-method-options input{ margin:3px 0 0;accent-color:#16a34a; }
+    #responseWorkflowModal .handover-method-options span{ display:grid;gap:2px; }
+    #responseWorkflowModal .handover-method-options strong{ font-size:13px;font-weight:600; }
+    #responseWorkflowModal .handover-method-options small{ font-size:12px;font-weight:400;color:#71717a; }
+    #responseWorkflowModal .handover-plan-preview{ display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0 0 12px;padding:10px 12px;border-radius:9px;background:#f4f4f5; }
+    #responseWorkflowModal .handover-plan-preview div{ display:contents; }
+    #responseWorkflowModal .handover-plan-preview span{ font-size:12px;color:#71717a; }
+    #responseWorkflowModal .handover-plan-preview strong{ min-width:0;font-size:12px;color:#27272a;overflow-wrap:anywhere; }
+    #responseWorkflowModal .handover-date-time,#responseWorkflowModal .handover-contact-fields{ display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+    #responseWorkflowModal .handover-date-time .response-workflow-field,#responseWorkflowModal .handover-contact-fields .response-workflow-field{ min-width:0; }
+    @media(max-width:420px){ #responseWorkflowModal .handover-date-time,#responseWorkflowModal .handover-contact-fields{ grid-template-columns:1fr;gap:0; } }
+    #responseWorkflowModal .response-workflow-help{ margin:0;padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.5; }
     #responseWorkflowModal .response-workflow-dialog .sd-dialog-footer{ display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #e4e4e7; }
     .rpt-response-preview-panel{ position:fixed;z-index:1100;top:16px;left:16px;width:220px;max-height:calc(100vh - 32px);overflow:auto;padding:12px;border:1px solid #27272a;border-radius:12px;background:#18181b;color:#fff;box-shadow:0 8px 28px rgba(0,0,0,.25);font:12px/1.45 'Inter','Segoe UI',sans-serif; }
     .rpt-response-preview-panel>strong{ display:block;margin-bottom:8px;font-size:12px; }
@@ -1904,13 +2269,36 @@ if (!empty($_GET['waitlist_booking'])) {
     .cpd .rpt-photo-thumb.rpt-video-thumb{ background:#000; cursor:default; }
     .cpd .rpt-photo-thumb video{ width:100%; display:block; background:#000; }
     .cpd .rpt-photo-none{ font-size:12.5px; color:var(--ink-400); }
-    .cd-drawer .rpt-history{ display:flex; flex-direction:column; margin:0; padding:0; }
-    .cd-drawer .rpt-history .rpt-h-item{ display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
-    .cd-drawer .rpt-history .rpt-h-item:last-child{ margin-bottom:0; }
-    .cd-drawer .rpt-history .rpt-h-dot{ width:8px; height:8px; border-radius:50%; background:#0E8131; margin-top:6px; flex-shrink:0; }
-    .cd-drawer .rpt-history .rpt-h-content{ flex:1; min-width:0; }
-    .cd-drawer .rpt-history .rpt-h-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
-    .cd-drawer .rpt-history .rpt-h-meta{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; margin-top:2px; }
+    .staff-detail-drawer .rpt-history{ display:flex; flex-direction:column; margin:0; padding:0; }
+    .staff-detail-drawer .rpt-history .rpt-h-item{ display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
+    .staff-detail-drawer .rpt-history .rpt-h-item:last-child{ margin-bottom:0; }
+    .staff-detail-drawer .rpt-history .rpt-h-dot{ width:8px; height:8px; border-radius:50%; background:#0E8131; margin-top:6px; flex-shrink:0; }
+    .staff-detail-drawer .rpt-history .rpt-h-content{ flex:1; min-width:0; }
+    .staff-detail-drawer .rpt-history .rpt-h-title{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
+    .staff-detail-drawer .rpt-history .rpt-h-meta{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; margin-top:2px; }
+    .cd-drawer .rpt-updates-timeline{ position:relative; margin:0 0 14px 3px; padding-left:14px; border-left:2px solid #e4e4e7; color:#09090b; font-family:'Inter','Segoe UI',sans-serif; }
+    .cd-drawer .rpt-updates-entry{ position:relative; padding:0 0 17px; }
+    .cd-drawer .rpt-updates-entry:last-child{ padding-bottom:0; }
+    .cd-drawer .rpt-updates-entry:before{ position:absolute; top:3px; left:-20px; width:10px; height:10px; border-radius:50%; background:#22c55e; content:""; box-shadow:0 0 0 2px #fff; }
+    .cd-drawer .rpt-updates-entry-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:3px; }
+    .cd-drawer .rpt-updates-entry-title{ min-width:0; color:#09090b; font-size:14px; font-weight:600; line-height:1.35; }
+    .cd-drawer .rpt-updates-entry-date{ flex:0 0 auto; color:#71717a; font-size:12px; line-height:1.4; text-align:right; }
+    .cd-drawer .rpt-updates-entry-actor{ display:inline-block; margin:0 0 6px; padding:1px 7px; border:1px solid #e4e4e7; border-radius:4px; background:#fafafa; color:#71717a; font-size:12px; line-height:1.35; }
+    .cd-drawer .rpt-updates-entry-copy{ margin:0 0 8px; color:#27272a; font-size:14px; font-weight:400; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .cd-drawer .rpt-updates-photo-grid{ display:flex; flex-wrap:wrap; gap:8px; }
+    .cd-drawer .rpt-updates-photo{ width:74px; height:74px; padding:0; overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#f4f4f5; cursor:pointer; }
+    .cd-drawer .rpt-updates-photo img,.cd-drawer .rpt-updates-photo video{ display:block; width:100%; height:100%; object-fit:cover; }
+    .cd-drawer .rpt-updates-caption{ margin:6px 0 0; color:#18181b; font-size:12px; font-weight:500; }
+    .cd-drawer .rpt-updates-empty{ margin:0 0 14px; color:#71717a; font-size:14px; }
+    .cd-drawer .rpt-perspective-attachment-section{ margin:0 0 18px; font-family:'Inter','Segoe UI',sans-serif; }
+    .cd-drawer .rpt-perspective-attachment-section h3{ display:flex; align-items:center; gap:7px; margin:0 0 10px; color:#18181b; font-size:13px; font-weight:600; }
+    .cd-drawer .rpt-perspective-attachment-section h3 span{ color:#71717a; font-size:12px; font-weight:400; }
+    .cd-drawer .rpt-perspective-attachment-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,112px)); gap:8px; }
+    .cd-drawer .rpt-perspective-attachment{ min-width:0; margin:0; }
+    .cd-drawer .rpt-perspective-attachment-thumb{ display:block; width:100%; aspect-ratio:1; padding:0; overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#f4f4f5; cursor:pointer; }
+    .cd-drawer .rpt-perspective-attachment-thumb img,.cd-drawer .rpt-perspective-attachment-thumb video{ display:block; width:100%; height:100%; object-fit:cover; }
+    .cd-drawer .rpt-perspective-attachment figcaption{ margin-top:4px; color:#52525b; font-size:11px; line-height:1.35; overflow-wrap:anywhere; }
+    .cd-drawer .rpt-perspective-attachment-empty{ margin:0; color:#71717a; font-size:12px; line-height:1.5; }
     .cpd .rpt-cards .card-img{ width:100%; height:150px; object-fit:cover; border-radius:var(--radius-sm) var(--radius-sm) 0 0; display:block; background:var(--ink-100); }
     .cpd .rpt-cards .card-img-placeholder{ width:100%; height:150px; border-radius:var(--radius-sm) var(--radius-sm) 0 0; background:var(--ink-100); display:flex;align-items:center;justify-content:center; color:var(--ink-300); }
     .cpd .date-input{ padding:10px 12px; border-radius:9px; border:1px solid var(--border); font-family:inherit; font-size:12.5px; color:var(--ink-700); background:var(--white); width:100%; box-sizing:border-box; }
@@ -2044,7 +2432,7 @@ if (!empty($_GET['waitlist_booking'])) {
   };
   </script>
 </head>
-<body class="staff-theme" data-realtime-page="staff">
+<body class="staff-theme" data-realtime-page="staff" data-app-base-url="<?php echo htmlspecialchars($appBaseUrl, ENT_QUOTES, 'UTF-8'); ?>">
 
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 
@@ -2159,15 +2547,19 @@ if (!empty($_GET['waitlist_booking'])) {
               <select id="apptStatusSelect" class="appt-status-select">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
+                <option value="action_needed">Action needed</option>
+                <option value="waitlisted">Waitlisted</option>
                 <option value="scheduled">Scheduled</option>
+                <option value="approved">Approved</option>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
                 <option value="rescheduled">Rescheduled</option>
                 <option value="no_show">No Show</option>
                 <option value="rejected">Rejected</option>
+                <option value="in_progress">In Progress</option>
               </select>
             </div>
-            <div style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
+            <div class="appt-primary-actions" style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
               <a href="availability.php" class="sd-btn sd-btn-outline"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
               <button type="button" class="sd-btn sd-btn-outline" onclick="exportAppointmentsCSV()" title="Export appointment requests as CSV">
                 Export CSV
@@ -2188,11 +2580,14 @@ if (!empty($_GET['waitlist_booking'])) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                 Reschedule
               </button>
-              <button type="button" class="bulk-btn" onclick="APP.bulkComplete()" title="Mark selected requests as completed">
+              <button type="button" class="bulk-btn" id="apptBulkCompleteBtn" style="display:none;" onclick="APP.bulkComplete()" title="Mark selected requests as completed">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                 Mark Completed
               </button>
-              <button type="button" class="bulk-btn danger" onclick="APP.bulkArchive()" title="Archive selected requests">
+              <button type="button" class="bulk-btn" id="apptBulkNoShowBtn" style="display:none;" onclick="APP.bulkNoShow()" title="Mark selected requests as no-show">
+                Mark No-show
+              </button>
+              <button type="button" class="bulk-btn danger" id="apptBulkArchiveBtn" style="display:none;" onclick="APP.bulkArchive()" title="Archive selected requests">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
                 Archive
               </button>
@@ -2226,9 +2621,12 @@ if (!empty($_GET['waitlist_booking'])) {
                     $aptRef = $req['reference_id'] ?? fallbackRefId('#APT-', $req['appointment_id']);
                     $sc = $statusColors[$req['status']] ?? ['bg'=>'#f1f5f9','color'=>'#64748b'];
                     $statusKey = $req['status'];
-                    $statusLabel = ucfirst(str_replace('_',' ', $req['status']));
-                    $dt = date('M d, Y', strtotime($req['preferred_date']));
-                    $tm = date('g:i A', strtotime($req['preferred_time']));
+                    $statusLabel = $req['status'] === 'cancelled' && $req['cancelled_by'] === 'resident'
+                      ? 'Cancelled by Resident'
+                      : ($req['status'] === 'cancelled' && $req['cancelled_by'] === 'staff'
+                        ? 'Cancelled by Staff' : ucfirst(str_replace('_',' ', $req['status'])));
+                    $dt = date('F j, Y', strtotime($req['scheduled_date']));
+                    $tm = date('g:i A', strtotime($req['scheduled_time']));
                     $sub = date('M d, Y', strtotime($req['created_at']));
                     $typeLabel = ucfirst($req['appointment_type']);
                     $petName = htmlspecialchars($req['pet_name'] ?? '-');
@@ -2238,7 +2636,8 @@ if (!empty($_GET['waitlist_booking'])) {
                     foreach ($nameParts as $np) { if ($np !== '') $initials .= strtoupper(mb_substr($np, 0, 1)); }
                     if ($initials === '') $initials = '?';
                   ?>
-                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-date="<?php echo (int)strtotime($req['preferred_date']); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
+                    <?php $canMarkOutcome = in_array($statusKey, ['scheduled', 'rescheduled', 'in_progress'], true) && strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']) <= time(); ?>
+                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-can-outcome="<?php echo $canMarkOutcome ? '1' : '0'; ?>" data-date="<?php echo (int)strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
                       <td class="sd-td">
                         <input type="checkbox" class="sd-table-cb appt-row-check" data-id="<?php echo (int)$req['appointment_id']; ?>" onclick="event.stopPropagation();APP.toggleSelect(<?php echo (int)$req['appointment_id']; ?>)" />
                       </td>
@@ -2253,7 +2652,7 @@ if (!empty($_GET['waitlist_booking'])) {
                       </td>
                       <td class="sd-td">
                         <div class="client-cell">
-                          <div class="avatar"><?php if (!empty($req['avatar_url'])): ?><img src="<?php echo htmlspecialchars($req['avatar_url']); ?>" alt=""><?php else: echo $initials; endif; ?></div>
+                          <div class="avatar"><?php if (!empty($req['avatar_url'])): ?><img src="<?php echo htmlspecialchars(dcvsStaffReportMediaUrl($req['avatar_url']), ENT_QUOTES, 'UTF-8'); ?>" alt=""><?php else: echo $initials; endif; ?></div>
                           <div class="contact-main contact-name"><?php echo $residentName; ?></div>
                         </div>
                       </td>
@@ -2263,7 +2662,7 @@ if (!empty($_GET['waitlist_booking'])) {
                       </td>
                       <td class="sd-td">
                         <div class="client-cell">
-                          <div class="avatar"><?php if (!empty($req['photo_url'])): ?><img src="<?php echo htmlspecialchars($req['photo_url']); ?>" alt=""><?php else: ?><i class="fas fa-paw"></i><?php endif; ?></div>
+                          <div class="avatar"><?php if (!empty($req['photo_url'])): ?><img src="<?php echo htmlspecialchars(dcvsStaffReportMediaUrl($req['photo_url']), ENT_QUOTES, 'UTF-8'); ?>" alt=""><?php else: ?><i class="fas fa-paw"></i><?php endif; ?></div>
                           <div class="contact-main contact-normal pet-name-value"><?php echo $petName; ?></div>
                         </div>
                       </td>
@@ -2461,7 +2860,7 @@ if (!empty($_GET['waitlist_booking'])) {
       <div class="cpd row-menu-pop" id="rowMenuPop"></div>
 
       <!-- Client Profile Drawer (right drawer, appointments style) -->
-      <div id="clientProfileModal" class="modal cpd cd-drawer">
+      <div id="clientProfileModal" class="modal cpd cd-drawer staff-detail-drawer">
         <div class="sd-dialog">
           <div class="sd-dialog-content" role="dialog" aria-modal="true">
             <button type="button" class="sd-dialog-close" onclick="closeModal('clientProfileModal')" aria-label="Close">
@@ -2544,6 +2943,15 @@ if (!empty($_GET['waitlist_booking'])) {
         #addClientModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
         @media (min-width:640px){ #addClientModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
         @media (max-width:560px){ #addClientModal .sd-form-grid{ grid-template-columns:1fr; } #addClientModal .sd-field-full{ grid-column:auto; } }
+        @media (max-width:640px){
+          #addClientModal.modal{ position:fixed; inset:0; align-items:stretch; justify-content:stretch; padding:0; }
+          #addClientModal .sd-dialog{ width:100%; height:100vh; height:100dvh; min-height:0; }
+          #addClientModal .sd-dialog-content{
+            box-sizing:border-box; width:100%; max-width:none; height:100vh; height:100dvh;
+            max-height:none; border:0; border-radius:0; padding:20px;
+            padding-bottom:calc(20px + env(safe-area-inset-bottom)); overflow-y:auto;
+          }
+        }
       </style>
       <div id="addClientModal" class="modal">
         <form id="addClientForm" class="sd-dialog" enctype="multipart/form-data">
@@ -2684,6 +3092,24 @@ if (!empty($_GET['waitlist_booking'])) {
       background:#ffffff;
       min-height:calc(100vh - var(--topbar-h, 64px));
     }
+    @media (max-width: 1024px) {
+      #analytics.aether-analytics {
+        margin:-1.5rem -1.5rem;
+        width:auto;
+      }
+    }
+    @media (max-width: 768px) {
+      #analytics.aether-analytics {
+        margin: -1rem -0.75rem;
+        width: auto;
+      }
+    }
+    @media (max-width: 480px) {
+      #analytics.aether-analytics {
+        margin-inline: -0.75rem;
+        width: calc(100% + 1.5rem);
+      }
+    }
 
     /* Appointment Records Table - Enhanced UI */
     #appointments.content-section {
@@ -2694,6 +3120,20 @@ if (!empty($_GET['waitlist_booking'])) {
       min-height:calc(100vh - var(--topbar-h, 64px));
       padding:1.5rem 2rem;
     }
+    @media (max-width: 1024px) {
+      #appointments.content-section {
+        width:auto;
+        margin:-1rem -1.5rem;
+        padding:1.5rem;
+      }
+    }
+    @media (max-width: 768px) {
+      #appointments.content-section {
+        width:auto;
+        margin:-1rem -0.75rem;
+        padding:1rem 0.75rem;
+      }
+    }
     /* Calendar schedule: full-page white, attached to the page (no gray gutter / no centering) */
     #calendar-schedule.content-section {
       margin:-1.75rem -2rem;
@@ -2702,6 +3142,14 @@ if (!empty($_GET['waitlist_booking'])) {
       background:#ffffff;
       min-height:calc(100vh - var(--topbar-h, 64px));
       padding:1.5rem 2rem;
+    }
+    @media (max-width: 1024px) {
+      #calendar-schedule.content-section {
+        box-sizing:border-box;
+        width:100%;
+        margin:-1rem 0 0;
+        padding:1rem 0;
+      }
     }
     .appt-white-card {
       background: #fff;
@@ -3237,7 +3685,7 @@ if (!empty($_GET['waitlist_booking'])) {
     #appointments .bulk-bar .bulk-btn svg{ width:14px; height:14px; flex-shrink:0; }
     #appointments .appt-card-header { justify-content:flex-start; }
     #appointments .appt-header-right { flex-wrap:wrap; }
-    #appointments .appt-db-table-area { overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; padding:0; }
+    #appointments .appt-db-table-area { overflow-x:auto; overflow-y:hidden; contain:paint; -webkit-overflow-scrolling:touch; border:1px solid #e4e4e7; border-radius:8px; background:#fff; padding:0; }
     #appointments .appt-table thead th { background:#fafafa; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; letter-spacing:0; text-transform:none; color:#71717a; height:40px; padding:0 8px; border-bottom:1px solid #e4e4e7; }
     #appointments .appt-table tbody tr { border-bottom:1px solid #e4e4e7; }
     #appointments .appt-table tbody tr:hover { background:#f4f4f5; }
@@ -3275,6 +3723,114 @@ if (!empty($_GET['waitlist_booking'])) {
     #appointments .dt-page-btn { height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
     #appointments .dt-page-btn:hover:not(:disabled) { background:#f4f4f5; }
     #appointments .dt-page-btn:disabled { opacity:.5; cursor:not-allowed; }
+    @media (max-width: 1024px) {
+      #appointments .kpis {
+        grid-template-columns:repeat(2,minmax(0,1fr));
+      }
+      #appointments .appt-card-header,
+      #appointments .appt-header-right,
+      #appointments .appt-card-header > div:last-child {
+        min-width:0;
+      }
+      #appointments .appt-table-wrap,
+      #appointments .appt-db-table-area {
+        max-width:100%;
+        min-width:0;
+      }
+      #appointments .appt-db-table-area {
+        overflow-x:auto !important;
+        overflow-y:hidden;
+        contain:paint;
+        -webkit-overflow-scrolling:touch;
+      }
+      #appointments .appt-table {
+        min-width:70rem;
+      }
+    }
+    @media (max-width: 768px) {
+      #appointments .appt-card-header {
+        flex-direction:column;
+        align-items:stretch;
+        gap:0.75rem;
+        padding:1rem 0;
+      }
+      #appointments .appt-header-right {
+        display:grid;
+        grid-template-columns:minmax(0,1fr);
+        width:100%;
+        gap:0.6rem;
+      }
+      #appointments .appt-search-wrap,
+      #appointments .appt-search-input,
+      #appointments .appt-status-select {
+        width:100%;
+        min-width:0;
+      }
+      #appointments .appt-card-header > div:last-child {
+        width:100%;
+        margin-left:0 !important;
+      }
+      #appointments .appt-card-header > div:last-child .sd-btn {
+        flex:1 1 100%;
+        justify-content:center;
+      }
+      #appointments .bulk-bar.active,
+      #appointments .bulk-bar .bulk-actions {
+        flex-wrap:wrap;
+        max-width:100%;
+      }
+      #appointments .dt-pagination,
+      #appointments .dt-pagination-right {
+        justify-content:center;
+        gap:0.75rem;
+      }
+      #appointments .dt-pagination {
+        padding-inline:0;
+      }
+    }
+    @media (max-width: 480px) {
+      #appointments .kpis {
+        grid-template-columns:minmax(0,1fr);
+        gap:0.75rem;
+      }
+      #appointments .kpi-card {
+        min-width:0;
+      }
+      #appointments .appt-card-header > div:last-child {
+        flex-direction:column;
+      }
+      #appointments .appt-card-header > div:last-child .sd-btn {
+        width:100%;
+      }
+      #appointments .dt-rows {
+        justify-content:center;
+        flex-wrap:wrap;
+      }
+      #appointments .dt-page-label {
+        width:auto;
+      }
+    }
+    @media (max-width: 768px) {
+      #appointments .appt-primary-actions {
+        display:grid !important;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
+      }
+      #appointments .appt-primary-actions .sd-btn {
+        box-sizing:border-box;
+        flex:0 0 auto !important;
+        width:100%;
+        min-width:0;
+        min-height:40px;
+        height:auto;
+        padding:8px;
+        line-height:1.25;
+        white-space:normal;
+      }
+      #appointments .appt-primary-actions .sd-btn:last-child {
+        grid-column:1 / -1;
+      }
+    }
 
     /* Dialog font + button style (shadcn) - Pending / Active / Resolved cases */
     #reports-pending .dt-container, #reports-active .dt-container, #reports-resolved .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
@@ -3301,10 +3857,10 @@ if (!empty($_GET['waitlist_booking'])) {
     #reports-pending .sd-row-actions, #reports-active .sd-row-actions, #reports-resolved .sd-row-actions{ width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; background:transparent; border:none; color:#71717a; cursor:pointer; }
     #reports-pending .sd-row-actions:hover, #reports-active .sd-row-actions:hover, #reports-resolved .sd-row-actions:hover{ background:#f4f4f5; color:#18181b; }
     #reports-all .type-badge, #reports-pending .type-badge, #reports-active .type-badge, #reports-resolved .type-badge{ font-size:14px; }
-    #reports-all .rpt-status, #reports-pending .rpt-status, #reports-active .rpt-status, #reports-resolved .rpt-status{ display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
+    #reports-all .rpt-status, #reports-pending .rpt-status, #reports-accepted .rpt-status, #reports-active .rpt-status, #reports-resolved .rpt-status{ display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
     #reports-all .rpt-status.pending, #reports-pending .rpt-status.pending, #reports-active .rpt-status.pending, #reports-resolved .rpt-status.pending{ background:#fef3c7; color:#92400e; border-color:#fde68a; }
     #reports-all .rpt-status.validated, #reports-pending .rpt-status.validated, #reports-active .rpt-status.validated, #reports-resolved .rpt-status.validated{ background:#dcebe0; color:#045e1f; border-color:#bbf7d0; }
-    #reports-all .rpt-status.active, #reports-pending .rpt-status.active, #reports-active .rpt-status.active, #reports-resolved .rpt-status.active{ background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; }
+    #reports-all .rpt-status.active, #reports-pending .rpt-status.active, #reports-accepted .rpt-status.active, #reports-active .rpt-status.active, #reports-resolved .rpt-status.active{ background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; }
     #reports-all .rpt-status.resolved, #reports-pending .rpt-status.resolved, #reports-active .rpt-status.resolved, #reports-resolved .rpt-status.resolved{ background:#0E8131; color:#ffffff; border-color:#0E8131; }
     #reports-all .rpt-status.rejected, #reports-pending .rpt-status.rejected, #reports-active .rpt-status.rejected, #reports-resolved .rpt-status.rejected{ background:#fee2e2; color:#991b1b; border-color:#fecaca; }
 
@@ -3417,10 +3973,10 @@ var CLIENTS = <?php echo json_encode($cpdClients, $jsonFlags); ?>;
 var PETS = <?php echo json_encode($cpdPets, $jsonFlags); ?>;
 var VIEW_OWNER = <?php echo $viewOwner; ?>;
 </script>
-<script src="assets/js/client-database.js"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/client-database.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 
   <!-- �"?�"? REPORTS: ALL �"?�"? -->
-  <section id="reports-all" class="content-section">
+  <section id="reports-all" class="content-section staff-report-section">
     <style>
       /* Dialog font + button style (shadcn) - All Reports */
       #reports-all{ background:var(--white); margin:-1.75rem -2rem; width:calc(100% + 4rem); max-width:none; min-height:calc(100vh - var(--topbar-h, 64px)); }
@@ -3462,8 +4018,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       #reports-all .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; }
       #reports-all .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
       #reports-all .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
-      #reports-all .db-toolbar{ justify-content:flex-start; }
-      #reports-all .db-toolbar-actions{ margin-left:auto; display:flex; align-items:center; gap:8px; }
       #reports-all .search-grow-wrap input{ height:36px; width:100%; padding:0 12px 0 36px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; font-size:14px; color:#18181b; outline:none; font-family:inherit; }
       #reports-all .search-grow-wrap input:focus{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
       #reports-all .search-grow-wrap input::placeholder{ color:#71717a; }
@@ -3480,18 +4034,18 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       #reports-all .dt-page-btn{ height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
       #reports-all .dt-page-btn:hover:not(:disabled){ background:#f4f4f5; }
       #reports-all .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
-      #reports-pending .dt-pagination, #reports-active .dt-pagination, #reports-resolved .dt-pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; font-family:'Inter','Segoe UI',sans-serif; }
-      #reports-pending .dt-pagination-right, #reports-active .dt-pagination-right, #reports-resolved .dt-pagination-right{ display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
-      #reports-pending .dt-rows, #reports-active .dt-rows, #reports-resolved .dt-rows{ display:flex; align-items:center; gap:8px; font-size:14px; color:#71717a; }
-      #reports-pending .dt-rows select, #reports-active .dt-rows select, #reports-resolved .dt-rows select{ height:32px; width:70px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; padding:0 8px; font-size:14px; color:#18181b; cursor:pointer; font-family:inherit; }
-      #reports-pending .dt-rows select:focus, #reports-active .dt-rows select:focus, #reports-resolved .dt-rows select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
-      #reports-pending .dt-page-label, #reports-active .dt-page-label, #reports-resolved .dt-page-label{ width:110px; text-align:center; font-size:14px; font-weight:500; color:#18181b; white-space:nowrap; }
-      #reports-pending .dt-page-btns, #reports-active .dt-page-btns, #reports-resolved .dt-page-btns{ display:flex; align-items:center; gap:4px; }
-      #reports-pending .dt-page-btn, #reports-active .dt-page-btn, #reports-resolved .dt-page-btn{ height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-      #reports-pending .dt-page-btn:hover:not(:disabled), #reports-active .dt-page-btn:hover:not(:disabled), #reports-resolved .dt-page-btn:hover:not(:disabled){ background:#f4f4f5; }
-      #reports-pending .dt-page-btn:disabled, #reports-active .dt-page-btn:disabled, #reports-resolved .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
+      #reports-pending .dt-pagination, #reports-accepted .dt-pagination, #reports-active .dt-pagination, #reports-resolved .dt-pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; font-family:'Inter','Segoe UI',sans-serif; }
+      #reports-pending .dt-pagination-right, #reports-accepted .dt-pagination-right, #reports-active .dt-pagination-right, #reports-resolved .dt-pagination-right{ display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+      #reports-pending .dt-rows, #reports-accepted .dt-rows, #reports-active .dt-rows, #reports-resolved .dt-rows{ display:flex; align-items:center; gap:8px; font-size:14px; color:#71717a; }
+      #reports-pending .dt-rows select, #reports-accepted .dt-rows select, #reports-active .dt-rows select, #reports-resolved .dt-rows select{ height:32px; width:70px; border-radius:6px; border:1px solid #e4e4e7; background:#fff; padding:0 8px; font-size:14px; color:#18181b; cursor:pointer; font-family:inherit; }
+      #reports-pending .dt-rows select:focus, #reports-accepted .dt-rows select:focus, #reports-active .dt-rows select:focus, #reports-resolved .dt-rows select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #reports-pending .dt-page-label, #reports-accepted .dt-page-label, #reports-active .dt-page-label, #reports-resolved .dt-page-label{ width:110px; text-align:center; font-size:14px; font-weight:500; color:#18181b; white-space:nowrap; }
+      #reports-pending .dt-page-btns, #reports-accepted .dt-page-btns, #reports-active .dt-page-btns, #reports-resolved .dt-page-btns{ display:flex; align-items:center; gap:4px; }
+      #reports-pending .dt-page-btn, #reports-accepted .dt-page-btn, #reports-active .dt-page-btn, #reports-resolved .dt-page-btn{ height:32px; width:32px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; border:1px solid #e4e4e7; background:#fff; color:#18181b; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+      #reports-pending .dt-page-btn:hover:not(:disabled), #reports-accepted .dt-page-btn:hover:not(:disabled), #reports-active .dt-page-btn:hover:not(:disabled), #reports-resolved .dt-page-btn:hover:not(:disabled){ background:#f4f4f5; }
+      #reports-pending .dt-page-btn:disabled, #reports-accepted .dt-page-btn:disabled, #reports-active .dt-page-btn:disabled, #reports-resolved .dt-page-btn:disabled{ opacity:.5; cursor:not-allowed; }
       @media (max-width: 640px){
-        #reports-pending .dt-pagination-right, #reports-active .dt-pagination-right, #reports-resolved .dt-pagination-right{ justify-content:center; gap:12px; }
+        #reports-pending .dt-pagination-right, #reports-accepted .dt-pagination-right, #reports-active .dt-pagination-right, #reports-resolved .dt-pagination-right{ justify-content:center; gap:12px; }
       }
       #reports-all{ font-family:'Inter','Segoe UI',sans-serif; }
       #reports-all .kpi-card{ font-family:'Inter','Segoe UI',sans-serif; }
@@ -3502,6 +4056,191 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       .cpd .cpd-edit-icon{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; cursor:pointer; }
       .cpd .cpd-edit-icon img{ display:block; width:16px; height:16px; object-fit:contain; }
       .cpd .cpd-edit-icon:hover{ border-color:#18181b; background:#f4f4f5; }
+
+      /* Match report summary cards to the Programs & Services stat cards. */
+      body.staff-theme #reports-all .kpi-card,
+      body.staff-theme #reports-pending .db-panel .kpi-card,
+      body.staff-theme #reports-accepted .db-panel .kpi-card,
+      body.staff-theme #reports-active .db-panel .kpi-card,
+      body.staff-theme #reports-resolved .db-panel .kpi-card {
+        display: flex;
+        min-width: 0;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 14px 16px;
+        border: 1px solid #E5E7EB;
+        border-radius: 14px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(16,24,40,.05), 0 1px 2px rgba(16,24,40,.03);
+        text-align: center;
+      }
+      body.staff-theme #reports-all .kpi-label,
+      body.staff-theme #reports-pending .db-panel .kpi-label,
+      body.staff-theme #reports-accepted .db-panel .kpi-label,
+      body.staff-theme #reports-active .db-panel .kpi-label,
+      body.staff-theme #reports-resolved .db-panel .kpi-label {
+        margin: 0 0 6px;
+        color: #18181b;
+        font-family: 'Inter','Segoe UI',sans-serif;
+        font-size: 0.85rem;
+        font-weight: 500;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+      }
+      body.staff-theme #reports-all .kpi-value,
+      body.staff-theme #reports-pending .db-panel .kpi-value,
+      body.staff-theme #reports-accepted .db-panel .kpi-value,
+      body.staff-theme #reports-active .db-panel .kpi-value,
+      body.staff-theme #reports-resolved .db-panel .kpi-value {
+        margin: 0 0 6px;
+        color: #18181b;
+        font-family: 'Inter','Segoe UI',sans-serif;
+        font-size: 1.75rem !important;
+        font-weight: 600;
+        letter-spacing: normal;
+        line-height: 1;
+      }
+      body.staff-theme #reports-all .kpi-sub,
+      body.staff-theme #reports-pending .db-panel .kpi-sub,
+      body.staff-theme #reports-accepted .db-panel .kpi-sub,
+      body.staff-theme #reports-active .db-panel .kpi-sub,
+      body.staff-theme #reports-resolved .db-panel .kpi-sub {
+        margin: 0;
+        color: #71717a;
+        font-family: 'Inter','Segoe UI',sans-serif;
+        font-size: 14px;
+      }
+
+      /* Keep report queues within the staff content column; tables scroll in their own wrappers. */
+      #reports-all,
+      #reports-pending,
+      #reports-accepted,
+      #reports-active,
+      #reports-resolved,
+      #reports-all .reports-fullpage,
+      #reports-pending .reports-fullpage,
+      #reports-accepted .reports-fullpage,
+      #reports-active .reports-fullpage,
+      #reports-resolved .reports-fullpage,
+      #reports-all .cpd-app,
+      #reports-pending .cpd-app,
+      #reports-accepted .cpd-app,
+      #reports-active .cpd-app,
+      #reports-resolved .cpd-app,
+      #reports-all .layout,
+      #reports-pending .layout,
+      #reports-accepted .layout,
+      #reports-active .layout,
+      #reports-resolved .layout,
+      #reports-all .db-panel,
+      #reports-pending .db-panel,
+      #reports-accepted .db-panel,
+      #reports-active .db-panel,
+      #reports-resolved .db-panel,
+      #reports-all .db-table-area,
+      #reports-pending .db-table-area,
+      #reports-accepted .db-table-area,
+      #reports-active .db-table-area,
+      #reports-resolved .db-table-area {
+        min-width: 0;
+        max-width: 100%;
+      }
+      #reports-all .dt-container,
+      #reports-pending .dt-container,
+      #reports-accepted .dt-container,
+      #reports-active .dt-container,
+      #reports-resolved .dt-container {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+      }
+      #reports-all .dt-container > div,
+      #reports-pending .dt-container > div,
+      #reports-accepted .dt-container > div,
+      #reports-active .dt-container > div,
+      #reports-resolved .dt-container > div {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        contain: paint;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      @media (max-width: 1024px) {
+        #reports-all .kpis,
+        #reports-pending .db-panel .kpis,
+        #reports-accepted .db-panel .kpis,
+        #reports-active .db-panel .kpis,
+        #reports-resolved .db-panel .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      @media (max-width: 768px) {
+        #reports-all .bulk-bar,
+        #reports-all .bulk-actions {
+          flex-wrap: wrap;
+          max-width: 100%;
+        }
+      }
+      @media (max-width: 480px) {
+        body.staff-theme #reports-all .kpis,
+        body.staff-theme #reports-pending .db-panel .kpis,
+        body.staff-theme #reports-accepted .db-panel .kpis,
+        body.staff-theme #reports-active .db-panel .kpis,
+        body.staff-theme #reports-resolved .db-panel .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 10px;
+        }
+        body.staff-theme #reports-all .dt-pagination,
+        body.staff-theme #reports-pending .dt-pagination,
+        body.staff-theme #reports-accepted .dt-pagination,
+        body.staff-theme #reports-active .dt-pagination,
+        body.staff-theme #reports-resolved .dt-pagination {
+          justify-content: center;
+          padding-inline: 0;
+        }
+        body.staff-theme #reports-all .dt-pagination-right,
+        body.staff-theme #reports-pending .dt-pagination-right,
+        body.staff-theme #reports-accepted .dt-pagination-right,
+        body.staff-theme #reports-active .dt-pagination-right,
+        body.staff-theme #reports-resolved .dt-pagination-right {
+          justify-content: center;
+          gap: 0.75rem;
+        }
+        body.staff-theme #reports-all .dt-page-label,
+        body.staff-theme #reports-pending .dt-page-label,
+        body.staff-theme #reports-accepted .dt-page-label,
+        body.staff-theme #reports-active .dt-page-label,
+        body.staff-theme #reports-resolved .dt-page-label {
+          width: auto;
+        }
+        body.staff-theme #reports-all .bulk-bar .bulk-actions {
+          justify-content: flex-start;
+          gap: 0.25rem;
+          padding-inline: 0.5rem;
+        }
+        body.staff-theme #reports-all .bulk-bar .bulk-count {
+          white-space: normal;
+        }
+        .cd-drawer .sd-dialog-content {
+          padding: 1rem;
+        }
+        .cd-drawer .sd-dialog-footer {
+          flex-wrap: wrap;
+        }
+      }
+      @media (max-width: 340px) {
+        body.staff-theme #reports-all .kpis,
+        body.staff-theme #reports-pending .db-panel .kpis,
+        body.staff-theme #reports-accepted .db-panel .kpis,
+        body.staff-theme #reports-active .db-panel .kpis,
+        body.staff-theme #reports-resolved .db-panel .kpis {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
     </style>
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
@@ -3521,7 +4260,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
               <div class="kpi-card">
                 <p class="kpi-label">Active Cases</p>
                 <div class="kpi-value"><?php echo $rptCounts['active']; ?></div>
-                <p class="kpi-sub">Currently being handled</p>
+                <p class="kpi-sub">Being handled by DCVS</p>
               </div>
               <div class="kpi-card">
                 <p class="kpi-label">Pending Cases</p>
@@ -3536,12 +4275,12 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar">
+            <div class="db-toolbar staff-report-toolbar">
               <div class="search-grow-wrap">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input type="text" id="rptMainSearch" placeholder="Search reports by ref, reporter, description..." oninput="rptSetSearch(this.value)">
               </div>
-              <div class="toolbar-filters">
+              <div class="toolbar-filters staff-report-filters">
                 <select class="select-input tf-select" id="rptType" onchange="rptSetType(this.value)">
                   <option value="">All Types</option>
                   <option value="stray">Stray Animal</option>
@@ -3604,7 +4343,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
               </div>
             </div>
 
-            <div class="db-table-area">
+            <div class="db-table-area staff-report-table-area">
               <div id="rptTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
                   <table>
@@ -3653,7 +4392,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </section>
 
   <!-- Report Details Drawer (right drawer, appointments style) -->
-  <div id="rptDetailsModal" class="modal cpd cd-drawer">
+  <div id="rptDetailsModal" class="modal cpd cd-drawer staff-detail-drawer">
     <div class="sd-dialog">
       <div class="sd-dialog-content" role="dialog" aria-modal="true">
         <button type="button" class="sd-dialog-close" onclick="closeModal('rptDetailsModal')" aria-label="Close">
@@ -3666,7 +4405,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         <div class="sd-field-group">
           <div id="rptDetailContent"></div>
         </div>
-        <div class="sd-dialog-footer" id="rptDetailFooter" style="display:flex;justify-content:center;gap:8px;"></div>
+        <div class="sd-dialog-footer" id="rptDetailFooter" style="display:flex;justify-content:flex-start;gap:8px;"></div>
       </div>
     </div>
   </div>
@@ -3822,11 +4561,11 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   var RPT_ITEMS = <?php echo json_encode($reportItems, $jsonFlags); ?>;
   </script>
   <?php $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1'; ?>
-  <script>window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>; window.DCVS_RESPONSE_ROLE = 'staff'; window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>; window.DCVS_CURRENT_STAFF_ID = <?php echo (int)$_SESSION['user_id']; ?>; window.DCVS_RESPONSE_OFFICERS = <?php echo json_encode($responseDispatchOfficers, $jsonFlags); ?>;</script>
-  <script src="assets/js/reports-database.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/reports-database.js'); ?>"></script>
+  <script>window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>; window.DCVS_RESPONSE_ROLE = 'staff'; window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>;</script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/reports-database.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/reports-database.js'); ?>"></script>
 
   <!-- �"?�"? REPORTS: PENDING CASES �"?�"? -->
-  <section id="reports-pending" class="content-section">
+  <section id="reports-pending" class="content-section staff-report-section">
     <?php if (isset($_SESSION['report_error'])): ?>
       <div class="toast toast-error" style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:6px;margin-bottom:1rem;"><?php echo htmlspecialchars($_SESSION['report_error']); unset($_SESSION['report_error']); ?></div>
     <?php endif; ?>
@@ -3866,13 +4605,12 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar">
+            <div class="db-toolbar staff-report-toolbar">
                 <div class="search-grow-wrap">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="penMainSearch" placeholder="Search pending reports..." oninput="penSetSearch(this.value)">
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div class="toolbar-filters">
+                <div class="toolbar-filters staff-report-filters">
                     <select class="select-input tf-select" id="penType" onchange="penSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -3887,10 +4625,9 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                  </div>
                 </div>
               </div>
-              <div class="db-table-area">
+              <div class="db-table-area staff-report-table-area">
                 <div id="penTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
                 <table>
@@ -3933,7 +4670,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </section>
 
   <!-- Pending Case Details Drawer -->
-  <div id="penDetailsModal" class="modal cpd cd-drawer">
+  <div id="penDetailsModal" class="modal cpd cd-drawer staff-detail-drawer">
     <div class="sd-dialog">
       <div class="sd-dialog-content" role="dialog" aria-modal="true">
         <button type="button" class="sd-dialog-close" onclick="closeModal('penDetailsModal')" aria-label="Close">
@@ -3969,6 +4706,12 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   var penBarangayEvidenceItems = [];
   var penBarangayEvidenceIndex = 0;
   var penEvidenceReturnFocus = null;
+
+  function casEsc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character) {
+      return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character];
+    });
+  }
 
   function renderPenEvidenceViewerItem() {
     var item = penBarangayEvidenceItems[penBarangayEvidenceIndex];
@@ -4039,7 +4782,204 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
     });
   }
 
-  function casResponseWorkflowDetails(r) {
+  function casReportCaseEvidence(r) {
+    var evidence = (Array.isArray(r.brgyValidationEvidence) ? r.brgyValidationEvidence : []).slice();
+    if (r.photo) evidence.push({ type: 'photo', url: r.photo, stage: 'resident', caption: '', role: 'resident' });
+    if (r.video) evidence.push({ type: 'video', url: r.video, stage: 'resident', caption: '', role: 'resident' });
+    return evidence;
+  }
+
+  function casEvidenceCaption(item) {
+    var stageCaptions = {
+      barangay_validation: 'Barangay validation',
+      barangay_secured: 'Animal secured',
+      barangay_turnover: 'Animal turnover'
+    };
+    return item.caption || stageCaptions[item.stage] || (item.type === 'video' ? 'Report video' : 'Case photo evidence');
+  }
+
+  function casReportCaseUpdatesHtml(r) {
+    var evidence = casReportCaseEvidence(r);
+    var evidenceByHistoryId = {};
+    evidence.forEach(function(item, index) {
+      var historyId = Number(item.responseHistoryId || 0);
+      if (historyId > 0) {
+        if (!evidenceByHistoryId[historyId]) evidenceByHistoryId[historyId] = [];
+        evidenceByHistoryId[historyId].push({ item: item, index: index });
+      }
+    });
+    penBarangayEvidenceItems = evidence;
+
+    var updates = (Array.isArray(r.responseHistory) ? r.responseHistory : [])
+      .filter(function(entry) { return entry.action !== 'report_submitted'; })
+      .map(function(entry) { return entry; });
+    var historyActions = updates.map(function(entry) { return entry.action; });
+    var equivalentHistoryActions = {
+      report_resolved: ['resolve', 'resolve_barangay'],
+      report_validated: ['accept_barangay_assignment', 'forward_to_dcvs_review'],
+      report_scheduled: ['schedule_report']
+    };
+    [
+      { action: 'report_resolved', date: r.resolved, rawDate: r.resolvedRaw, actor: 'DCVS Staff', actorRole: 'staff', reason: 'The report was marked resolved.' },
+      { action: 'report_scheduled', date: r.scheduled, rawDate: r.scheduledRaw, actor: 'DCVS Staff', actorRole: 'staff', reason: 'The report was scheduled for action.' },
+      { action: 'report_confirmed', date: r.confirmed, rawDate: r.confirmedRaw, actor: 'DCVS Staff', actorRole: 'staff', reason: 'DCVS confirmed this report for handling.' },
+      { action: 'report_validated', date: r.validated, rawDate: r.validatedRaw, actor: 'Barangay', actorRole: 'barangay', reason: 'The barangay reviewed this report.' }
+    ].forEach(function(entry) {
+      var equivalentActions = equivalentHistoryActions[entry.action] || [];
+      if (!entry.date || historyActions.indexOf(entry.action) !== -1 ||
+          equivalentActions.some(function(action) { return historyActions.indexOf(action) !== -1; })) return;
+      updates.push({
+        id: 0,
+        action: entry.action,
+        actor: entry.actor,
+        actorRole: entry.actorRole,
+        toState: '',
+        reason: entry.reason,
+        createdAt: entry.date,
+        createdAtRaw: entry.rawDate || ''
+      });
+    });
+    updates.push({
+      action: 'report_submitted',
+      actor: r.reporter || 'Resident',
+      actorRole: 'resident',
+      toState: '',
+      reason: '',
+      createdAt: r.submitted || '',
+      createdAtRaw: r.createdAt || ''
+    });
+    updates.sort(function(a, b) {
+      return new Date(b.createdAtRaw || b.createdAt || 0).getTime() -
+        new Date(a.createdAtRaw || a.createdAt || 0).getTime();
+    });
+
+    var stateLabels = {
+      awaiting_dcvs_decision: 'Forwarded to DCVS',
+      dcvs_dispatch: 'DCVS dispatch',
+      barangay_response_approved: 'Accepted by Barangay',
+      barangay_responding: 'Response started',
+      animal_secured: 'Animal secured',
+      awaiting_turnover: 'Awaiting turnover',
+      turned_over: 'Turned over to DCVS',
+      dcvs_processing: 'DCVS processing',
+      unable_to_locate: 'Unable to locate',
+      escalated_to_dcvs: 'Escalated to DCVS',
+      returned_to_barangay: 'Returned to Barangay',
+      closed_not_actionable: 'Closed as not actionable',
+      resolved: 'Resolved'
+    };
+    var actionLabels = {
+      add_photo_evidence: 'Photo evidence added',
+      report_correction: 'Report details updated',
+      report_submitted: 'Report submitted',
+      report_resolved: 'Resolved by DCVS',
+      report_scheduled: 'Scheduled for action',
+      report_confirmed: 'Confirmed by DCVS',
+      report_validated: 'Reviewed by Barangay',
+      approve_barangay_response: 'Accepted by Barangay',
+      accept_barangay_assignment: 'Accepted by Barangay',
+      forward_to_dcvs_review: 'Forwarded to DCVS',
+      start_response: 'Response started',
+      record_site_visit: 'Site visit recorded',
+      update_progress: 'Progress update',
+      secure_animal: 'Animal secured',
+      mark_secured: 'Animal secured',
+      set_handover_plan: 'Handover plan set or updated',
+      confirm_turnover: 'Animal turnover confirmed',
+      turnover_overdue: 'Animal turnover overdue',
+      begin_processing: 'DCVS processing started',
+      resolve: 'Report resolved',
+      resolve_barangay: 'Resolved by Barangay'
+    };
+    var legacyActionBySource = {
+      barangay_validation: ['accept_barangay_assignment', 'forward_to_dcvs_review', 'report_validated'],
+      barangay_secured: ['mark_secured', 'secure_animal'],
+      barangay_turnover: ['confirm_turnover'],
+      resident: ['report_submitted']
+    };
+    var attachedIndices = Object.create(null);
+    function mediaForUpdate(entry) {
+      var linked = evidenceByHistoryId[Number(entry.id || 0)] || [];
+      if (linked.length) {
+        linked.forEach(function(photo) { attachedIndices[photo.index] = true; });
+        return linked;
+      }
+      var matched = [];
+      evidence.forEach(function(item, index) {
+        if (attachedIndices[index]) return;
+        var sourceActions = legacyActionBySource[item.stage] || [];
+        if (sourceActions.indexOf(entry.action) !== -1) {
+          attachedIndices[index] = true;
+          matched.push({ item: item, index: index });
+        }
+      });
+      return matched;
+    }
+
+    var updateHtml = updates.map(function(entry) {
+      var historyId = Number(entry.id || 0);
+      var action = String(entry.action || '');
+      var title = actionLabels[action] || stateLabels[entry.toState] ||
+        action.replace(/_/g, ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); }) ||
+        'Case update';
+      var copy = entry.reason || (action === 'report_submitted'
+        ? 'The resident submitted this report.'
+        : (action === 'add_photo_evidence'
+          ? 'Photo evidence was added to this report.'
+          : (entry.toState && stateLabels[entry.toState]
+            ? 'The case status was updated to ' + stateLabels[entry.toState] + '.'
+            : 'A case update was recorded.')));
+      var actorRole = String(entry.actorRole || '').toLowerCase();
+      var actorLabel = actorRole === 'system'
+        ? 'System'
+        : (actorRole === 'barangay'
+        ? 'Brgy. ' + (r.brgy || 'Barangay')
+        : (actorRole === 'resident' ? 'Resident' : 'DCVS'));
+      var photos = mediaForUpdate(entry);
+      var photosHtml = photos.length
+        ? '<div class="rpt-updates-photo-grid">' + photos.map(function(photo) {
+            var caption = casEvidenceCaption(photo.item);
+            var media = photo.item.type === 'video'
+              ? '<video src="' + casEsc(photo.item.url || '') + '" muted playsinline preload="metadata" tabindex="-1" aria-hidden="true"></video>'
+              : '<img src="' + casEsc(photo.item.url || '') + '" alt="' + casEsc(caption) + '" loading="lazy">';
+            return '<div><button type="button" class="rpt-updates-photo" onclick="penViewBarangayEvidence(' + photo.index + ')" aria-label="View case evidence: ' + casEsc(caption) + '">' +
+              media + '</button>' +
+              '<p class="rpt-updates-caption">' + casEsc(caption) + '</p>' +
+              '</div>';
+          }).join('') + '</div>'
+        : '';
+      return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">' +
+        '<span class="rpt-updates-entry-title">' + casEsc(title) + '</span>' +
+        '<time class="rpt-updates-entry-date">' + casEsc(entry.createdAt || '') + '</time></div>' +
+        '<span class="rpt-updates-entry-actor">' + casEsc(actorLabel) + '</span>' +
+        '<p class="rpt-updates-entry-copy">' + casEsc(copy) + '</p>' + photosHtml +
+        '</article>';
+    }).join('');
+
+    var unlinkedPhotos = evidence.map(function(item, index) {
+      return attachedIndices[index] ? null : { item: item, index: index };
+    }).filter(Boolean);
+    var unlinkedHtml = unlinkedPhotos.length
+      ? '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head"><span class="rpt-updates-entry-title">Additional attachments</span></div>' +
+        '<span class="rpt-updates-entry-actor">DCVS</span><div class="rpt-updates-photo-grid">' +
+        unlinkedPhotos.map(function(photo) {
+          var caption = casEvidenceCaption(photo.item);
+          var media = photo.item.type === 'video'
+            ? '<video src="' + casEsc(photo.item.url || '') + '" muted playsinline preload="metadata" tabindex="-1" aria-hidden="true"></video>'
+            : '<img src="' + casEsc(photo.item.url || '') + '" alt="' + casEsc(caption) + '" loading="lazy">';
+          return '<div><button type="button" class="rpt-updates-photo" onclick="penViewBarangayEvidence(' + photo.index + ')" aria-label="View case evidence: ' + casEsc(caption) + '">' +
+            media + '</button>' +
+            '<p class="rpt-updates-caption">' + casEsc(caption) + '</p></div>';
+        }).join('') + '</div></article>'
+      : '';
+    return updateHtml || unlinkedHtml
+      ? '<div class="rpt-section-title">Case updates</div><div class="rpt-updates-timeline">' + updateHtml + unlinkedHtml + '</div>'
+      : '<div class="rpt-section-title">Case updates</div><p class="rpt-updates-empty">No case updates have been recorded yet.</p>';
+  }
+  window.casReportCaseUpdatesHtml = casReportCaseUpdatesHtml;
+
+  function casResponseWorkflowDetails(r, options) {
+    options = options || {};
     if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return '';
     var labels = {
       awaiting_dcvs_decision: 'Awaiting DCVS response decision', dcvs_dispatch: 'DCVS dispatch',
@@ -4059,7 +4999,32 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       && r.turnoverDeadline
       && new Date(r.turnoverDeadline.replace(' ', 'T')).getTime() < Date.now()
     );
-    return '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Response &amp; Custody</div><div class="info-rows info-rows-2col">' +
+    var turnoverComplete = r.statusRaw === 'resolved' && r.turnoverStatus === 'receipt_confirmed';
+    var turnoverRequired = typeof window.responseWorkflowNeedsHandover === 'function'
+      && window.responseWorkflowNeedsHandover(r);
+    var overdueTurnover = r.statusRaw === 'resolved' && r.turnoverStatus === 'pending'
+      && r.turnoverDueAt && new Date(r.turnoverDueAt.replace(' ', 'T')).getTime() < Date.now();
+    var stepsHtml = '';
+    if (!options.hideProgress) {
+      var completedStage = r.statusRaw === 'resolved'
+        ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
+        : (r.responseState === 'barangay_response_approved' ? 0
+          : (r.responseState === 'barangay_responding' || r.responseState === 'escalated_to_dcvs' ? 1
+            : (r.responseState === 'animal_secured' ? 2 : -1)));
+      var steps = ['Accepted', 'Responding', 'Secured', 'Resolved'];
+      if (turnoverRequired) steps.push(turnoverComplete ? 'Turned over to DCVS' : 'Turned over');
+      stepsHtml = '<div class="response-steps" aria-label="Barangay response progress">' + steps.map(function(label, index) {
+        var stepClass = index < completedStage ? ' is-complete'
+          : (index === completedStage ? ((overdue && index === 1 || overdueTurnover && index === 4) ? ' is-current is-overdue' : ' is-current') : '');
+        var check = index < completedStage
+          ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+          : '';
+        return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + check + '</span><span>' + label + '</span></div>';
+      }).join('') + '</div>';
+    }
+    var handoverHtml = typeof window.responseWorkflowHandoverHtml === 'function'
+      ? window.responseWorkflowHandoverHtml(r, { excludeReceipt: turnoverComplete }) : '';
+    return handoverHtml + '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Response &amp; Custody</div>' + stepsHtml + '<div class="info-rows info-rows-2col">' +
       casInfoRow('Response Status', labels[r.responseState] || r.responseState) +
       casInfoRow('Response Mode', r.responseMode === 'barangay_response'
         ? 'Barangay Response'
@@ -4067,10 +5032,11 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       (r.holdingLocation ? casInfoRow('Holding Location', r.holdingLocation) : '') +
       (r.animalCondition ? casInfoRow('Animal Condition', r.animalCondition) : '') +
       (r.turnoverRequestedAt ? casInfoRow('Pickup Requested', r.turnoverRequestedAt) : '') +
-      '</div>' + (overdue ? '<div role="alert" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:13px;">Response deadline exceeded — follow up is required.</div>' : '') + '</div>';
+      '</div>' + (overdue ? '<div role="alert" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:13px;">Response deadline exceeded — follow up is required.</div>' : '') +
+      '</div>';
   }
 
-  function casBarangayValidationDetails(r) {
+  function casBarangayValidationDetails(r, pendingReviewStyle) {
     var labels = {
       site_visit_pending: 'Site visit pending',
       confirmed_on_site: 'Confirmed on site',
@@ -4081,10 +5047,45 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
     var evidence = Array.isArray(r.brgyValidationEvidence) ? r.brgyValidationEvidence : [];
     var hasFieldStatus = !!r.brgyValidationStatus;
     var validationTime = r.validated || 'Awaiting barangay validation';
-    var statusLabel = labels[r.brgyValidationStatus] ||
-      (r.statusRaw === 'validated' ? 'Validation details unavailable' : 'Awaiting barangay validation');
+    var workflowLabels = {
+      awaiting_dcvs_decision: 'Forwarded to DCVS',
+      dcvs_dispatch: 'DCVS dispatch',
+      barangay_response_approved: 'Response approved',
+      barangay_responding: 'Barangay responding',
+      animal_secured: 'Animal secured',
+      awaiting_turnover: 'Awaiting turnover',
+      turned_over: 'Turned over',
+      dcvs_processing: 'DCVS processing',
+      unable_to_locate: 'Unable to locate',
+      escalated_to_dcvs: 'Escalated to DCVS',
+      returned_to_barangay: 'Returned to barangay',
+      closed_not_actionable: 'Closed — not actionable',
+      resolved: 'Resolved'
+    };
+    var currentActionStatus = workflowLabels[r.responseState] ||
+      ({ confirmed: 'In progress', scheduled: 'In progress', resolved: 'Resolved', rejected: 'Closed' }[r.statusRaw] || '');
+    var statusLabel = pendingReviewStyle
+      ? 'Pending Barangay Review'
+      : (currentActionStatus || labels[r.brgyValidationStatus] ||
+        (r.statusRaw === 'validated' ? 'Validation details unavailable' : 'Awaiting barangay validation'));
+    var responseHistory = Array.isArray(r.responseHistory) ? r.responseHistory : [];
+    var latestWorkflowEntry = null;
+    for (var historyIndex = responseHistory.length - 1; historyIndex >= 0; historyIndex--) {
+      if (r.responseState && responseHistory[historyIndex].toState === r.responseState) {
+        latestWorkflowEntry = responseHistory[historyIndex];
+        break;
+      }
+    }
     var statusClass = 'style="color:#045e1f;background:#eef6f0;border:1px solid #b8d1c0;"';
-    if (r.brgyValidationStatus === 'site_visit_pending') {
+    if (pendingReviewStyle) {
+      statusClass = 'style="color:#92400e;background:#fef3c7;border:1px solid #fde68a;"';
+    } else if (currentActionStatus === 'Resolved' || currentActionStatus === 'Response approved') {
+      statusClass = 'style="color:#ffffff;background:#0E8131;border:1px solid #0E8131;"';
+    } else if (currentActionStatus === 'Closed' || currentActionStatus === 'Unable to locate' || currentActionStatus === 'Closed — not actionable') {
+      statusClass = 'style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca;"';
+    } else if (currentActionStatus) {
+      statusClass = 'style="color:#175CD3;background:#eff6ff;border:1px solid #bfdbfe;"';
+    } else if (r.brgyValidationStatus === 'site_visit_pending') {
       statusClass = 'style="color:#52525b;background:#f4f4f5;border:1px solid #e4e4e7;"';
     } else if (r.brgyValidationStatus === 'urgent_response') {
       statusClass = 'style="color:#991b1b;background:#fef2f2;border:1px solid #fecaca;"';
@@ -4112,15 +5113,42 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         casEsc(r.brgy || 'Barangay') +
         ' checked "I can respond to this case". This report was forwarded to DCVS for review and assignment.</span></div></div>'
       : '';
+    var workflowMessageRows = [];
+    if (currentActionStatus) {
+      workflowMessageRows.push({ label: 'Current status', value: currentActionStatus });
+    }
+    if (r.responseState === 'resolved' || r.statusRaw === 'resolved') {
+      if (r.resolutionDetails || r.caseNotes) {
+        workflowMessageRows.push({ label: 'Resolution', value: r.resolutionDetails || r.caseNotes });
+      }
+      if (r.animalDisposition) {
+        workflowMessageRows.push({ label: 'Animal disposition', value: r.animalDisposition });
+      }
+    }
+    if (latestWorkflowEntry && latestWorkflowEntry.reason) {
+      workflowMessageRows.push({
+        label: r.responseState === 'resolved' || r.statusRaw === 'resolved' ? 'Additional update' : 'Action details',
+        value: latestWorkflowEntry.reason
+      });
+    }
+    var workflowMessageMeta = latestWorkflowEntry
+      ? [latestWorkflowEntry.actor, latestWorkflowEntry.createdAt].filter(Boolean).join(' · ')
+      : ([r.resolutionActor, r.responseResolvedAt].filter(Boolean).join(' · '));
+    var workflowMessageHtml = workflowMessageRows.map(function(row) {
+      return '<div><span class="pen-validation-message-field-label">' + casEsc(row.label) + ':</span> <span class="pen-validation-message-field-value">' + casEsc(row.value) + '</span></div>';
+    }).join('');
     return '<section class="pen-validation-card" aria-label="Barangay Validation">' +
       '<div class="pen-validation-heading">' +
       '<svg class="pen-validation-heading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-11V5l-8-3-8 3v6c0 7 8 11 8 11z"/><path d="m9 12 2 2 4-4"/></svg>' +
       '<div class="pen-validation-heading-copy"><div class="pen-validation-title">Barangay Validation</div>' +
       '<div class="pen-validation-meta">' + casEsc(r.brgy ? 'Brgy. ' + r.brgy + ' · ' : '') + casEsc(validationTime) + '</div></div>' +
-      '<span class="pen-validation-status" ' + statusClass + '>' + casEsc(statusLabel) + '</span>' +
+      (pendingReviewStyle ? '' : '<span class="pen-validation-status" ' + statusClass + '>' + casEsc(statusLabel) + '</span>') +
       '</div><div class="pen-validation-content">' +
+      (workflowMessageHtml
+        ? '<div><div class="pen-validation-label">Latest case update' + (workflowMessageMeta ? ' · ' + casEsc(workflowMessageMeta) : '') + '</div><div class="pen-validation-message pen-validation-message-fields">' + workflowMessageHtml + '</div></div>'
+        : '') +
       ((r.brgyValidationNotes || r.brgyNotes)
-        ? '<div><div class="pen-validation-label">Message from barangay</div><div class="pen-validation-message">' + casEsc(r.brgyValidationNotes || r.brgyNotes) + '</div></div>'
+        ? '<div><div class="pen-validation-label">' + (workflowMessageHtml ? 'Barangay validation message' : 'Message from barangay') + '</div><div class="pen-validation-message">' + casEsc(r.brgyValidationNotes || r.brgyNotes) + '</div></div>'
         : (!hasFieldStatus
           ? '<div class="pen-validation-message">' + (r.statusRaw === 'validated' ? 'Field validation details are not available for this report.' : 'This report is awaiting barangay field validation.') + '</div>'
           : '')) +
@@ -4129,24 +5157,103 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       '</div></section>';
   }
 
-  function casBarangayEvidenceHtml(r) {
-    var evidence = Array.isArray(r.brgyValidationEvidence) ? r.brgyValidationEvidence : [];
-    if (!evidence.length) return '';
-    penBarangayEvidenceItems = evidence;
-    return '<div style="width:100%;"><div class="info-row-label" style="margin:8px 0;">Barangay evidence (' + evidence.length + ')</div>' +
-      '<div class="rpt-photo-box">' + evidence.map(function(item) {
-        var url = casEsc(item.url || '');
-        var index = evidence.indexOf(item);
-        if (item.type === 'video') {
-          return '<button type="button" class="rpt-photo-thumb rpt-video-thumb" onclick="penViewBarangayEvidence(' + index + ')" aria-label="View barangay field video evidence"><video src="' + url + '" muted playsinline preload="metadata" tabindex="-1" aria-hidden="true"></video></button>';
-        }
-        return '<button type="button" class="rpt-photo-thumb" onclick="penViewBarangayEvidence(' + index + ')" aria-label="View barangay field photo evidence"><img src="' + url + '" alt="" aria-hidden="true"></button>';
-      }).join('') + '</div></div>';
-  }
   </script>
 
+  <!-- Barangay-handled response queue -->
+  <section id="reports-accepted" class="content-section staff-report-section">
+    <div class="cpd reports-fullpage">
+      <div class="cpd-app">
+        <div class="layout">
+          <div class="panel db-panel">
+            <div class="kpis">
+              <div class="kpi-card">
+                <p class="kpi-label">Total Cases</p>
+                <div class="kpi-value"><?php echo $barangayResponseCounts['all']; ?></div>
+                <p class="kpi-sub">Currently handled by Barangay</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Accepted</p>
+                <div class="kpi-value"><?php echo $barangayResponseCounts['accepted']; ?></div>
+                <p class="kpi-sub">Awaiting response</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Responding</p>
+                <div class="kpi-value"><?php echo $barangayResponseCounts['responding']; ?></div>
+                <p class="kpi-sub">Barangay team dispatched</p>
+              </div>
+              <div class="kpi-card">
+                <p class="kpi-label">Animal Secured</p>
+                <div class="kpi-value"><?php echo $barangayResponseCounts['secured']; ?></div>
+                <p class="kpi-sub">In Barangay custody</p>
+              </div>
+            </div>
+            <div class="db-toolbar staff-report-toolbar">
+              <div class="search-grow-wrap">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="brgMainSearch" placeholder="Search Barangay cases..." oninput="brgSetSearch(this.value)">
+              </div>
+              <div class="toolbar-filters staff-report-filters">
+                <select class="select-input tf-select" id="brgType" onchange="brgSetType(this.value)">
+                  <option value="">All Types</option>
+                  <option value="stray">Stray Animal</option>
+                  <option value="rabies">Rabies</option>
+                  <option value="injured">Injured Animal</option>
+                  <option value="dead">Dead Animal</option>
+                  <option value="rescue">Rescue</option>
+                </select>
+                <select class="select-input tf-select" id="brgBrgy" onchange="brgSetBrgy(this.value)">
+                  <option value="">All Barangays</option>
+                  <?php foreach ($cpdBarangays as $b): ?>
+                    <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </div>
+            </div>
+            <div class="db-table-area staff-report-table-area">
+              <div id="brgTableWrap" class="dt-container">
+                <div style="overflow-x:auto;">
+                  <table><thead id="brgTableHead"></thead><tbody id="brgRows"></tbody></table>
+                </div>
+              </div>
+              <div id="brgCardsWrap" class="cards-grid" style="display:none;"></div>
+              <div id="brgMapWrap" style="display:none;"></div>
+            </div>
+            <div class="dt-pagination">
+              <div class="dt-pagination-right">
+                <div class="dt-rows"><span>Rows per page</span><select onchange="window.brgSetPerPage(this.value)"><option value="10">10</option><option value="20">20</option><option value="30">30</option><option value="40">40</option><option value="50">50</option></select></div>
+                <div class="dt-page-label" id="brgPageLabel">Page 1 of 1</div>
+                <div class="dt-page-btns">
+                  <button class="dt-page-btn" id="brgPageFirst" title="Go to first page" onclick="window.brgGoPage('first')">«</button>
+                  <button class="dt-page-btn" id="brgPagePrev" title="Go to previous page" onclick="window.brgGoPage('prev')">‹</button>
+                  <button class="dt-page-btn" id="brgPageNext" title="Go to next page" onclick="window.brgGoPage('next')">›</button>
+                  <button class="dt-page-btn" id="brgPageLast" title="Go to last page" onclick="window.brgGoPage('last')">»</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="brgDetailsModal" class="modal cpd cd-drawer staff-detail-drawer">
+    <div class="sd-dialog">
+      <div class="sd-dialog-content" role="dialog" aria-modal="true">
+        <button type="button" class="sd-dialog-close" onclick="closeModal('brgDetailsModal')" aria-label="Close">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 6 6"/></svg>
+        </button>
+        <div class="sd-dialog-header">
+          <h2 class="sd-dialog-title">Accepted by Barangay</h2>
+          <p class="sd-dialog-description">Barangay response and custody updates for this report.</p>
+        </div>
+        <div class="sd-field-group"><div id="brgDetailContent"></div></div>
+        <div class="sd-dialog-footer" id="brgDrawerFooter"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- �"?�"? REPORTS: ACTIVE CASES �"?�"? -->
-  <section id="reports-active" class="content-section">
+  <section id="reports-active" class="content-section staff-report-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
 
@@ -4180,13 +5287,12 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar">
+            <div class="db-toolbar staff-report-toolbar">
                 <div class="search-grow-wrap">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="actMainSearch" placeholder="Search active cases..." oninput="actSetSearch(this.value)">
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div class="toolbar-filters">
+                <div class="toolbar-filters staff-report-filters">
                     <select class="select-input tf-select" id="actType" onchange="actSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -4201,10 +5307,9 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                  </div>
                 </div>
               </div>
-              <div class="db-table-area">
+              <div class="db-table-area staff-report-table-area">
                 <div id="actTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
                 <table>
@@ -4242,7 +5347,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </section>
 
   <!-- Active Case Details Drawer -->
-  <div id="actDetailsModal" class="modal cpd cd-drawer">
+  <div id="actDetailsModal" class="modal cpd cd-drawer staff-detail-drawer">
     <div class="sd-dialog">
       <div class="sd-dialog-content" role="dialog" aria-modal="true">
         <button type="button" class="sd-dialog-close" onclick="closeModal('actDetailsModal')" aria-label="Close">
@@ -4265,7 +5370,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </script>
 
   <!-- �"?�"? REPORTS: RESOLVED CASES �"?�"? -->
-  <section id="reports-resolved" class="content-section">
+  <section id="reports-resolved" class="content-section staff-report-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
 
@@ -4299,13 +5404,12 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar">
+            <div class="db-toolbar staff-report-toolbar">
                 <div class="search-grow-wrap">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="resMainSearch" placeholder="Search resolved cases..." oninput="resSetSearch(this.value)">
                 </div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div class="toolbar-filters">
+                <div class="toolbar-filters staff-report-filters">
                     <select class="select-input tf-select" id="resType" onchange="resSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -4320,10 +5424,9 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                  </div>
                 </div>
               </div>
-              <div class="db-table-area">
+              <div class="db-table-area staff-report-table-area">
                 <div id="resTableWrap" class="dt-container">
                 <div style="overflow-x:auto;">
                 <table>
@@ -4366,7 +5469,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   </section>
 
   <!-- Resolved Case Details Drawer -->
-  <div id="resDetailsModal" class="modal cpd cd-drawer">
+  <div id="resDetailsModal" class="modal cpd cd-drawer staff-detail-drawer">
     <div class="sd-dialog">
       <div class="sd-dialog-content" role="dialog" aria-modal="true">
         <button type="button" class="sd-dialog-close" onclick="closeModal('resDetailsModal')" aria-label="Close">
@@ -4386,9 +5489,126 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   <script>
   var RESOLVED_ITEMS = <?php echo json_encode($resolvedItems, $jsonFlags); ?>;
   </script>
-  <script src="assets/js/case-database.js"></script>
-  <script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/case-database.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/case-database.js'); ?>"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/response-workflow.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
   <script>
+  var BARANGAY_RESPONSE_ITEMS = <?php echo json_encode($barangayResponseItems, $jsonFlags); ?>;
+  var STAFF_BARANGAY_RESPONSE_STATES = <?php echo json_encode($staffBarangayResponseStates, $jsonFlags); ?>;
+  initCaseDB({
+    p: 'brg',
+    section: 'reports-accepted',
+    modalId: 'brgDetailsModal',
+    data: BARANGAY_RESPONSE_ITEMS,
+    pageLabel: 'cases',
+    emptyText: 'No cases are currently being handled by a Barangay.',
+    sortDefault: 'newest',
+    columns: [{ label: 'Report', key: 'ref' }, { label: 'Reporter', key: 'reporter' }, { label: 'Contact', key: 'phone' }, { label: 'Type', key: 'typeLabel' }, { label: 'Priority', key: 'urgency' }, { label: 'Barangay', key: 'brgy' }, { label: 'Status', key: 'status' }, { label: 'Date Submitted', key: 'submitted' }, { label: 'Incident Date', key: 'date' }, { label: 'Date Resolved', key: 'resolved' }, 'Actions'],
+    groupMatch: function () { return true; },
+    rowHtml: function (r) {
+      return '<td class="sd-td"><div class="client-name" style="font-weight:400;">' + casEsc(r.ref) + '</div></td>' +
+        '<td class="sd-td"><div class="client-cell"><div class="avatar">' + casAvatar(r) + '</div><div><div class="client-name">' + casEsc(r.reporter || '-') + '</div></div></div></td>' +
+        '<td class="sd-td"><div class="contact-main">' + casEsc(r.phone || '-') + '</div><div class="contact-sub">' + casEsc(r.email || '-') + '</div></td>' +
+        '<td class="sd-td"><div class="client-name" style="font-weight:400;">' + casEsc(r.typeLabel || '-') + '</div></td>' +
+        '<td class="sd-td">' + casPriorityPill(r.urgency) + '</td>' +
+        '<td class="sd-td"><div class="client-name" style="font-weight:400;">' + casEsc(r.brgy || '-') + '</div></td>' +
+        '<td class="sd-td">' + casStatusPill('active', r.statusLabel) + '</td>' +
+        '<td class="sd-td"><div class="contact-main">' + casEsc(r.submitted || '-') + '</div></td>' +
+        '<td class="sd-td"><div class="contact-main">' + casEsc(r.incidentDate || r.date || '-') + '</div></td>' +
+        '<td class="sd-td"><div class="contact-main">' + casEsc(r.resolved || '-') + '</div></td>' +
+        '<td class="sd-td sd-td-action"><button type="button" class="sd-row-actions" title="More options" aria-label="More options" onclick="event.stopPropagation();brgActions(event,' + r.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>';
+    },
+    cardHtml: function (r) {
+      var image = r.photo ? '<img class="card-img" src="' + casEsc(r.photo) + '" alt="">' : '<div class="card-img-placeholder">' + casEsc(r.typeLabel || 'Report') + '</div>';
+      return image + '<div style="padding:14px;"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:10px;">' +
+        casTypeBadge(r.type, r.typeLabel) + casStatusPill('active', r.statusLabel) +
+        '</div><div class="client-card-id">' + casCaseId(r) + ' · ' + casEsc(r.ref) + '</div>' +
+        '<div class="client-card-name">' + casEsc(r.reporter || '-') + '</div><div class="client-card-id">' + casEsc(r.brgy || '-') + '</div></div>';
+    },
+    drawerHtml: function (r) {
+      var state = String(r.responseState || '');
+      var currentStep = state === 'barangay_responding' ? 1 : (state === 'animal_secured' ? 2 : 0);
+      var deadline = state === 'barangay_responding' ? r.progressDeadline : r.responseDeadline;
+      var deadlineDate = deadline ? new Date(String(deadline).replace(' ', 'T')) : null;
+      var deadlineLabel = deadlineDate && !isNaN(deadlineDate.getTime())
+        ? deadlineDate.toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+        : 'No response deadline';
+      var deadlineIsOverdue = deadlineDate && !isNaN(deadlineDate.getTime()) && deadlineDate.getTime() < Date.now();
+      var deadlineBadge = deadlineDate && !isNaN(deadlineDate.getTime())
+        ? (deadlineIsOverdue ? 'Barangay response overdue · ' : 'Barangay response due · ') + deadlineLabel
+        : 'No response deadline recorded';
+      var steps = ['Accepted', 'Responding', 'Secured', 'Resolved'];
+      var progressHtml = '<div class="response-steps" aria-label="Barangay response progress">' + steps.map(function (label, index) {
+        var stepClass = index < currentStep ? ' is-complete' : (index === currentStep ? ' is-current' : '');
+        var check = index < currentStep
+          ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+          : '';
+        return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + check + '</span><span>' + label + '</span></div>';
+      }).join('') + '</div>';
+      var responseNote = state === 'barangay_response_approved' || state === 'returned_to_barangay'
+        ? 'The Barangay is expected to begin its response when its team is heading to the location. The initial response target is 24 hours.'
+        : (state === 'barangay_responding'
+          ? 'The Barangay has started its response. Staff can monitor progress updates against the response target.'
+          : 'The Barangay has recorded the animal as secured. Staff can review custody details and follow-up updates.');
+      var avatarUrl = r.avatar ? (window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) : '';
+      var headerImage = avatarUrl
+        ? '<img src="' + casEsc(avatarUrl) + '" alt="" style="width:100%;height:100%;object-fit:cover;">'
+        : casAvatar(r);
+      var responseStatus = r.statusLabel || window.dcvsStaffBarangayCaseStatusLabel(r);
+      var responseMode = r.responseMode === 'barangay_response' ? 'Barangay Response'
+        : (r.responseMode === 'dcvs_dispatch' ? 'DCVS Dispatch' : 'Undecided');
+      var responseDeadlineValue = deadlineDate && !isNaN(deadlineDate.getTime())
+        ? deadlineDate.toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+        : '—';
+      var lastProgress = r.lastProgressAt
+        ? new Date(String(r.lastProgressAt).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
+        : '—';
+      return '<div class="rpt-tabs">' +
+        '<button class="rpt-tab" data-tab="details" onclick="brgDetailGo(\'details\')">Details</button>' +
+        '<button class="rpt-tab" data-tab="updates" onclick="brgDetailGo(\'updates\')">Updates</button></div>' +
+        '<div class="rpt-detail-body" data-tab="details">' +
+        '<div class="brg-drawer-reporter"><div class="brg-drawer-photo">' + headerImage + '</div>' +
+        '<div class="brg-drawer-reporter-copy"><span>Reported by</span><strong>' + casEsc(r.reporter || '—') + '</strong></div>' +
+        '<span class="brg-drawer-status">' + casEsc(responseStatus) + '</span></div>' +
+        '<div class="brg-drawer-priority"><span>Priority</span>' + casPriorityPill(r.urgency) + '</div>' +
+        '<section class="brg-response-card" aria-label="Barangay Response">' +
+        '<div class="brg-response-heading"><div><strong>Barangay Response</strong><span>Handled by Brgy. ' + casEsc(r.brgy || '—') + '</span></div>' +
+        '<span class="brg-response-deadline' + (deadlineIsOverdue ? ' is-overdue' : '') + '">' + casEsc(deadlineBadge) + '</span></div>' +
+        progressHtml + '<div class="brg-response-note"><span aria-hidden="true">ℹ</span><span>' + casEsc(responseNote) + '</span></div>' +
+        '<button type="button" class="brg-response-map-link" onclick="brgViewLocation(\'' + casEsc(r.brgy) + '\',' + Number(r.id) + ')">View report route on geo map</button>' +
+        '</section>' +
+        '<section class="rpt-col rpt-full-col brg-custody-section"><div class="rpt-section-title">Response &amp; Custody</div>' +
+        '<div class="info-rows info-rows-2col rpt-response-custody-grid">' +
+        casInfoRow('Response Status', responseStatus) + casInfoRow('Response Mode', responseMode) +
+        casInfoRow('Last Progress Update', lastProgress) + casInfoRow('Response Due', responseDeadlineValue) +
+        casInfoRow('Holding Location', r.holdingLocation || '—') + casInfoRow('Animal Condition', r.animalCondition || '—') +
+        casInfoRow('Resolution Details', r.resolutionDetails || '—') +
+        casInfoRow('Animal Disposition', r.animalDisposition ? r.animalDisposition.replace(/_/g, ' ') : '—') +
+        casInfoRow('Secured', r.securedAt || '—') +
+        '</div></section>' +
+        '<div class="rpt-detail-grid"><div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows info-rows-2col">' +
+        casInfoRow('Date Submitted', r.submitted || r.date || '—') + casInfoRow('Incident Date', r.incidentDate || r.date || '—') +
+        casInfoRow('Location', r.location || '—') + casInfoRow('Report Type', r.typeLabel || '—') +
+        '</div></div><div class="rpt-col rpt-full-col"><div class="rpt-section-title">Animal Information</div><div class="info-rows info-rows-2col">' +
+        casInfoRow('Animal Type', r.animalType || '—') + casInfoRow('Breed / Appearance', r.animalBreed || '—') +
+        casInfoRow('Number of animals', r.animalCount || '—') + casInfoRow('Animal Behavior', r.animalBehavior || '—') +
+        '</div></div><div class="rpt-col rpt-full-col"><div class="rpt-section-title">Incident Details</div><div class="rpt-desc-box">' + casEsc(r.desc || 'No description provided.') + '</div></div>' +
+        (r.brgyNotes ? '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Barangay Notes</div><div class="rpt-notes-box">' + casEsc(r.brgyNotes) + '</div></div>' : '') +
+        '</div></div><div class="rpt-detail-body" data-tab="updates" style="display:none;">' + casReportCaseUpdatesHtml(r) + '</div>';
+    },
+    drawerFooter: function (r) {
+      var actions = '';
+      if (window.DCVS_BARANGAY_RESPONSE_ENABLED &&
+          ['barangay_response_approved', 'barangay_responding'].indexOf(r.responseState) !== -1) {
+        actions += '<button class="sd-btn sd-btn-outline" onclick="responseWorkflowAction(' + Number(r.id) + ',\'revoke_approval\')">Switch to Dispatch</button>';
+      }
+      return actions + '<button class="sd-btn sd-btn-outline" onclick="brgViewLocation(\'' + casEsc(r.brgy) + '\',' + Number(r.id) + ')">View Location</button>';
+    },
+    menuHtml: function (r) {
+      return '<button class="row-menu-item" onclick="brgSelect(' + r.id + ');caseCloseActions()">View Case Details</button>' +
+        (r.photo || r.video ? '<button class="row-menu-item" onclick="brgViewPhoto(\'' + casEsc(r.photo || r.video) + '\');caseCloseActions()">View Attachment</button>' : '') +
+        '<button class="row-menu-item" onclick="brgViewLocation(\'' + casEsc(r.brgy) + '\',' + Number(r.id) + ');caseCloseActions()">View Location</button>';
+    }
+  });
   initCaseDB({
     p: 'pen',
     section: 'reports-pending',
@@ -4440,24 +5660,19 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       history = history.concat(casResponseHistoryEntries(r));
       var validationEvidence = Array.isArray(r.brgyValidationEvidence) ? r.brgyValidationEvidence : [];
       var attachmentCount = validationEvidence.length + Number(!!r.photo) + Number(!!r.video);
-      var validationEvidenceHtml = casBarangayEvidenceHtml(r);
-      var photoHtml = (r.photo || r.video || validationEvidenceHtml)
-        ? '<div class="rpt-photo-box">' +
-          (r.photo ? '<div class="rpt-photo-thumb" onclick="penViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div>' : '') +
-          (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + casEsc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
-          '</div>' + validationEvidenceHtml
-        : '<p class="rpt-photo-none">No attachments.</p>';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="penDetailGo(\'details\')">Details</button>' +
-        '<button class="rpt-tab" data-tab="attachments" onclick="penDetailGo(\'attachments\')">Attachments' + (attachmentCount ? ' <span class="pen-attachment-count">' + attachmentCount + '</span>' : '') + '</button>' +
-        '<button class="rpt-tab" data-tab="history" onclick="penDetailGo(\'history\')">History</button>' +
+        '<button class="rpt-tab" data-tab="updates" onclick="penDetailGo(\'updates\')">Updates' + (attachmentCount ? ' <span class="pen-attachment-count">' + attachmentCount + '</span>' : '') + '</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
 
-        '<div class="pen-reporter-row">' +
-        '<div class="pen-reporter-avatar">' + casAvatar(r) + '</div>' +
-        '<div><div class="info-row-label">Reported by</div><div class="info-row-value" style="font-weight:600;">' + casEsc(r.reporter || '—') + '</div></div>' +
+        '<div class="pen-reporter-row" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">' +
+        '<div class="pen-reporter-avatar" style="width:85px;height:85px;border-radius:8px;flex:0 0 85px;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + casEsc(r.reporter || '—') + '</span>' +
+        '</div>' +
         casStatusPill(r.statusRaw === 'validated' ? 'validated' : 'pending', r.statusLabel || 'Pending Barangay Review').replace('class="rpt-status ', 'class="rpt-status pen-reporter-status ') +
         '</div>' +
 
@@ -4466,7 +5681,6 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         casPriorityPill(r.priority || r.urgency) +
         '</div>' +
 
-        casBarangayValidationDetails(r) +
         casResponseWorkflowDetails(r) +
         (typeof window.rptResponseRiskPanel === 'function' ? window.rptResponseRiskPanel(r) : '') +
 
@@ -4518,15 +5732,8 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         '</div>' +
         '</div>' +
 
-        '<div class="rpt-detail-body" data-tab="attachments" style="display:none;">' +
-        '<div class="rpt-section-title">Attachments</div>' + photoHtml +
-        '</div>' +
-
-        '<div class="rpt-detail-body" data-tab="history" style="display:none;">' +
-        '<div class="rpt-section-title">Activity Timeline</div>' +
-        '<div class="rpt-history">' + history.map(function (h) {
-          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + casEsc(h.t) + '</div><div class="rpt-h-meta">by ' + casEsc(h.a) + (h.d && h.d !== '—' ? ' \u00b7 ' + casEsc(h.d) : '') + '</div></div></div>';
-        }).join('') + '</div>' +
+        '<div class="rpt-detail-body" data-tab="updates" style="display:none;">' +
+        casReportCaseUpdatesHtml(r) +
         '</div>';
     },
     menuHtml: function (r) {
@@ -4562,7 +5769,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         '<td><div class="contact-main">' + casEsc(r.phone || '-') + '</div><div class="contact-sub">' + casEsc(r.email || '-') + '</div></td>' +
         '<td><div class="client-name">' + casEsc(r.typeLabel || '-') + '</div></td>' +
         '<td><div class="client-name">' + casEsc(r.brgy || '-') + '</div></td>' +
-        '<td>' + casStatusPill('active') + (r.scheduled ? '<div class="client-id" style="margin-top:3px;">Scheduled ' + casEsc(r.scheduled) + '</div>' : '') + '</td>' +
+        '<td>' + casStatusPill('active', r.statusLabel || 'Active') + (r.scheduled ? '<div class="client-id" style="margin-top:3px;">Scheduled ' + casEsc(r.scheduled) + '</div>' : '') + '</td>' +
         '<td><div class="contact-main">' + casEsc(r.submitted || '-') + '</div></td>' +
         '<td><div class="contact-main">' + casEsc(r.date) + '</div></td>' +
         '<td><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();actActions(event,' + r.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>';
@@ -4574,7 +5781,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       return img +
         '<div style="padding:14px;">' +
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">' +
-        casTypeBadge(r.type, r.typeLabel) + casStatusPill('active') +
+        casTypeBadge(r.type, r.typeLabel) + casStatusPill('active', r.statusLabel || 'Active') +
         '</div>' +
         '<div class="client-card-id" style="font-size:12px;margin-bottom:8px;">' + casCaseId(r) + ' &middot; ' + casEsc(r.ref) + '</div>' +
         '<div class="client-card-name" style="font-size:14px;margin-bottom:2px;">' + casEsc(r.reporter) + '</div>' +
@@ -4584,32 +5791,16 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         '</div>';
     },
     drawerHtml: function (r) {
-      var history = [
-        { t: casEsc(r.typeLabel || r.type || 'Report') + ' report submitted', a: casEsc(r.reporter || 'Resident'), d: r.date },
-        { t: 'Verified by Barangay', a: 'Barangay', d: r.validated || r.confirmed },
-        { t: 'Confirmed by DCVS Staff', a: 'DCVS Staff', d: r.confirmed },
-        (r.scheduled ? { t: 'Scheduled for action', a: 'DCVS Staff', d: r.scheduled } : null),
-        { t: 'Status: Active', a: 'DCVS Staff', d: 'Being handled' }
-      ].filter(Boolean);
-      history = history.concat(casResponseHistoryEntries(r));
-      var validationEvidenceHtml = casBarangayEvidenceHtml(r);
-      var photoHtml = (r.photo || r.video || validationEvidenceHtml)
-        ? '<div class="rpt-photo-box">' +
-          (r.photo ? '<div class="rpt-photo-thumb" onclick="actViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div>' : '') +
-          (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + casEsc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
-          '</div>' + validationEvidenceHtml
-        : '<p class="rpt-photo-none">No attachments.</p>';
       var statusColor = '#1E40AF', statusBg = '#EFF6FF', statusBorder = '#BFDBFE';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="actDetailGo(\'details\')">Details</button>' +
-        '<button class="rpt-tab" data-tab="attachments" onclick="actDetailGo(\'attachments\')">Attachments</button>' +
-        '<button class="rpt-tab" data-tab="history" onclick="actDetailGo(\'history\')">History</button>' +
+        '<button class="rpt-tab" data-tab="updates" onclick="actDetailGo(\'updates\')">Updates</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
 
         '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
-        '<div class="avatar" style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#64748b;">' + casAvatar(r) + '</div>' +
+        '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + casEsc(r.reporter || '—') + '</span>' +
@@ -4622,8 +5813,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         casPriorityPill(r.priority || r.urgency) +
         '</div>' +
 
-        casBarangayValidationDetails(r) +
-        casResponseWorkflowDetails(r) +
+        casResponseWorkflowDetails(r, { hideProgress: true }) +
         (typeof window.rptResponseRiskPanel === 'function' ? window.rptResponseRiskPanel(r) : '') +
 
         '<div class="rpt-detail-grid">' +
@@ -4679,17 +5869,10 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         '<div class="rpt-notes-box">' + casEsc(r.brgyNotes) + '</div>' +
         '</div>' : '') +
 
-        '</div>' +
+        '</div></div>' +
 
-        '<div class="rpt-detail-body" data-tab="attachments" style="display:none;">' +
-        '<div class="rpt-section-title">Attachments</div>' + photoHtml +
-        '</div>' +
-
-        '<div class="rpt-detail-body" data-tab="history" style="display:none;">' +
-        '<div class="rpt-section-title">Activity Timeline</div>' +
-        '<div class="rpt-history">' + history.map(function (h) {
-          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + casEsc(h.t) + '</div><div class="rpt-h-meta">by ' + casEsc(h.a) + (h.d ? ' \u00b7 ' + casEsc(h.d) : '') + '</div></div></div>';
-        }).join('') + '</div>' +
+        '<div class="rpt-detail-body" data-tab="updates" style="display:none;">' +
+        casReportCaseUpdatesHtml(r) +
         '</div>';
     },
     drawerFooter: function (r) {
@@ -4779,18 +5962,10 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         { t: 'Resolved by DCVS Staff', a: 'DCVS Staff', d: r.resolved }
       ].filter(Boolean);
       history = history.concat(casResponseHistoryEntries(r));
-      var validationEvidenceHtml = casBarangayEvidenceHtml(r);
-      var photoHtml = (r.photo || r.video || validationEvidenceHtml)
-        ? '<div class="rpt-photo-box">' +
-          (r.photo ? '<div class="rpt-photo-thumb" onclick="resViewPhoto(\'' + casEsc(r.photo) + '\')"><img src="' + casEsc(r.photo) + '" alt="Report attachment"></div>' : '') +
-          (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + casEsc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
-          '</div>' + validationEvidenceHtml
-        : '<p class="rpt-photo-none">No attachments.</p>';
       var statusColor = '#ffffff', statusBg = '#0E8131', statusBorder = '#0E8131';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="resDetailGo(\'details\')">Details</button>' +
-        '<button class="rpt-tab" data-tab="attachments" onclick="resDetailGo(\'attachments\')">Attachments</button>' +
-        '<button class="rpt-tab" data-tab="history" onclick="resDetailGo(\'history\')">History</button>' +
+        '<button class="rpt-tab" data-tab="updates" onclick="resDetailGo(\'updates\')">Updates</button>' +
         '</div>' +
 
         '<div class="rpt-detail-body" data-tab="details">' +
@@ -4867,15 +6042,8 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
         '</div>' +
 
-        '<div class="rpt-detail-body" data-tab="attachments" style="display:none;">' +
-        '<div class="rpt-section-title">Attachments</div>' + photoHtml +
-        '</div>' +
-
-        '<div class="rpt-detail-body" data-tab="history" style="display:none;">' +
-        '<div class="rpt-section-title">Activity Timeline</div>' +
-        '<div class="rpt-history">' + history.map(function (h) {
-          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">' + casEsc(h.t) + '</div><div class="rpt-h-meta">by ' + casEsc(h.a) + (h.d && h.d !== '—' ? ' \u00b7 ' + casEsc(h.d) : '') + '</div></div></div>';
-        }).join('') + '</div>' +
+        '<div class="rpt-detail-body" data-tab="updates" style="display:none;">' +
+        casReportCaseUpdatesHtml(r) +
         '</div>';
     },
     menuHtml: function (r) {
@@ -4948,7 +6116,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         <div class="ps-profile-left">
           <div class="profile-header-avatar-wrapper">
             <?php if (!empty($staffAvatar)): ?>
-              <div class="ps-avatar"><img id="staffAvatarImg" src="<?php echo htmlspecialchars($staffAvatar); ?>" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" onclick="toggleProfileDropdown(event)"></div>
+              <div class="ps-avatar"><img id="staffAvatarImg" src="<?php echo htmlspecialchars(dcvsStaffReportMediaUrl($staffAvatar), ENT_QUOTES, 'UTF-8'); ?>" alt="Avatar" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" onclick="toggleProfileDropdown(event)"></div>
             <?php else: ?>
               <div class="ps-avatar-plain" onclick="toggleProfileDropdown(event)"><i class="fas fa-user"></i></div>
             <?php endif; ?>
@@ -5040,7 +6208,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         </script>
       </div>
 
-      <form id="staffSettingsForm" action="update-staff-profile.php" method="POST" enctype="multipart/form-data">
+      <form id="staffSettingsForm" action="<?php echo htmlspecialchars($appBaseUrl . '/update-staff-profile.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST" enctype="multipart/form-data">
         <input type="file" name="avatar" id="avatarInput" accept="image/*" style="display:none;" onchange="previewAvatar(event, 'staffAvatarImg')">
 
         <!-- Personal Information -->
@@ -5103,7 +6271,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       <?php endif; ?>
       <div class="profile-photo-view">
         <?php if (!empty($staffAvatar)): ?>
-          <img src="<?php echo htmlspecialchars($staffAvatar); ?>" alt="Profile Photo" id="profilePhotoViewImg">
+          <img src="<?php echo htmlspecialchars(dcvsStaffReportMediaUrl($staffAvatar), ENT_QUOTES, 'UTF-8'); ?>" alt="Profile Photo" id="profilePhotoViewImg">
         <?php else: ?>
           <div class="no-profile-photo">
             <i class="fas fa-user"></i>
@@ -5121,7 +6289,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
       <h2><i class="fas fa-key"></i> Change Password</h2>
       <button class="modal-close" onclick="closeModal('changePasswordModal')"><i class="fas fa-times"></i></button>
     </div>
-    <form class="modal-form" id="changePasswordForm" action="update-staff-password.php" method="POST">
+    <form class="modal-form" id="changePasswordForm" action="<?php echo htmlspecialchars($appBaseUrl . '/update-staff-password.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST">
       <div class="modal-body">
         <div class="form-group"><label>Current Password <span class="req">*</span></label><input type="password" name="current_password" class="form-control" required /></div>
         <div class="form-group"><label>New Password <span class="req">*</span></label><input type="password" name="new_password" class="form-control" required /></div>
@@ -5158,7 +6326,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   @media(max-width:480px){.report-alert-footer{flex-direction:column-reverse;}.report-alert-footer .sd-btn{width:100%;}}
 </style>
 <div class="modal" id="confirmReportModal">
-  <form id="confirmReportForm" action="confirm-schedule-report.php" method="POST">
+  <form id="confirmReportForm" action="<?php echo htmlspecialchars($appBaseUrl . '/confirm-schedule-report.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST">
     <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="confirmReportTitle" aria-describedby="confirmReportDescription">
       <button type="button" class="report-alert-close" onclick="closeModal('confirmReportModal')" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -5192,7 +6360,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 </div>
 
 <div class="modal" id="rejectReportModal">
-  <form id="rejectReportForm" action="reject-validated-report.php" method="POST">
+  <form id="rejectReportForm" action="<?php echo htmlspecialchars($appBaseUrl . '/reject-validated-report.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST">
     <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="rejectReportTitle" aria-describedby="rejectReportDescription">
       <button type="button" class="report-alert-close" onclick="closeModal('rejectReportModal')" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -5218,12 +6386,198 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 <!-- Schedule Appointment Modal -->
 <!-- Review Appointment Request Modal (shadcn Dialog) -->
 <style>
-  /* Appointment Details = right drawer */
-  #appointmentDetailsModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
-  #appointmentDetailsModal.modal.active{ opacity:1; visibility:visible; }
-  #appointmentDetailsModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
-  #appointmentDetailsModal .sd-dialog-content{ max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; border:none; border-radius:0; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); padding:24px; gap:18px; }
-  #appointmentDetailsModal.active .sd-dialog-content{ transform:translateX(0); }
+  /* Shared fixed right drawer for report, client profile, and appointment details. */
+  .staff-detail-drawer.modal{
+    position:fixed;
+    inset:0;
+    z-index:999;
+    display:flex;
+    align-items:stretch;
+    justify-content:flex-end;
+    padding:0;
+    overflow:hidden;
+    background:rgba(0,0,0,.5);
+    opacity:0;
+    visibility:hidden;
+    transition:opacity .25s ease,visibility .25s ease;
+  }
+  .staff-detail-drawer.modal.active{ opacity:1; visibility:visible; }
+  .staff-detail-drawer .sd-dialog{
+    display:flex;
+    width:100%;
+    height:100dvh;
+    max-width:100%;
+    min-height:0;
+    justify-content:flex-end;
+  }
+  body.staff-theme .staff-detail-drawer .sd-dialog-content{
+    position:relative;
+    display:flex;
+    box-sizing:border-box;
+    flex:0 0 auto;
+    flex-direction:column;
+    width:min(480px,100vw);
+    min-width:0;
+    max-width:100vw;
+    height:100dvh;
+    max-height:100dvh;
+    min-height:0;
+    gap:18px;
+    overflow:hidden;
+    align-self:stretch;
+    padding:24px;
+    border:0;
+    border-radius:0;
+    box-shadow:-8px 0 40px rgba(15,23,32,.18);
+    animation:none;
+    transform:translateX(105%);
+    transition:transform .32s cubic-bezier(.32,.72,.25,1);
+  }
+  body.staff-theme .staff-detail-drawer.active .sd-dialog-content{ transform:translateX(0); }
+  .staff-detail-drawer .sd-dialog-close{
+    position:absolute;
+    top:18px;
+    right:18px;
+    z-index:2;
+  }
+  .staff-detail-drawer .sd-dialog-header{
+    flex:0 0 auto;
+    padding-right:28px;
+  }
+  .staff-detail-drawer .sd-field-group{
+    display:flex;
+    flex:1 1 auto;
+    flex-direction:column;
+    min-height:0;
+    overflow-x:hidden;
+    overflow-y:auto;
+    overscroll-behavior:contain;
+    -webkit-overflow-scrolling:touch;
+  }
+  .staff-detail-drawer .rpt-tabs{
+    position:sticky;
+    top:0;
+    z-index:2;
+    flex:0 0 auto;
+    margin-top:0;
+    padding-top:8px;
+    background:#fff;
+  }
+  .staff-detail-drawer .sd-dialog-footer{
+    box-sizing:border-box;
+    flex:0 0 auto;
+    padding-bottom:calc(8px + env(safe-area-inset-bottom));
+    background:#fff;
+  }
+  .staff-detail-drawer #rptDetailFooter{ flex-wrap:wrap; }
+  .staff-detail-drawer #rptDetailFooter .sd-btn{ flex:0 1 auto; white-space:nowrap; }
+  .staff-detail-drawer .sd-dialog-footer:empty{ display:none; }
+
+  #mainContent > .staff-report-section.content-section{
+    box-sizing:border-box;
+    width:calc(100% + 4rem);
+    max-width:none;
+    margin:-1.75rem -2rem 0;
+  }
+  .staff-report-section .cpd-app{ width:100%; min-width:0; padding:0; }
+  .staff-report-section .db-panel{ width:100%; min-width:0; }
+  body.staff-theme #mainContent .staff-report-toolbar{
+    display:flex;
+    box-sizing:border-box;
+    width:100%;
+    min-width:0;
+    align-items:center;
+    justify-content:flex-start;
+    gap:12px;
+    margin:0 0 12px;
+    flex-wrap:wrap;
+  }
+  body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{
+    box-sizing:border-box;
+    flex:1 1 220px;
+    width:auto;
+    min-width:220px;
+    max-width:none;
+  }
+  body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap input{ height:36px; }
+  body.staff-theme #mainContent .staff-report-filters{
+    display:flex;
+    box-sizing:border-box;
+    flex:0 1 auto;
+    width:auto;
+    min-width:0;
+    align-items:center;
+    gap:8px;
+    flex-wrap:nowrap;
+  }
+  body.staff-theme #mainContent .staff-report-filters .tf-select{
+    box-sizing:border-box;
+    flex:0 1 auto;
+    width:auto;
+    min-width:130px;
+    max-width:190px;
+    height:36px;
+    padding:0 26px 0 10px;
+  }
+  body.staff-theme #mainContent .staff-report-toolbar .db-toolbar-actions{
+    display:flex;
+    flex:0 0 auto;
+    align-items:center;
+    gap:8px;
+    margin-left:auto;
+  }
+  .staff-report-table-area{ box-sizing:border-box; width:100%; min-width:0; padding-top:0; }
+  @media (max-width: 1100px){
+    body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{ flex-basis:100%; }
+  }
+  @media (max-width: 1024px){
+    #mainContent > .staff-report-section.content-section{
+      width:100%;
+      max-width:100%;
+      margin:-1rem 0 0;
+    }
+  }
+  @media (max-width: 768px){
+    body.staff-theme #mainContent .staff-report-toolbar{ align-items:stretch; gap:10px; }
+    body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{
+      flex:1 1 100%;
+      width:100%;
+      min-width:0;
+    }
+    body.staff-theme #mainContent .staff-report-filters{
+      display:grid;
+      flex:1 1 100%;
+      width:100%;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+    }
+    body.staff-theme #mainContent .staff-report-filters .tf-select{
+      width:100%;
+      min-width:0;
+      max-width:100%;
+    }
+    body.staff-theme #mainContent .staff-report-toolbar .db-toolbar-actions{ width:100%; margin-left:0; }
+    body.staff-theme #mainContent .staff-report-toolbar .db-toolbar-actions .sd-btn{ width:100%; }
+  }
+  @media (max-width: 360px){
+    body.staff-theme #mainContent .staff-report-filters{ grid-template-columns:minmax(0,1fr); }
+  }
+  @media (max-width: 640px){
+    .staff-detail-drawer.modal{ z-index:1200; }
+    .staff-detail-drawer .sd-dialog{ width:100%; max-width:none; }
+    body.staff-theme .staff-detail-drawer .sd-dialog-content{
+      flex-basis:100%;
+      width:100%;
+      max-width:100%;
+      height:100dvh;
+      max-height:100dvh;
+      padding:16px 14px calc(14px + env(safe-area-inset-bottom));
+      transform:none;
+      transition:none;
+    }
+    body.staff-theme .staff-detail-drawer.active .sd-dialog-content{ transform:none; }
+    .staff-detail-drawer .sd-dialog-footer{ padding-bottom:calc(12px + env(safe-area-inset-bottom)); }
+  }
+
   #appointmentDetailsModal.appt-bulk-dialog.modal{ align-items:center; justify-content:center; padding:16px; }
   #appointmentDetailsModal.appt-bulk-dialog .sd-dialog{ width:100%; height:auto; justify-content:center; }
   #appointmentDetailsModal.appt-bulk-dialog .sd-dialog-content{ width:min(560px,94vw); max-width:min(560px,94vw); height:auto; max-height:calc(100vh - 32px); box-sizing:border-box; overflow-y:auto; border:1px solid #e4e4e7; border-radius:10px; box-shadow:0 20px 25px rgba(15,23,32,.18); transform:none; transition:none; padding:24px; gap:16px; }
@@ -5424,7 +6778,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 </div>
 
 <!-- Appointment Details Modal (shadcn Dialog) -->
-<div id="appointmentDetailsModal" class="modal">
+<div id="appointmentDetailsModal" class="modal staff-detail-drawer">
   <div class="sd-dialog">
     <div class="sd-dialog-content" role="dialog" aria-modal="true">
       <button type="button" class="sd-dialog-close" onclick="closeModal('appointmentDetailsModal')" aria-label="Close">
@@ -5449,7 +6803,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
           <span id="detailStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
         </div>
         <div>
-          <div class="rpt-section-title-action" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;">Resident Information</span><button type="button" class="cpd-edit-icon" id="apptDrawerEditBtn" onclick="editAppointmentFromDrawer()" aria-label="Edit appointment" title="Edit appointment" style="display:inline-flex;align-items:center;justify-content:center;width:30px!important;min-width:30px;max-width:30px;height:30px!important;min-height:30px;max-height:30px;padding:0;flex:0 0 30px;"><img src="assets/images/edit%20icon.png" alt="" style="display:block;width:16px!important;height:16px!important;min-width:16px;max-width:16px;min-height:16px;max-height:16px;object-fit:contain;"></button></div>
+          <div class="rpt-section-title-action" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;">Resident Information</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Resident ID</p><p id="detailResidentId" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Mobile Number</p><p id="detailPhone" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
@@ -5461,9 +6815,11 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Service</p><p id="detailType" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Pet</p><p id="detailPet" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
-            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Date</p><p id="detailDate" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
+            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Preferred Date</p><p id="detailPreferredDate" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
+            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Preferred Time</p><p id="detailPreferredTime" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
+            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Final Scheduled Date</p><p id="detailFinalDate" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
+            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Final Scheduled Time</p><p id="detailFinalTime" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Barangay</p><p id="detailBrgy" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
-            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Time</p><p id="detailTime" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Address</p><p id="detailAddress" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
           </div>
         </div>
@@ -5481,6 +6837,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
           <div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;">Notes</div>
           <div id="detailNotes" style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">-</div>
         </div>
+        <p id="apptOutcomeGuidance" style="display:none;margin:8px 0 0;color:#52525b;font-size:13px;line-height:1.45;"></p>
       </div>
         <div id="apptBulkReviewMessage" style="display:none;color:#991b1b;background:#fef2f2;border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.45;"></div>
         <div id="apptBulkRejectPanel" style="display:none;">
@@ -5496,7 +6853,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
 
 <!-- Staff Appointment Edit Dialog -->
 <div id="staffEditAppointmentModal" class="modal">
-  <form class="modal-form sd-dialog" action="staff-add-appointment.php" method="POST">
+  <form class="modal-form sd-dialog" action="<?php echo htmlspecialchars($appBaseUrl . '/staff-add-appointment.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST">
     <div class="sd-dialog-content" role="dialog" aria-modal="true">
       <button type="button" class="sd-dialog-close" onclick="closeModal('staffEditAppointmentModal')" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -5580,7 +6937,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
         <h2 class="sd-dialog-title" id="resolveCaseTitle">Mark Case as Resolved</h2>
         <p class="sd-dialog-description" id="resolveCaseDescription">Confirm the resolution details before closing this case and notifying the resident and barangay.</p>
       </div>
-      <form id="resolveForm" action="resolve-report.php" method="POST" style="display:contents;">
+      <form id="resolveForm" action="<?php echo htmlspecialchars($appBaseUrl . '/resolve-report.php', ENT_QUOTES, 'UTF-8'); ?>" method="POST" style="display:contents;">
         <div class="sd-field-group">
           <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
           <input type="hidden" name="case_id" id="resolveCaseId" value="">
@@ -5649,7 +7006,7 @@ function viewOwnerProfile(userId) {
     modal.style.display = 'flex';
     
     // Fetch owner data
-    fetch('staff-get-owner-profile.php?user_id=' + encodeURIComponent(userId))
+    fetch(window.dcvsStaffUrl('staff-get-owner-profile.php') + '?user_id=' + encodeURIComponent(userId))
         .then(res => res.json())
         .then(data => {
             if (data.success) {
@@ -5674,7 +7031,7 @@ function viewOwnerProfile(userId) {
                         petCard.innerHTML = `
                             <div style="width:200px; height:200px; background:#0E8131; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden;">
                                 ${pet.photo_url 
-                                    ? `<img src="${pet.photo_url}" alt="${pet.pet_name}" style="width:100%; height:100%; object-fit:cover;" />` 
+                                    ? `<img src="${window.dcvsStaffMediaUrl(pet.photo_url)}" alt="${pet.pet_name}" style="width:100%; height:100%; object-fit:cover;" />`
                                     : `<span style="font-size:3rem; color:white; font-weight:800;">${pet.pet_name.substring(0, 2).toUpperCase()}</span>`
                                 }
                             </div>
@@ -5751,6 +7108,43 @@ function updateConfirmReportAction() {
 var confirmReportScheduleField = document.getElementById('confirmReportScheduledAt');
 if (confirmReportScheduleField) confirmReportScheduleField.addEventListener('input', updateConfirmReportAction);
 
+window.dcvsStaffCaseBelongsInActiveCases = function(item) {
+  var status = String(item && item.statusRaw || '');
+  var barangayStates = ['barangay_response_approved', 'barangay_responding', 'animal_secured', 'returned_to_barangay'];
+  return String(item && item.caseStatus || '') === 'active'
+    && (status === 'confirmed' || status === 'scheduled')
+    && barangayStates.indexOf(String(item && item.responseState || '')) === -1;
+};
+
+window.dcvsStaffCaseBelongsInBarangayQueue = function(item) {
+  var state = String(item && item.responseState || '');
+  var status = String(item && item.statusRaw || '');
+  return ['barangay_response_approved', 'barangay_responding', 'animal_secured', 'returned_to_barangay'].indexOf(state) !== -1
+    && status !== 'resolved'
+    && status !== 'rejected';
+};
+
+window.dcvsStaffBarangayCaseStatusLabel = function(item) {
+  var labels = {
+    barangay_response_approved: 'Accepted by Barangay',
+    barangay_responding: 'Barangay Responding',
+    animal_secured: 'Animal Secured',
+    returned_to_barangay: 'Returned to Barangay'
+  };
+  return labels[String(item && item.responseState || '')] || 'Accepted by Barangay';
+};
+
+window.dcvsStaffActiveCaseStatusLabel = function(item) {
+  var labels = {
+    dcvs_dispatch: 'DCVS Dispatch',
+    dcvs_processing: 'DCVS Processing',
+    escalated_to_dcvs: 'Escalated to DCVS',
+    unable_to_locate: 'Unable to Locate',
+    turned_over: 'Turned over to DCVS'
+  };
+  return labels[String(item && item.responseState || '')] || 'Active';
+};
+
 function updateStaffReportKpis() {
   var high = function(items) { return items.filter(function(item) { return /high|critical/i.test(item.urgency || ''); }).length; };
   var pendingWeek = PENDING_ITEMS.filter(function(item) { return Number(item.vts || 0) >= Date.now() - 7 * 86400000; }).length;
@@ -5764,6 +7158,22 @@ function updateStaffReportKpis() {
   };
   setValues('reports-pending', [PENDING_ITEMS.length, high(PENDING_ITEMS), pendingWeek, PENDING_ITEMS.length]);
   setValues('reports-active', [ACTIVE_ITEMS.length, high(ACTIVE_ITEMS), activeScheduled, activeOverdue]);
+  var barangayItems = window.BARANGAY_RESPONSE_ITEMS || [];
+  var acceptedBarangayCount = barangayItems.filter(function(item) {
+    return ['barangay_response_approved', 'returned_to_barangay'].indexOf(String(item.responseState || '')) !== -1;
+  }).length;
+  var respondingBarangayCount = barangayItems.filter(function(item) {
+    return item.responseState === 'barangay_responding';
+  }).length;
+  var securedBarangayCount = barangayItems.filter(function(item) {
+    return item.responseState === 'animal_secured';
+  }).length;
+  setValues('reports-accepted', [
+    barangayItems.length,
+    acceptedBarangayCount,
+    respondingBarangayCount,
+    securedBarangayCount
+  ]);
   setValues('reports-resolved', [
     RESOLVED_ITEMS.length,
     RESOLVED_ITEMS.filter(function(item) { return Number(item.ts || 0) >= monthStart; }).length,
@@ -5776,6 +7186,7 @@ function applyStaffReportTransition(data) {
   var reportId = String(data.report_id);
   var item = PENDING_ITEMS.find(function(r) { return String(r.id) === reportId; }) ||
     ACTIVE_ITEMS.find(function(r) { return String(r.id) === reportId; }) ||
+    (window.BARANGAY_RESPONSE_ITEMS || []).find(function(r) { return String(r.id) === reportId; }) ||
     RESOLVED_ITEMS.find(function(r) { return String(r.id) === reportId; }) ||
     (window.RPT_ITEMS || []).find(function(r) { return String(r.id) === reportId; });
   if (!item) return;
@@ -5783,18 +7194,25 @@ function applyStaffReportTransition(data) {
   var nowLabel = data.confirmed_at || data.resolved_at || new Date().toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
   if (data.status === 'confirmed' || data.status === 'scheduled') {
     if (window.penRemoveItem) window.penRemoveItem(reportId);
+    if (window.brgRemoveItem) window.brgRemoveItem(reportId);
     var scheduled = data.scheduled_at ? new Date(String(data.scheduled_at).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
     var activeItem = Object.assign({}, item, {
-      caseId: Number(data.case_id || item.caseId || item.id), caseStatus: 'active', status: 'active',
-      statusLabel: 'Active', confirmed: nowLabel, scheduled: scheduled
+      caseId: Number(data.case_id || item.caseId || item.id), caseStatus: 'active', status: 'active', statusRaw: data.status,
+      statusLabel: window.dcvsStaffActiveCaseStatusLabel(item), confirmed: nowLabel, scheduled: scheduled
     });
-    if (window.actAddItem) window.actAddItem(activeItem);
+    if (window.dcvsStaffCaseBelongsInActiveCases(activeItem)) {
+      if (window.actAddItem) window.actAddItem(activeItem);
+    } else if (window.actRemoveItem) {
+      window.actRemoveItem(reportId);
+    }
     if (window.rptUpdateItem) window.rptUpdateItem(reportId, {
       status: 'active', statusRaw: data.status, statusLabel: data.status === 'scheduled' ? 'Scheduled' : 'Active',
       caseStatus: 'active', caseId: activeItem.caseId, confirmed: nowLabel, scheduled: scheduled
     });
   } else if (data.status === 'resolved') {
+    if (window.penRemoveItem) window.penRemoveItem(reportId);
     if (window.actRemoveItem) window.actRemoveItem(reportId);
+    if (window.brgRemoveItem) window.brgRemoveItem(reportId);
     var resolvedTimestamp = data.resolved_at_raw
       ? new Date(String(data.resolved_at_raw).replace(' ', 'T')).getTime()
       : Date.now();
@@ -5858,7 +7276,7 @@ if (rejectReportForm) rejectReportForm.addEventListener('submit', function(event
   var formData = new FormData(form);
   formData.set('action', 'reject_report');
   formData.set('csrf_token', window.DCVS_RESPONSE_CSRF || '');
-  fetch('response-workflow.php', { method: 'POST', body: formData })
+  fetch(window.dcvsStaffUrl('response-workflow.php'), { method: 'POST', body: formData })
     .then(function(response) {
       return response.json().then(function(data) {
         if (!response.ok || !data || !data.success) {
@@ -5891,75 +7309,6 @@ if (resolveReportForm) resolveReportForm.addEventListener('submit', function(eve
 function openRejectionModal(reportId) {
     document.getElementById('rejectReportId').value = reportId;
     openModal('rejectReportModal');
-}
-
-function applyStaffRealtimeReport(source) {
-  var id = Number(source.report_id);
-  if (!id) return;
-  var typeLabels = { stray:'Stray Animal', rabies:'Rabies', injured:'Injured Animal', dead:'Dead Animal', rescue:'Rescue' };
-  var rawStatus = String(source.status || 'pending').toLowerCase();
-  var caseStatus = source.case_status || (rawStatus === 'resolved' ? 'resolved' : (rawStatus === 'confirmed' || rawStatus === 'scheduled' ? 'active' : ''));
-  var allStatus = rawStatus === 'resolved' ? 'resolved' : (rawStatus === 'confirmed' || rawStatus === 'scheduled' ? 'active' : 'pending');
-  var typeLabel = typeLabels[String(source.report_type || '').toLowerCase()] || String(source.report_type || 'Report');
-  var created = source.created_at || '';
-  var confirmed = source.case_confirmed_at || source.confirmed_at || '';
-  var scheduled = source.scheduled_at || '';
-  var resolved = source.resolved_at || '';
-  var existing = (window.RPT_ITEMS || []).find(function(item) { return Number(item.id) === id; }) ||
-    PENDING_ITEMS.find(function(item) { return Number(item.id) === id; }) ||
-    ACTIVE_ITEMS.find(function(item) { return Number(item.id) === id; }) ||
-    RESOLVED_ITEMS.find(function(item) { return Number(item.id) === id; });
-  var base = Object.assign({}, existing || {}, {
-    id: id,
-    ref: source.reference_id || ('#RPT-' + String(id).padStart(4, '0')),
-    type: String(source.report_type || '').toLowerCase(),
-    typeLabel: typeLabel,
-    typeShort: typeLabel.split(' ')[0],
-    desc: source.description || (existing && existing.desc) || '',
-    location: source.location_address || (existing && existing.location) || '-',
-    brgy: source.barangay_name || (existing && existing.brgy) || '',
-    reporter: source.reporter_name || (existing && existing.reporter) || 'Resident',
-    phone: source.reporter_phone || (existing && existing.phone) || '',
-    email: source.reporter_email || (existing && existing.email) || '',
-    avatar: source.avatar_url || (existing && existing.avatar) || '',
-    date: created ? new Date(String(created).replace(' ', 'T')).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : (existing && existing.date) || '',
-    createdAt: created || (existing && existing.createdAt) || '',
-    ts: created ? new Date(String(created).replace(' ', 'T')).getTime() : (existing && existing.ts) || Date.now(),
-    urgency: String(source.urgency_level || (existing && existing.urgency) || 'medium').charAt(0).toUpperCase() + String(source.urgency_level || (existing && existing.urgency) || 'medium').slice(1),
-    status: allStatus,
-    statusRaw: rawStatus,
-    statusLabel: rawStatus === 'rejected' ? 'Closed' : (rawStatus === 'validated' ? 'Pending DCVS Review' : (rawStatus === 'pending' ? 'Pending Barangay Review' : (allStatus === 'active' ? 'In Progress' : (allStatus.charAt(0).toUpperCase() + allStatus.slice(1))))),
-    caseId: source.case_id ? Number(source.case_id) : (existing && existing.caseId) || null,
-    caseStatus: caseStatus,
-    confirmed: confirmed ? new Date(String(confirmed).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.confirmed) || '',
-    validated: source.validated_at ? new Date(String(source.validated_at).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.validated) || '',
-    scheduled: scheduled ? new Date(String(scheduled).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.scheduled) || '',
-    resolved: resolved ? new Date(String(resolved).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.resolved) || ''
-  });
-  if (window.rptAddItem) window.rptAddItem(base);
-
-  if (rawStatus === 'pending' || rawStatus === 'validated') {
-    if (window.actRemoveItem) window.actRemoveItem(id);
-    if (window.resRemoveItem) window.resRemoveItem(id);
-    if (window.penAddItem) window.penAddItem(Object.assign({}, base, {
-      status:'pending',
-      statusLabel: rawStatus === 'validated' ? 'Pending DCVS Review' : 'Pending Barangay Review',
-      caseId:null,
-      caseStatus:''
-    }));
-  } else if (allStatus === 'active') {
-    if (window.penRemoveItem) window.penRemoveItem(id);
-    if (window.resRemoveItem) window.resRemoveItem(id);
-    if (window.actAddItem) window.actAddItem(Object.assign({}, base, { status:'active', statusLabel:'Active', caseStatus:'active' }));
-  } else if (allStatus === 'resolved') {
-    if (window.penRemoveItem) window.penRemoveItem(id);
-    if (window.actRemoveItem) window.actRemoveItem(id);
-    if (window.resAddItem) window.resAddItem(Object.assign({}, base, { status:'resolved', statusLabel:'Resolved', caseStatus:'resolved' }));
-  } else if (rawStatus === 'rejected') {
-    if (window.penRemoveItem) window.penRemoveItem(id);
-    if (window.actRemoveItem) window.actRemoveItem(id);
-  }
-  updateStaffReportKpis();
 }
 
 // â�?��,�â�?��,� OWNER SEARCH + PAGINATION â�?��,�â�?��,�
@@ -6076,7 +7425,7 @@ function applyStaffRealtimeReport(source) {
         while (avatar.firstChild) avatar.removeChild(avatar.firstChild);
         if (avatarUrl) {
           var image = document.createElement('img');
-          image.src = avatarUrl;
+          image.src = window.dcvsStaffMediaUrl(avatarUrl);
           image.alt = '';
           avatar.appendChild(image);
         } else {
@@ -6113,7 +7462,7 @@ function applyStaffRealtimeReport(source) {
         while (avatar.firstChild) avatar.removeChild(avatar.firstChild);
         if (photoUrl) {
           var image = document.createElement('img');
-          image.src = photoUrl;
+          image.src = window.dcvsStaffMediaUrl(photoUrl);
           image.alt = '';
           avatar.appendChild(image);
         } else {
@@ -6168,15 +7517,16 @@ function applyStaffRealtimeReport(source) {
         var row = allRows.find(function(item) { return String(item.getAttribute('data-id')) === String(id); });
         if (!row) return false;
         row.setAttribute('data-status', status);
+        row.setAttribute('data-can-outcome', '0');
         var badge = row.querySelector('.appt-status-pill');
         var statusStyles = {
           pending: ['#fef3c7', '#92400e'], scheduled: ['#0E8131', '#ffffff'], approved: ['#dcfce7', '#166534'],
           rescheduled: ['#dbeafe', '#1d4ed8'], completed: ['#dbeafe', '#1e40af'], cancelled: ['#f3f4f6', '#6b7280'],
-          rejected: ['#fee2e2', '#991b1b'], no_show: ['#fef2f2', '#b91c1c']
+          rejected: ['#fee2e2', '#991b1b'], no_show: ['#fef2f2', '#b91c1c'], waitlisted: ['#fef3c7', '#92400e']
         };
         if (badge) {
           var style = statusStyles[status] || ['#f4f4f5', '#52525b'];
-          badge.textContent = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+          badge.textContent = status === 'no_show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
           badge.style.background = style[0];
           badge.style.color = style[1];
         }
@@ -6367,7 +7717,7 @@ function applyStaffRealtimeReport(source) {
 })();
 
 function markAllNotifRead() {
-    fetch('mark-notifications-read.php?type=staff').then(() => {
+    fetch(window.dcvsStaffUrl('mark-notifications-read.php') + '?type=staff').then(() => {
         document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.remove('unread'));
         const badge = document.querySelector('.notif-badge');
         if (badge) badge.style.display = 'none';
@@ -6473,7 +7823,7 @@ function viewMedicalHistory(petId) {
     document.getElementById('medicalHistoryContent').innerHTML = '<p style="text-align:center;">Loading history...</p>';
     
     // Fetch history
-    fetch('staff-get-history.php?pet_id=' + petId)
+    fetch(window.dcvsStaffUrl('staff-get-history.php') + '?pet_id=' + petId)
         .then(response => response.text())
         .then(data => {
             document.getElementById('medicalHistoryContent').innerHTML = data;
@@ -6910,7 +8260,7 @@ function checkStaffSlot() {
     status.style.color = '#92400e';
     status.textContent = 'Checking availability...';
     var exclude = document.getElementById('formApptId')?.value || 0;
-    fetch('includes/check_slot.php?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude)
+    fetch(window.dcvsStaffUrl('includes/check_slot.php') + '?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude)
         .then(function(r) { return r.json(); })
         .then(function(d) {
             if (d.available) {
@@ -6953,18 +8303,21 @@ function openApptRowMenu(ev, apptId, apptStatus){
   ev.stopPropagation();
   var pop = document.getElementById('apptRowMenuPop');
   if (!pop) return;
+  var appointmentRow = document.querySelector('#appointmentsTable tr[data-id="' + apptId + '"]');
+  var canMarkOutcome = appointmentRow && appointmentRow.getAttribute('data-can-outcome') === '1';
   var items = '';
   items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.view('+apptId+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</button>';
   if (apptStatus === 'pending') {
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();schedulePendingAppointment('+apptId+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Schedule</button>';
   }
-  if (apptStatus === 'rescheduled') {
+  if (apptStatus === 'approved' || apptStatus === 'scheduled' || apptStatus === 'rescheduled') {
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.reschedSingle('+apptId+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Reschedule</button>';
   }
-  if (apptStatus !== 'pending' && apptStatus !== 'completed' && apptStatus !== 'cancelled' && apptStatus !== 'rejected') {
+  if (canMarkOutcome && (apptStatus === 'scheduled' || apptStatus === 'rescheduled' || apptStatus === 'in_progress')) {
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.statusChange('+apptId+',\'completed\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Mark Completed</button>';
+    items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.statusChange('+apptId+',\'no_show\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6m0-6-6 6"/></svg>Mark No-show</button>';
   }
-  if (apptStatus === 'scheduled' || apptStatus === 'rescheduled' || apptStatus === 'completed') {
+  if (apptStatus === 'completed' || apptStatus === 'no_show' || apptStatus === 'cancelled' || apptStatus === 'rejected') {
     items += '<button class="row-menu-item danger" onclick="closeApptRowMenu();archiveAppt('+apptId+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button>';
   }
   pop.innerHTML = items;
@@ -7043,7 +8396,7 @@ function rejectAppointmentFromDrawer(id) {
     body.append('ajax', '1');
     body.append('appointment_id', id);
     body.append('reason', value);
-    fetch('reject-appointment.php', {
+    fetch(window.dcvsStaffUrl('reject-appointment.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
@@ -7070,66 +8423,175 @@ function rejectAppointmentFromDrawer(id) {
   openModal('appointmentRejectReasonDialog');
   reason.focus();
 }
-function schedulePendingAppointment(id){
+function schedulePendingAppointment(id, onComplete, staffMessage){
   var modal = document.getElementById('scheduleAppointmentDialog');
   if (!modal) {
     modal = document.createElement('div');
     modal.id = 'scheduleAppointmentDialog';
     modal.className = 'modal';
     modal.style.cssText = 'background:rgba(0,0,0,.5);padding:1rem;z-index:1200;';
-    modal.innerHTML = '<div class="sd-dialog-content" role="alertdialog" aria-modal="true" style="width:100%;max-width:420px;box-sizing:border-box;background:#fff;border:1px solid #e4e4e7;border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 20px 25px rgba(15,23,32,.18);">' +
+    modal.innerHTML = '<div class="sd-dialog-content" role="alertdialog" aria-modal="true" style="width:100%;max-width:480px;box-sizing:border-box;background:#fff;border:1px solid #e4e4e7;border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 20px 25px rgba(15,23,32,.18);">' +
       '<button type="button" class="sd-dialog-close" id="scheduleAppointmentClose" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>' +
-      '<div class="sd-dialog-header"><h2 class="sd-dialog-title">Schedule Appointment</h2><p class="sd-dialog-description">Approve and schedule this appointment at the resident\'s requested date and time.</p></div>' +
+      '<div class="sd-dialog-header"><h2 class="sd-dialog-title">Schedule Appointment</h2><p class="sd-dialog-description">Choose the final appointment date and time. The resident’s requested schedule remains recorded separately.</p></div>' +
+      '<div class="sd-form-grid"><div class="sd-field"><label class="sd-label" for="scheduleAppointmentDate">Final Date</label><input class="sd-input" id="scheduleAppointmentDate" type="date" required></div><div class="sd-field"><label class="sd-label" for="scheduleAppointmentTime">Final Time</label><select class="sd-input" id="scheduleAppointmentTime"><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></div></div>' +
+      '<p id="scheduleAppointmentCapacity" style="margin:0;color:#52525b;background:#f8fafc;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.45;">Checking capacity…</p>' +
       '<p id="scheduleAppointmentError" style="display:none;margin:0;color:#991b1b;background:#fef2f2;border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.45;"></p>' +
-      '<div class="sd-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="scheduleAppointmentCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="scheduleAppointmentSubmit">Schedule Appointment</button></div>' +
+      '<div class="sd-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="scheduleAppointmentCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="scheduleAppointmentSubmit" disabled>Check Availability</button></div>' +
       '</div>';
     document.body.appendChild(modal);
-    document.getElementById('scheduleAppointmentClose').onclick = function () { closeModal('scheduleAppointmentDialog'); };
-    document.getElementById('scheduleAppointmentCancel').onclick = function () { closeModal('scheduleAppointmentDialog'); };
-    modal.addEventListener('click', function (event) {
-      if (event.target === modal) closeModal('scheduleAppointmentDialog');
-    });
   }
 
   var error = document.getElementById('scheduleAppointmentError');
+  var capacity = document.getElementById('scheduleAppointmentCapacity');
+  var dateInput = document.getElementById('scheduleAppointmentDate');
+  var timeInput = document.getElementById('scheduleAppointmentTime');
   var submit = document.getElementById('scheduleAppointmentSubmit');
+  var dismissSchedule = function () {
+    closeModal('scheduleAppointmentDialog');
+    if (typeof onComplete === 'function') onComplete(null);
+  };
+  document.getElementById('scheduleAppointmentClose').onclick = dismissSchedule;
+  document.getElementById('scheduleAppointmentCancel').onclick = dismissSchedule;
+  modal.onclick = function (event) {
+    if (event.target === modal) dismissSchedule();
+  };
   error.textContent = '';
   error.style.display = 'none';
-  submit.disabled = false;
-  submit.textContent = 'Schedule Appointment';
-  submit.onclick = function () {
+  capacity.textContent = 'Loading the resident’s requested schedule…';
+  submit.disabled = true;
+  submit.textContent = 'Check Availability';
+  var previewSequence = 0;
+  var slotState = null;
+
+  function refreshCapacity() {
+    var request = ++previewSequence;
+    var date = dateInput.value;
+    var time = timeInput.value;
+    slotState = null;
     submit.disabled = true;
-    submit.textContent = 'Scheduling...';
+    submit.textContent = 'Checking…';
+    capacity.textContent = 'Checking daily and time-slot capacity…';
+    var query = new URLSearchParams({ appointment_id: id, date: date, time: time });
+    fetch(window.dcvsStaffUrl('appointment-slot-capacity.php') + '?' + query.toString())
+      .then(function (response) { return response.json(); })
+      .then(function (result) {
+        if (request !== previewSequence) return;
+        if (!result || !result.success) throw new Error((result && result.message) || 'Could not check appointment capacity.');
+        slotState = result;
+        capacity.textContent = result.daily_count + ' of ' + result.daily_limit + ' daily appointments taken; '
+          + result.slot_count + ' of ' + result.slot_capacity + ' at this time.';
+        if (result.conflict) {
+          capacity.textContent += ' This resident already has an appointment at the selected date and time.';
+          submit.textContent = 'Resolve Conflict';
+          submit.disabled = true;
+        } else if (result.past) {
+          capacity.textContent += ' The selected time has already passed.';
+          submit.textContent = 'Choose a Future Time';
+          submit.disabled = true;
+        } else if (!result.slot_open) {
+          capacity.textContent += ' This clinic time is closed or unavailable.';
+          submit.textContent = 'Choose Another Time';
+          submit.disabled = true;
+        } else if (result.full && !result.has_pet) {
+          capacity.textContent += ' Capacity is full, but this request has no linked pet and cannot be added to the pet-required waitlist.';
+          submit.textContent = 'Cannot Waitlist';
+          submit.disabled = true;
+        } else {
+          submit.textContent = result.full ? 'Move to Waitlist' : 'Schedule Appointment';
+          submit.disabled = false;
+        }
+      })
+      .catch(function (failure) {
+        if (request !== previewSequence) return;
+        slotState = null;
+        capacity.textContent = '';
+        error.textContent = failure.message || 'Could not check appointment capacity.';
+        error.style.display = 'block';
+        submit.textContent = 'Check Availability';
+        submit.disabled = true;
+      });
+  }
+
+  dateInput.onchange = refreshCapacity;
+  timeInput.onchange = refreshCapacity;
+  submit.onclick = function () {
+    if (!slotState || submit.disabled) return;
+    submit.disabled = true;
+    submit.textContent = slotState.full ? 'Moving to Waitlist…' : 'Scheduling…';
     var body = new URLSearchParams();
     body.append('ajax', '1');
     body.append('appointment_id', id);
-    fetch('approve-appointment.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
+    body.append('scheduled_date', dateInput.value);
+    body.append('scheduled_time', timeInput.value);
+    body.append('staff_message', staffMessage || '');
+    fetch(window.dcvsStaffUrl('approve-appointment.php'), { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() })
       .then(function (response) { return response.json(); })
       .then(function (data) {
         if (data && data.success) {
           closeModal('scheduleAppointmentDialog');
           closeModal('appointmentDetailsModal');
-          if (window.apptUpdateRow) window.apptUpdateRow(id, 'scheduled');
-          if (window.portalToast) portalToast('Appointment scheduled', data.message || 'Appointment request scheduled.');
+          var nextStatus = data.status || 'scheduled';
+          var chosenDate = new Date(dateInput.value + 'T00:00:00');
+          var chosenDateLabel = chosenDate.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+          var chosenTimeLabel = timeInput.options[timeInput.selectedIndex].text;
+          if (window.apptUpdateRow) window.apptUpdateRow(id, nextStatus, chosenDateLabel + ' · ' + chosenTimeLabel);
+          var tableRow = document.querySelector('#appointmentsTable tr[data-id="' + id + '"]');
+          if (tableRow && nextStatus === 'scheduled') {
+            tableRow.setAttribute('data-date', String(Math.floor(new Date(dateInput.value + 'T' + timeInput.value + ':00').getTime() / 1000)));
+          }
+          if (window.portalToast) portalToast(nextStatus === 'waitlisted' ? 'Appointment waitlisted' : 'Appointment scheduled', data.message || 'Appointment request updated.');
+          if (typeof onComplete === 'function') onComplete(nextStatus);
           return;
         }
         error.textContent = (data && data.message) || 'Could not schedule this appointment.';
         error.style.display = 'block';
-        submit.disabled = false;
-        submit.textContent = 'Schedule Appointment';
+        refreshCapacity();
       })
       .catch(function () {
         error.textContent = 'Network error. Please try again.';
         error.style.display = 'block';
-        submit.disabled = false;
-        submit.textContent = 'Schedule Appointment';
+        refreshCapacity();
       });
   };
+  fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
+    .then(function (response) { return response.json(); })
+    .then(function (result) {
+      var appointment = result && result.data;
+      if (!result || !result.success || !appointment) throw new Error((result && result.message) || 'Could not load the requested schedule.');
+      dateInput.value = appointment.preferred_date || '';
+      var requestedTime = (appointment.preferred_time || '').substring(0, 5);
+      if (requestedTime) timeInput.value = requestedTime;
+      refreshCapacity();
+    })
+    .catch(function (failure) {
+      error.textContent = failure.message || 'Could not load the requested schedule.';
+      error.style.display = 'block';
+      capacity.textContent = '';
+    });
   openModal('scheduleAppointmentDialog');
 }
 window.APP = window.APP || {};
 (function(APP) {
   var apptSelected = {};
+  function updateApptBulkActionVisibility() {
+    var ids = Object.keys(apptSelected);
+    var selectedRows = ids.map(function (id) {
+      return document.querySelector('#appointmentsTable tr[data-id="' + id + '"]');
+    }).filter(Boolean);
+    var allFinal = selectedRows.length > 0 && selectedRows.every(function (row) {
+      return ['completed', 'no_show', 'cancelled', 'rejected'].indexOf(row.getAttribute('data-status')) !== -1;
+    });
+    var allOutcomeDue = selectedRows.length > 0 && selectedRows.every(function (row) {
+      return ['scheduled', 'rescheduled', 'in_progress'].indexOf(row.getAttribute('data-status')) !== -1
+        && row.getAttribute('data-can-outcome') === '1';
+    });
+    var archive = document.getElementById('apptBulkArchiveBtn');
+    var complete = document.getElementById('apptBulkCompleteBtn');
+    var noShow = document.getElementById('apptBulkNoShowBtn');
+    if (archive) archive.style.display = allFinal ? '' : 'none';
+    if (complete) complete.style.display = allOutcomeDue ? '' : 'none';
+    if (noShow) noShow.style.display = allOutcomeDue ? '' : 'none';
+  }
 
   /* ── Appt bulk BEGIN: checkbox quick actions (same pattern as All Reports) ── */
   APP.toggleSelect = function(id) {
@@ -7148,6 +8610,7 @@ window.APP = window.APP || {};
     var cnt = document.getElementById('apptSelectedCount');
     if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
     if (cnt) cnt.textContent = n;
+    updateApptBulkActionVisibility();
     var all = document.getElementById('apptSelectAll');
     var total = document.querySelectorAll('#appointmentsTable tbody .appt-row-check').length;
     if (all) {
@@ -7169,6 +8632,7 @@ window.APP = window.APP || {};
     var total = document.querySelectorAll('#appointmentsTable tbody .appt-row-check').length;
     if (bar) bar.style.display = n ? 'flex' : 'none';
     if (count) count.textContent = n;
+    updateApptBulkActionVisibility();
     if (all) { all.checked = total > 0 && n === total; all.indeterminate = n > 0 && n < total; }
   };
 
@@ -7347,7 +8811,7 @@ window.APP = window.APP || {};
     st.style.background = '#fefce8';
     st.style.color = '#92400e';
     st.textContent = 'Checking availability...';
-    fetch('includes/check_slot.php?date=' + encodeURIComponent(a.preferred_date) + '&time=' + encodeURIComponent(a.preferred_time) + '&exclude=' + a.appointment_id + '&urgency=' + encodeURIComponent(a.urgency_level || 'routine'))
+    fetch(window.dcvsStaffUrl('includes/check_slot.php') + '?date=' + encodeURIComponent(a.preferred_date) + '&time=' + encodeURIComponent(a.preferred_time) + '&exclude=' + a.appointment_id + '&urgency=' + encodeURIComponent(a.urgency_level || 'routine'))
       .then(function (r) { return r.json(); })
       .then(function (sd) {
         if (!sd || typeof sd.available !== 'boolean') { st.style.display = 'none'; return; }
@@ -7397,7 +8861,7 @@ window.APP = window.APP || {};
     var sb = revEl('formSubmitBtn');
     if (sb) { sb.disabled = true; sb.textContent = 'Submit Decision'; }
     apptReviewProgress('Loading request ' + idx + ' of ' + rv.total + '…');
-    fetch('staff-get-appointment-request.php?id=' + encodeURIComponent(id))
+    fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (apptReview !== rv) return;
@@ -7633,6 +9097,19 @@ window.APP = window.APP || {};
 
   function apptBulkReviewSubmit(detail, sequence, decision, reason) {
     if (apptReview !== sequence || sequence.busy) return;
+    if (decision === 'scheduled') {
+      sequence.busy = true;
+      schedulePendingAppointment(detail.appointment_id, function (status) {
+        if (apptReview !== sequence) return;
+        sequence.busy = false;
+        if (!status) return;
+        sequence.applied.push({ id: String(detail.appointment_id), status: status });
+        sequence.queue.shift();
+        if (sequence.queue.length) apptReviewLoadNext();
+        else apptReviewFinish();
+      });
+      return;
+    }
     sequence.busy = true;
     var footer = revEl('apptDetailFooter');
     var message = revEl('apptBulkReviewMessage');
@@ -7642,7 +9119,7 @@ window.APP = window.APP || {};
     body.append('appointment_id', detail.appointment_id);
     body.append('staff_message', '');
     if (decision === 'rejected') body.append('reason', reason);
-    fetch(decision === 'scheduled' ? 'approve-appointment.php' : 'reject-appointment.php', {
+    fetch(window.dcvsStaffUrl(decision === 'scheduled' ? 'approve-appointment.php' : 'reject-appointment.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString()
@@ -7697,7 +9174,23 @@ window.APP = window.APP || {};
       var body = 'ajax=1&appointment_id=' + encodeURIComponent(apptId) +
         '&staff_message=' + encodeURIComponent((revEl('formStaffMessage') || {}).value || '');
       if (decision === 'rejected') body += '&reason=' + encodeURIComponent(reason.value);
-      var url = decision === 'scheduled' ? 'approve-appointment.php' : 'reject-appointment.php';
+      if (decision === 'scheduled') {
+        schedulePendingAppointment(apptId, function (status) {
+          if (apptReview !== rv) return;
+          rv.busy = false;
+          if (!status) {
+            var reviewSubmit = revEl('formSubmitBtn');
+            if (reviewSubmit) reviewSubmit.disabled = false;
+            return;
+          }
+          rv.applied.push({ id: String(apptId), status: status });
+          rv.queue.shift();
+          if (rv.queue.length) apptReviewLoadNext();
+          else apptReviewFinish();
+        }, (revEl('formStaffMessage') || {}).value || '');
+        return;
+      }
+      var url = 'reject-appointment.php';
       fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body })
         .then(function (r) { return r.json(); })
         .then(function (d) {
@@ -7706,7 +9199,7 @@ window.APP = window.APP || {};
           if (sb) sb.textContent = 'Submit Decision';
           if (d && d.success) {
             rv.applied.push({ id: String(apptId), status: decision });
-            if (window.apptUpdateRow) window.apptUpdateRow(apptId, decision === 'scheduled' ? 'scheduled' : 'rejected');
+            if (window.apptUpdateRow) window.apptUpdateRow(apptId, 'rejected');
             rv.queue.shift();
             if (rv.queue.length) apptReviewLoadNext();
             else apptReviewFinish();
@@ -7827,8 +9320,9 @@ window.APP = window.APP || {};
       var emptyMessages = {
         review:'Only pending appointment requests can be reviewed.',
         reschedule:'Only pending, scheduled, or rescheduled appointments can be rescheduled.',
-        complete:'Pending, completed, cancelled, and rejected appointments cannot be marked as completed.',
-        archive:'Only scheduled, rescheduled, or completed appointments can be archived.'
+        complete:'Only due scheduled appointments can be marked as completed.',
+          'no-show':'Only due scheduled appointments can be marked as no-show.',
+          archive:'Only completed, no-show, cancelled, or rejected appointments can be archived.'
       };
       apptToast(type === 'complete' ? 'Nothing to Complete' : 'No eligible appointments', emptyMessages[type]);
       return;
@@ -7868,10 +9362,12 @@ window.APP = window.APP || {};
       if (apptSeq !== sequence) return;
       var description = modal ? modal.querySelector('.sd-dialog-description') : null;
       var footer = document.getElementById('apptDetailFooter');
-      var action = sequence.type === 'details-complete' ? 'marking it as completed' : 'archiving it';
+      var action = sequence.type === 'details-complete' ? 'marking it as completed'
+        : (sequence.type === 'details-no-show' ? 'marking it as no-show' : 'archiving it');
       if (description) description.textContent = apptBulkActionDescription(appointment, sequence, action, index);
       if (!footer) return;
-      var actionLabel = sequence.type === 'details-complete' ? 'Mark this appointment completed' : 'Archive this appointment';
+      var actionLabel = sequence.type === 'details-complete' ? 'Mark this appointment completed'
+        : (sequence.type === 'details-no-show' ? 'Mark this appointment no-show' : 'Archive this appointment');
       var actionStyle = sequence.type === 'details-archive' ? ' style="background:#dc2626;border-color:#dc2626;color:#fff;"' : '';
       footer.innerHTML = '<button type="button" class="sd-btn sd-btn-outline" id="apptDetailsBulkCancel">Cancel</button>' +
         '<button type="button" class="sd-btn sd-btn-default" id="apptDetailsBulkConfirm"' + actionStyle + '>' + actionLabel + '</button>';
@@ -7883,17 +9379,21 @@ window.APP = window.APP || {};
         sequence.processing = true;
         confirm.disabled = true;
         cancel.disabled = true;
-        confirm.textContent = sequence.type === 'details-complete' ? 'Completing...' : 'Archiving...';
+        confirm.textContent = sequence.type === 'details-complete' ? 'Completing...'
+          : (sequence.type === 'details-no-show' ? 'Marking no-show...' : 'Archiving...');
         var operation = sequence.type === 'details-complete'
           ? apptPost('update-appointment-status.php', 'action=complete&ids=' + encodeURIComponent(item.id))
-          : fetch('client-database-handler.php', { method:'POST', body:(function() { var fd = new FormData(); fd.append('action','archive_appointment'); fd.append('appointment_id',item.id); return fd; })() })
-              .then(function (response) { return response.json(); }).then(function (data) { return !!(data && data.success); }).catch(function () { return false; });
+          : (sequence.type === 'details-no-show'
+            ? apptPost('update-appointment-status.php', 'action=no_show&ids=' + encodeURIComponent(item.id))
+            : fetch(window.dcvsStaffUrl('client-database-handler.php'), { method:'POST', body:(function() { var fd = new FormData(); fd.append('action','archive_appointment'); fd.append('appointment_id',item.id); return fd; })() })
+              .then(function (response) { return response.json(); }).then(function (data) { return !!(data && data.success); }).catch(function () { return false; }));
         operation.then(function (success) {
           if (apptSeq !== sequence) return;
           sequence.processing = false;
           if (success) {
             sequence.applied.push(item);
             if (sequence.type === 'details-complete' && window.apptUpdateRow) window.apptUpdateRow(item.id, 'completed');
+            if (sequence.type === 'details-no-show' && window.apptUpdateRow) window.apptUpdateRow(item.id, 'no_show');
             if (sequence.type === 'details-archive' && window.apptRemoveRows) window.apptRemoveRows([item.id]);
           } else {
             sequence.failed++;
@@ -7920,8 +9420,10 @@ window.APP = window.APP || {};
     apptSeq = null;
     apptDetailsBulkRestore();
     closeModal('appointmentDetailsModal');
-    var actionName = sequence.type === 'details-complete' ? 'completed' : 'archived';
-    apptFlashReload(sequence.type === 'details-complete' ? 'Appointments Completed' : 'Appointments Archived',
+    var isComplete = sequence.type === 'details-complete';
+    var isNoShow = sequence.type === 'details-no-show';
+    var actionName = isComplete ? 'completed' : (isNoShow ? 'marked no-show' : 'archived');
+    apptFlashReload(isComplete ? 'Appointments Completed' : (isNoShow ? 'Appointments Marked No-show' : 'Appointments Archived'),
       sequence.applied.length + ' of ' + sequence.total + ' selected appointment(s) ' + actionName + '.' +
       (sequence.skipped ? ' ' + sequence.skipped + ' ineligible appointment(s) skipped.' : '') +
       (sequence.failed ? ' ' + sequence.failed + ' failed.' : ''));
@@ -7932,17 +9434,30 @@ window.APP = window.APP || {};
     var items = apptEnsureSel();
     if (!items) return;
     var eligible = items.filter(function (r) {
-      return r.status !== 'pending' && r.status !== 'completed' && r.status !== 'cancelled' && r.status !== 'rejected';
+      var row = document.querySelector('#appointmentsTable tr[data-id="' + r.id + '"]');
+      return row && ['scheduled', 'rescheduled', 'in_progress'].indexOf(r.status) !== -1
+        && row.getAttribute('data-can-outcome') === '1';
     });
     apptStartDetailsBulk('complete', items, eligible);
   };
 
-  /* Archive — scheduled/rescheduled/completed (mirrors row menu rule) */
+  APP.bulkNoShow = function () {
+    var items = apptEnsureSel();
+    if (!items) return;
+    var eligible = items.filter(function (r) {
+      var row = document.querySelector('#appointmentsTable tr[data-id="' + r.id + '"]');
+      return row && ['scheduled', 'rescheduled', 'in_progress'].indexOf(r.status) !== -1
+        && row.getAttribute('data-can-outcome') === '1';
+    });
+    apptStartDetailsBulk('no-show', items, eligible);
+  };
+
+  /* Archive only final appointment outcomes. */
   APP.bulkArchive = function () {
     var items = apptEnsureSel();
     if (!items) return;
     var eligible = items.filter(function (r) {
-      return r.status === 'scheduled' || r.status === 'rescheduled' || r.status === 'completed';
+      return ['completed', 'no_show', 'cancelled', 'rejected'].indexOf(r.status) !== -1;
     });
     apptStartDetailsBulk('archive', items, eligible);
   };
@@ -7977,7 +9492,7 @@ window.APP = window.APP || {};
         var fd = new FormData();
         fd.append('action', 'archive_appointment');
         fd.append('appointment_id', it.id);
-        fetch('client-database-handler.php', { method: 'POST', body: fd })
+        fetch(window.dcvsStaffUrl('client-database-handler.php'), { method: 'POST', body: fd })
           .then(function (r) { return r.json(); })
           .then(function (data) { if (data && data.success) s.applied.push(it); else s.failed++; })
           .catch(function () { s.failed++; })
@@ -8019,15 +9534,15 @@ window.APP = window.APP || {};
       (seq.failed ? ' ' + seq.failed + ' failed.' : ''));
   }
 
-  /* Reschedule — pending/scheduled/rescheduled, one date-time modal at a time */
+  /* Reschedule active appointment requests, one date-time modal at a time */
   APP.bulkReschedule = function () {
     var items = apptEnsureSel();
     if (!items) return;
     var eligible = items.filter(function (r) {
-      return r.status === 'pending' || r.status === 'scheduled' || r.status === 'rescheduled';
+      return ['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(r.status) !== -1;
     });
     if (!eligible.length) {
-      apptToast('Cannot Reschedule', 'Only pending, scheduled, or rescheduled appointments can be rescheduled. Other selected appointments are ignored.');
+      apptToast('Cannot Reschedule', 'Only pending, approved, scheduled, or rescheduled appointments can be rescheduled. Other selected appointments are ignored.');
       return;
     }
     apptSeq = { type: 'reschedule', queue: eligible.slice(), total: eligible.length, skipped: items.length - eligible.length, applied: [], failed: 0 };
@@ -8059,8 +9574,8 @@ window.APP = window.APP || {};
         document.getElementById('rescheduleApptRef').textContent = (a.reference_id || ('#APT-' + a.appointment_id)) + (seq.total > 1 ? ' \u00b7 ' + idx + ' of ' + seq.total : '');
         document.getElementById('rescheduleApptResident').textContent = a.full_name || '-';
         document.getElementById('rescheduleApptPet').textContent = a.pet_name || '-';
-        document.getElementById('rescheduleApptDate').value = a.preferred_date || '';
-        document.getElementById('rescheduleApptTime').value = (a.preferred_time || '').slice(0, 5);
+        document.getElementById('rescheduleApptDate').value = a.scheduled_date || a.preferred_date || '';
+        document.getElementById('rescheduleApptTime').value = (a.scheduled_time || a.preferred_time || '').slice(0, 5);
         var detailMessage = apptBulkActionDescription(a, seq, 'rescheduling it', idx);
         var descEl = document.querySelector('#rescheduleAppointmentModal .sd-dialog-description');
         if (descEl) descEl.textContent = detailMessage;
@@ -8098,10 +9613,10 @@ window.APP = window.APP || {};
     var msg = document.getElementById('rescheduleApptMessage');
     btn.disabled = true;
     btn.textContent = 'Rescheduling...';
-    fetch('update-appointment-status.php', {
+    fetch(window.dcvsStaffUrl('update-appointment-status.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'action=reschedule&ids=' + encodeURIComponent(id) + '&preferred_date=' + encodeURIComponent(date) + '&preferred_time=' + encodeURIComponent(time)
+      body: 'action=reschedule&ids=' + encodeURIComponent(id) + '&scheduled_date=' + encodeURIComponent(date) + '&scheduled_time=' + encodeURIComponent(time)
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -8211,14 +9726,37 @@ window.APP = window.APP || {};
       var cnt = document.getElementById('apptSelectedCount');
       if (bar) bar.style.display = n > 0 ? 'flex' : 'none';
       if (cnt) cnt.textContent = n;
+      updateApptBulkActionVisibility();
     }
   });
 
+  function formatApptDate(value) {
+    if (!value) return '-';
+    var parts = String(value).substring(0, 10).split('-');
+    if (parts.length !== 3) return '-';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(date.getTime()) ? '-' : date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+  function formatApptTime(value) {
+    if (!value) return '-';
+    var parts = String(value).split(':');
+    if (parts.length < 2) return '-';
+    var hour = Number(parts[0]);
+    var minute = Number(parts[1]);
+    if (isNaN(hour) || isNaN(minute)) return '-';
+    var suffix = hour >= 12 ? 'PM' : 'AM';
+    hour = hour % 12 || 12;
+    return hour + ':' + String(minute).padStart(2, '0') + ' ' + suffix;
+  }
+
   APP.statusChange = function(id, newStatus) {
-    var action = newStatus === 'completed' ? 'complete' : (newStatus === 'cancelled' ? 'cancel' : '');
+    var action = newStatus === 'completed' ? 'complete' : (newStatus === 'no_show' ? 'no_show' : (newStatus === 'cancelled' ? 'cancel' : ''));
     if (!action) { alert('Unsupported action.'); return; }
-    var actionLabel = newStatus === 'completed' ? 'Mark this appointment as completed?' : 'Update this appointment?';
-    confirmAppointmentAction(newStatus === 'completed' ? 'Mark as Completed' : 'Update Appointment', actionLabel, function() { fetch('update-appointment-status.php', {
+    var actionLabel = newStatus === 'completed'
+      ? 'Confirm that DCVS staff completed this appointment.'
+      : (newStatus === 'no_show' ? 'Confirm that the resident did not attend this appointment.' : 'Update this appointment?');
+    var title = newStatus === 'completed' ? 'Mark as Completed' : (newStatus === 'no_show' ? 'Mark as No-show' : 'Update Appointment');
+    confirmAppointmentAction(title, actionLabel, function() { fetch(window.dcvsStaffUrl('update-appointment-status.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: 'action=' + encodeURIComponent(action) + '&ids=' + encodeURIComponent(id)
@@ -8227,14 +9765,15 @@ window.APP = window.APP || {};
     .then(function(d) {
       if (d.success) {
         if (window.apptUpdateRow) window.apptUpdateRow(id, newStatus);
-        apptToast('Appointment updated', d.message || 'Appointment status updated.');
+      closeModal('appointmentDetailsModal');
+      apptToast('Appointment updated', d.message || 'Appointment status updated.');
       } else { alert(d.message || 'Failed to update status.'); }
     })
     .catch(function() { alert('Network error.'); }); });
   };
 
   APP.view = function(id, onReady, onError) {
-    fetch('staff-get-appointment-request.php?id=' + encodeURIComponent(id))
+    fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (!d.success) {
@@ -8246,15 +9785,16 @@ window.APP = window.APP || {};
         function set(el, v) { if (el) el.textContent = v || '-'; }
         function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
         var statusText = (a.status || '-').replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+        if (a.status === 'cancelled') statusText = a.cancelled_by === 'resident' ? 'Cancelled by Resident' : (a.cancelled_by === 'staff' ? 'Cancelled by Staff' : 'Cancelled');
         set(document.getElementById('detailClient'), a.full_name);
         set(document.getElementById('detailResidentId'), a.user_reference_id || '-');
         window._currentApptRef = a.reference_id || ('#APT-' + (a.appointment_id || ''));
         window._currentApptId = a.appointment_id || 0;
-        var editApptBtn = document.getElementById('apptDrawerEditBtn');
-        if (editApptBtn) editApptBtn.style.display = a.status === 'pending' ? 'inline-flex' : 'none';
         set(document.getElementById('detailType'), cap(a.appointment_type) + ((a.urgency_level || 'routine') === 'urgent' ? ' · Urgent' : ' · Routine'));
-        set(document.getElementById('detailDate'), a.preferred_date ? new Date(a.preferred_date).toLocaleDateString('en-US', {year:'numeric',month:'short',day:'numeric'}) : '-');
-        set(document.getElementById('detailTime'), a.preferred_time);
+        set(document.getElementById('detailPreferredDate'), formatApptDate(a.preferred_date));
+        set(document.getElementById('detailPreferredTime'), formatApptTime(a.preferred_time));
+        set(document.getElementById('detailFinalDate'), formatApptDate(a.scheduled_date));
+        set(document.getElementById('detailFinalTime'), formatApptTime(a.scheduled_time));
         var statusEl = document.getElementById('detailStatus');
         if (statusEl) {
           var stColors = {
@@ -8265,7 +9805,8 @@ window.APP = window.APP || {};
             cancelled: { bg: '#fee2e2', fg: '#dc2626', border: '#FECACA' },
             no_show: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' },
             rejected: { bg: '#fee2e2', fg: '#dc2626', border: '#FECACA' },
-            in_progress: { bg: '#dbeafe', fg: '#1e40af', border: '#BFDBFE' }
+            in_progress: { bg: '#dbeafe', fg: '#1e40af', border: '#BFDBFE' },
+            waitlisted: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' }
           };
           var st = stColors[a.status] || { bg: '#f1f5f9', fg: '#475569', border: '#E2E8F0' };
           statusEl.textContent = statusText;
@@ -8281,14 +9822,14 @@ window.APP = window.APP || {};
         set(document.getElementById('detailPetType'), cap(a.pet_type));
         set(document.getElementById('detailPetBreed'), a.breed);
         set(document.getElementById('detailPetGender'), cap(a.gender));
-        set(document.getElementById('detailPetAge'), a.age);
+        set(document.getElementById('detailPetAge'), a.age === null || a.age === '' ? '-' : a.age + (Number(a.age) === 1 ? ' year' : ' years'));
         set(document.getElementById('detailPetVax'), a.vaccination_status);
         set(document.getElementById('detailNotes'), a.notes);
         var avatarEl = document.getElementById('detailAvatar');
         var pic = a.avatar_url || a.profile_picture;
         if (avatarEl) {
           if (pic) {
-            avatarEl.innerHTML = '<img src="' + pic + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
+            avatarEl.innerHTML = '<img src="' + window.dcvsStaffMediaUrl(pic) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
           } else {
             var initials = (a.full_name || '?').split(' ').map(function(w){return w[0];}).join('').substring(0,2).toUpperCase();
             avatarEl.innerHTML = initials;
@@ -8309,16 +9850,29 @@ window.APP = window.APP || {};
         openModal('appointmentDetailsModal');
 
         var footer = document.getElementById('apptDetailFooter');
+        var outcomeGuidance = document.getElementById('apptOutcomeGuidance');
+        if (outcomeGuidance) {
+          var isScheduled = a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress';
+          outcomeGuidance.style.display = isScheduled ? 'block' : 'none';
+          outcomeGuidance.textContent = isScheduled
+            ? (a.can_mark_outcome
+              ? 'DCVS staff records the outcome after the final scheduled date and time: mark Completed if the appointment took place, or No-show if the resident did not attend.'
+              : 'DCVS staff may mark this appointment Completed or No-show after its final scheduled date and time.')
+            : '';
+        }
         if (footer) {
           var footerHtml = '';
           if (a.status === 'pending') {
             footerHtml += '<button class="sd-btn sd-btn-default" onclick="schedulePendingAppointment(' + a.appointment_id + ')">Schedule</button>';
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="rejectAppointmentFromDrawer(' + a.appointment_id + ')">Reject</button>';
           }
-          if (a.status === 'scheduled' || a.status === 'rescheduled') {
+          if ((a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress') && a.can_mark_outcome) {
             footerHtml += '<button class="sd-btn sd-btn-default" onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Mark as Completed</button>';
+            footerHtml += '<button class="sd-btn sd-btn-outline" onclick="APP.statusChange(' + a.appointment_id + ',\'no_show\')">Mark No-show</button>';
           }
-          footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveAppt(' + a.appointment_id + ', \'' + (a.pet_name || '').replace(/'/g, "\\'") + '\', \'' + (a.full_name || '').replace(/'/g, "\\'") + '\')">Archive</button>';
+          if (['completed', 'no_show', 'cancelled', 'rejected'].indexOf(a.status) !== -1) {
+            footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveAppt(' + a.appointment_id + ', \'' + (a.pet_name || '').replace(/'/g, "\\'") + '\', \'' + (a.full_name || '').replace(/'/g, "\\'") + '\')">Archive</button>';
+          }
           footer.innerHTML = footerHtml;
         }
         if (typeof onReady === 'function') onReady(a);
@@ -8332,7 +9886,7 @@ window.APP = window.APP || {};
   window.editAppointmentFromDrawer = function() {
     var id = window._currentApptId;
     if (!id) return;
-    fetch('staff-get-appointment-request.php?id=' + encodeURIComponent(id))
+    fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (!d || !d.success || !d.data) {
@@ -8358,7 +9912,7 @@ window.APP = window.APP || {};
   };
 
   APP.reschedSingle = function(id) {
-    fetch('staff-get-appointment-request.php?id=' + encodeURIComponent(id))
+    fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
       .then(function(r) { return r.json(); })
       .then(function(d) {
         if (!d.success) { alert('Appointment not found.'); return; }
@@ -8367,8 +9921,8 @@ window.APP = window.APP || {};
         document.getElementById('rescheduleApptRef').textContent = a.reference_id || ('#APT-' + a.appointment_id);
         document.getElementById('rescheduleApptResident').textContent = a.full_name || '-';
         document.getElementById('rescheduleApptPet').textContent = a.pet_name || '-';
-        document.getElementById('rescheduleApptDate').value = a.preferred_date || '';
-        document.getElementById('rescheduleApptTime').value = (a.preferred_time || '').slice(0, 5);
+        document.getElementById('rescheduleApptDate').value = a.scheduled_date || a.preferred_date || '';
+        document.getElementById('rescheduleApptTime').value = (a.scheduled_time || a.preferred_time || '').slice(0, 5);
         openModal('rescheduleAppointmentModal');
       })
       .catch(function() { alert('Error loading appointment.'); });
@@ -8416,10 +9970,10 @@ function submitStaffReschedule(e) {
   btn.disabled = true;
   btn.textContent = 'Rescheduling...';
   msg.style.display = 'none';
-  fetch('update-appointment-status.php', {
+  fetch(window.dcvsStaffUrl('update-appointment-status.php'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'action=reschedule&ids=' + encodeURIComponent(id) + '&preferred_date=' + encodeURIComponent(date) + '&preferred_time=' + encodeURIComponent(time)
+    body: 'action=reschedule&ids=' + encodeURIComponent(id) + '&scheduled_date=' + encodeURIComponent(date) + '&scheduled_time=' + encodeURIComponent(time)
   })
   .then(function(r) { return r.json(); })
   .then(function(data) {
@@ -8460,7 +10014,7 @@ function archiveAppt(id, pet, resident) {
     openModal('archiveApptModal');
     return;
   }
-  fetch('staff-get-appointment-request.php?id=' + encodeURIComponent(id))
+  fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
     .then(function (r) { return r.json(); })
     .then(function (d) {
       if (d && d.success && d.data) fill(d.data.pet_name, d.data.full_name);
@@ -8477,7 +10031,7 @@ function executeArchiveAppt() {
   var fd = new FormData();
   fd.append('action', 'archive_appointment');
   fd.append('appointment_id', id);
-  fetch('client-database-handler.php', { method: 'POST', body: fd })
+  fetch(window.dcvsStaffUrl('client-database-handler.php'), { method: 'POST', body: fd })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (data.success) {
@@ -8502,17 +10056,141 @@ function executeArchiveAppt() {
 
 <?php include __DIR__ . '/../../includes/portal-toast.php'; ?>
 <script>
+window.applyStaffRealtimeReport = function(source) {
+  var id = Number(source.report_id);
+  if (!id) return;
+  var typeLabels = { stray:'Stray Animal', rabies:'Rabies', injured:'Injured Animal', dead:'Dead Animal', rescue:'Rescue' };
+  var rawStatus = String(source.status || 'pending').toLowerCase();
+  var allStatus = rawStatus === 'resolved' ? 'resolved' : (rawStatus === 'confirmed' || rawStatus === 'scheduled' ? 'active' : 'pending');
+  var typeLabel = typeLabels[String(source.report_type || '').toLowerCase()] || String(source.report_type || 'Report');
+  var created = source.created_at || '';
+  var confirmed = source.case_confirmed_at || source.confirmed_at || '';
+  var scheduled = source.scheduled_at || '';
+  var resolved = source.resolved_at || '';
+  var pendingItems = window.PENDING_ITEMS || [];
+  var activeItems = window.ACTIVE_ITEMS || [];
+  var barangayItems = window.BARANGAY_RESPONSE_ITEMS || [];
+  var resolvedItems = window.RESOLVED_ITEMS || [];
+  var existing = (window.RPT_ITEMS || []).find(function(item) { return Number(item.id) === id; }) ||
+    pendingItems.find(function(item) { return Number(item.id) === id; }) ||
+    activeItems.find(function(item) { return Number(item.id) === id; }) ||
+    barangayItems.find(function(item) { return Number(item.id) === id; }) ||
+    resolvedItems.find(function(item) { return Number(item.id) === id; });
+  var responseState = Object.prototype.hasOwnProperty.call(source, 'response_state')
+    ? String(source.response_state || '')
+    : String(existing && existing.responseState || '');
+  var statusLabel;
+  if (['barangay_response_approved', 'barangay_responding', 'animal_secured', 'returned_to_barangay'].indexOf(responseState) !== -1) {
+    statusLabel = window.dcvsStaffBarangayCaseStatusLabel({ responseState: responseState });
+  } else if (responseState === 'escalated_to_dcvs') statusLabel = 'Escalated to DCVS';
+  else if (rawStatus === 'rejected') statusLabel = 'Closed';
+  else if (rawStatus === 'validated') statusLabel = 'Pending Barangay Review';
+  else if (rawStatus === 'pending') statusLabel = 'Pending Barangay Review';
+  else if (allStatus === 'active') statusLabel = 'In Progress';
+  else statusLabel = allStatus.charAt(0).toUpperCase() + allStatus.slice(1);
+  var base = Object.assign({}, existing || {}, {
+    id:id,
+    ref:source.reference_id || ('#RPT-' + String(id).padStart(4, '0')),
+    type:String(source.report_type || '').toLowerCase(),
+    typeLabel:typeLabel,
+    typeShort:typeLabel.split(' ')[0],
+    desc:source.description || (existing && existing.desc) || '',
+    location:source.location_address || (existing && existing.location) || '-',
+    brgy:source.barangay_name || (existing && existing.brgy) || '',
+    reporter:source.reporter_name || (existing && existing.reporter) || 'Resident',
+    phone:source.reporter_phone || (existing && existing.phone) || '',
+    email:source.reporter_email || (existing && existing.email) || '',
+    avatar:source.avatar_url || (existing && existing.avatar) || '',
+    date:created ? new Date(String(created).replace(' ', 'T')).toLocaleDateString('en-US', { year:'numeric', month:'short', day:'numeric' }) : (existing && existing.date) || '',
+    createdAt:created || (existing && existing.createdAt) || '',
+    ts:created ? new Date(String(created).replace(' ', 'T')).getTime() : (existing && existing.ts) || Date.now(),
+    urgency:String(source.urgency_level || (existing && existing.urgency) || 'medium').replace(/^./, function(c) { return c.toUpperCase(); }),
+    status:allStatus,
+    statusRaw:rawStatus,
+    statusLabel:statusLabel,
+    responseState:responseState,
+    caseId:source.case_id ? Number(source.case_id) : (existing && existing.caseId) || null,
+    caseStatus:Object.prototype.hasOwnProperty.call(source, 'case_status')
+      ? String(source.case_status || '')
+      : String(existing && existing.caseStatus || ''),
+    confirmed:confirmed ? new Date(String(confirmed).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.confirmed) || '',
+    validated:source.validated_at ? new Date(String(source.validated_at).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.validated) || '',
+    scheduled:scheduled ? new Date(String(scheduled).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.scheduled) || '',
+    resolved:resolved ? new Date(String(resolved).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : (existing && existing.resolved) || ''
+  });
+  if (window.rptAddItem) window.rptAddItem(base);
+  if (window.dcvsStaffCaseBelongsInBarangayQueue(base)) {
+    if (window.penRemoveItem) window.penRemoveItem(id);
+    if (window.actRemoveItem) window.actRemoveItem(id);
+    if (window.resRemoveItem) window.resRemoveItem(id);
+    base.status = 'active';
+    base.statusLabel = window.dcvsStaffBarangayCaseStatusLabel(base);
+    if (window.brgAddItem) window.brgAddItem(base);
+  } else if (rawStatus === 'pending' || rawStatus === 'validated') {
+    if (window.actRemoveItem) window.actRemoveItem(id);
+    if (window.brgRemoveItem) window.brgRemoveItem(id);
+    if (window.resRemoveItem) window.resRemoveItem(id);
+    if (window.penAddItem) window.penAddItem(Object.assign({}, base, {
+      status:'pending',
+      statusLabel:rawStatus === 'validated' ? 'Pending DCVS Review' : 'Pending Barangay Review',
+      caseId:null,
+      caseStatus:'',
+      responseState:responseState
+    }));
+  } else if (allStatus === 'active') {
+    if (window.penRemoveItem) window.penRemoveItem(id);
+    if (window.brgRemoveItem) window.brgRemoveItem(id);
+    if (window.resRemoveItem) window.resRemoveItem(id);
+    base.status = 'active';
+    base.statusLabel = window.dcvsStaffActiveCaseStatusLabel(base);
+    if (window.dcvsStaffCaseBelongsInActiveCases(base)) {
+      if (window.actAddItem) window.actAddItem(base);
+    } else if (window.actRemoveItem) {
+      window.actRemoveItem(id);
+    }
+  } else if (allStatus === 'resolved') {
+    if (window.penRemoveItem) window.penRemoveItem(id);
+    if (window.actRemoveItem) window.actRemoveItem(id);
+    if (window.brgRemoveItem) window.brgRemoveItem(id);
+    if (window.resAddItem) window.resAddItem(Object.assign({}, base, { status:'resolved', statusLabel:'Resolved', caseStatus:'resolved' }));
+  } else if (rawStatus === 'rejected') {
+    if (window.penRemoveItem) window.penRemoveItem(id);
+    if (window.actRemoveItem) window.actRemoveItem(id);
+    if (window.brgRemoveItem) window.brgRemoveItem(id);
+    if (window.resRemoveItem) window.resRemoveItem(id);
+  }
+
+  var monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+  var yearStart = new Date(new Date().getFullYear(), 0, 1).getTime();
+  var highCount = function(items) { return items.filter(function(item) { return /high|critical/i.test(item.urgency || ''); }).length; };
+  var pendingWeek = pendingItems.filter(function(item) { return Number(item.vts || 0) >= Date.now() - 7 * 86400000; }).length;
+  var activeScheduled = activeItems.filter(function(item) { return !!item.scheduled; }).length;
+  var activeOverdue = activeItems.filter(function(item) { return item.scheduled && new Date(item.scheduled).getTime() < Date.now(); }).length;
+  var kpiValues = {
+    'reports-pending':[pendingItems.length, highCount(pendingItems), pendingWeek, pendingItems.length],
+    'reports-active':[activeItems.length, highCount(activeItems), activeScheduled, activeOverdue],
+    'reports-resolved':[resolvedItems.length,
+      resolvedItems.filter(function(item) { return Number(item.ts || 0) >= monthStart; }).length,
+      resolvedItems.filter(function(item) { return Number(item.ts || 0) >= yearStart; }).length,
+      highCount(resolvedItems)]
+  };
+  Object.keys(kpiValues).forEach(function(sectionId) {
+    document.querySelectorAll('#' + sectionId + ' .kpis .kpi-value').forEach(function(node, index) {
+      if (typeof kpiValues[sectionId][index] !== 'undefined') node.textContent = kpiValues[sectionId][index];
+    });
+  });
+};
 document.addEventListener('dcvs:realtime', function(event) {
   var data = event.detail || {};
   if (Array.isArray(data.appointments) && window.apptUpsertRealtimeRow) {
     data.appointments.forEach(function(appointment) { window.apptUpsertRealtimeRow(appointment); });
   }
   if (Array.isArray(data.reports)) {
-    data.reports.forEach(function(report) { applyStaffRealtimeReport(report); });
+    data.reports.forEach(function(report) { window.applyStaffRealtimeReport(report); });
   }
 });
 </script>
-<script src="includes/realtime.js"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/includes/realtime.js', ENT_QUOTES, 'UTF-8'); ?>?v=20261010-2"></script>
 <?php if ($staffWaitlistBooking): ?>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -8536,5 +10214,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <?php endif; ?>
+<?php require_once __DIR__ . '/../../includes/reports/photo-evidence-dialog.php'; ?>
 </body>
 </html>

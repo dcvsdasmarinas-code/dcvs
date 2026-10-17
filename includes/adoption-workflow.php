@@ -1,7 +1,7 @@
 <?php
 
 const ADOPTION_AGREEMENT_VERSION = 'dcvs-adoption-v1';
-const ADOPTION_RESERVATION_DAYS = 7;
+const ADOPTION_RESERVATION_DAYS = 3;
 const ADOPTION_DOCUMENT_MAX_BYTES = 10485760;
 
 class AdoptionWorkflowException extends RuntimeException
@@ -183,10 +183,12 @@ function adoptionExpireListingReservations($conn, $listingId)
 
     $stmt = adoptionRequireStatement($conn->prepare(
         "UPDATE adoption_applications
-         SET status = 'expired'
-         WHERE pet_listing_id = ? AND status = 'approved' AND resulting_pet_id IS NULL
-           AND approved_pickup_at IS NOT NULL
-           AND approved_pickup_at <= DATE_SUB(NOW(), INTERVAL 3 DAY)"
+         SET status = 'declined', decline_reason = 'expired'
+         WHERE pet_listing_id = ? AND resulting_pet_id IS NULL
+           AND ((status = 'reserved' AND response_deadline IS NOT NULL AND response_deadline <= NOW())
+             OR (status = 'confirmed' AND pickup_deadline IS NOT NULL AND pickup_deadline <= NOW())
+             OR (status = 'approved' AND approved_pickup_at IS NOT NULL
+                 AND approved_pickup_at <= DATE_SUB(NOW(), INTERVAL 3 DAY)))"
     ));
     $stmt->bind_param('i', $listingId);
     $stmt->execute();
@@ -195,7 +197,7 @@ function adoptionExpireListingReservations($conn, $listingId)
     $stmt = adoptionRequireStatement($conn->prepare(
         "SELECT COUNT(*) FROM adoption_applications
          WHERE pet_listing_id = ?
-           AND (status IN ('pending','under_review','needs_info')
+           AND (status IN ('pending','under_review','needs_info','reserved','confirmed')
                 OR (status = 'approved' AND resulting_pet_id IS NULL))"
     ));
     $stmt->bind_param('i', $listingId);
@@ -214,36 +216,46 @@ function adoptionExpireListingReservations($conn, $listingId)
     }
 }
 
+function expireAdoptionReservations($db)
+{
+    $db->begin_transaction();
+    try {
+        $updates = [
+            "UPDATE adoption_applications
+             SET status = 'expired', info_deadline = NULL
+             WHERE status = 'needs_info' AND info_deadline IS NOT NULL AND info_deadline <= NOW()",
+            "UPDATE adoption_applications
+             SET status = 'declined', decline_reason = 'expired'
+             WHERE resulting_pet_id IS NULL
+               AND ((status = 'reserved' AND response_deadline IS NOT NULL AND response_deadline <= NOW())
+                 OR (status = 'confirmed' AND pickup_deadline IS NOT NULL AND pickup_deadline <= NOW())
+                 OR (status = 'approved' AND approved_pickup_at IS NOT NULL
+                     AND approved_pickup_at <= DATE_SUB(NOW(), INTERVAL 3 DAY)))",
+            "UPDATE pet_listings pl
+             SET status = 'available', updated_at = NOW()
+             WHERE pl.status = 'reserved'
+               AND NOT EXISTS (
+                   SELECT 1 FROM adoption_applications aa
+                   WHERE aa.pet_listing_id = pl.listing_id
+                     AND (aa.status IN ('pending','under_review','needs_info','reserved','confirmed')
+                       OR (aa.status = 'approved' AND aa.resulting_pet_id IS NULL))
+               )",
+        ];
+        foreach ($updates as $sql) {
+            if (!$db->query($sql)) {
+                throw new RuntimeException('Expired adoption reservations could not be processed: ' . $db->error);
+            }
+        }
+        adoptionCommit($db);
+    } catch (Throwable $exception) {
+        $db->rollback();
+        throw $exception;
+    }
+}
+
 function adoptionReleaseExpiredReservations($conn)
 {
-    $result = $conn->query(
-        "SELECT DISTINCT pet_listing_id FROM adoption_applications
-         WHERE ((status = 'needs_info' AND info_deadline IS NOT NULL AND info_deadline <= NOW())
-             OR (status = 'approved' AND resulting_pet_id IS NULL AND approved_pickup_at IS NOT NULL
-                 AND approved_pickup_at <= DATE_SUB(NOW(), INTERVAL 3 DAY)))
-           AND pet_listing_id IS NOT NULL"
-    );
-    if (!$result) {
-        throw new RuntimeException('Expired adoption reservations could not be loaded.');
-    }
-
-    $listingIds = [];
-    while ($row = $result->fetch_assoc()) {
-        $listingIds[] = (int)$row['pet_listing_id'];
-    }
-    $result->free();
-
-    foreach ($listingIds as $listingId) {
-        $conn->begin_transaction();
-        try {
-            adoptionLockPetListing($conn, $listingId);
-            adoptionExpireListingReservations($conn, $listingId);
-            adoptionCommit($conn);
-        } catch (Throwable $exception) {
-            $conn->rollback();
-            throw $exception;
-        }
-    }
+    expireAdoptionReservations($conn);
 }
 
 function adoptionHasActiveApplicationForListing($conn, $listingId)
@@ -251,7 +263,7 @@ function adoptionHasActiveApplicationForListing($conn, $listingId)
     $stmt = adoptionRequireStatement($conn->prepare(
         "SELECT COUNT(*) FROM adoption_applications
          WHERE pet_listing_id = ?
-           AND (status IN ('pending','under_review','needs_info')
+           AND (status IN ('pending','under_review','needs_info','reserved','confirmed')
                 OR (status = 'approved' AND resulting_pet_id IS NULL))"
     ));
     $stmt->bind_param('i', $listingId);
@@ -259,6 +271,67 @@ function adoptionHasActiveApplicationForListing($conn, $listingId)
     $hasActive = (int)$stmt->get_result()->fetch_row()[0] > 0;
     $stmt->close();
     return $hasActive;
+}
+
+function adoptionConfirmApplication($conn, $residentId, $applicationId)
+{
+    $lookup = adoptionRequireStatement($conn->prepare(
+        'SELECT pet_listing_id FROM adoption_applications WHERE application_id = ? AND applicant_id = ?'
+    ));
+    $lookup->bind_param('ii', $applicationId, $residentId);
+    $lookup->execute();
+    $row = $lookup->get_result()->fetch_assoc();
+    $lookup->close();
+    if (!$row || (int)$row['pet_listing_id'] <= 0) {
+        throw new AdoptionWorkflowException('Adoption application not found.');
+    }
+    $listingId = (int)$row['pet_listing_id'];
+
+    $conn->begin_transaction();
+    try {
+        adoptionLockPetListing($conn, $listingId);
+        adoptionExpireListingReservations($conn, $listingId);
+        adoptionLockResidentAfterPet($conn, $residentId);
+        $application = adoptionLockApplication($conn, $applicationId);
+        if (!$application || (int)$application['applicant_id'] !== $residentId
+            || (int)$application['pet_listing_id'] !== $listingId) {
+            throw new AdoptionWorkflowException('Adoption application not found.');
+        }
+        if ($application['status'] !== 'reserved') {
+            if ($application['status'] === 'declined') {
+                adoptionCommit($conn);
+            }
+            throw new AdoptionWorkflowException(
+                $application['status'] === 'declined'
+                    ? 'The response deadline passed and this reservation expired.'
+                    : 'This application is no longer awaiting your confirmation.'
+            );
+        }
+        if (empty($application['response_deadline'])) {
+            throw new AdoptionWorkflowException('This reservation has no response deadline. Please contact DCVS staff.');
+        }
+
+        $stmt = adoptionRequireStatement($conn->prepare(
+            "UPDATE adoption_applications
+             SET status = 'confirmed', confirmed_at = NOW(),
+                 pickup_deadline = DATE_ADD(NOW(), INTERVAL 3 DAY)
+             WHERE application_id = ? AND applicant_id = ? AND status = 'reserved'
+               AND response_deadline > NOW()"
+        ));
+        $stmt->bind_param('ii', $applicationId, $residentId);
+        $stmt->execute();
+        if ($stmt->affected_rows !== 1) {
+            $stmt->close();
+            adoptionExpireListingReservations($conn, $listingId);
+            adoptionCommit($conn);
+            throw new AdoptionWorkflowException('The response deadline passed. This reservation has expired.');
+        }
+        $stmt->close();
+        adoptionCommit($conn);
+    } catch (Throwable $exception) {
+        $conn->rollback();
+        throw $exception;
+    }
 }
 
 function adoptionNotifyStaff($conn, $title, $message, $referenceId, $referenceType = 'adoption_app')
@@ -547,6 +620,10 @@ function adoptionResidentAction($conn, $residentId, $applicationId, $action, $re
             adoptionCommit($conn);
             throw new AdoptionWorkflowException('The seven-day response period expired and the pet reservation was released.');
         }
+        if ($application['status'] === 'declined') {
+            adoptionCommit($conn);
+            throw new AdoptionWorkflowException('The allotted response or pickup time expired and the pet reservation was released.');
+        }
 
         if ($action === 'respond') {
             if ($application['status'] !== 'needs_info' || $response === '') {
@@ -664,9 +741,12 @@ function adoptionVerifyIdentity($conn, $verificationId, $staffId, $decision, $no
 
 function adoptionApproveApplication($conn, $applicationId, $staffId, $pickupAt, $interviewAt = '', $homeVisitAt = '', $homeVisitNotes = '')
 {
-    $pickup = DateTime::createFromFormat('!Y-m-d H:i:s', $pickupAt);
-    if (!$pickup || $pickup->format('Y-m-d H:i:s') !== $pickupAt || $pickup <= new DateTime()) {
-        throw new AdoptionWorkflowException('Choose a future date and time for the resident to visit DCVS.');
+    $pickup = null;
+    if ($pickupAt !== '') {
+        $pickup = DateTime::createFromFormat('!Y-m-d H:i:s', $pickupAt);
+        if (!$pickup || $pickup->format('Y-m-d H:i:s') !== $pickupAt || $pickup <= new DateTime()) {
+            throw new AdoptionWorkflowException('Choose a future date and time for the resident to visit DCVS.');
+        }
     }
     $lookup = adoptionRequireStatement($conn->prepare(
         'SELECT pet_listing_id, applicant_id FROM adoption_applications WHERE application_id = ?'
@@ -705,7 +785,9 @@ function adoptionApproveApplication($conn, $applicationId, $staffId, $pickupAt, 
         $petName = (string)$listing['name'];
         $stmt = adoptionRequireStatement($conn->prepare(
             "UPDATE adoption_applications
-             SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), approved_pickup_at = ?,
+             SET status = 'reserved', reviewed_by = ?, reviewed_at = NOW(),
+                 approved_pickup_at = NULLIF(?, ''), reserved_at = NOW(),
+                 response_deadline = DATE_ADD(NOW(), INTERVAL 3 DAY),
                  finalized_by = NULL, finalized_at = NULL, resulting_pet_id = NULL,
                  interview_at = NULLIF(?, ''), home_visit_at = NULLIF(?, ''), home_visit_notes = ?
              WHERE application_id = ? AND status IN ('pending','under_review')"
@@ -718,9 +800,10 @@ function adoptionApproveApplication($conn, $applicationId, $staffId, $pickupAt, 
         }
         $stmt->close();
 
-        $date = $pickup->format('F j, Y');
-        $time = $pickup->format('g:i A');
-        $message = 'Your request to adopt ' . $petName . ' has been approved by Dasmariñas City Veterinary Services. Please visit the DCVS office on ' . $date . ' at ' . $time . ' to complete the adoption and pick up ' . $petName . '. Please bring your proof of residency for verification.';
+        $message = 'Your request to adopt ' . $petName . ' has been approved by Dasmariñas City Veterinary Services. Confirm within three days using Yes, I\'m In to begin your three-day pickup period.';
+        if ($pickup) {
+            $message .= ' Your scheduled DCVS visit is ' . $pickup->format('F j, Y') . ' at ' . $pickup->format('g:i A') . '.';
+        }
         adoptionNotifyResident($conn, $residentId, 'Adoption Application Approved', $message, $applicationId);
         adoptionCommit($conn);
 
@@ -796,10 +879,22 @@ function adoptionFinalizeApplication($conn, $applicationId, $staffId)
         $application = adoptionLockApplication($conn, $applicationId);
         if (!$listing || !$application || (int)$application['applicant_id'] !== $residentId
             || (int)$application['pet_listing_id'] !== $listingId
-            || $application['status'] !== 'approved'
+            || $application['status'] !== 'confirmed'
             || $listing['status'] !== 'reserved'
-            || empty($application['approved_pickup_at'])) {
-            throw new AdoptionWorkflowException('Only an approved, scheduled application can be finalized as adopted.');
+            || empty($application['pickup_deadline'])) {
+            throw new AdoptionWorkflowException('Only a confirmed reservation can be finalized as adopted.');
+        }
+        $deadlineStmt = adoptionRequireStatement($conn->prepare(
+            'SELECT pickup_deadline > NOW() AS deadline_open FROM adoption_applications WHERE application_id = ?'
+        ));
+        $deadlineStmt->bind_param('i', $applicationId);
+        $deadlineStmt->execute();
+        $deadlineOpen = (int)$deadlineStmt->get_result()->fetch_assoc()['deadline_open'] === 1;
+        $deadlineStmt->close();
+        if (!$deadlineOpen) {
+            adoptionExpireListingReservations($conn, $listingId);
+            adoptionCommit($conn);
+            throw new AdoptionWorkflowException('The pickup deadline passed. This reservation has expired and the pet is available again.');
         }
         adoptionResidentEligibilityFromRow($resident);
 
@@ -852,12 +947,17 @@ function adoptionFinalizeApplication($conn, $applicationId, $staffId)
         $stmt = adoptionRequireStatement($conn->prepare(
             "UPDATE adoption_applications
              SET status = 'adopted', resulting_pet_id = ?, finalized_by = ?, finalized_at = NOW()
-             WHERE application_id = ? AND status = 'approved'"
+             WHERE application_id = ? AND status = 'confirmed' AND pickup_deadline > NOW()"
         ));
         $stmt->bind_param('iii', $petId, $staffId, $applicationId);
         $stmt->execute();
         if ($stmt->affected_rows !== 1) {
             $stmt->close();
+            $conn->rollback();
+            $conn->begin_transaction();
+            adoptionLockPetListing($conn, $listingId);
+            adoptionExpireListingReservations($conn, $listingId);
+            adoptionCommit($conn);
             throw new AdoptionWorkflowException('The application changed before finalization.');
         }
         $stmt->close();

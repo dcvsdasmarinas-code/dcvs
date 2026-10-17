@@ -14,6 +14,8 @@ session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../mailer.php';
 require_once __DIR__ . '/../../sms-sender.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -394,8 +396,8 @@ if ($barangayResult) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     /* ── Semantic color tokens (light only) ── */
     :root {
@@ -520,8 +522,8 @@ if ($barangayResult) {
     .log-empty i { font-size: 2.4rem; display: block; margin-bottom: 0.6rem; color: #cbd5e1; }
 
     /* ── Compose dialog (shadcn style) ── */
-    #composeDialog { z-index: 10000; background: rgba(0,0,0,0.5); }
-    #composeDialog .comm-compose-dialog-content { position: relative; width: 100%; max-width: 560px; max-height: 90vh; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation: modalIn 0.2s ease; font-family:'Inter','Segoe UI',sans-serif; }
+    #composeDialog { z-index: 10000; padding: 16px; background: rgba(0,0,0,0.5); }
+    #composeDialog .comm-compose-dialog-content { position: relative; box-sizing: border-box; width: min(520px,100%); max-width: 520px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 20px 25px rgba(15,23,32,.18); animation: none; font-family:'Inter','Segoe UI',sans-serif; }
     .comm-compose-header { display: flex; flex-direction: column; gap: 6px; padding-right: 32px; }
     .comm-compose-header h2 { margin: 0; color: #18181b; font-size: 18px; font-weight: 600; line-height: 1; letter-spacing: -0.025em; }
     .comm-compose-header p { margin: 0; color: #71717a; font-size: 14px; font-weight: 400; line-height: 1.5; }
@@ -562,17 +564,28 @@ if ($barangayResult) {
       .comm-header > div { width: 100%; }
       .btn-compose { width: 100%; justify-content: center; }
       .comm-toolbar { flex-direction: column; align-items: stretch; }
+      .comm-page { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+      .comm-toolbar .comm-toolbar-actions { width: 100%; margin-left: 0; }
+      .comm-toolbar .comm-toolbar-actions .btn-compose { width: 100%; }
       .comm-count { margin-left: 0; align-self: flex-start; }
       .comm-toolbar .comm-search,
       .comm-toolbar .comm-filter { flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; }
       .comm-toolbar .comm-filter select { width: 100%; max-width: none; box-sizing: border-box; }
+      .comm-card { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+      .comm-card .sd-data-table-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; contain: paint; }
       .comm-card .sd-pagination { flex-direction: column; gap: 0.5rem; align-items: center; }
       .comm-card .sd-data-table { min-width: 1000px; }
     }
 
     @media (max-width: 640px) {
       .comm-card .sd-data-table-wrap { min-height: 24rem; }
-      #composeDialog .comm-compose-dialog-content { padding: 20px; }
+      #composeDialog { padding: 0 !important; align-items: stretch !important; justify-content: stretch !important; }
+      #composeDialog .comm-compose-dialog-content { width: 100%; max-width: none; height: 100vh; height: 100dvh; max-height: none; padding: 20px; border: 0; border-radius: 0; box-shadow: none; }
+      .toast-container { left: 1rem; right: 1rem; }
+      .toast { min-width: 0; max-width: 100%; }
+    }
+    @media (min-width: 641px) and (max-width: 768px) {
+      #composeDialog { padding: 16px !important; align-items: center !important; justify-content: center !important; }
     }
 
     /* ── Dialog font + button style (shadcn) — Communication ── */

@@ -204,7 +204,7 @@ function dcvsBlockedTimes($conn, $date, $weeklyTemplate = null, $overrides = nul
 
 /** Statuses that hold a slot: a resident appointment occupying that date+time. */
 function dcvsHeldStatuses() {
-    return ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress'];
+    return ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress', 'action_needed'];
 }
 
 /** Appointment statuses that still reserve capacity for their scheduled date/time. */
@@ -215,7 +215,7 @@ function dcvsCapacityStatuses() {
 /** Count appointments consuming daily capacity, optionally excluding one appointment. */
 function dcvsAppointmentDayCount($conn, $date, $excludeId = 0, $urgency = 'routine') {
     $statuses = implode("','", dcvsCapacityStatuses());
-    $sql = "SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND status IN ('$statuses') AND archived_at IS NULL AND urgency_level = ?";
+    $sql = "SELECT COUNT(*) FROM appointments WHERE COALESCE(scheduled_date, preferred_date) = ? AND status IN ('$statuses') AND archived_at IS NULL AND urgency_level = ?";
     if ($excludeId) $sql .= " AND appointment_id != ?";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
@@ -238,7 +238,7 @@ function dcvsAppointmentDayCount($conn, $date, $excludeId = 0, $urgency = 'routi
 function dcvsAppointmentSlotCount($conn, $date, $time, $excludeId = 0, $urgency = 'routine') {
     $time = dcvsTimeKey($time) . ':00';
     $statuses = implode("','", dcvsCapacityStatuses());
-    $sql = "SELECT COUNT(*) FROM appointments WHERE preferred_date = ? AND preferred_time = ? AND status IN ('$statuses') AND archived_at IS NULL";
+    $sql = "SELECT COUNT(*) FROM appointments WHERE COALESCE(scheduled_date, preferred_date) = ? AND COALESCE(scheduled_time, preferred_time) = ? AND status IN ('$statuses') AND archived_at IS NULL";
     if ($urgency !== 'all') $sql .= " AND urgency_level = ?";
     if ($excludeId) $sql .= " AND appointment_id != ?";
     $stmt = $conn->prepare($sql);
@@ -278,8 +278,8 @@ function dcvsSlotHeld($conn, $date, $time, $excludeId = 0, $urgency = 'routine')
 /** List of 'HH:MM' times on a date that are held by an active appointment. */
 function dcvsHeldTimes($conn, $date) {
     $statuses = implode("','", dcvsHeldStatuses());
-    $stmt = $conn->prepare("SELECT preferred_time FROM appointments
-                       WHERE preferred_date = ? AND status IN ('$statuses') AND archived_at IS NULL AND urgency_level = 'routine'");
+    $stmt = $conn->prepare("SELECT COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
+                       WHERE COALESCE(scheduled_date, preferred_date) = ? AND status IN ('$statuses') AND archived_at IS NULL AND urgency_level = 'routine'");
     if (!$stmt) return [];
     $stmt->bind_param('s', $date);
     if (!$stmt->execute()) {
@@ -291,7 +291,7 @@ function dcvsHeldTimes($conn, $date) {
     $held = [];
     $slotCounts = [];
     while ($row = $r->fetch_assoc()) {
-        $time = substr($row['preferred_time'], 0, 5);
+        $time = substr($row['slot_time'], 0, 5);
         $slotCounts[$time] = ($slotCounts[$time] ?? 0) + 1;
     }
     $stmt->close();

@@ -1,0 +1,221 @@
+:root {
+  --site-primary-green: #045e1f;
+}
+
+.site-header {
+  top: 0 !important;
+  right: 0 !important;
+  left: 0 !important;
+  z-index: 2147483000 !important;
+  width: 100% !important;
+  padding: 0 !important;
+}
+
+.site-header .navbar {
+  display: flex !important;
+  align-items: center !important;
+  gap: 2rem !important;
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 68px !important;
+  margin: 0 !important;
+  padding: 0 2rem !important;
+  box-sizing: border-box !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--site-primary-green) !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.site-header .navbar.nav-scrolled {
+  border: 0 !important;
+  background: var(--site-primary-green) !important;
+  box-shadow: none !important;
+}
+
+.site-header .navbar-brand {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.8rem;
+  color: #fff !important;
+  text-decoration: none !important;
+}
+
+.site-header .navbar-brand .brand-logo {
+  display: block;
+  width: auto !important;
+  height: 50px !important;
+  object-fit: contain;
+}
+
+.site-header .navbar-brand-name {
+  color: #fff;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.site-header .nav-links {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-end !important;
+  gap: clamp(0.4rem, 1.5vw, 1.5rem);
+}
+
+.site-header .nav-links a,
+.site-header .nav-links .dropdown-toggle {
+  color: #f5f7f6 !important;
+  background: transparent !important;
+  border-radius: 0 !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.86rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.035em !important;
+  text-transform: uppercase !important;
+}
+
+.site-header .nav-links a:hover,
+.site-header .nav-links a:focus-visible,
+.site-header .nav-links a.active,
+.site-header .nav-links .dropdown-toggle:hover,
+.site-header .nav-links .dropdown-toggle.active {
+  color: #fff !important;
+  background: transparent !important;
+  text-decoration: underline !important;
+  text-underline-offset: 0.35rem;
+}
+
+.site-header .nav-links .dropdown-menu {
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 0 !important;
+  background: var(--site-primary-green) !important;
+}
+
+.site-header .nav-links .dropdown-menu a {
+  color: #f5f7f6 !important;
+  text-transform: none !important;
+  letter-spacing: normal !important;
+}
+
+.site-header .nav-links .dropdown-menu a:hover,
+.site-header .nav-links .dropdown-menu a:focus-visible,
+.site-header .nav-links .dropdown-menu a.active {
+  color: #fff !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  text-decoration: none !important;
+}
+
+.site-header .nav-login-btn,
+.site-header .nav-contact-btn {
+  flex-shrink: 0;
+  padding: 0.55rem 1.1rem !important;
+  border: 1px solid rgba(255, 255, 255, 0.65) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: #fff !important;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif !important;
+  font-size: 0.78rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+
+.site-header .nav-login-btn:hover,
+.site-header .nav-login-btn:focus-visible,
+.site-header .nav-contact-btn:hover,
+.site-header .nav-contact-btn:focus-visible {
+  background: #fff !important;
+  color: var(--site-primary-green) !important;
+}
+
+.site-header .nav-toggle span {
+  background: #fff !important;
+}
+
+.public-ann-header h1,
+.gm-page .gm-hero h2,
+.about-page h1,
+.about-page h2,
+.about-cta h2,
+.faq-page .faq-hero h1,
+.faq-page .faq-section h2,
+.faq-page .contact-cta > p > strong,
+.contact-page h1,
+.adoption-hero-section h1,
+.adoption-hearts-section h1,
+.how-to-adopt h2,
+.adopt-section h2,
+.reasons-to-adopt-section .reasons-title,
+.gallery-section h2,
+.adoption-two-page .hero-grid h1,
+.adoption-two-page .about-grid h1,
+.hero .main-heading,
+.hero .secondary-heading,
+.pet-list-section .pet-list-heading {
+  color: var(--site-primary-green) !important;
+}
+
+@media (max-width: 1100px) {
+  .site-header .navbar {
+    gap: 0.75rem !important;
+    padding: 0 1.25rem !important;
+  }
+
+  .site-header .navbar-brand-name {
+    font-size: 0.74rem;
+  }
+
+  .site-header .nav-links {
+    inset: 68px 0 auto 0 !important;
+    align-items: stretch !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: var(--site-primary-green) !important;
+    box-shadow: 0 16px 24px rgba(0, 0, 0, 0.18) !important;
+  }
+
+  .site-header .nav-links a,
+  .site-header .nav-links .dropdown-toggle {
+    width: 100%;
+    color: #f5f7f6 !important;
+    text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .site-header .navbar {
+    gap: 0.4rem !important;
+    padding: 0 0.75rem !important;
+  }
+
+  .site-header .navbar-brand {
+    min-width: 0;
+    gap: 0.45rem;
+  }
+
+  .site-header .navbar-brand .brand-logo {
+    height: 38px !important;
+  }
+
+  .site-header .navbar-brand-name {
+    max-width: 120px;
+    font-size: 0.64rem;
+    letter-spacing: 0.035em;
+    white-space: normal;
+  }
+
+  .site-header .nav-login-btn,
+  .site-header .nav-contact-btn {
+    padding: 0.4rem 0.45rem !important;
+    font-size: 0.66rem !important;
+  }
+}

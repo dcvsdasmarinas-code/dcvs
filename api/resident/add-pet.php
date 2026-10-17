@@ -30,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($applicationId > 0) {
             $approvedStmt = $conn->prepare(
                 "SELECT resulting_pet_id FROM adoption_applications
-                 WHERE application_id = ? AND applicant_id = ? AND status = 'approved'
+                 WHERE application_id = ? AND applicant_id = ? AND status = 'adopted'
                    AND resulting_pet_id IS NOT NULL"
             );
             $approvedStmt->bind_param('ii', $applicationId, $_SESSION['user_id']);

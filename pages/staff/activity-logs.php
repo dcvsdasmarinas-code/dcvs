@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -250,8 +252,8 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     .activity-cms { background: #ffffff; }
@@ -302,7 +304,26 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
     .table-card .sd-pagination-link.sd-pagination-next { padding-right: 10px; }
 
     @media (max-width: 900px) {
-      .al-wrap { padding: 1rem 0.75rem 2rem; }
+      .al-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: 1rem 0.75rem 2rem; }
+      .al-filters { min-width: 0; }
+      .appt-search-wrap { flex: 1 1 100%; width: 100%; min-width: 0; }
+      .appt-search-input { box-sizing: border-box; width: 100%; }
+      .activity-cms .dt-pagination { justify-content: center; padding: 12px 8px; }
+      .activity-cms .dt-pagination-right { justify-content: center; gap: 12px; }
+    }
+
+    @media (max-width: 768px) {
+      .al-filters > .appt-status-select { box-sizing: border-box; flex: 1 1 calc(50% - 4px); width: calc(50% - 4px); min-width: 0; }
+      .act-date-filter-wrap { flex: 0 0 36px; }
+      .al-filters #actClearBtn { flex: 1 1 calc(50% - 4px); justify-content: center; min-width: 0; }
+      .table-card { min-width: 0; }
+      .table-card .sd-data-table-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 0; flex: 0 0 auto; -webkit-overflow-scrolling: touch; }
+      .table-card .activities-table { width: max-content; min-width: 980px; }
+    }
+
+    @media (max-width: 480px) {
+      .activity-cms .dt-pagination-right { gap: 8px; }
+      .activity-cms .dt-rows { flex-basis: 100%; justify-content: center; }
     }
   </style>
 </head>
@@ -345,7 +366,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
           <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
-        <div style="position:relative;display:inline-block;">
+        <div class="act-date-filter-wrap" style="position:relative;display:inline-block;">
           <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -374,7 +395,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
       <div class="table-card" id="recentActivitiesCard">
         <div class="sd-data-table-wrap">
-        <table class="sd-data-table activities-table">
+        <table class="sd-data-table activities-table no-responsive">
           <thead>
             <tr class="sd-tr">
               <th class="sd-th" style="width:45px;">No.</th>

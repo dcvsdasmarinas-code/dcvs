@@ -813,8 +813,44 @@ body { background:#ffffff; }
 #viewProfileModal .sd-profile-name{font-family:'Inter','Segoe UI',sans-serif !important;font-size:18px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#18181b;}
 #viewProfileModal .sd-profile-sub{font-family:'Inter',sans-serif !important;font-size:13px;font-weight:500;line-height:1.6;letter-spacing:normal;}
 #viewProfileModal #vpStatus .appt-status-pill{font-family:'Inter',sans-serif !important;font-size:13px;font-weight:500;line-height:1.6;letter-spacing:normal;}
-#viewProfileModal #vpPetsList .vp-pet-name{font-family:'Inter','Segoe UI',sans-serif !important;font-size:15px;font-weight:400;line-height:1.6;letter-spacing:normal;color:#18181b;}
-#viewProfileModal #vpPetsList .vp-pet-details{font-family:'Inter','Segoe UI',sans-serif !important;font-size:13px;font-weight:600;line-height:1.6;letter-spacing:normal;color:#71717a;}
+#viewProfileModal .resident-profile-dialog{width:min(600px,calc(100vw - 32px));max-width:600px;max-height:90vh;padding:0;gap:0;overflow:hidden;}
+#viewProfileModal .resident-profile-dialog .sd-dialog-header{position:relative;flex:0 0 auto;padding:18px 24px;border-bottom:1px solid #e4e4e7;}
+#viewProfileModal .resident-profile-dialog .sd-dialog-title{line-height:1.35;}
+#viewProfileModal .resident-profile-dialog .sd-dialog-close{top:18px;right:20px;}
+#viewProfileModal .resident-profile-content{display:flex;flex:1;min-height:0;overflow:hidden;}
+#viewProfileModal .resident-profile-body{width:100%;min-height:0;padding:0 24px;overflow-y:auto;}
+#viewProfileModal .resident-profile-summary{display:flex;align-items:center;gap:16px;padding:22px 0;border-bottom:1px solid #e4e4e7;}
+#viewProfileModal .resident-profile-avatar{width:72px;height:72px;flex:0 0 auto;overflow:hidden;border-radius:50%;background:#f4f4f5;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;}
+#viewProfileModal .resident-profile-avatar img{width:100%;height:100%;object-fit:cover;}
+#viewProfileModal .resident-profile-name{margin:0;color:#18181b;font-size:18px;font-weight:600;line-height:1.6;letter-spacing:normal;}
+#viewProfileModal .resident-profile-badges{display:flex;align-items:center;gap:8px;margin-top:4px;}
+#viewProfileModal .resident-profile-badge{display:inline-flex;align-items:center;min-height:22px;padding:2px 10px;border:1px solid #e4e4e7;border-radius:4px;background:#f4f4f5;color:#52525b;font-size:13px;font-weight:500;line-height:1.6;}
+#viewProfileModal .resident-profile-badge.active{border-color:#078a34;background:#078a34;color:#fff;}
+#viewProfileModal .resident-profile-badge.inactive{border-color:#facc58;background:#fff4cc;color:#92400e;}
+#viewProfileModal .resident-profile-registered{margin:6px 0 0;color:#71717a;font-size:13px;font-weight:500;line-height:1.6;}
+#viewProfileModal .resident-profile-section{padding:18px 0;border-bottom:1px solid #e4e4e7;}
+#viewProfileModal .resident-profile-section:last-child{border-bottom:0;}
+#viewProfileModal .resident-profile-section-title{margin:0 0 12px;color:#18181b;font-size:14px;font-weight:600;line-height:1.6;letter-spacing:0;}
+#viewProfileModal .resident-profile-info-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:28px;row-gap:16px;}
+#viewProfileModal .resident-profile-info-label{color:#71717a;font-size:13px;font-weight:600;line-height:1.6;}
+#viewProfileModal .resident-profile-info-value{color:#18181b;font-size:15px;font-weight:400;line-height:1.6;word-break:break-word;}
+#viewProfileModal .resident-profile-info-item.full-width{grid-column:1/-1;}
+#viewProfileModal .resident-profile-pets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+#viewProfileModal .resident-profile-pet{display:flex;align-items:center;gap:10px;min-width:0;padding:10px 12px;border:1px solid #e4e4e7;border-radius:0;}
+#viewProfileModal .resident-profile-pet-avatar{width:48px;height:48px;flex:0 0 auto;overflow:hidden;border-radius:50%;background:#f4f4f5;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;}
+#viewProfileModal .resident-profile-pet-avatar img{width:100%;height:100%;object-fit:cover;}
+#viewProfileModal .resident-profile-pet-content{min-width:0;}
+#viewProfileModal .resident-profile-pet-name{overflow:hidden;color:#18181b;font-size:15px;font-weight:400;line-height:1.6;text-overflow:ellipsis;white-space:nowrap;}
+#viewProfileModal .resident-profile-pet-details{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px;}
+#viewProfileModal .resident-profile-pet-tag{display:inline-flex;max-width:100%;overflow:hidden;padding:2px 7px;border-radius:5px;background:#f4f4f5;color:#71717a;font-size:13px;font-weight:600;line-height:1.6;text-overflow:ellipsis;white-space:nowrap;}
+#viewProfileModal .resident-profile-empty{padding:8px 0;color:#71717a;font-size:13px;line-height:1.6;}
+#viewProfileModal .resident-profile-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:0 0 auto;padding:14px 24px;border-top:1px solid #e4e4e7;}
+#viewProfileModal .resident-profile-footer-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;}
+#viewProfileModal .resident-profile-footer .sd-btn-danger{background:#dc2626;border-color:#dc2626;color:#fff;}
+#viewProfileModal .resident-profile-footer .sd-btn-danger:hover{background:#b91c1c;border-color:#b91c1c;}
+#viewProfileModal .resident-profile-content[hidden],
+#viewProfileModal .resident-profile-footer[hidden],
+#viewProfileModal .legacy-profile-content[hidden]{display:none!important;}
 .appt-table tbody tr{cursor:pointer;}
 
 @media(max-width:768px){
@@ -822,6 +858,10 @@ body { background:#ffffff; }
   .appt-search-input{min-width:none;width:100%;}
   .appt-status-select{width:100%;}
   .appt-pagination{flex-direction:column;align-items:stretch;text-align:center;}
+  #viewProfileModal .resident-profile-dialog{width:calc(100vw - 24px);max-height:92vh;}
+  #viewProfileModal .resident-profile-pets{grid-template-columns:1fr;}
+  #viewProfileModal .resident-profile-info-grid{column-gap:16px;}
+  #viewProfileModal .resident-profile-footer{padding:12px 16px;}
 }
 </style>
 </head>
@@ -1150,36 +1190,96 @@ body { background:#ffffff; }
         <h2 class="sd-dialog-title">User Profile</h2>
         <p class="sd-dialog-description">View user account details and information.</p>
       </div>
-      <div class="sd-field-group">
-        <div class="sd-profile-head">
-          <div class="sd-avatar-lg" id="vpAvatar"></div>
+      <div class="resident-profile-content" id="residentProfileContent" hidden>
+        <div class="resident-profile-body">
           <div>
-            <div class="sd-profile-name" id="vpName"></div>
-            <div class="sd-profile-sub" id="vpRole"></div>
+            <div class="resident-profile-summary">
+              <div class="resident-profile-avatar" id="residentProfileAvatar"></div>
+              <div>
+                <h3 class="resident-profile-name" id="residentProfileName"></h3>
+                <div class="resident-profile-badges">
+                  <span class="resident-profile-badge">Resident</span>
+                  <span class="resident-profile-badge" id="residentProfileStatus"></span>
+                </div>
+                <p class="resident-profile-registered" id="residentProfileRegistered"></p>
+              </div>
+            </div>
+            <section class="resident-profile-section">
+              <h3 class="resident-profile-section-title">Account</h3>
+              <div class="resident-profile-info-grid">
+                <div class="resident-profile-info-item">
+                  <div class="resident-profile-info-label">Reference ID</div>
+                  <div class="resident-profile-info-value" id="residentProfileReference">—</div>
+                </div>
+                <div class="resident-profile-info-item">
+                  <div class="resident-profile-info-label">Username</div>
+                  <div class="resident-profile-info-value" id="residentProfileUsername">—</div>
+                </div>
+                <div class="resident-profile-info-item">
+                  <div class="resident-profile-info-label">Email</div>
+                  <div class="resident-profile-info-value" id="residentProfileEmail">—</div>
+                </div>
+                <div class="resident-profile-info-item">
+                  <div class="resident-profile-info-label">Phone</div>
+                  <div class="resident-profile-info-value" id="residentProfilePhone">—</div>
+                </div>
+              </div>
+            </section>
+            <section class="resident-profile-section">
+              <h3 class="resident-profile-section-title">Location</h3>
+              <div class="resident-profile-info-grid">
+                <div class="resident-profile-info-item">
+                  <div class="resident-profile-info-label">Barangay</div>
+                  <div class="resident-profile-info-value" id="residentProfileBarangay">—</div>
+                </div>
+                <div class="resident-profile-info-item full-width">
+                  <div class="resident-profile-info-label">Address</div>
+                  <div class="resident-profile-info-value" id="residentProfileAddress">—</div>
+                </div>
+              </div>
+            </section>
+            <section class="resident-profile-section">
+              <h3 class="resident-profile-section-title">Pets <span id="residentProfilePetCount"></span></h3>
+              <div class="resident-profile-pets" id="residentProfilePets"></div>
+              <div class="resident-profile-empty" id="residentProfileNoPets" hidden>No registered pets.</div>
+            </section>
           </div>
         </div>
-        <div class="sd-section">
-          <div class="sd-section-title"><span>01</span> Account Information</div>
-          <div class="sd-info-grid">
-            <div class="sd-info-item"><div class="sd-info-label">Reference ID</div><div class="sd-info-value" id="vpRef">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Username</div><div class="sd-info-value" id="vpUsername">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Email</div><div class="sd-info-value" id="vpEmail">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Phone</div><div class="sd-info-value" id="vpPhone">—</div></div>
-          </div>
+      </div>
+      <div class="resident-profile-footer" id="residentProfileFooter" hidden>
+        <button type="button" class="sd-btn sd-btn-danger" id="residentProfileSuspend" onclick="toggleResidentProfileStatus()">Deactivate user</button>
+        <div class="resident-profile-footer-actions">
+          <button type="button" class="sd-btn sd-btn-secondary" onclick="closeModal('viewProfileModal')">Close</button>
+          <button type="button" class="sd-btn sd-btn-primary" onclick="editResidentFromProfile()">Edit user</button>
         </div>
-        <div class="sd-section">
-          <div class="sd-section-title"><span>02</span> Personal Details</div>
-          <div class="sd-info-grid">
-            <div class="sd-info-item sd-field-full"><div class="sd-info-label">Address</div><div class="sd-info-value" id="vpAddress">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Barangay</div><div class="sd-info-value" id="vpBarangay">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Status</div><div class="sd-info-value" id="vpStatus">—</div></div>
-            <div class="sd-info-item"><div class="sd-info-label">Registered</div><div class="sd-info-value" id="vpRegistered">—</div></div>
+      </div>
+      <div class="legacy-profile-content" id="legacyProfileContent">
+        <div class="sd-field-group">
+          <div class="sd-profile-head">
+            <div class="sd-avatar-lg" id="vpAvatar"></div>
+            <div>
+              <div class="sd-profile-name" id="vpName"></div>
+              <div class="sd-profile-sub" id="vpRole"></div>
+            </div>
           </div>
-        </div>
-        <div class="sd-section" id="vpPetsSection" style="display:none;">
-          <div class="sd-section-title"><span>03</span> Pets</div>
-          <div id="vpPetsList" style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:center;"></div>
-          <div id="vpNoPets" style="display:none;font-size:13px;color:#71717a;padding:8px 0;">No registered pets.</div>
+          <div class="sd-section">
+            <div class="sd-section-title"><span>01</span> Account Information</div>
+            <div class="sd-info-grid">
+              <div class="sd-info-item"><div class="sd-info-label">Reference ID</div><div class="sd-info-value" id="vpRef">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Username</div><div class="sd-info-value" id="vpUsername">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Email</div><div class="sd-info-value" id="vpEmail">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Phone</div><div class="sd-info-value" id="vpPhone">—</div></div>
+            </div>
+          </div>
+          <div class="sd-section">
+            <div class="sd-section-title"><span>02</span> Personal Details</div>
+            <div class="sd-info-grid">
+              <div class="sd-info-item sd-field-full"><div class="sd-info-label">Address</div><div class="sd-info-value" id="vpAddress">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Barangay</div><div class="sd-info-value" id="vpBarangay">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Status</div><div class="sd-info-value" id="vpStatus">—</div></div>
+              <div class="sd-info-item"><div class="sd-info-label">Registered</div><div class="sd-info-value" id="vpRegistered">—</div></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1691,7 +1791,149 @@ function submitConfirmedAction() {
   });
 }
 
+var residentProfileUser = null;
+
+function escapeProfileHtml(value) {
+  var el = document.createElement('span');
+  el.textContent = value == null ? '' : String(value);
+  return el.innerHTML;
+}
+
+function setResidentProfileAvatar(container, user) {
+  container.textContent = '';
+  if (user.avatar_url) {
+    var image = document.createElement('img');
+    image.src = user.avatar_url;
+    image.alt = '';
+    container.appendChild(image);
+    return;
+  }
+  var initials = (user.full_name || '').trim().split(/\s+/).map(function(part) {
+    return part.charAt(0);
+  }).join('').toUpperCase().slice(0, 2) || '?';
+  container.textContent = initials;
+}
+
+function renderResidentProfilePets(pets) {
+  var petList = document.getElementById('residentProfilePets');
+  var noPets = document.getElementById('residentProfileNoPets');
+  document.getElementById('residentProfilePetCount').textContent = ' (' + pets.length + ')';
+  petList.textContent = '';
+  noPets.hidden = pets.length > 0;
+  if (!pets.length) return;
+
+  pets.forEach(function(pet) {
+    var card = document.createElement('article');
+    card.className = 'resident-profile-pet';
+
+    var avatar = document.createElement('div');
+    avatar.className = 'resident-profile-pet-avatar';
+    if (pet.photo_url) {
+      var image = document.createElement('img');
+      image.src = pet.photo_url;
+      image.alt = '';
+      image.loading = 'lazy';
+      avatar.appendChild(image);
+    } else {
+      var initials = (pet.pet_name || '').trim().split(/\s+/).map(function(part) {
+        return part.charAt(0);
+      }).join('').toUpperCase().slice(0, 2) || '?';
+      avatar.textContent = initials;
+    }
+
+    var content = document.createElement('div');
+    content.className = 'resident-profile-pet-content';
+    var name = document.createElement('div');
+    name.className = 'resident-profile-pet-name';
+    name.textContent = pet.pet_name || '—';
+    var details = document.createElement('div');
+    details.className = 'resident-profile-pet-details';
+    [pet.pet_type, pet.breed, pet.gender].filter(Boolean).forEach(function(detail) {
+      var tag = document.createElement('span');
+      tag.className = 'resident-profile-pet-tag';
+      tag.textContent = String(detail).charAt(0).toUpperCase() + String(detail).slice(1);
+      details.appendChild(tag);
+    });
+    content.appendChild(name);
+    content.appendChild(details);
+    card.appendChild(avatar);
+    card.appendChild(content);
+    petList.appendChild(card);
+  });
+}
+
+function toggleResidentProfileStatus() {
+  if (!residentProfileUser) return;
+  var user = residentProfileUser;
+  var active = user.status === 'active';
+  closeModal('viewProfileModal');
+  confirmAction(
+    'toggle_status',
+    Number(user.user_id),
+    (active ? 'Deactivate' : 'Activate') + ' user <strong>' + escapeProfileHtml(user.full_name) + '</strong>? ' +
+      (active ? 'They will no longer be able to sign in or submit requests.' : 'They will regain access.')
+  );
+}
+
+function editResidentFromProfile() {
+  if (!residentProfileUser) return;
+  var userId = Number(residentProfileUser.user_id);
+  closeModal('viewProfileModal');
+  openEditModal(userId);
+}
+
 function viewUserProfile(u) {
+  residentProfileUser = u.role === 'resident' ? u : null;
+  var isResident = Boolean(residentProfileUser);
+  var dialog = document.querySelector('#viewProfileModal .sd-dialog-content');
+  var residentContent = document.getElementById('residentProfileContent');
+  var residentFooter = document.getElementById('residentProfileFooter');
+  var legacyContent = document.getElementById('legacyProfileContent');
+  dialog.classList.toggle('resident-profile-dialog', isResident);
+  residentContent.hidden = !isResident;
+  residentFooter.hidden = !isResident;
+  legacyContent.hidden = isResident;
+
+  if (isResident) {
+    document.getElementById('residentProfileName').textContent = u.full_name || '—';
+    document.getElementById('residentProfileUsername').textContent = u.username || '—';
+    document.getElementById('residentProfileReference').textContent = u.reference_id || '—';
+    document.getElementById('residentProfileEmail').textContent = u.email || '—';
+    document.getElementById('residentProfilePhone').textContent = u.phone || '—';
+    document.getElementById('residentProfileBarangay').textContent = u.barangay_name || '—';
+    document.getElementById('residentProfileAddress').textContent = u.address || '—';
+    document.getElementById('residentProfileRegistered').textContent = u.created_at
+      ? 'Registered ' + new Date(u.created_at).toLocaleDateString('en-US', {year:'numeric', month:'long', day:'numeric'})
+      : '';
+    var residentStatus = document.getElementById('residentProfileStatus');
+    residentStatus.textContent = u.status ? u.status.charAt(0).toUpperCase() + u.status.slice(1) : '—';
+    residentStatus.className = 'resident-profile-badge ' + (u.status === 'active' ? 'active' : (u.status === 'inactive' ? 'inactive' : ''));
+    var statusButton = document.getElementById('residentProfileSuspend');
+    statusButton.textContent = u.status === 'active' ? 'Deactivate user' : 'Activate user';
+    statusButton.className = 'sd-btn ' + (u.status === 'active' ? 'sd-btn-danger' : 'sd-btn-primary');
+    setResidentProfileAvatar(document.getElementById('residentProfileAvatar'), u);
+
+    var petList = document.getElementById('residentProfilePets');
+    var noPets = document.getElementById('residentProfileNoPets');
+    document.getElementById('residentProfilePetCount').textContent = '';
+    noPets.textContent = 'No registered pets.';
+    petList.textContent = 'Loading pets…';
+    noPets.hidden = true;
+    apiPost({action:'get_user_pets', user_id:u.user_id}, function(resp) {
+      if (!residentProfileUser || Number(residentProfileUser.user_id) !== Number(u.user_id)) return;
+      if (resp.success && Array.isArray(resp.pets)) {
+        renderResidentProfilePets(resp.pets);
+      } else {
+        petList.textContent = '';
+        noPets.textContent = 'Could not load registered pets.';
+        noPets.hidden = false;
+        showToast('Could not load pets', {type:'error', description:resp.message || 'Please try opening the profile again.'});
+      }
+    });
+    openModal('viewProfileModal');
+    return;
+  }
+
   document.getElementById('vpName').textContent = u.full_name || '—';
   var roleIcon = {'admin':'fa-crown','staff':'fa-user-md','barangay':'fa-map-pin','resident':'fa-user'};
   document.getElementById('vpRole').innerHTML = '<i class="fas '+(roleIcon[u.role]||'fa-user')+'"></i> '+ (u.role ? u.role.charAt(0).toUpperCase()+u.role.slice(1) : '—');
@@ -1709,44 +1951,6 @@ function viewUserProfile(u) {
   var avatarEl = document.getElementById('vpAvatar');
   if (u.avatar_url) { avatarEl.innerHTML = '<img src="'+u.avatar_url+'" alt="Avatar" style="width:72px;height:72px;border-radius:50%;object-fit:cover;">'; }
   else { var initials = (u.full_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2) || '?'; avatarEl.textContent = initials; }
-  var petsSection = document.getElementById('vpPetsSection');
-  var petsList = document.getElementById('vpPetsList');
-  var noPets = document.getElementById('vpNoPets');
-  if (u.role === 'resident') {
-    petsSection.style.display = '';
-    petsList.innerHTML = '<div style="font-size:13px;color:#71717a;">Loading pets...</div>';
-    noPets.style.display = 'none';
-    apiPost({action:'get_user_pets', user_id: u.user_id}, function(resp) {
-      if (resp.success && resp.pets && resp.pets.length > 0) {
-        var html = '';
-        var typeIcon = {'dog':'fa-dog','cat':'fa-cat','other':'fa-paw'};
-        resp.pets.forEach(function(p) {
-          html += '<div style="display:flex;align-items:center;justify-content:center;gap:10px;">';
-          if (p.photo_url) {
-            html += '<img src="'+p.photo_url+'" alt="'+(p.pet_name||'Pet')+'" style="width:48px;height:48px;border-radius:50%;object-fit:cover;flex-shrink:0;">';
-          } else {
-            html += '<div style="width:48px;height:48px;border-radius:50%;background:#e4e4e7;color:#52525b;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;font-weight:600;">'+((p.pet_name||'').split(' ').map(function(s){return s.charAt(0)}).join('').toUpperCase().slice(0,2)||'?')+'</div>';
-          }
-          html += '<div style="text-align:left;">';
-          html += '<div class="vp-pet-name">'+(p.pet_name||'—')+'</div>';
-          var details = [];
-          if (p.pet_type) details.push(p.pet_type.charAt(0).toUpperCase()+p.pet_type.slice(1));
-          if (p.breed) details.push(p.breed);
-          if (p.gender) details.push(p.gender.charAt(0).toUpperCase()+p.gender.slice(1));
-          html += '<div class="vp-pet-details">'+(details.join(' · ')||'—')+'</div>';
-          html += '</div></div>';
-        });
-        petsList.innerHTML = html;
-        noPets.style.display = 'none';
-      } else {
-        petsList.innerHTML = '';
-        noPets.style.display = '';
-      }
-    });
-  } else {
-    petsSection.style.display = 'none';
-    petsList.innerHTML = '';
-  }
   openModal('viewProfileModal');
 }
 

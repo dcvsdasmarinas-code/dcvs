@@ -1,5 +1,10 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../env.php';
+loadDcvsEnv();
+$mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
 
 $barangaySummary = [];
 $bsq = $conn->query("SELECT b.barangay_name,
@@ -15,11 +20,6 @@ if ($bsq) {
     while ($row = $bsq->fetch_assoc()) $barangaySummary[] = $row;
 }
 
-$totalConfirmed = array_sum(array_column($barangaySummary, 'confirmed'));
-$totalPending = array_sum(array_column($barangaySummary, 'pending'));
-$totalResolved = array_sum(array_column($barangaySummary, 'resolved'));
-$affectedBgy = 0;
-foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -34,6 +34,7 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="stylesheet" href="dist/mapcn.css" />
   <link rel="stylesheet" href="geo-map/map.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     :root {
       --bg-ice: #e9f3ff;
@@ -124,19 +125,11 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
     .gm-hero h2 { font-size: 1.6rem; font-weight: 800; color: #1a2a3a; font-family: 'Montserrat', sans-serif; }
     .gm-hero p { max-width: 680px; margin: 0.6rem auto 0; color: #4a5672; font-size: 0.92rem; }
 
-    /* Stats */
-    .gm-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem; }
-    .gm-stat-card {
-      background: #f8fafc; border-radius: 12px; padding: 1.2rem 1rem;
-      text-align: center; border: 1px solid rgba(0,0,0,0.05);
-    }
-    .gm-stat-card .num { font-size: 1.5rem; font-weight: 800; color: #045e1f; font-family: 'Montserrat', sans-serif; }
-    .gm-stat-card .label { font-size: 0.78rem; color: #4a5672; margin-top: 2px; font-weight: 500; }
-
     /* Map */
     .gm-map-section {
-      background: #ffffff; border-radius: 14px; overflow: visible;
-      border: 1px solid rgba(0,0,0,0.06); margin-bottom: 2rem;
+      background: #ffffff; border-radius: 12px; overflow: hidden;
+      border: 1px solid #e2e8f0; margin-bottom: 2rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     .gm-map-section #geoMap { height: 520px; position: relative; }
     .gm-map-section .mapcn-loading {
@@ -295,7 +288,6 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       .nav-toggle.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
       .dropdown-menu { position: static; box-shadow: none; padding: 0 0 0 1rem; border: none; opacity: 1; visibility: visible; transform: none; display: none; }
       .nav-item.open .dropdown-menu { display: block; }
-      .gm-stats { grid-template-columns: repeat(2, 1fr); }
       .gm-info-section { grid-template-columns: 1fr; }
       .gm-page { padding-top: 110px; }
     }
@@ -308,10 +300,6 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       .gm-hero p { font-size: 0.85rem; }
     }
     @media (max-width: 480px) {
-      .gm-stats { grid-template-columns: 1fr 1fr; gap: 0.6rem; }
-      .gm-stat-card { padding: 0.8rem 0.6rem; }
-      .gm-stat-card .num { font-size: 1.15rem; }
-      .gm-stat-card .label { font-size: 0.68rem; }
     }
 
     /* Inter font (shadcn dialog style) */
@@ -321,8 +309,6 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
 
     .gm-hero h2,
     .gm-hero p,
-    .gm-stat-card .num,
-    .gm-stat-card .label,
     .gm-table-wrapper,
     .gm-table,
     .gm-table th,
@@ -348,11 +334,6 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       letter-spacing: -0.01em !important;
     }
 
-    .gm-stat-card .num {
-      letter-spacing: -0.02em !important;
-      font-weight: 700 !important;
-    }
-
     .gm-sidebar h3 {
       letter-spacing: -0.02em !important;
       font-weight: 700 !important;
@@ -369,7 +350,7 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
 
 <header class="site-header">
   <nav class="navbar">
-    <img src="uploads/site/DCVS LOGO.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;">
+    <a href="landing-page.php" class="navbar-brand"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;"><span class="navbar-brand-name">Dasmariñas City Veterinary Services</span></a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -392,6 +373,7 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       </li>
       <li><a href="adoption.php">Adoption</a></li>
     </ul>
+    <a href="contact.php" class="nav-contact-btn">Contact Us</a>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>
@@ -401,33 +383,14 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
 
     <div class="gm-hero">
       <h2>Animal Welfare Case Map of Dasmariñas</h2>
-      <p>Explore real-time data on confirmed animal welfare cases across all 75 barangays. The choropleth map uses color intensity to show case concentration.</p>
-    </div>
-
-    <!-- Stats -->
-    <div class="gm-stats">
-      <div class="gm-stat-card">
-        <div class="num"><?php echo $totalConfirmed; ?></div>
-        <div class="label">Confirmed Cases</div>
-      </div>
-      <div class="gm-stat-card">
-        <div class="num"><?php echo $affectedBgy; ?> / 75</div>
-        <div class="label">Affected Barangays</div>
-      </div>
-      <div class="gm-stat-card">
-        <div class="num"><?php echo $totalPending; ?></div>
-        <div class="label">Pending Reports</div>
-      </div>
-      <div class="gm-stat-card">
-        <div class="num"><?php echo $totalResolved; ?></div>
-        <div class="label">Resolved Cases</div>
-      </div>
+      <p>Explore filed animal welfare reports across all 75 barangays. Report pins include cases at every status; barangay shading reflects confirmed case concentration.</p>
     </div>
 
     <!-- Map -->
     <div class="gm-map-section">
-      <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php"}' style="width:100%;height:520px;position:relative;">
+      <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;height:520px;position:relative;">
         <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
+        <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
       </div>
       <!-- Hidden panel kept for mapcn bundle compatibility -->
       <div class="geo-info-panel" id="geoInfoPanel" style="display:none;"></div>
@@ -437,6 +400,13 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
         <div class="gm-legend-item"><span class="gm-legend-swatch" style="background:#eab308;"></span> 1–5 cases</div>
         <div class="gm-legend-item"><span class="gm-legend-swatch" style="background:#f97316;"></span> 6–15 cases</div>
         <div class="gm-legend-item"><span class="gm-legend-swatch" style="background:#ef4444;"></span> 16+ cases</div>
+        <span style="font-weight:700;color:#0f172a;margin-left:12px;">Report pins:</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#eab308;border-radius:50%;"></span> Pending</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#3b82f6;border-radius:50%;"></span> Accepted / reviewing</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#22c55e;border-radius:50%;"></span> Confirmed</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#8b5cf6;border-radius:50%;"></span> Scheduled</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#64748b;border-radius:50%;"></span> Resolved</span>
+        <span class="gm-legend-item"><span class="gm-legend-swatch" style="background:#0f766e;border-radius:50%;"></span> Other status</span>
         <div style="margin-left:auto;font-size:0.72rem;color:#94a3b8;">
           Auto-refreshes every 30s
         </div>
@@ -448,6 +418,9 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
       <div class="gm-info-card">
         <h3>How to Read the Map</h3>
         <ul>
+          <li>Each circle pin represents a filed report, regardless of status; clustered pins show multiple nearby reports</li>
+          <li>Pin colors show report status; click a pin for its status, category, and barangay</li>
+          <li>Barangay shading shows confirmed case concentration, not all filed report counts</li>
           <li><strong>Green</strong> — No confirmed cases reported</li>
           <li><strong>Yellow</strong> — 1 to 5 confirmed cases (low)</li>
           <li><strong>Orange</strong> — 6 to 15 confirmed cases (moderate)</li>
@@ -556,7 +529,9 @@ foreach ($barangaySummary as $b) { if ($b['confirmed'] > 0) $affectedBgy++; }
   </div>
 </footer>
 
-<script src="dist/mapcn.umd.cjs"></script>
+<script src="dist/mapcn.umd.cjs?v=<?php echo (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'); ?>"></script>
+<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="assets/js/public-report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/public-report-map-pins.js'); ?>"></script>
 <script>
 // Mobile nav toggle
 var navbar = document.querySelector('.navbar');

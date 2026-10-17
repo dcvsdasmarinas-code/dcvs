@@ -2,7 +2,7 @@
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 $petsData = [];
 $pq = $conn->query("SELECT * FROM pet_listings WHERE status = 'available' ORDER BY created_at DESC");
 if ($pq) {
@@ -240,313 +240,99 @@ body {
     }
 }
 
-/* Pet List Section */
 .pet-list-section {
-    padding: 100px 40px 100px;
-    background: white;
-}
-
-.pet-list-container {
-    width: 100%;
-    max-width: 1500px;
-    min-width: 0;
-    margin: 0 auto;
-}
-
-.pet-list-heading {
-    font-size: 32px;
-    font-weight: 600;
+    padding: 100px 40px;
+    background: #fff;
     color: #18181b;
-    text-align: center;
-    margin-bottom: 40px;
-    letter-spacing: -0.025em;
+}
+.pet-list-container { width: 100%; max-width: 1320px; margin: 0 auto; }
+.pet-list-intro { max-width: 640px; margin-bottom: 28px; }
+.pet-list-heading {
+    margin: 0 0 12px;
+    color: #18181b;
     font-family: 'Inter','Segoe UI',sans-serif;
 }
-
-/* Card grid */
-.pet-list-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 32px;
-    min-width: 0;
-}
-
+.pet-list-description { margin: 0; color: #71717a; font-size: 15px; line-height: 1.65; }
+.pet-list-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 26px; }
 .pet-card {
-    position: relative;
     min-width: 0;
-    background: transparent;
-    border: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    padding-top: 16px;
+    border-top: 1px solid #e4e4e7;
+    color: #18181b;
     font-family: 'Inter','Segoe UI',sans-serif;
 }
-
-.pet-card .photo {
-    width: calc(100% - 36px);
+.pet-card[hidden] { display: none; }
+.pet-photo {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
     aspect-ratio: 1 / 1;
     overflow: hidden;
-    position: relative;
+    border-radius: 3px;
     background: #f4f4f5;
-    margin: 0 auto;
-    border: 3px solid #18181b;
-    border-radius: 4px;
-    z-index: 2;
 }
-
-.pet-card .photo img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-}
-
-.pet-card .photo img.blurred {
-    filter: blur(3px) brightness(0.6);
-}
-
-.pet-status-overlay {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 5;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.pet-status-text {
-    color: #fff;
-    font-size: 24px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    font-family: 'Inter','Segoe UI',sans-serif;
-    text-shadow: 0 2px 12px rgba(0,0,0,0.7);
-}
-
-.pet-desc {
-    font-family: 'Inter','Segoe UI',sans-serif;
-    font-size: 18px;
-    font-weight: 400;
-    color: #18181b;
-    line-height: 1.35;
-    text-align: center;
-    padding: 8px 0 22px;
-}
-
-.pet-card-details {
-    padding: 10px 0 0;
-}
-
-.pet-card-body {
-    position: relative;
-    z-index: 1;
-    margin-top: -44%;
-    padding: calc(44% + 20px) 18px 18px;
-    background: #fff;
-    border: 0;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-}
-
-.pet-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin-bottom: 8px;
-}
-
-.pet-card .name {
-    font-family: 'Inter','Segoe UI',sans-serif;
-    font-size: 26px;
-    font-weight: 700;
-    color: #09090b;
-    line-height: 1.3;
-    text-align: center;
-}
-
-.pet-card-meta {
-    font-family: 'Inter','Segoe UI',sans-serif;
-    color: #18181b;
-    line-height: 1.3;
-    margin-top: 40px;
-    margin-bottom: 42px;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 26px 18px;
-    align-items: center;
-}
-
-.pet-card-meta span {
-    display: inline;
-}
-
-.pet-card-meta > div {
-    min-width: 0;
-    white-space: nowrap;
-}
-
-.pet-card-meta > div:nth-child(2),
-.pet-card-meta > div:nth-child(4) {
-    justify-self: start;
-}
-
-.pet-card-meta .meta-label {
-    font-size: 16px;
-    font-weight: 700;
-    margin-right: 4px;
-}
-
-.pet-card-meta .meta-value {
-    font-size: 16px;
-    font-weight: 400;
-    white-space: nowrap;
-}
-
+.pet-photo img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pet-photo-placeholder { width: 44px; height: 44px; color: #a1a1aa; fill: currentColor; }
+.pet-card-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 12px 0 3px; }
+.pet-card .name { margin: 0; color: #18181b; font-family: 'Inter','Segoe UI',sans-serif; font-size: 20px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.pet-card-id { flex: 0 0 auto; color: #71717a; font: 10px/1.4 Consolas, monospace; }
+.pet-card-meta { margin: 0 0 8px; color: #71717a; font-size: 13px; line-height: 1.5; }
+.pet-card-status { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px; color: #50c878; font-size: 12px; }
+.pet-card-status::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ''; }
+.pet-care-statuses { display: flex; flex-wrap: wrap; gap: 7px 12px; margin: 0 0 12px; padding: 0; list-style: none; }
+.pet-care-statuses li { color: #71717a; font-size: 12px; line-height: 1.4; }
+.pet-care-statuses li.is-complete { color: #3f3f46; }
+.pet-care-statuses li.is-complete::before { margin-right: 5px; color: #16833b; content: '✓'; font-weight: 700; }
+.pet-care-statuses li.is-known:not(.is-complete) { color: #92400e; }
+.pet-care-statuses li:not(.is-complete)::before { margin-right: 5px; color: #a1a1aa; content: '○'; }
+.pet-care-statuses li.is-known:not(.is-complete)::before { color: #b45309; content: '!'; font-weight: 700; }
+.pet-card-facts { display: flex; flex-wrap: wrap; gap: 7px 12px; margin: 0 0 12px; padding: 0; list-style: none; }
+.pet-card-facts li { color: #3f3f46; font-size: 12px; line-height: 1.4; }
+.pet-card-facts li::before { margin-right: 5px; color: #16833b; content: '✓'; font-weight: 700; }
+.pet-card-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 6px 10px; margin: 0 0 10px; font-size: 12px; line-height: 1.45; }
+.pet-card-detail dt { color: #71717a; }
+.pet-card-detail dd { min-width: 0; margin: 0; color: #18181b; overflow-wrap: anywhere; }
+.pet-desc { min-height: 38px; margin: 0 0 14px; color: #3f3f46; font: 14px/1.5 'Inter','Segoe UI',sans-serif; overflow-wrap: anywhere; }
 .btn-adopt {
-    align-self: center;
-    width: calc(100% - 36px);
-    max-width: 280px;
-    margin: -22px auto -22px;
-    position: relative;
-    z-index: 3;
-    display: inline-flex;
-    min-height: 44px;
+    display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    padding: 10px 22px;
-    border: 0;
-    border-radius: 6px;
-    font-family: 'Inter','Segoe UI',sans-serif;
-    font-size: 16px;
-    font-weight: 500;
-    color: #fafafa;
-    background: #18181b;
+    width: 100%;
+    min-height: 40px;
+    padding: 8px 14px;
+    border: 1px solid #16833b;
+    border-radius: 3px;
+    background: transparent;
+    color: #16833b;
+    font-size: 13px;
+    font-weight: 600;
     text-decoration: none;
-    cursor: pointer;
-    box-shadow: none;
-    transition: background 0.15s, box-shadow 0.15s;
+    transition: background .15s ease, color .15s ease;
 }
-
-.btn-adopt:hover {
-    background: #27272a;
-    box-shadow: none;
+.btn-adopt:hover { background: #16833b; color: #fff; }
+.btn-adopt:focus-visible { outline: 2px solid #16833b; outline-offset: 3px; }
+.btn-adopt svg { display: none; }
+.btn-adopt.btn-disabled { border-color: #d4d4d8; color: #71717a; cursor: default; pointer-events: none; }
+.pet-list-empty { grid-column: 1 / -1; padding: 40px 20px; border: 1px dashed #d4d4d8; color: #71717a; text-align: center; }
+@media (max-width: 900px) {
+    .pet-list-section { padding: 76px 28px 52px; }
+    .pet-list-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px 18px; }
 }
-
-.btn-adopt:focus-visible {
-    outline: 2px solid #18181b;
-    outline-offset: 2px;
-}
-
-.btn-adopt svg {
-    display: none;
-}
-
-.btn-adopt.btn-disabled {
-    background: #a1a1aa;
-    color: #fafafa;
-    cursor: default;
-    pointer-events: none;
-}
-
-.btn-adopt.btn-disabled:hover {
-    background: #a1a1aa;
-}
-
-/* Pet List Responsive */
-@media (max-width: 1100px) {
-    .pet-list-grid {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
-
-@media (max-width: 720px) {
-    .pet-list-section {
-        padding: 60px 20px;
-    }
-
-    .pet-list-heading {
-        font-size: 24px;
-        margin-bottom: 30px;
-    }
-    
-    .pet-list-grid {
-        grid-template-columns: repeat(2, 1fr);
-        gap: 16px;
-    }
-}
-
-@media (max-width: 480px) {
-    .pet-list-section {
-        padding: 44px 16px 56px;
-    }
-
-    .pet-list-grid {
-        grid-template-columns: minmax(0, 1fr);
-        gap: 22px;
-    }
-
-    .pet-card .photo {
-        width: min(76%, 240px);
-    }
-
-    .pet-card-body {
-        margin-top: -30%;
-        padding: calc(30% + 16px) 14px 16px;
-    }
-
-    .pet-card .name {
-        font-size: 22px;
-        overflow-wrap: anywhere;
-    }
-
-    .pet-card-meta {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 14px 10px;
-        margin-top: 20px;
-        margin-bottom: 24px;
-    }
-
-    .pet-card-meta > div {
-        min-width: 0;
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-
-    .pet-card-meta .meta-label,
-    .pet-card-meta .meta-value {
-        font-size: 13px;
-        line-height: 1.4;
-        white-space: normal;
-        overflow-wrap: anywhere;
-    }
-
-    .pet-desc {
-        font-size: 14px;
-        line-height: 1.5;
-        padding: 0 0 14px;
-        overflow-wrap: anywhere;
-    }
-    .pet-card-details {
-        padding-top: 12px;
-    }
-    .btn-adopt {
-        width: min(80%, 240px);
-        min-height: 40px;
-        margin: 8px auto 0;
-        padding: 8px 12px;
-        font-size: 13px;
-    }
-    .pet-status-text {
-        font-size: 16px;
-        letter-spacing: 1px;
-    }
+@media (max-width: 600px) {
+    .pet-list-section { padding: 60px 18px 44px; }
+    .pet-list-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
+    .pet-card-header { margin-top: 10px; }
+    .pet-card .name { font-size: 17px; }
+    .pet-card-id { font-size: 8px; }
+    .pet-card-meta { font-size: 11px; }
+    .pet-card-status, .pet-care-statuses li, .pet-card-detail { font-size: 10px; }
+    .pet-care-statuses { gap: 6px 8px; }
+    .pet-card-detail { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    .pet-card-detail dt { margin-top: 5px; }
+    .pet-desc { min-height: 0; font-size: 12px; }
+    .btn-adopt { min-height: 36px; padding: 7px 8px; font-size: 11px; }
 }
 
 </style>
@@ -556,83 +342,104 @@ body {
                 <div class="headings">
                     <h1 class="main-heading">Find Your New Best Friend</h1>
                     <h2 class="secondary-heading">Meet Our Rescued Pets Waiting for a Forever Home</h2>
-                    <p class="hero-description">Every pet deserves a loving family. Browse our adoptable pets â€” each one is vaccinated, healthy, and ready to fill your home with joy.</p>
+                    <p class="hero-description">Every pet deserves a loving family. Browse our adoptable pets &mdash; each one is vaccinated, healthy, and ready to fill your home with joy.</p>
                 </div>
             </div>
             <div class="hero-image-col">
                 <img src="uploads/site/cutout-aspin.png" alt="Happy pet looking for a home">
             </div>
         </div>
-
-        <!-- Decorative Background Shapes -->
         <div class="bg-shape bg-shape-1"></div>
         <div class="bg-shape bg-shape-2"></div>
         <div class="bg-shape bg-shape-3"></div>
     </div>
 
-    <!-- Pet List Section -->
     <section class="pet-list-section">
         <div class="pet-list-container">
-            <h2 class="pet-list-heading">Our Pets</h2>
+            <header class="pet-list-intro">
+                <h1 class="pet-list-heading">Animals available for adoption</h1>
+                <p class="pet-list-description">Every animal listed here has been checked in at the DCVS Shelter. Once staff reserve an animal for you, you have 3 days to complete the pickup before it returns to this list.</p>
+            </header>
             <div class="pet-list-grid">
+                <?php if (empty($petsData)): ?>
+                <div class="pet-list-empty">There are no animals currently available for adoption. Please check back soon.</div>
+                <?php endif; ?>
                 <?php foreach ($petsData as $id => $p): ?>
-                <div class="pet-card">
-                    <div class="photo">
-                        <img src="<?php echo htmlspecialchars($p['photo_url'] ?? ''); ?>" alt="<?php echo htmlspecialchars($p['name']); ?>" class="<?php echo $p['status'] !== 'available' ? 'blurred' : ''; ?>">
-                        <?php if ($p['status'] !== 'available'): ?>
-                        <div class="pet-status-overlay">
-                            <span class="pet-status-text"><?php echo htmlspecialchars(ucfirst($p['status'])); ?></span>
-                        </div>
+                <?php
+                $petGender = trim((string)($p['gender'] ?? ''));
+                $petAge = trim((string)($p['age'] ?? ''));
+                $petAgeDisplay = ctype_digit($petAge)
+                    ? $petAge . ((int)$petAge === 1 ? ' year old' : ' years old')
+                    : $petAge;
+                $petBreed = trim((string)($p['breed'] ?? ''));
+                $petWeight = trim((string)($p['weight'] ?? ''));
+                $vaccinationStatus = $p['vaccination_status'] ?? 'unknown';
+                $sterilizationStatus = $p['sterilization_status'] ?? 'unknown';
+                $dewormingStatus = $p['deworming_status'] ?? 'unknown';
+                $vaccinationLabels = [
+                    'vaccinated' => 'Vaccinated',
+                    'partially_vaccinated' => 'Partially vaccinated',
+                    'not_vaccinated' => 'Not vaccinated',
+                    'unknown' => 'Vaccination not recorded',
+                ];
+                $sterilizationLabels = [
+                    'spayed' => 'Spayed',
+                    'neutered' => 'Neutered',
+                    'not_sterilized' => 'Not yet spayed / neutered',
+                    'unknown' => 'Spay / neuter not recorded',
+                ];
+                $dewormingLabels = [
+                    'dewormed' => 'Dewormed',
+                    'not_dewormed' => 'Not dewormed',
+                    'unknown' => 'Deworming not recorded',
+                ];
+                $rescuedDateText = trim((string)($p['rescued_date'] ?? ''));
+                if ($rescuedDateText !== '' && strtotime($rescuedDateText) !== false) {
+                    $rescuedDateText = date('F j, Y', strtotime($rescuedDateText));
+                }
+                ?>
+                <article class="pet-card"
+                    data-gender="<?php echo htmlspecialchars(strtolower($petGender)); ?>"
+                    data-age="<?php echo htmlspecialchars(strtolower($petAge)); ?>"
+                    data-breed="<?php echo htmlspecialchars(strtolower($petBreed)); ?>">
+                    <div class="pet-photo">
+                        <svg class="pet-photo-placeholder" viewBox="0 0 48 48" aria-hidden="true">
+                            <ellipse cx="12" cy="15" rx="4" ry="6"/><ellipse cx="22" cy="10" rx="4" ry="6"/>
+                            <ellipse cx="32" cy="11" rx="4" ry="6"/><ellipse cx="40" cy="18" rx="4" ry="6"/>
+                            <path d="M24 21c-6 0-15 9-14 15 .7 4 5 5 9 3 3-1 7-1 10 0 5 2 9 1 10-3 1-6-8-15-15-15z"/>
+                        </svg>
+                        <?php if (!empty($p['photo_url'])): ?>
+                        <img src="<?php echo htmlspecialchars($p['photo_url']); ?>" alt="<?php echo htmlspecialchars($p['name']); ?>" loading="lazy" onerror="this.remove()">
                         <?php endif; ?>
                     </div>
-                    <div class="pet-card-body">
-                    <div class="pet-card-details">
-                        <div class="pet-card-header">
-                            <div class="name"><?php echo htmlspecialchars($p['name']); ?></div>
-                        </div>
-                        <div class="pet-card-meta">
-                            <?php
-                            $rescuedDateText = trim((string)($p['rescued_date'] ?? ''));
-                            if ($rescuedDateText !== '' && strtotime($rescuedDateText) !== false) {
-                                $rescuedDateText = date('F j', strtotime($rescuedDateText));
-                            }
-                            $ageText = trim((string)($p['age'] ?? ''));
-                            if ($ageText !== '' && strcasecmp($ageText, 'unknown') !== 0) {
-                                $ageText = trim((string)preg_replace('/\s*(years?|yrs?|months?|mos?|old)\b/i', '', $ageText));
-                            }
-                            ?>
-                            <div>
-                                <span class="meta-label">Breed:</span>
-                                <span class="meta-value"><?php echo htmlspecialchars($p['breed'] ?: 'Unknown'); ?></span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Gender:</span>
-                                <span class="meta-value"><?php echo htmlspecialchars($p['gender'] ?: 'Unknown'); ?></span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Age:</span>
-                                <span class="meta-value"><?php echo htmlspecialchars($ageText ?: 'Unknown'); ?></span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Rescued:</span>
-                                <span class="meta-value"><?php echo htmlspecialchars($rescuedDateText ?: 'Unknown'); ?></span>
-                            </div>
-                        </div>
-                        <div class="pet-desc"><?php echo htmlspecialchars($p['description'] ?: 'No description available.'); ?></div>
+                    <div class="pet-card-header">
+                        <h2 class="name"><?php echo htmlspecialchars($p['name']); ?></h2>
+                        <span class="pet-card-id">DCVS-<?php echo str_pad((string)$id, 4, '0', STR_PAD_LEFT); ?></span>
                     </div>
-                    </div>
+                    <p class="pet-card-meta"><?php echo htmlspecialchars(trim(($petGender !== '' ? ucfirst($petGender) . ' ' : '') . ($petBreed !== '' ? $petBreed : 'Unknown breed') . ($petAgeDisplay !== '' ? ', ' . $petAgeDisplay : ''))); ?></p>
+                    <p class="pet-card-status">Available</p>
+                    <ul class="pet-care-statuses" aria-label="Health and care information">
+                        <li class="<?php echo $vaccinationStatus === 'vaccinated' ? 'is-complete' : ($vaccinationStatus !== 'unknown' ? 'is-known' : ''); ?>"><?php echo htmlspecialchars($vaccinationLabels[$vaccinationStatus] ?? $vaccinationLabels['unknown']); ?></li>
+                        <li class="<?php echo in_array($sterilizationStatus, ['spayed', 'neutered'], true) ? 'is-complete' : ($sterilizationStatus !== 'unknown' ? 'is-known' : ''); ?>"><?php echo htmlspecialchars($sterilizationLabels[$sterilizationStatus] ?? $sterilizationLabels['unknown']); ?></li>
+                        <li class="<?php echo $dewormingStatus === 'dewormed' ? 'is-complete' : ($dewormingStatus !== 'unknown' ? 'is-known' : ''); ?>"><?php echo htmlspecialchars($dewormingLabels[$dewormingStatus] ?? $dewormingLabels['unknown']); ?></li>
+                    </ul>
+                    <dl class="pet-card-detail">
+                        <dt>Temperament</dt><dd><?php echo htmlspecialchars(trim((string)($p['temperament'] ?? '')) ?: 'Not recorded'); ?></dd>
+                        <dt>At the shelter since</dt><dd><?php echo htmlspecialchars($rescuedDateText !== '' ? $rescuedDateText : 'Not recorded'); ?></dd>
+                        <?php if ($petWeight !== '' && $petWeight !== '0'): ?>
+                        <dt>Weight</dt><dd><?php echo htmlspecialchars($petWeight . ' kg'); ?></dd>
+                        <?php endif; ?>
+                        <?php if (trim((string)($p['vaccinations'] ?? '')) !== ''): ?>
+                        <dt>Vaccination details</dt><dd><?php echo htmlspecialchars($p['vaccinations']); ?></dd>
+                        <?php endif; ?>
+                    </dl>
+                    <p class="pet-desc"><?php echo htmlspecialchars($p['description'] ?: 'No description available.'); ?></p>
                     <?php if ($p['status'] === 'available'): ?>
-                    <a href="adopt-process.php?listing_id=<?php echo $id; ?>" class="btn-adopt">
-                        Adopt Me
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                    </a>
+                    <a href="adopt-process.php?listing_id=<?php echo (int)$id; ?>" class="btn-adopt">Adopt Me</a>
                     <?php else: ?>
-                    <div class="btn-adopt btn-disabled">
-                        <?php echo $p['status'] === 'adopted' ? 'Already Adopted' : 'Not Available'; ?>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-                    </div>
+                    <div class="btn-adopt btn-disabled"><?php echo htmlspecialchars(ucfirst($p['status'])); ?></div>
                     <?php endif; ?>
-                </div>
+                </article>
                 <?php endforeach; ?>
             </div>
         </div>

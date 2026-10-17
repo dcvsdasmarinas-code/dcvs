@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 
 session_name('DCVS_ADMIN_SESSION');
@@ -16,7 +18,7 @@ session_start();
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
 if ($autoUser && ($autoUser['role'] ?? '') === 'admin') {
-    header('Location: role-management.php');
+    header('Location: dashboard-admin.php');
     exit;
 }
 
@@ -57,9 +59,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $recordFailedLogin = function() use ($email) {
         $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-        if ($_SESSION['login_failures'] >= 5) {
-            $_SESSION['login_lockout_until'] = time() + (10 * 60);
-            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+        if ($_SESSION['login_failures'] >= 3) {
+            $_SESSION['login_lockout_until'] = time() + (15 * 60);
+            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 15 minutes.";
         } else {
             $_SESSION['login_error'] = "Invalid email or password.";
         }
@@ -124,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            header('Location: role-management.php');
+            header('Location: dashboard-admin.php');
             exit;
         } else {
             $recordFailedLogin();
@@ -559,16 +561,23 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .back-home a:hover i { transform: translateX(-3px); }
 
     @media (max-width: 900px) {
-      .auth-wrapper { grid-template-columns: 1fr; }
-      .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
-      .brand-trust { position: static; margin: 3rem calc(-1 * (4rem + 60px)) 0; }
-      .auth-form-panel { padding: 2rem 1rem; height: auto; max-height: none; }
+      body { background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%); }
+      .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
+      .auth-brand-panel, .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .brand-title { order: 1; width: 100%; max-width: 360px; padding: 1.25rem 1rem 0; font-size: clamp(1.45rem, 6vw, 1.9rem); line-height: 1.15; text-align: center; overflow-wrap: normal; }
+      .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
+      .brand-tagline { display: none; }
+      .auth-form-panel { order: 3; min-width: 0; width: 100%; max-height: none; padding: 0.5rem 16px 0; background: transparent; }
+      .auth-form-card { width: 100%; max-width: 460px; margin: 0 auto; padding: 1.5rem clamp(1rem, 5vw, 2rem); }
+      .login-logo { display: none; }
+      .login-header { text-align: center; }
+      .brand-trust { order: 4; position: relative; width: 100%; max-width: 100%; margin: 0; padding: 1rem 0 1.25rem; }
+      .brand-logo-item { padding: 0 0.75rem; }
+      .brand-logo-item img { height: 48px; max-width: 140px; }
     }
 
     @media (max-width: 480px) {
-      .auth-brand-panel { padding: 2rem 1.5rem 1rem; }
-      .brand-trust { margin: 2rem calc(-1 * (1.5rem + 60px)) 0; }
-      .auth-form-panel { padding: 1.5rem 1rem; }
       .login-header h2 { font-size: 1.25rem; }
     }
   </style>
@@ -580,7 +589,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <p class="brand-tagline">Managing citywide animal welfare operations with secure oversight and control.</p>
       </div>
 
@@ -591,7 +600,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
             $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
             for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
               <div class="brand-logo-item">
-                <img src="assets/images/<?php echo rawurlencode($logo); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
               </div>
             <?php endforeach; endfor; ?>
           </div>
@@ -603,7 +612,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       <div class="auth-form-card">
 
         <div class="login-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" />
+          <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" />
         </div>
 
         <div class="login-header">
@@ -684,6 +693,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
   </div>
 
-  <script src="assets/js/auth.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var PIN_FOCUS_ZOOM = 18;
 
   function safeMediaUrl(value) {
@@ -64,11 +72,27 @@
   }
 
   function formatWorkflowDate(value) {
-    var normalized = String(value || '').replace(' ', 'T');
+    var normalized = String(value || '').trim().replace(' ', 'T');
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(normalized)) {
+      normalized += '+08:00';
+    }
     var date = normalized ? new Date(normalized) : null;
     return date && !isNaN(date.getTime())
-      ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
+      ? new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'Asia/Manila'
+      }).format(date)
       : (value || '—');
+  }
+
+  function formatWorkflowText(value) {
+    return String(value || '').replace(/\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b/g, function(timestamp) {
+      return formatWorkflowDate(timestamp);
+    });
   }
 
   function isBarangayTeamAssigned(properties) {
@@ -331,16 +355,37 @@
       }
     }
 
+    function routeStatusMessage(properties) {
+      if (properties.turnover_status === 'receipt_confirmed' || properties.response_state === 'turned_over') {
+        return properties.status === 'resolved'
+          ? 'This incident has been resolved and turnover is complete.'
+          : '';
+      }
+      if (properties.status === 'resolved') {
+        if (properties.turnover_status === 'pending' || properties.response_state === 'awaiting_turnover') {
+          return 'This incident has been resolved; animal turnover is pending.';
+        }
+        return 'This incident has been resolved.';
+      }
+      return '';
+    }
+
     function calculateRoute(properties) {
       var requestToken = ++routeRequestToken;
+      var statusMessage = routeStatusMessage(properties);
+      if (statusMessage) {
+        showRouteStatus(statusMessage, false, false);
+        return;
+      }
+
       if (mapElement.getAttribute('data-report-route-enabled') !== '1') {
         showRouteStatus('Route service is unavailable.', true, false);
         return;
       }
 
       showRouteStatus('Calculating route…', false, false);
-      fetch('geo-map/report-route.php?sess=' + encodeURIComponent(sessionName)
-          + '&report_id=' + encodeURIComponent(properties.report_id), {
+      fetch(appUrl('geo-map/report-route.php?sess=' + encodeURIComponent(sessionName)
+          + '&report_id=' + encodeURIComponent(properties.report_id)), {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/json' }
       }).then(function(response) {
@@ -364,6 +409,9 @@
             : 'Route from ' + originName + (routeData.origin.accuracy === 'approximate' ? '; verify the entrance.' : '.'));
         if (routeData.origin.accuracy === 'approximate') {
           message = message.replace(/\.$/, '') + ' (approximate coordinates).';
+        }
+        if (properties.response_state === 'escalated_to_dcvs') {
+          message = 'This incident has been escalated to DCVS. ' + message;
         }
         showRouteStatus(message, false, true);
       }).catch(function(error) {
@@ -671,12 +719,23 @@
         : (properties.status === 'pending' || properties.status === 'validated'
           ? (sessionName === 'DCVS_BARANGAY_SESSION' ? 'Barangay review · not assigned yet' : 'Awaiting assignment')
           : (isDcvsTakeover(properties) ? 'DCVS Team' : 'DCVS review'));
-      var latest = properties.latest_response_action
-        ? responseActionLabel(properties.latest_response_action)
+      var latest = 'No response update recorded';
+      if (properties.latest_response_action === 'auto_escalate_overdue') {
+        latest = 'Barangay response deadline missed. Automatically escalated to DCVS for dispatch'
+          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '.');
+      } else if (properties.latest_response_action === 'turnover_overdue') {
+        latest = 'Live animal turnover overdue. DCVS has not yet acknowledged receipt of the animal for the reported incident involving '
+          + reportTypeLabel(properties.type) + '. The turnover deadline was missed on '
+          + formatWorkflowDate(properties.turnover_due_at || properties.latest_response_at) + '.';
+      } else if (properties.latest_response_action === 'confirm_turnover') {
+        latest = 'Live animal turnover completed. The animal was turned over to DCVS Dasmariñas on '
+          + formatWorkflowDate(properties.turnover_received_at || properties.latest_response_at) + '.';
+      } else if (properties.latest_response_action) {
+        latest = responseActionLabel(properties.latest_response_action)
           + (properties.latest_response_actor ? ' · ' + properties.latest_response_actor : '')
-          + (properties.latest_response_reason ? ': ' + properties.latest_response_reason : '')
-          + (properties.latest_response_at ? ' · ' + formatWorkflowDate(properties.latest_response_at) : '')
-        : 'No response update recorded';
+          + (properties.latest_response_reason ? ': ' + formatWorkflowText(properties.latest_response_reason) : '')
+          + (properties.latest_response_at ? ' · ' + formatWorkflowDate(properties.latest_response_at) : '');
+      }
       var values = {
         stage: stage,
         team: team,
@@ -693,7 +752,7 @@
       if (!activePinSource || pinsRefreshInFlight || document.hidden) return;
       pinsRefreshInFlight = true;
       var previousFeatures = pinFeatures;
-      var pinsUrl = 'geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName);
+      var pinsUrl = appUrl('geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName));
       if (requestedReportId !== null) pinsUrl += '&report_id=' + encodeURIComponent(String(requestedReportId));
       fetch(pinsUrl, {
         credentials: 'same-origin',
@@ -772,7 +831,7 @@
 
     function enablePinLayers() {
       if (activePinSource) return Promise.resolve();
-      var pinsUrl = 'geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName);
+      var pinsUrl = appUrl('geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName));
       if (requestedReportId !== null) {
         pinsUrl += '&report_id=' + encodeURIComponent(String(requestedReportId));
       }

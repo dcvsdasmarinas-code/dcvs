@@ -356,6 +356,31 @@
     bottom: 24px;
     max-width: calc(100% - 16px);
   }
+
+  body.staff-theme .geo-summary-bar {
+    gap: 0.625rem;
+    padding: 0.75rem;
+  }
+
+  body.staff-theme .geo-summary-item {
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  body.staff-theme .geo-summary-item strong {
+    font-size: 13px;
+  }
+
+  body.staff-theme .geo-search-wrap {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  body.staff-theme .geo-search-wrap input {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 36px;
+  }
 }
 
 .dcvs-report-pin-drawer {
@@ -711,6 +736,35 @@
     gap: 7px 10px;
   }
 
+}
+
+@media (max-width: 540px) {
+  .dcvs-report-pin-drawer {
+    top: auto;
+    right: 10px;
+    bottom: 10px;
+    left: auto;
+    width: min(280px, calc(100% - 32px));
+    max-height: min(62%, 360px);
+  }
+
+  .dcvs-report-pin-hero-preview {
+    height: clamp(96px, 28vw, 132px);
+  }
+
+  .dcvs-report-pin-drawer-header {
+    padding: 10px 14px;
+  }
+
+  .dcvs-report-pin-drawer-header h2 {
+    font-size: 16px;
+  }
+
+  .dcvs-report-pin-drawer-body {
+    flex: 1 1 auto;
+    padding: 0 14px 10px;
+    overflow-y: auto;
+  }
 }
 
 /* Compact info card */

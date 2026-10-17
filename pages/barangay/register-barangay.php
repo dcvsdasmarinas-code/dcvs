@@ -10,6 +10,8 @@ session_set_cookie_params([
 ]);
 session_start();
 
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
 
@@ -126,8 +128,8 @@ $conn->close();
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/auth.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/auth.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css', ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -603,18 +605,25 @@ $conn->close();
 
     /* Responsive */
     @media (max-width: 900px) {
-      .auth-wrapper { grid-template-columns: 1fr; }
-      .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
-      .brand-trust { position: static; margin: 3rem calc(-1 * (4rem + 60px)) 0; }
-      .auth-form-panel { padding: 2rem 1rem; height: auto; max-height: none; }
+      body { display: block; min-height: 100vh; overflow-x: hidden; background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%); }
+      .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
+      .auth-brand-panel, .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .brand-title { order: 1; width: 100%; max-width: 360px; padding: 1.25rem 1rem 0; font-size: clamp(1.45rem, 6vw, 1.9rem); line-height: 1.15; text-align: center; overflow-wrap: normal; }
+      .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
+      .brand-tagline { display: none; }
+      .auth-form-panel { order: 3; min-width: 0; width: 100%; max-height: none; padding: 0.5rem 16px 0; background: transparent; }
+      .auth-form-card { width: 100%; max-width: 560px; margin: 0 auto; padding: 1.5rem clamp(1rem, 5vw, 2rem); }
+      .register-logo { display: none; }
+      .register-header { text-align: center; }
+      .brand-trust { order: 4; position: relative; width: 100%; max-width: 100%; margin: 0; padding: 1rem 0 1.25rem; }
+      .brand-logo-item { padding: 0 0.75rem; }
+      .brand-logo-item img { height: 48px; max-width: 140px; }
+      .form-row { grid-template-columns: 1fr; gap: 1rem; }
     }
 
     @media (max-width: 480px) {
-      .auth-brand-panel { padding: 2rem 1.5rem 1rem; }
-      .brand-trust { margin: 2rem calc(-1 * (1.5rem + 60px)) 0; }
-      .auth-form-panel { padding: 1.5rem 1rem; }
       .register-header h2 { font-size: 1.25rem; }
-      .form-row { grid-template-columns: 1fr; gap: 1rem; }
     }
   </style>
 </head>
@@ -626,7 +635,7 @@ $conn->close();
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <p class="brand-tagline">Serving the community through better animal welfare and veterinary services.</p>
       </div>
 
@@ -637,7 +646,7 @@ $conn->close();
             $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
             for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
               <div class="brand-logo-item">
-                <img src="assets/images/<?php echo rawurlencode($logo); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
               </div>
             <?php endforeach; endfor; ?>
           </div>
@@ -650,7 +659,7 @@ $conn->close();
       <div class="auth-form-card">
 
         <div class="register-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" />
+          <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" />
         </div>
 
         <div class="register-header">
@@ -840,6 +849,6 @@ $conn->close();
     </div>
   </div>
 
-  <script src="assets/js/auth.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>
