@@ -213,15 +213,6 @@
       || /^(?:6\+|[6-9]\d*|\d{2,})$/.test(count);
   }
 
-  function dispatchOfficerField() {
-    var officers = Array.isArray(window.DCVS_RESPONSE_OFFICERS) ? window.DCVS_RESPONSE_OFFICERS : [];
-    var options = officers.map(function (officer) {
-      return '<option value="' + Number(officer.id) + '">' + esc(officer.name) + '</option>';
-    }).join('');
-    return '<label class="response-workflow-field" for="responseFielddispatch_officer_id">Assign DCVS officer <span class="response-workflow-required" aria-hidden="true">*</span>' +
-      '<select id="responseFielddispatch_officer_id" name="dispatch_officer_id" required><option value="">Choose an active officer</option>' + options + '</select></label>';
-  }
-
   function showAction(reportId, action, options) {
     options = options || {};
     var modal = document.getElementById('responseWorkflowModal');
@@ -253,9 +244,9 @@
     var config = {
       staff_decide: {
         title: 'Dispatch DCVS Team',
-        description: 'Assign an active DCVS officer to respond to this report.',
+        description: 'By confirming this report, you agree to respond to the incident, whether the reported location is near or far.',
         submit: 'Dispatch DCVS Team',
-        fields: dispatchOfficerField() + field('Dispatch notes', 'reason', 'textarea', false)
+        fields: field('Dispatch notes', 'reason', 'textarea', false)
       },
       authorize_high_risk_override: {
         title: 'Override High-Risk Restriction',

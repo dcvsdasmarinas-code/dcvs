@@ -114,6 +114,12 @@ $sbModules = [
         'title' => 'User Management',
         'sections' => [
             [
+                'title' => 'Overview', 'icon' => 'fa-chart-pie',
+                'items' => [
+                    sbItem('Dashboard', 'fa-chart-pie', ['href' => 'dashboard-admin.php', 'initialActive' => $activePage === 'overview']),
+                ],
+            ],
+            [
                 'title' => 'Users', 'icon' => 'fa-users',
                 'items' => [
                     sbItem('All Users', 'fa-list', ['section' => 'users', 'href' => 'role-management.php', 'initialActive' => $activePage === 'users']),
@@ -160,7 +166,7 @@ $sbModules = [
 ];
 
 $sbRail = [
-    'user-management' => ['icon' => 'fa-users',          'label' => 'Users',      'section' => 'users',    'href' => 'role-management.php'],
+    'user-management' => ['icon' => 'fa-chart-pie',      'label' => 'Dashboard', 'href' => 'dashboard-admin.php'],
     'monitoring'      => ['icon' => 'fa-history',        'label' => 'Activity',   'section' => 'activity', 'href' => 'dashboard-admin.php#activity'],
     'system'          => ['icon' => 'fa-cog',            'label' => 'System',     'section' => 'settings', 'href' => 'dashboard-admin.php#settings'],
 ];

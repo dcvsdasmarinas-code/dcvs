@@ -725,7 +725,6 @@
       if (window.DCVS_BARANGAY_RESPONSE_ENABLED) {
         formData.set('action', 'staff_decide'); formData.set('response_mode', 'dcvs_dispatch');
         formData.set('report_id', report.id); formData.set('csrf_token', window.DCVS_RESPONSE_CSRF || '');
-        formData.set('dispatch_officer_id', String(window.DCVS_CURRENT_STAFF_ID || ''));
       } else {
         formData.set('ajax', '1'); formData.set('report_id', report.id); formData.set('scheduled_at', ''); formData.set('dcvs_notes', '');
       }

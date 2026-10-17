@@ -16,7 +16,7 @@ session_start();
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
 if ($autoUser && ($autoUser['role'] ?? '') === 'admin') {
-    header('Location: role-management.php');
+    header('Location: dashboard-admin.php');
     exit;
 }
 
@@ -124,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            header('Location: role-management.php');
+            header('Location: dashboard-admin.php');
             exit;
         } else {
             $recordFailedLogin();

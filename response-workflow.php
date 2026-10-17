@@ -126,20 +126,17 @@ if ($action === 'authorize_high_risk_override') {
     if ($mode !== 'dcvs_dispatch') {
         responseWorkflowReply(400, ['success' => false, 'message' => 'Barangay response is assigned during barangay review; DCVS may only dispatch a DCVS-handled report.']);
     }
-    $dispatchOfficerId = filter_var($_POST['dispatch_officer_id'] ?? null, FILTER_VALIDATE_INT);
-    if (!$dispatchOfficerId || $dispatchOfficerId <= 0) {
-        responseWorkflowReply(400, ['success' => false, 'message' => 'Choose the DCVS officer assigned to this dispatch.']);
-    }
+    $dispatchOfficerId = $userId;
     $officerCheck = $conn->prepare("SELECT user_id, full_name FROM users WHERE user_id = ? AND role = 'staff' AND status = 'active' AND deleted_at IS NULL");
-    if (!$officerCheck) responseWorkflowReply(500, ['success' => false, 'message' => 'Could not verify the selected DCVS officer.']);
+    if (!$officerCheck) responseWorkflowReply(500, ['success' => false, 'message' => 'Could not verify the active DCVS staff member.']);
     $officerCheck->bind_param('i', $dispatchOfficerId);
     if (!$officerCheck->execute() || !($officerRow = $officerCheck->get_result()->fetch_assoc())) {
         $officerCheck->close();
-        responseWorkflowReply(400, ['success' => false, 'message' => 'Choose an active DCVS officer.']);
+        responseWorkflowReply(403, ['success' => false, 'message' => 'Only an active DCVS staff member can confirm this dispatch.']);
     }
     $dispatchOfficerName = (string)$officerRow['full_name'];
     $officerCheck->close();
-    $reason = 'Assigned to ' . $dispatchOfficerName . ($reason !== '' ? '. ' . $reason : '. DCVS dispatch selected.');
+    $reason = 'Dispatch confirmed by ' . $dispatchOfficerName . ($reason !== '' ? '. ' . $reason : '.');
     $target = $mode;
 } else {
     $isHandoverPlan = $action === 'set_handover_plan';
@@ -678,7 +675,7 @@ if (function_exists('createNotification')) {
     } elseif ($action === 'reject_report') {
         $message = 'DCVS rejected this report. Reason: ' . $reason;
     } elseif ($action === 'staff_decide' && $mode === 'dcvs_dispatch') {
-        $message = 'DCVS assigned ' . $dispatchOfficerName . ' to respond to this report.';
+        $message = 'DCVS confirmed this report. ' . $dispatchOfficerName . ' will respond to the incident regardless of the distance to the reported location.';
     } elseif ($action === 'staff_decide') {
         $message = 'DCVS approved the barangay response. The barangay is preparing to respond.';
     } elseif ($action === 'start_response') {

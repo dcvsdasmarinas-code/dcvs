@@ -680,23 +680,6 @@ if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
     }
 }
 
-$responseDispatchOfficers = [];
-if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
-    $officerQuery = $conn->query("SELECT user_id, full_name FROM users
-        WHERE role = 'staff' AND status = 'active' AND deleted_at IS NULL
-        ORDER BY full_name");
-    if ($officerQuery) {
-        while ($officer = $officerQuery->fetch_assoc()) {
-            $responseDispatchOfficers[] = [
-                'id' => (int)$officer['user_id'],
-                'name' => (string)$officer['full_name'],
-            ];
-        }
-    } else {
-        error_log('Could not load active DCVS officers for response decisions: ' . $conn->error);
-    }
-}
-
 function dcvsStaffReportMediaUrl($url) {
     global $appBaseUrl;
     $url = trim((string)$url);
@@ -4578,7 +4561,7 @@ var VIEW_OWNER = <?php echo $viewOwner; ?>;
   var RPT_ITEMS = <?php echo json_encode($reportItems, $jsonFlags); ?>;
   </script>
   <?php $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1'; ?>
-  <script>window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>; window.DCVS_RESPONSE_ROLE = 'staff'; window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>; window.DCVS_CURRENT_STAFF_ID = <?php echo (int)$_SESSION['user_id']; ?>; window.DCVS_RESPONSE_OFFICERS = <?php echo json_encode($responseDispatchOfficers, $jsonFlags); ?>;</script>
+  <script>window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>; window.DCVS_RESPONSE_ROLE = 'staff'; window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>;</script>
   <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/reports-database.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/reports-database.js'); ?>"></script>
 
   <!-- �"?�"? REPORTS: PENDING CASES �"?�"? -->
