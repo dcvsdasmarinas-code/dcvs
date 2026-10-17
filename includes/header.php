@@ -1,3 +1,7 @@
+<?php
+require_once __DIR__ . '/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -116,11 +120,12 @@ a{text-decoration:none;color:inherit;}
 h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section-title, .hero-title, .page-title { font-family:'Inter','Segoe UI',sans-serif !important; font-size:clamp(2rem,1.75rem + 1.25vw,2.5rem) !important; line-height:1 !important; font-weight:600 !important; letter-spacing:-0.025em !important; color:#18181b !important; }
 </style>
 <link rel="stylesheet" href="assets/css/responsive.css">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 <header class="site-header">
   <nav class="navbar">
-    <a href="landing-page.php"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height:50px;width:auto;"></a>
+    <a href="landing-page.php" class="navbar-brand"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height:50px;width:auto;"><span class="navbar-brand-name">Dasmariñas City Veterinary Services</span></a>
     <button class="nav-toggle" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
     <ul class="nav-links">
       <li><a href="landing-page.php" class="<?php echo $activePage === 'home' ? 'active' : ''; ?>">Home</a></li>
@@ -141,6 +146,7 @@ h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section
       </li>
       <li><a href="adoption.php">Adoption</a></li>
     </ul>
+    <a href="contact.php" class="nav-contact-btn">Contact Us</a>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>

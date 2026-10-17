@@ -1,5 +1,7 @@
 ﻿<!DOCTYPE html>
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
@@ -191,6 +193,7 @@ $ann_ct = count($announcements);
   .dropdown-toggle { padding:5px 10px !important; font-size:0.8rem !important; }
 }
 </style>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>" />
 </head><!--/$--><body data-barba="wrapper" data-navigation-status="is-closed" data-about-status="is-closed" data-theme-nav="light" data-scroll-time="0"><?php include __DIR__ . '/../../includes/landing-navbar.php'; ?><div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><!--$--><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span><!--/$--></div><div class="cursor_css w-embed"><style>
   @media (hover: hover) and (pointer: fine) {
 

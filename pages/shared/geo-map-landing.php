@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../env.php';
 loadDcvsEnv();
@@ -32,6 +34,7 @@ if ($bsq) {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="stylesheet" href="dist/mapcn.css" />
   <link rel="stylesheet" href="geo-map/map.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     :root {
       --bg-ice: #e9f3ff;
@@ -347,7 +350,7 @@ if ($bsq) {
 
 <header class="site-header">
   <nav class="navbar">
-    <img src="uploads/site/DCVS LOGO.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;">
+    <a href="landing-page.php" class="navbar-brand"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;"><span class="navbar-brand-name">Dasmariñas City Veterinary Services</span></a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -370,6 +373,7 @@ if ($bsq) {
       </li>
       <li><a href="adoption.php">Adoption</a></li>
     </ul>
+    <a href="contact.php" class="nav-contact-btn">Contact Us</a>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>

@@ -1,3 +1,7 @@
+<?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1053,12 +1057,13 @@ h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:'Inter'
   </style>
   <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/responsive.css">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
  <header class="site-header">
   <nav class="navbar">
-    <a href="landing-page.php"><img src="uploads/site/DCVS LOGO.png" alt="DCSV Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
+    <a href="landing-page.php" class="navbar-brand"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;"><span class="navbar-brand-name">Dasmariñas City Veterinary Services</span></a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span>
       <span></span>
@@ -1083,6 +1088,7 @@ h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:'Inter'
       </li>
       <li><a href="#adopt" class="active">Adoption</a></li>
     </ul>
+    <a href="contact.php" class="nav-contact-btn">Contact Us</a>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>

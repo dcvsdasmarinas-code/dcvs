@@ -1,6 +1,9 @@
 <header class="site-header">
   <nav class="navbar">
-    <a href="<?php echo $homePage; ?>"><img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;"></a>
+    <a href="<?php echo $homePage; ?>" class="navbar-brand">
+      <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="brand-logo" style="height: 50px; width: auto;">
+      <span class="navbar-brand-name">Dasmariñas City Veterinary Services</span>
+    </a>
     <button class="nav-toggle" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
     </button>
@@ -23,6 +26,7 @@
       </li>
       <li><a href="adoption.php">Adoption</a></li>
     </ul>
+    <a href="contact.php" class="nav-contact-btn">Contact Us</a>
     <a href="login.php" class="nav-login-btn">Login</a>
   </nav>
 </header>

@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 session_name('DCVS_ADMIN_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
@@ -183,8 +185,80 @@ $conn->close();
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/auth.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/auth.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <style>
+    .mobile-brand-title,
+    .mobile-brand-trust { display: none; }
+
+    @media (max-width: 900px) {
+      body.auth-body {
+        display: block;
+        min-height: 100vh;
+        overflow-x: hidden;
+        background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%);
+      }
+      .auth-wrapper.auth-wrapper-register {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-content: start;
+        min-height: 100vh;
+        overflow: hidden;
+        background: inherit;
+      }
+      .auth-brand-panel,
+      .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .mobile-brand-title {
+        display: block;
+        order: 1;
+        width: 100%;
+        max-width: 360px;
+        padding: 1.25rem 1rem 0;
+        color: #fff;
+        font-size: clamp(1.45rem, 6vw, 1.9rem);
+        font-weight: 700;
+        line-height: 1.15;
+        text-align: center;
+      }
+      .brand-title:not(.mobile-brand-title) { display: none; }
+      .auth-logo {
+        order: 2;
+        width: clamp(88px, 24vw, 112px);
+        margin: 0.6rem auto 0.75rem;
+      }
+      .brand-subtitle,
+      .register-highlights { display: none; }
+      .auth-form-panel-register {
+        order: 3;
+        min-width: 0;
+        width: 100%;
+        max-height: none;
+        padding: 0.5rem 16px 0;
+        background: transparent;
+      }
+      .auth-form-card-register {
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 1.5rem clamp(1rem, 5vw, 2rem);
+      }
+      .form-header { text-align: center; }
+      .mobile-brand-trust {
+        display: block;
+        order: 4;
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        padding: 1rem 0 1.25rem;
+      }
+      .mobile-brand-trust .brand-logos { width: 100%; overflow: hidden; }
+      .mobile-brand-trust .brand-logo-item { padding: 0 0.75rem; }
+      .mobile-brand-trust .brand-logo-item img { height: 48px; max-width: 140px; }
+      .form-row { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body class="auth-body">
 
@@ -197,8 +271,9 @@ $conn->close();
     <!-- Left Panel: Branding -->
     <div class="auth-brand-panel">
       <div class="brand-content">
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <h1 class="brand-title">Join DCVS<br />Staff Management</h1>
+        <h1 class="mobile-brand-title">Dasmariñas City Veterinary Services</h1>
         <p class="brand-subtitle">Create your staff account and help manage the city's animal welfare programs.</p>
 
         <div class="register-highlights">
@@ -221,6 +296,19 @@ $conn->close();
           <div class="highlight-item">
             <i class="fas fa-check-circle"></i>
             <span>Access system analytics</span>
+          </div>
+        </div>
+        <div class="brand-trust mobile-brand-trust" aria-label="Partner and organization logos">
+          <div class="brand-logos">
+            <div class="brand-logos-track">
+              <?php
+              $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
+              for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
+                <div class="brand-logo-item">
+                  <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                </div>
+              <?php endforeach; endfor; ?>
+            </div>
           </div>
         </div>
       </div>
@@ -501,7 +589,7 @@ $conn->close();
     </div>
   </div>
 
-<script src="assets/js/auth.js"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script>
   function openTermsModal() { var m = document.getElementById('termsModal'); if (m) m.style.display = 'flex'; }
   function closeTermsModal() { var m = document.getElementById('termsModal'); if (m) m.style.display = 'none'; }
