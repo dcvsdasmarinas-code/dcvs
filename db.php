@@ -13,12 +13,24 @@ $username = (string)env('DB_USER', 'root');
 $password = (string)env('DB_PASS', '');
 $database = trim((string)env('DB_NAME', 'dcvs'));
 
-// Create connection
-$conn = new mysqli($host, $username, $password, $database);
+$connectionError = '';
+$mysqliDriver = new mysqli_driver();
+$previousReportMode = $mysqliDriver->report_mode;
+mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+try {
+    $conn = new mysqli($host, $username, $password, $database);
+    $connectionError = (string)$conn->connect_error;
+} catch (mysqli_sql_exception $exception) {
+    $connectionError = $exception->getMessage();
+} finally {
+    mysqli_report($previousReportMode);
+}
 
-// Check connection
-if ($conn->connect_error) {
-    die("Connection failed: " . $conn->connect_error);
+if ($connectionError !== '') {
+    error_log('Database connection failed: ' . $connectionError);
+    http_response_code(503);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Service temporarily unavailable');
 }
 
 // Set charset to utf8mb4
@@ -43,40 +55,123 @@ function createNotification($conn, $userId, $type, $title, $message = '', $refer
  * Returns new avatar URL on success or false on failure (sets $_SESSION['profile_error']).
  */
 function handleAvatarUpload($conn, $userId, &$session) {
-    if (!isset($_FILES['avatar']) || $_FILES['avatar']['error'] !== UPLOAD_ERR_OK) {
+    if (!isset($_FILES['avatar']) || !is_array($_FILES['avatar'])) {
         return $session['avatar_url'] ?? '';
     }
 
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    $maxSize = 2 * 1024 * 1024;
-
-    if (!in_array($_FILES['avatar']['type'], $allowedTypes)) {
-        $_SESSION['profile_error'] = 'Invalid file type. Please upload JPG, PNG, GIF, or WebP.';
+    $file = $_FILES['avatar'];
+    $uploadError = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+    if ($uploadError === UPLOAD_ERR_NO_FILE) {
+        return $session['avatar_url'] ?? '';
+    }
+    if ($uploadError !== UPLOAD_ERR_OK) {
+        $_SESSION['profile_error'] = 'The avatar upload could not be completed. Please try again.';
         return false;
     }
-    if ($_FILES['avatar']['size'] > $maxSize) {
+
+    $maxSize = 2 * 1024 * 1024;
+    $tmpPath = (string)($file['tmp_name'] ?? '');
+    $actualSize = $tmpPath !== '' ? filesize($tmpPath) : false;
+    if (!is_uploaded_file($tmpPath) || $actualSize === false) {
+        error_log("handleAvatarUpload: invalid uploaded file for user $userId");
+        $_SESSION['profile_error'] = 'The uploaded avatar could not be validated. Please try again.';
+        return false;
+    }
+    if ($actualSize > $maxSize) {
         $_SESSION['profile_error'] = 'File size exceeds 2MB limit.';
         return false;
     }
 
-    $uploadDir = __DIR__ . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'avatars' . DIRECTORY_SEPARATOR;
+    $mimeTypes = [
+        'image/jpeg' => ['jpg', IMAGETYPE_JPEG],
+        'image/png' => ['png', IMAGETYPE_PNG],
+        'image/gif' => ['gif', IMAGETYPE_GIF],
+        'image/webp' => ['webp', IMAGETYPE_WEBP],
+    ];
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $detectedMime = $finfo->file($tmpPath);
+    $imageInfo = @getimagesize($tmpPath);
+    if (
+        !is_string($detectedMime)
+        || !isset($mimeTypes[$detectedMime])
+        || $imageInfo === false
+        || ($imageInfo['mime'] ?? '') !== $detectedMime
+        || ($imageInfo[2] ?? null) !== $mimeTypes[$detectedMime][1]
+        || (int)$imageInfo[0] < 1
+        || (int)$imageInfo[1] < 1
+        || (int)$imageInfo[0] * (int)$imageInfo[1] > 20000000
+    ) {
+        $_SESSION['profile_error'] = 'Invalid image. Please upload a JPG, PNG, GIF, or WebP image.';
+        return false;
+    }
+    if (!function_exists('imagecreatefromstring')) {
+        error_log('handleAvatarUpload: GD extension is unavailable');
+        $_SESSION['profile_error'] = 'Avatar image processing is temporarily unavailable.';
+        return false;
+    }
+
+    $imageData = file_get_contents($tmpPath);
+    if ($imageData === false) {
+        error_log("handleAvatarUpload: failed to read uploaded image for user $userId");
+        $_SESSION['profile_error'] = 'The uploaded avatar could not be processed. Please try again.';
+        return false;
+    }
+    $image = @imagecreatefromstring($imageData);
+    unset($imageData);
+    if ($image === false) {
+        error_log("handleAvatarUpload: GD could not decode uploaded image for user $userId");
+        $_SESSION['profile_error'] = 'The uploaded avatar could not be processed. Please try again.';
+        return false;
+    }
+
+    $uploadDir = __DIR__ . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'avatars';
     if (!is_dir($uploadDir)) {
-        @mkdir($uploadDir, 0777, true);
-        if (!is_dir($uploadDir)) {
+        if (!@mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+            imagedestroy($image);
             error_log("handleAvatarUpload: failed to create upload directory $uploadDir");
             $_SESSION['profile_error'] = 'Server error: upload directory unavailable.';
             return false;
         }
     }
 
-    $ext = pathinfo($_FILES['avatar']['name'], PATHINFO_EXTENSION);
-    $filename = 'user_' . $userId . '_' . time() . '.' . $ext;
-    $uploadPath = $uploadDir . $filename;
+    $extension = $mimeTypes[$detectedMime][0];
+    $filename = bin2hex(random_bytes(16)) . '.' . $extension;
+    $uploadPath = $uploadDir . DIRECTORY_SEPARATOR . $filename;
     $webPath = 'uploads/avatars/' . $filename;
+    $temporaryPath = tempnam($uploadDir, '.avatar-');
+    if ($temporaryPath === false) {
+        imagedestroy($image);
+        error_log("handleAvatarUpload: failed to create temporary image for user $userId");
+        $_SESSION['profile_error'] = 'Failed to save uploaded file. Please try again.';
+        return false;
+    }
 
-    if (!move_uploaded_file($_FILES['avatar']['tmp_name'], $uploadPath)) {
-        error_log("handleAvatarUpload: move_uploaded_file failed for user $userId — src=" . ($_FILES['avatar']['tmp_name'] ?? '?') . " dst=$uploadPath");
-        $_SESSION['profile_error'] = 'Failed to save uploaded file. Please check server permissions.';
+    if ($detectedMime === 'image/png' || $detectedMime === 'image/gif' || $detectedMime === 'image/webp') {
+        imagealphablending($image, false);
+        imagesavealpha($image, true);
+    }
+
+    $encoded = false;
+    switch ($detectedMime) {
+        case 'image/jpeg':
+            $encoded = @imagejpeg($image, $temporaryPath, 90);
+            break;
+        case 'image/png':
+            $encoded = @imagepng($image, $temporaryPath, 6);
+            break;
+        case 'image/gif':
+            $encoded = @imagegif($image, $temporaryPath);
+            break;
+        case 'image/webp':
+            $encoded = function_exists('imagewebp') && @imagewebp($image, $temporaryPath, 85);
+            break;
+    }
+    imagedestroy($image);
+
+    if (!$encoded || !@chmod($temporaryPath, 0644) || !@rename($temporaryPath, $uploadPath)) {
+        @unlink($temporaryPath);
+        error_log("handleAvatarUpload: failed to re-encode or save image for user $userId");
+        $_SESSION['profile_error'] = 'Failed to save uploaded file. Please try again.';
         return false;
     }
 
@@ -84,7 +179,7 @@ function handleAvatarUpload($conn, $userId, &$session) {
     $oldPath = $session['avatar_url'] ?? '';
     if (!empty($oldPath) && $oldPath !== $webPath) {
         $oldFull = __DIR__ . '/' . $oldPath;
-        if (file_exists($oldFull)) unlink($oldFull);
+        if (is_file($oldFull)) unlink($oldFull);
     }
 
     // Update database
