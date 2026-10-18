@@ -37,7 +37,6 @@ $roleCheck->close();
 
 $reportPinsEnabled = false;
 loadDcvsEnv();
-$reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
@@ -146,7 +145,7 @@ $activePage = 'geo';
           <span id="geoSearchStatus" class="geo-search-status" role="status" aria-live="polite"></span>
         </div>
         <!-- Map container -->
-        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" data-report-route-enabled="<?php echo $reportRoutingEnabled ? '1' : '0'; ?>" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;position:relative;">
+        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;position:relative;">
           <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
           <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
         </div>

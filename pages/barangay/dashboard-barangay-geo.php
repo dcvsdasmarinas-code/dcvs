@@ -57,7 +57,6 @@ $notificationQuery->close();
 
 loadDcvsEnv();
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
-$reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
 $reportPinsEnabled = false;
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
@@ -198,7 +197,6 @@ $barangaySidebarStylesheetInHead = true;
          data-map-scope="barangay"
          data-map-barangay-id="<?php echo $barangayId; ?>"
          data-map-basemap-toggle="true"
-         data-report-route-enabled="<?php echo $reportRoutingEnabled ? '1' : '0'; ?>"
          <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_BARANGAY_SESSION"<?php endif; ?>
          <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?>>
       <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>

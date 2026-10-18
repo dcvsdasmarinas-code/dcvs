@@ -677,6 +677,34 @@
   font-weight: 600;
 }
 
+.dcvs-report-pin-directions {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #0e8131;
+  border-radius: 6px;
+  background: #0e8131;
+  color: #fff;
+  font: 600 13px 'Inter', 'Segoe UI', sans-serif;
+  text-align: center;
+  text-decoration: none;
+}
+
+.dcvs-report-pin-directions:hover {
+  background: #0b6b29;
+  border-color: #0b6b29;
+}
+
+.dcvs-report-pin-directions[aria-disabled="true"] {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #64748b;
+  cursor: wait;
+}
+
 .dcvs-report-pin-info-row {
   display: flex;
   align-items: flex-start;
