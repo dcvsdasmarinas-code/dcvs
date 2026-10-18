@@ -9,6 +9,7 @@ $appBaseUrl = dcvsAppBaseUrl();
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="Adopt a rescue dog from Animal Kingdom Foundation. Give our lovely rescues the life they deserve." />
   <title>Adopt a Rescue | Dasmariñas City Veterinary Services</title>
+  <link rel="icon" href="<?php echo htmlspecialchars($appBaseUrl . '/favicon.ico?v=' . (int)filemtime(__DIR__ . '/../../favicon.ico'), ENT_QUOTES, 'UTF-8'); ?>" sizes="16x16 32x32 48x48" />
 
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />

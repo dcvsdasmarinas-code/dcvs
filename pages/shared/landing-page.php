@@ -145,6 +145,7 @@ $apptUrl = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) ? 
   .dropdown-toggle { padding:5px 10px !important; font-size:0.8rem !important; }
 }
 </style>
+<link rel="icon" href="<?php echo htmlspecialchars($appBaseUrl . '/favicon.ico?v=' . (int)filemtime(__DIR__ . '/../../favicon.ico'), ENT_QUOTES, 'UTF-8'); ?>" sizes="16x16 32x32 48x48" />
 </head><body data-barba="wrapper" data-navigation-status="is-close" data-about-status="is-closed" data-theme-nav="dark" data-scroll-time="0" class="body">
 <?php $currentPage='home'; $homePage='landing-page.php'; include __DIR__ . '/../../includes/landing-navbar.php'; ?>
 <div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span></div><div class="cursor_css w-embed"><style>
