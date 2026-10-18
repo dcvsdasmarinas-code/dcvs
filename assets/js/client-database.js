@@ -425,7 +425,7 @@ function renderProfile(tab){
   var footer = document.getElementById('clientProfileFooter');
   if (footer) {
     footer.innerHTML =
-      '<a class="sd-btn sd-btn-default" href="staff-communication.php?recipient_id='+encodeURIComponent(c.user_id)+'&recipient_role=resident">Email/Message</a>' +
+      '<a class="sd-btn sd-btn-default" href="#" onclick="openClientComposeFromProfile(); return false;">Email/Message</a>' +
       '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="confirmArchive('+c.user_id+',\''+cpdEsc(c.full_name).replace(/'/g,"\\'")+'\')">Archive</button>';
   }
 
@@ -456,11 +456,16 @@ function renderProfile(tab){
   } else if (activeTab==='history'){
     var history = d.history || [];
     if (!history.length){
-      body.innerHTML = '<div class="no-results"><i class="fas fa-history"></i><p>No activity yet.</p></div>';
+      body.innerHTML = '<div class="rpt-section-title">Client updates</div><p class="rpt-updates-empty">No client updates have been recorded yet.</p>';
     } else {
-      body.innerHTML = '<div class="rpt-section-title">Activity Timeline</div>'+
-        '<div class="rpt-history">'+history.map(function(h){
-          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">'+cpdEsc(h.t)+'</div><div class="rpt-h-meta">by '+cpdEsc(h.a)+(h.d ? ' \u00b7 '+cpdEsc(h.d) : '')+'</div></div></div>';
+      body.innerHTML = '<div class="rpt-section-title">Client updates</div>'+
+        '<div class="rpt-updates-timeline">'+history.map(function(h){
+          return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">'+
+            '<span class="rpt-updates-entry-title">'+cpdEsc(h.t)+'</span>'+
+            (h.d ? '<time class="rpt-updates-entry-date">'+cpdEsc(h.d)+'</time>' : '')+
+            '</div><span class="rpt-updates-entry-actor">'+cpdEsc(h.a || 'DCVS')+'</span>'+
+            (h.copy ? '<p class="rpt-updates-entry-copy">'+cpdEsc(h.copy)+'</p>' : '')+
+            '</article>';
         }).join('')+'</div>';
     }
   }

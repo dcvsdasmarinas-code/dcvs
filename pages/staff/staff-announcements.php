@@ -459,14 +459,6 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     .acms .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:12px; overflow:hidden; background:var(--ink-100); border:1px solid var(--border); display:flex;align-items:center;justify-content:center; margin-bottom:4px; }
     .acms .acms-preview-stage img{ width:100%; height:100%; object-fit:cover; display:block; }
     .acms .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex;align-items:center;justify-content:center; color:var(--ink-300); font-size:46px; }
-    .fb-post-preview{ max-width:520px; margin:0 auto; overflow:hidden; border:1px solid #dfe3e8; border-radius:12px; background:#fff; box-shadow:0 2px 8px rgba(15,23,42,.08); }
-    .fb-post-preview-header{ display:flex; align-items:center; gap:10px; padding:14px 16px; }
-    .fb-post-preview-avatar{ display:flex; align-items:center; justify-content:center; width:42px; height:42px; border-radius:50%; background:#075e36; color:#fff; font-size:18px; }
-    .fb-post-preview-page{ color:#1c1e21; font-size:14px; font-weight:650; }
-    .fb-post-preview-meta{ margin-top:2px; color:#65676b; font-size:12px; }
-    .fb-post-preview-copy{ padding:2px 16px 16px; color:#1c1e21; font-size:15px; line-height:1.48; white-space:pre-wrap; overflow-wrap:anywhere; }
-    .fb-post-preview-image{ display:block; width:100%; max-height:320px; object-fit:cover; border-top:1px solid #e4e6eb; }
-
     .acms .toggle-row{ display:flex; align-items:center; gap:10px; background:var(--ink-50); border:1px solid var(--border); border-radius:10px; padding:11px 13px; cursor:pointer; }
     .acms .toggle-row input{ width:17px;height:17px; accent-color:var(--green-600); cursor:pointer; }
     .acms .toggle-row .t-label{ font-size:13px; font-weight:600; color:var(--ink-800); }
@@ -1279,37 +1271,10 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
           </div>
           <div class="sd-dialog-footer">
             <button type="button" class="sd-btn sd-btn-outline" onclick="closeAnnouncementModal()">Cancel</button>
-            <button type="button" class="sd-btn sd-btn-outline" id="facebookPreviewButton" onclick="openFacebookPostPreview()"><i class="fab fa-facebook"></i> Preview Facebook post</button>
             <button type="submit" class="sd-btn sd-btn-default"><span id="submitBtnText">Create</span></button>
           </div>
         </div>
       </form>
-    </div>
-
-    <div id="facebookPostPreviewModal" class="modal" aria-hidden="true">
-      <div class="sd-dialog">
-        <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="facebookPostPreviewTitle" style="max-width:620px;">
-          <button type="button" class="sd-dialog-close" onclick="closeFacebookPostPreview()" aria-label="Close">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-          </button>
-          <div class="sd-dialog-header">
-            <h2 class="sd-dialog-title" id="facebookPostPreviewTitle">Facebook post preview</h2>
-            <p class="sd-dialog-description">This is the exact text the system will send to Facebook. Barangay coordination details are not included.</p>
-          </div>
-          <div class="fb-post-preview">
-            <div class="fb-post-preview-header">
-              <div class="fb-post-preview-avatar" aria-hidden="true"><i class="fas fa-paw"></i></div>
-              <div><div class="fb-post-preview-page">Dasmariñas City Veterinary Services</div><div class="fb-post-preview-meta">Preview • Public post</div></div>
-            </div>
-            <div id="facebookPostPreviewCopy" class="fb-post-preview-copy" aria-live="polite"></div>
-            <img id="facebookPostPreviewImage" class="fb-post-preview-image" alt="Announcement poster" hidden>
-          </div>
-          <p id="facebookPostPreviewError" class="sd-event-help" role="alert" hidden></p>
-          <div class="sd-dialog-footer">
-            <button type="button" class="sd-btn sd-btn-outline" onclick="closeFacebookPostPreview()">Close preview</button>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div id="announcementDiscardDialog" class="modal" aria-hidden="true">
@@ -2099,80 +2064,7 @@ function openCreate(category){
   document.getElementById('photoPreview').style.display = 'none';
   document.getElementById('photoPlaceholder').style.display = '';
   document.getElementById('photoArea').classList.remove('has-image');
-  document.getElementById('facebookPreviewButton').style.display = '';
   openModal('announcementModal');
-}
-
-let facebookPreviewObjectUrl = '';
-
-function closeFacebookPostPreview(){
-  closeModal('facebookPostPreviewModal');
-  if (facebookPreviewObjectUrl) {
-    URL.revokeObjectURL(facebookPreviewObjectUrl);
-    facebookPreviewObjectUrl = '';
-  }
-  if (document.getElementById('announcementModal').classList.contains('active')) {
-    document.body.style.overflow = 'hidden';
-  }
-}
-
-async function openFacebookPostPreview(){
-  const form = document.getElementById('announcementForm');
-  const button = document.getElementById('facebookPreviewButton');
-  const copy = document.getElementById('facebookPostPreviewCopy');
-  const image = document.getElementById('facebookPostPreviewImage');
-  const error = document.getElementById('facebookPostPreviewError');
-  const csrfToken = form.querySelector('input[name="csrf_token"]');
-  const fields = new URLSearchParams({
-    action: 'preview',
-    csrf_token: csrfToken ? csrfToken.value : '',
-    title: document.getElementById('formTitle').value,
-    location: document.getElementById('formProgramLocation').value,
-    content: document.getElementById('formContent').value,
-    link_url: document.getElementById('formLinkUrl').value,
-    category: document.getElementById('formCategory').value,
-    subject: document.getElementById('formSubject').value
-  });
-  const selectedPoster = document.getElementById('photoPreview');
-  const posterInput = document.getElementById('photoInput');
-  if (facebookPreviewObjectUrl) {
-    URL.revokeObjectURL(facebookPreviewObjectUrl);
-    facebookPreviewObjectUrl = '';
-  }
-  const currentPoster = posterInput.files && posterInput.files.length
-    ? (facebookPreviewObjectUrl = URL.createObjectURL(posterInput.files[0]))
-    : (selectedPoster.style.display !== 'none' ? selectedPoster.src : '');
-
-  error.hidden = true;
-  error.textContent = '';
-  copy.textContent = 'Composing preview…';
-  if (currentPoster) {
-    image.src = currentPoster;
-    image.hidden = false;
-  } else {
-    image.removeAttribute('src');
-    image.hidden = true;
-  }
-  openModal('facebookPostPreviewModal');
-  button.disabled = true;
-  try {
-    const response = await fetch(FACEBOOK_ANNOUNCEMENT_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
-      body: fields.toString()
-    });
-    const result = await response.json();
-    if (!response.ok || !result.success) {
-      throw new Error(result.message || 'Could not compose the Facebook preview.');
-    }
-    copy.textContent = result.caption;
-  } catch (previewError) {
-    copy.textContent = '';
-    error.textContent = previewError.message || 'Could not compose the Facebook preview.';
-    error.hidden = false;
-  } finally {
-    button.disabled = false;
-  }
 }
 
 function announcementFormSnapshot(){
@@ -2370,9 +2262,6 @@ function openEdit(id){
       document.getElementById('formCategory').value = a.is_event ? 'event' : a.category;
       document.getElementById('formSubject').value = a.subject || 'general_notices';
       document.getElementById('formStatus').value = a.status === 'archived' ? 'draft' : a.status;
-      const facebookRow = annGet(parseInt(a.announcement_id, 10));
-      document.getElementById('facebookPreviewButton').style.display =
-        a.status === 'published' && facebookStatusLabel(facebookRow) === 'Posted' ? 'none' : '';
       document.getElementById('formPublishAt').value = a.publish_at ? toLocalInput(a.publish_at) : '';
       document.getElementById('formLinkUrl').value = a.link_url || '';
       document.getElementById('formContent').value = a.content;

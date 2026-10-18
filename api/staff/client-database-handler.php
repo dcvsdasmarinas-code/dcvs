@@ -115,7 +115,7 @@ function handleGetClient($conn) {
 
     if (!empty($client['created_at'])) {
         $ts = strtotime($client['created_at']);
-        $history[] = ['t' => 'Account registered', 'a' => 'DCVS', 'd' => date('M d, Y', $ts), 'ts' => $ts];
+        $history[] = ['t' => 'Account registered', 'a' => 'DCVS', 'd' => date('M j, Y g:i A', $ts), 'ts' => $ts];
     }
 
     $allPets = $conn->prepare("SELECT pet_name, created_at FROM pets WHERE owner_id = ?");
@@ -125,7 +125,7 @@ function handleGetClient($conn) {
     while ($row = $ap->fetch_assoc()) {
         if (empty($row['created_at'])) continue;
         $ts = strtotime($row['created_at']);
-        $history[] = ['t' => 'Pet registered: ' . $row['pet_name'], 'a' => $clientName, 'd' => date('M d, Y', $ts), 'ts' => $ts];
+        $history[] = ['t' => 'Pet registered: ' . $row['pet_name'], 'a' => $clientName, 'd' => date('M j, Y g:i A', $ts), 'ts' => $ts];
     }
     $allPets->close();
 
@@ -136,7 +136,7 @@ function handleGetClient($conn) {
     while ($row = $rr->fetch_assoc()) {
         if (empty($row['created_at'])) continue;
         $ts = strtotime($row['created_at']);
-        $history[] = ['t' => ucfirst($row['report_type']) . ' report submitted', 'a' => $clientName, 'd' => date('M d, Y', $ts), 'ts' => $ts];
+        $history[] = ['t' => ucfirst($row['report_type']) . ' report submitted', 'a' => $clientName, 'd' => date('M j, Y g:i A', $ts), 'ts' => $ts];
     }
     $rq->close();
 
@@ -147,7 +147,7 @@ function handleGetClient($conn) {
     while ($row = $ar->fetch_assoc()) {
         if (empty($row['created_at'])) continue;
         $ts = strtotime($row['created_at']);
-        $history[] = ['t' => ucfirst($row['appointment_type']) . ' appointment booked', 'a' => $clientName, 'd' => date('M d, Y', $ts), 'ts' => $ts];
+        $history[] = ['t' => ucfirst($row['appointment_type']) . ' appointment booked', 'a' => $clientName, 'd' => date('M j, Y g:i A', $ts), 'ts' => $ts];
     }
     $aq->close();
 
@@ -159,7 +159,7 @@ function handleGetClient($conn) {
         if (empty($row['created_at'])) continue;
         $ts = strtotime($row['created_at']);
         $title = ($row['details'] !== null && $row['details'] !== '') ? $row['details'] : ucwords(str_replace('_', ' ', $row['action']));
-        $history[] = ['t' => $title, 'a' => $clientName, 'd' => date('M d, Y', $ts), 'ts' => $ts];
+        $history[] = ['t' => $title, 'a' => $clientName, 'd' => date('M j, Y g:i A', $ts), 'ts' => $ts];
     }
     $lq->close();
 

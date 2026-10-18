@@ -383,6 +383,7 @@ if ($barangayResult) {
     $barangays[] = $barangayRow;
   }
 }
+$composeBarangays = $barangays;
 
 // DO NOT close $conn here — sidebar include uses it for notifications
 ?>
@@ -398,6 +399,7 @@ if ($barangayResult) {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-compose-dialog.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-compose-dialog.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     /* ── Semantic color tokens (light only) ── */
     :root {
@@ -746,67 +748,7 @@ if ($barangayResult) {
 
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- Compose Message Dialog -->
-<div class="modal" id="composeDialog" onclick="if(event.target === this) closeComposeDialog()">
-  <section class="comm-compose-dialog-content" role="dialog" aria-modal="true" aria-labelledby="composeDialogTitle" aria-describedby="composeDialogDescription">
-    <button type="button" class="comm-compose-close" onclick="closeComposeDialog()" aria-label="Close compose message dialog"><i class="fas fa-times"></i></button>
-    <div class="comm-compose-header">
-      <h2 id="composeDialogTitle">Compose Message</h2>
-      <p id="composeDialogDescription">Send a message directly to a resident or barangay officer.</p>
-    </div>
-    <form method="POST" action="staff-communication.php" id="composeForm" class="comm-compose-form">
-      <div class="comm-compose-body">
-      <div class="form-group">
-        <label for="recipient_role">Send To <span class="req">*</span></label>
-        <select id="recipient_role" name="recipient_role" onchange="onRoleChange()" required>
-          <option value="">Select role...</option>
-          <option value="resident">Resident</option>
-          <option value="barangay">Barangay Officer</option>
-        </select>
-      </div>
-      <div class="form-group recipient-filter-group" id="recipientBarangayGroup">
-          <label for="recipientBarangay">Barangay <span class="req">*</span></label>
-          <select id="recipientBarangay" onchange="filterCommunicationRecipients()" disabled>
-            <option value="">Select Barangay...</option>
-            <?php foreach ($barangays as $barangay): ?>
-              <option value="<?php echo (int)$barangay['barangay_id']; ?>"><?php echo htmlspecialchars($barangay['barangay_name']); ?></option>
-            <?php endforeach; ?>
-          </select>
-      </div>
-      <div class="form-group recipient-filter-group" id="recipientAccountGroup">
-        <label for="recipient_id" id="recipientAccountLabel">Registered Accounts <span class="req">*</span></label>
-        <select id="recipient_id" name="recipient_id" required disabled>
-          <option value="">Select a barangay first...</option>
-        </select>
-        <div class="recipient-count" id="recipientCount"></div>
-      </div>
-      <div class="form-group">
-        <label for="message_type">Message Type <span class="req">*</span></label>
-        <select id="message_type" name="message_type" onchange="onMessageTypeChange()" required>
-          <?php foreach ($messageTypes as $key => $label): ?>
-            <option value="<?php echo $key; ?>"><?php echo $label; ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="subject">Subject <span class="req">*</span></label>
-        <input type="text" id="subject" name="subject" placeholder="e.g. Update on your report" required />
-        <div class="subject-suggestions" id="subjectSuggestions"></div>
-      </div>
-      <div class="form-group">
-        <label for="message">Message <span class="req">*</span></label>
-        <textarea id="message" name="message" placeholder="Type your message here..." required></textarea>
-      </div>
-
-      </div>
-      <input type="hidden" name="send_message" value="1">
-      <div class="comm-compose-footer">
-        <button type="button" class="sd-btn sd-btn-outline" onclick="closeComposeDialog()">Cancel</button>
-        <button type="submit" class="sd-btn sd-btn-default btn-send" id="sendBtn"><span id="sendBtnLabel">Send Message</span></button>
-      </div>
-    </form>
-  </section>
-</div>
+<?php require __DIR__ . '/../../includes/staff-compose-dialog.php'; ?>
 
 <!-- Resend Confirm Modal -->
 <div id="resendModal" class="modal">
@@ -830,165 +772,10 @@ if ($barangayResult) {
 var residents = <?php echo json_encode($residents); ?>;
 var barangayUsers = <?php echo json_encode($barangayUsers); ?>;
 
-var subjectTemplates = {
-    general:     ['Important Update from DCVS', 'Notification from DCVS Staff'],
-    report:      ['Update on Animal Report', 'Action Needed on Report', 'Follow-up on Report'],
-    appointment: ['Appointment Confirmation', 'Appointment Reminder', 'Appointment Rescheduled'],
-    adoption:    ['Update on Adoption Request', 'Adoption Application Status'],
-    followup:    ['Friendly Reminder from DCVS', 'Follow-up on Previous Concern'],
-    other:       []
-};
-var messageTypeOptions = {
-    resident: [
-        { value: 'general', label: 'General Message' },
-        { value: 'report', label: 'Animal Report' },
-        { value: 'appointment', label: 'Appointment' },
-        { value: 'adoption', label: 'Adoption Request' },
-        { value: 'followup', label: 'Follow-up / Reminder' },
-        { value: 'other', label: 'Other' }
-    ],
-    barangay: [
-        { value: 'barangay_general', label: 'General Message' },
-        { value: 'barangay_report', label: 'Animal Report' },
-        { value: 'barangay_rescue', label: 'Rescue Case' },
-        { value: 'barangay_pets', label: 'Pet Records' },
-        { value: 'barangay_vaccination', label: 'Vaccination' },
-        { value: 'barangay_coordination', label: 'Barangay Coordination' },
-        { value: 'barangay_followup', label: 'Follow-up / Reminder' },
-        { value: 'barangay_other', label: 'Other' }
-    ]
-};
-var barangaySubjectTemplates = {
-    barangay_general: ['Barangay Coordination'],
-    barangay_report: ['Report Follow-up', 'Report Validation'],
-    barangay_rescue: ['Rescue Coordination'],
-    barangay_pets: ['Pet Record Verification'],
-    barangay_vaccination: ['Vaccination Update'],
-    barangay_coordination: ['Barangay Coordination'],
-    barangay_followup: ['Follow-up Required', 'Reminder'],
-    barangay_other: []
-};
-
 function escapeHtml(s) {
     if (s === null || s === undefined) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-
-function onRoleChange() {
-    updateRecipients();
-    updateMessageTypeOptions();
-}
-
-function updateMessageTypeOptions() {
-    var role = document.getElementById('recipient_role').value;
-    var typeSelect = document.getElementById('message_type');
-    var options = messageTypeOptions[role] || messageTypeOptions.resident;
-    typeSelect.innerHTML = '';
-    options.forEach(function(option) {
-        var element = document.createElement('option');
-        element.value = option.value;
-        element.textContent = option.label;
-        typeSelect.appendChild(element);
-    });
-    document.getElementById('subject').value = '';
-    onMessageTypeChange();
-}
-
-function updateRecipients() {
-    var role = document.getElementById('recipient_role').value;
-    var select = document.getElementById('recipient_id');
-    var count = document.getElementById('recipientCount');
-    var barangaySelect = document.getElementById('recipientBarangay');
-    var hasRole = role === 'resident' || role === 'barangay';
-    document.getElementById('recipientBarangayGroup').classList.toggle('visible', hasRole);
-    document.getElementById('recipientAccountGroup').classList.remove('visible');
-    document.getElementById('recipientAccountLabel').innerHTML = (role === 'barangay' ? 'Registered Accounts' : 'Registered Clients') + ' <span class="req">*</span>';
-    barangaySelect.value = '';
-    barangaySelect.disabled = !hasRole;
-    select.disabled = true;
-    select.required = false;
-    select.innerHTML = '<option value="">' + (hasRole ? 'Select a barangay first...' : 'Select a role first...') + '</option>';
-    count.textContent = '';
-}
-
-function filterCommunicationRecipients() {
-    var role = document.getElementById('recipient_role').value;
-    var barangayId = document.getElementById('recipientBarangay').value;
-    var select = document.getElementById('recipient_id');
-    var accountGroup = document.getElementById('recipientAccountGroup');
-    var count = document.getElementById('recipientCount');
-    var users = role === 'barangay' ? barangayUsers : residents;
-
-    select.innerHTML = '<option value="">' + (barangayId ? 'Select a registered account...' : 'Select a barangay first...') + '</option>';
-    accountGroup.classList.toggle('visible', !!barangayId);
-    select.disabled = !barangayId;
-    select.required = !!barangayId;
-    count.textContent = '';
-    if (!barangayId) return;
-
-    var matches = users.filter(function(user) {
-      return String(user.barangay_id || '') === String(barangayId);
-    });
-
-    count.textContent = matches.length + ' registered ' + (role === 'barangay' ? 'account' : 'client') + (matches.length !== 1 ? 's' : '') + ' found';
-    matches.forEach(function(user) {
-        var option = document.createElement('option');
-        option.value = user.user_id;
-        option.textContent = user.full_name + (user.email ? ' — ' + user.email : '');
-        select.appendChild(option);
-    });
-    if (!matches.length) {
-        select.innerHTML = '<option value="">No registered ' + (role === 'barangay' ? 'accounts' : 'clients') + ' for this barangay</option>';
-        select.disabled = true;
-        select.required = false;
-    }
-}
-
-function onMessageTypeChange() {
-    var type = document.getElementById('message_type').value;
-    var suggestions = document.getElementById('subjectSuggestions');
-    var subjectInput = document.getElementById('subject');
-    suggestions.innerHTML = '';
-    var subs = barangaySubjectTemplates[type] || subjectTemplates[type] || [];
-    subs.forEach(function(s) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = s;
-        btn.onclick = function() { subjectInput.value = s; };
-        suggestions.appendChild(btn);
-    });
-}
-
-/* ── Compose dialog ── */
-function openComposeDialog() {
-  document.getElementById('composeDialog').classList.add('active');
-    document.body.style.overflow = 'hidden';
-  document.getElementById('recipient_role').focus();
-}
-function closeComposeDialog() {
-  document.getElementById('composeDialog').classList.remove('active');
-    document.body.style.overflow = '';
-}
-
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape' && document.getElementById('composeDialog').classList.contains('active')) closeComposeDialog();
-});
-
-document.getElementById('composeForm')?.addEventListener('submit', function(e) {
-  var role = document.getElementById('recipient_role').value;
-  var barangay = document.getElementById('recipientBarangay').value;
-  var recipient = document.getElementById('recipient_id').value;
-  if ((role === 'resident' || role === 'barangay') && (!barangay || !recipient)) {
-    e.preventDefault();
-    document.getElementById('recipientCount').textContent = !barangay
-      ? 'Select a barangay before sending.'
-      : 'Select a registered ' + (role === 'barangay' ? 'barangay account' : 'client') + ' before sending.';
-    return;
-  }
-    var btn = document.getElementById('sendBtn');
-    btn.disabled = true;
-    document.getElementById('sendBtnLabel').textContent = 'Sending...';
-});
 
 /* ── Sent Message History: server-side search + filter + pagination (8/page) ── */
 var logPerPage = 20;
@@ -1182,5 +969,6 @@ function dismissToast(el) {
   setTimeout(function() { el.remove(); }, 300);
 }
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-compose-dialog.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-compose-dialog.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

@@ -356,6 +356,9 @@ if ($cpdPq) {
 $cpdBarangays = [];
 $cpdBq = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
 if ($cpdBq) { while ($r = $cpdBq->fetch_assoc()) $cpdBarangays[] = $r; }
+$composeBarangays = $cpdBarangays;
+$composeResidents = getUsersByRole($conn, 'resident');
+$composeBarangayUsers = getUsersByRole($conn, 'barangay');
 
 $kpiClients = count($cpdClients);
 $kpiPets    = count($cpdPets);
@@ -1364,6 +1367,7 @@ if (!empty($_GET['waitlist_booking'])) {
   
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-compose-dialog.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-compose-dialog.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <script>window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl); ?>; window.dcvsStaffUrl = function(path) { path = String(path || '').trim(); return /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(path) ? path : window.DCVS_APP_BASE_URL + '/' + path.replace(/^\.?\/*/, ''); };</script>
   
   <!-- Chart.js -->
@@ -2879,6 +2883,7 @@ if (!empty($_GET['waitlist_booking'])) {
           </div>
         </div>
       </div>
+      <?php require __DIR__ . '/../../includes/staff-compose-dialog.php'; ?>
 
       <!-- Add Client Modal (shadcn Dialog) -->
       <style>
@@ -3973,7 +3978,12 @@ var CLIENTS = <?php echo json_encode($cpdClients, $jsonFlags); ?>;
 var PETS = <?php echo json_encode($cpdPets, $jsonFlags); ?>;
 var VIEW_OWNER = <?php echo $viewOwner; ?>;
 </script>
+<script>
+var residents = <?php echo json_encode($composeResidents, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
+var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT); ?>;
+</script>
 <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/client-database.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-compose-dialog.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-compose-dialog.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 
   <!-- �"?�"? REPORTS: ALL �"?�"? -->
   <section id="reports-all" class="content-section staff-report-section">

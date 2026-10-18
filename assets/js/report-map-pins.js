@@ -535,22 +535,42 @@
         : (properties.status === 'pending' || properties.status === 'validated'
           ? (sessionName === 'DCVS_BARANGAY_SESSION' ? 'Barangay review · not assigned yet' : 'Awaiting assignment')
           : (isDcvsTakeover(properties) ? 'DCVS Team' : 'DCVS review'));
-      var latest = 'No response update recorded';
+      var latest = 'No response updates have been recorded yet.';
       if (properties.latest_response_action === 'auto_escalate_overdue') {
-        latest = 'Barangay response deadline missed. Automatically escalated to DCVS for dispatch'
-          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '.');
+        latest = 'The Barangay response deadline was missed, so the case was automatically escalated to DCVS for dispatch'
+          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '')
+          + '.';
       } else if (properties.latest_response_action === 'turnover_overdue') {
-        latest = 'Live animal turnover overdue. DCVS has not yet acknowledged receipt of the animal for the reported incident involving '
-          + reportTypeLabel(properties.type) + '. The turnover deadline was missed on '
-          + formatWorkflowDate(properties.turnover_due_at || properties.latest_response_at) + '.';
+        latest = 'The animal turnover deadline'
+          + ((properties.turnover_due_at || properties.latest_response_at)
+            ? ' passed on ' + formatWorkflowDate(properties.turnover_due_at || properties.latest_response_at)
+            : ' has passed')
+          + ', and DCVS has not yet acknowledged receiving the animal involved in this '
+          + reportTypeLabel(properties.type).toLowerCase() + ' report.';
       } else if (properties.latest_response_action === 'confirm_turnover') {
-        latest = 'Live animal turnover completed. The animal was turned over to DCVS Dasmariñas on '
-          + formatWorkflowDate(properties.turnover_received_at || properties.latest_response_at) + '.';
+        latest = 'The animal was turned over to DCVS Dasmariñas'
+          + ((properties.turnover_received_at || properties.latest_response_at)
+            ? ' on ' + formatWorkflowDate(properties.turnover_received_at || properties.latest_response_at)
+            : '') + '.';
       } else if (properties.latest_response_action) {
-        latest = responseActionLabel(properties.latest_response_action)
-          + (properties.latest_response_actor ? ' · ' + properties.latest_response_actor : '')
-          + (properties.latest_response_reason ? ': ' + formatWorkflowText(properties.latest_response_reason) : '')
-          + (properties.latest_response_at ? ' · ' + formatWorkflowDate(properties.latest_response_at) : '');
+        var actionDescriptions = {
+          accept_barangay_assignment: 'accepted the Barangay assignment',
+          start_response: 'started responding to the report',
+          update_progress: 'updated the response progress',
+          mark_secured: 'secured the animal',
+          resolve_barangay: 'marked the incident as resolved',
+          confirm_turnover: 'completed the animal turnover',
+          unable_to_secure: 'escalated the case to DCVS',
+          unable_to_locate: 'reported that the animal could not be located',
+          staff_decide: 'dispatched the DCVS team'
+        };
+        var actionDescription = actionDescriptions[properties.latest_response_action]
+          || responseActionLabel(properties.latest_response_action).toLowerCase();
+        latest = (properties.latest_response_actor || 'The response team') + ' ' + actionDescription
+          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '')
+          + (properties.latest_response_reason
+            ? ' and noted that ' + formatWorkflowText(properties.latest_response_reason).replace(/\s+/g, ' ').trim()
+            : '') + '.';
       }
       var values = {
         stage: stage,
