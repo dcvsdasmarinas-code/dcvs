@@ -140,18 +140,21 @@ include __DIR__ . '/../../includes/header.php';
   background:rgba(0,0,0,0.5);z-index:1000;align-items:center;justify-content:center;
 }
 .modal-overlay.active{display:flex;}
-.modal{
-  background:#fff;border-radius:16px;padding:40px;max-width:600px;width:90%;
-  max-height:80vh;overflow-y:auto;position:relative;
+.privacy-modal-content{
+  box-sizing:border-box;background:#fff;border-radius:0;padding:40px;
+  width:min(600px, calc(100% - 32px));max-height:calc(100vh - 32px);
+  overflow-y:auto;position:relative;
 }
-.modal h2{font-weight:800;font-size:28px;margin:0 0 20px;letter-spacing:-0.025em;}
-.modal p{font-size:15px;line-height:1.6;color:#4b4b4b;margin:0 0 16px;}
-.modal-close{
+.privacy-modal-content .modal-actions{display:flex;justify-content:flex-end;margin-top:24px;}
+.privacy-modal-content .modal-accept{min-width:120px;}
+.privacy-modal-content h2{font-weight:800;font-size:28px;margin:0 0 20px;letter-spacing:-0.025em;}
+.privacy-modal-content p{font-size:15px;line-height:1.6;color:#4b4b4b;margin:0 0 16px;}
+.privacy-modal-content .modal-close{
   position:absolute;top:20px;right:20px;background:none;border:none;
   font-size:28px;cursor:pointer;color:#6b6b6b;width:32px;height:32px;
   display:flex;align-items:center;justify-content:center;border-radius:50%;
 }
-.modal-close:hover{background:#f2f2f0;color:#111;}
+.privacy-modal-content .modal-close:hover{background:#f2f2f0;color:#111;}
 
 .error-message{font-style:italic;color:#dc2626;font-size:14px;margin:0 0 20px;}
 .checkbox-row{display:flex;align-items:flex-start;gap:12px;margin-bottom:18px;}
@@ -182,6 +185,10 @@ include __DIR__ . '/../../includes/header.php';
   .visit-section{padding:30px 12px 40px !important;}
   .map-iframe{height:200px !important;}
   .contact-pad{padding:50px 12px 30px;}
+  .privacy-modal-content{padding:28px 20px 20px;}
+  .privacy-modal-content h2{font-size:22px;padding-right:28px;}
+  .privacy-modal-content .modal-actions{margin-top:20px;}
+  .privacy-modal-content .modal-accept{flex:1;width:100%;box-sizing:border-box;}
 }
 </style>
 
@@ -192,7 +199,6 @@ include __DIR__ . '/../../includes/header.php';
         <div class="eyebrow">Contact</div>
         <h1>Get in touch<br>with DCVS</h1>
         <p>Have questions about pet registration, veterinary appointments, animal adoption, or stray and rabies case reporting? Our team is here to assist you. Complete the contact form and we'll respond to your inquiry as soon as possible.</p>
-        <p>Whether you need help using the system, following up on a submitted report, or requesting information about our veterinary services, we're ready to help. Please provide accurate contact details so we can respond efficiently.</p>
       </div>
       <div class="card ps-card">
         <?php if ($mailStatus === 'success'): ?>
@@ -292,10 +298,13 @@ include __DIR__ . '/../../includes/header.php';
 
 <!-- Modal -->
 <div class="modal-overlay" id="privacyModal">
-  <div class="modal">
-    <button class="modal-close" onclick="closeModal()"><i class="fas fa-times"></i></button>
-    <h2>Data Privacy Act of 2012</h2>
+  <div class="privacy-modal-content" role="dialog" aria-modal="true" aria-labelledby="privacyModalTitle">
+    <button type="button" class="modal-close" aria-label="Close privacy notice" onclick="closeModal()"><i class="fas fa-times"></i></button>
+    <h2 id="privacyModalTitle">Data Privacy Act of 2012</h2>
     <p>By submitting this form, you consent to the collection and processing of your personal information in accordance with the Data Privacy Act of 2012 (Republic Act No. 10173). The information you provide will be used solely by the Dasmariñas City Veterinary Services (DCVS) to respond to your inquiry, provide requested assistance, and improve our services. Your personal data will be kept confidential, securely stored, and will not be shared with unauthorized parties unless required by law.</p>
+    <div class="modal-actions">
+      <button type="button" class="ps-btn ps-btn-primary modal-accept" onclick="acceptPrivacyPolicy()">I accept</button>
+    </div>
   </div>
 </div>
 
@@ -325,6 +334,11 @@ function validateForm(event) {
 }
 function openModal() { document.getElementById('privacyModal').classList.add('active'); }
 function closeModal() { document.getElementById('privacyModal').classList.remove('active'); }
+function acceptPrivacyPolicy() {
+  document.getElementById('news').checked = true;
+  document.getElementById('privacyError').style.display = 'none';
+  closeModal();
+}
 document.getElementById('privacyModal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });

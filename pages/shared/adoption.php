@@ -1057,7 +1057,7 @@ h1, h2, .hero h1, .hero-title, .page-title, .section-title { font-family:'Inter'
   </style>
   <link href="https://unpkg.com/aos@2.3.4/dist/aos.css" rel="stylesheet">
   <link rel="stylesheet" href="assets/css/responsive.css">
-  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/site-navbar.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
@@ -1548,5 +1548,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 })();
   </script>
-  </body>
+<script src="assets/js/navbar-scroll-hide.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/navbar-scroll-hide.js'); ?>"></script>
+</body>
 </html>

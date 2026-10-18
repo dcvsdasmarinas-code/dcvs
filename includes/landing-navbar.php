@@ -31,13 +31,6 @@
   </nav>
 </header>
 <?php if (($currentPage ?? '') === 'updates') { include __DIR__ . '/../pages/shared/announcements-ui.php'; } ?>
-<style>
-  .site-header { transition: transform 0.3s ease, box-shadow 0.3s ease; will-change: transform; }
-  .site-header.nav-header-hidden { transform: translateY(-110%) !important; }
-  @media (prefers-reduced-motion: reduce) {
-    .site-header { transition: none; }
-  }
-</style>
 <script>
 (function () {
   var header = document.querySelector('.site-header') || document;
@@ -93,31 +86,6 @@
       window.addEventListener('scroll', sc, { passive: true });
       sc();
     }
-    /* Hide navbar on scroll down, reveal on scroll up */
-    var st = document.querySelector('.site-header');
-    if (st) {
-      var lastY = window.scrollY;
-      var ticking = false;
-      function onScroll() {
-        ticking = false;
-        var y = window.scrollY;
-        var menuOpen = navLinks ? navLinks.classList.contains('open') : false;
-        if (menuOpen || y < 120) {
-          st.classList.remove('nav-header-hidden');
-        } else if (y > lastY) {
-          st.classList.add('nav-header-hidden');
-        } else {
-          st.classList.remove('nav-header-hidden');
-        }
-        lastY = y;
-      }
-      window.addEventListener('scroll', function () {
-        if (!ticking) {
-          ticking = true;
-          window.requestAnimationFrame(onScroll);
-        }
-      }, { passive: true });
-    }
     if (navToggle && navLinks) {
       navToggle.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -146,6 +114,7 @@
   }
 })();
 </script>
+<script src="assets/js/navbar-scroll-hide.js?v=<?php echo (int)filemtime(__DIR__ . '/../assets/js/navbar-scroll-hide.js'); ?>"></script>
 <script>
 (function () {
   var realTitle = document.title || '';

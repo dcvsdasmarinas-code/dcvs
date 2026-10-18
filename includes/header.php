@@ -120,7 +120,7 @@ a{text-decoration:none;color:inherit;}
 h1, h2, .about-hero h1, .about-page h2, .faq-hero h1, .contact-hero h1, .section-title, .hero-title, .page-title { font-family:'Inter','Segoe UI',sans-serif !important; font-size:clamp(2rem,1.75rem + 1.25vw,2.5rem) !important; line-height:1 !important; font-weight:600 !important; letter-spacing:-0.025em !important; color:#18181b !important; }
 </style>
 <link rel="stylesheet" href="assets/css/responsive.css">
-<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css', ENT_QUOTES, 'UTF-8'); ?>">
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css?v=' . (int)filemtime(__DIR__ . '/../assets/css/site-navbar.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 <header class="site-header">
@@ -183,3 +183,4 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 });
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/navbar-scroll-hide.js?v=' . (int)filemtime(__DIR__ . '/../assets/js/navbar-scroll-hide.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
