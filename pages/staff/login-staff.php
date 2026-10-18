@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../../includes/app-base.php';
 $appBaseUrl = dcvsAppBaseUrl();
+header('Location: ' . $appBaseUrl . '/login.php', true, 302);
+exit;
 require_once __DIR__ . '/../../db.php';
 
 session_name('DCVS_STAFF_SESSION');

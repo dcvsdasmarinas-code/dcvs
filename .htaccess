@@ -7,7 +7,7 @@
 RewriteEngine On
 RewriteRule ^admin-archive\.php$ pages/admin/admin-archive.php [END]
 RewriteRule ^dashboard-admin\.php$ pages/admin/dashboard-admin.php [END]
-RewriteRule ^login-admin\.php$ pages/admin/login-admin.php [END]
+RewriteRule ^login-admin\.php$ pages/shared/login.php [END]
 RewriteRule ^role-management\.php$ pages/admin/role-management.php [END]
 RewriteRule ^analytics-export\.php$ api/admin/analytics-export.php [END]
 RewriteRule ^logout-admin\.php$ api/admin/logout-admin.php [END]
@@ -70,8 +70,8 @@ RewriteRule ^dashboard-staff-geo\.php$ pages/staff/dashboard-staff-geo.php [END]
 
 # Login and logout compatibility routes.
 RewriteRule ^login\.php$ pages/shared/login.php [END]
-RewriteRule ^login-barangay\.php$ pages/barangay/login-barangay.php [END]
-RewriteRule ^login-staff\.php$ pages/staff/login-staff.php [END]
+RewriteRule ^login-barangay\.php$ pages/shared/login.php [END]
+RewriteRule ^login-staff\.php$ pages/shared/login.php [END]
 RewriteRule ^logout\.php$ api/shared/logout.php [END]
 RewriteRule ^logout-barangay\.php$ api/barangay/logout-barangay.php [END]
 RewriteRule ^logout-staff\.php$ api/staff/logout-staff.php [END]

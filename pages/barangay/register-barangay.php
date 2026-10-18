@@ -1,4 +1,5 @@
 <?php
+session_name('DCVS_ADMIN_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
     'lifetime' => 30 * 24 * 60 * 60,
@@ -12,6 +13,10 @@ session_start();
 
 require_once __DIR__ . '/../../includes/app-base.php';
 $appBaseUrl = dcvsAppBaseUrl();
+if (empty($_SESSION['logged_in']) || ($_SESSION['role'] ?? '') !== 'admin') {
+    header('Location: ' . $appBaseUrl . '/login.php');
+    exit;
+}
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
 
@@ -104,8 +109,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['register_success'] = "Barangay account created successfully! You can now log in.";
-        header('Location: login-barangay.php');
+        $_SESSION['flash_msg'] = "Barangay account created successfully.";
+        $_SESSION['flash_type'] = 'success';
+        header('Location: role-management.php');
         exit;
     } else {
         $_SESSION['register_error'] = "Registration failed. Please try again.";

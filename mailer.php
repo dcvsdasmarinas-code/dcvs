@@ -4,7 +4,7 @@
  * Sends professional HTML emails to residents when staff updates appointments or reports.
  */
 
-require_once 'email_config.php';
+require_once __DIR__ . '/email_config.php';
 
 /**
  * Enqueue a DCVS email to the email_queue table for background delivery.

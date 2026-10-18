@@ -41,6 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $confirmPassword = $_POST['confirm_password'] ?? '';
     $agreeTerms = isset($_POST['agree_terms']);
 
+    if (isset($_POST['role']) && $_POST['role'] !== 'resident') {
+        http_response_code(403);
+        exit('Public registration is available for resident accounts only.');
+    }
+
     // Server-side validation
     $errors = [];
 
@@ -767,7 +772,7 @@ $conn->close();
       .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
       .auth-brand-panel, .brand-content { display: contents; }
       .auth-brand-panel::before { display: none; }
-      .brand-title { order: 1; width: 100%; max-width: 360px; padding: 1.25rem 1rem 0; font-size: clamp(1.45rem, 6vw, 1.9rem); line-height: 1.15; text-align: center; overflow-wrap: normal; }
+      .brand-title { order: 1; justify-self: center; width: 100%; max-width: 420px; margin-inline: auto; padding: 1.25rem 1rem 0; font-size: clamp(1.65rem, 7vw, 2.15rem); line-height: 1.15; text-align: center; text-wrap: balance; overflow-wrap: normal; }
       .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
       .brand-tagline { display: none; }
       .auth-form-panel { order: 3; min-width: 0; width: 100%; max-height: none; padding: 0.5rem 16px 0; background: transparent; }
@@ -783,6 +788,7 @@ $conn->close();
     @media (max-width: 480px) {
       .register-header h2 { font-size: 1.25rem; }
     }
+
   </style>
 </head>
 <body>

@@ -2,22 +2,35 @@
 require_once __DIR__ . '/../../includes/app-base.php';
 $appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/auth-routing.php';
 
-ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
-session_set_cookie_params([
-    'lifetime' => 30 * 24 * 60 * 60,
-    'path'     => '/',
-    'domain'   => $_SERVER['HTTP_HOST'] ?? '',
-    'secure'   => !empty($_SERVER['HTTPS']),
-    'httponly' => true,
-    'samesite' => 'Lax',
-]);
+session_name('PHPSESSID');
+dcvsConfigureAuthSession();
 session_start();
+
+if (!empty($_SESSION['logged_in']) && !empty($_SESSION['user_id'])) {
+    $activePortal = dcvsAuthenticatedUserFromSession();
+    if ($activePortal) {
+        header('Location: ' . $activePortal['dashboard']);
+        exit;
+    }
+}
+$existingPortalDashboard = dcvsFindExistingPortalSession();
+if ($existingPortalDashboard) {
+    header('Location: ' . $existingPortalDashboard);
+    exit;
+}
 
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
 if ($autoUser) {
-    header('Location: dashboard-resident.php');
+    $autoPortal = dcvsStartRoleSession($autoUser);
+    if ($autoPortal) {
+        header('Location: ' . $autoPortal['dashboard']);
+        exit;
+    }
+    $_SESSION['login_error'] = 'This account type cannot sign in through this page.';
+    header('Location: login.php');
     exit;
 }
 
@@ -121,22 +134,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            // Redirect based on role
-            switch ($user['role']) {
-                case 'admin':
-                    header('Location: role-management.php');
-                    break;
-                case 'staff':
-                    header('Location: dashboard-staff.php');
-                    break;
-                case 'barangay':
-                    header('Location: dashboard-barangay.php');
-                    break;
-                case 'resident':
-                default:
-                    header('Location: dashboard-resident.php');
-                    break;
+            $portal = dcvsStartRoleSession($user);
+            if (!$portal) {
+                $_SESSION['login_error'] = 'This account type cannot sign in through this page.';
+                header('Location: login.php');
+                exit;
             }
+            header('Location: ' . $portal['dashboard']);
             exit;
         } else {
             $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
@@ -611,7 +615,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
       .auth-brand-panel, .brand-content { display: contents; }
       .auth-brand-panel::before { display: none; }
-      .brand-title { order: 1; width: 100%; max-width: 360px; padding: 1.25rem 1rem 0; font-size: clamp(1.45rem, 6vw, 1.9rem); line-height: 1.15; text-align: center; overflow-wrap: normal; }
+      .brand-title { order: 1; justify-self: center; width: 100%; max-width: 420px; margin-inline: auto; padding: 1.25rem 1rem 0; font-size: clamp(1.65rem, 7vw, 2.15rem); line-height: 1.15; text-align: center; text-wrap: balance; overflow-wrap: normal; }
       .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
       .brand-tagline { display: none; }
       .auth-form-panel { order: 3; min-width: 0; width: 100%; max-height: none; padding: 0.5rem 16px 0; background: transparent; }
@@ -626,6 +630,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     @media (max-width: 480px) {
       .login-header h2 { font-size: 1.25rem; }
     }
+
   </style>
 </head>
 <body>
