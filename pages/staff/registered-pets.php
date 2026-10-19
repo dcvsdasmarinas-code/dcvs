@@ -24,13 +24,14 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESS
 $pageTitle = 'Registered Pets';
 $activePage = 'registered-pets';
 $pets = [];
+$barangays = [];
 $loadError = '';
 $counts = ['total' => 0, 'dog' => 0, 'cat' => 0, 'other' => 0];
 
 $petQuery = $conn->query("
     SELECT p.pet_id, p.reference_id, p.pet_name, p.pet_type, p.breed, p.age, p.gender,
            p.vaccination_status, p.photo_url, p.created_at, p.owner_id,
-           u.full_name AS owner_name, u.reference_id AS owner_ref,
+           u.full_name AS owner_name, u.reference_id AS owner_ref, u.email AS owner_email,
            b.barangay_name
     FROM pets p
     JOIN users u ON p.owner_id = u.user_id
@@ -43,7 +44,10 @@ $petQuery = $conn->query("
 if ($petQuery) {
     while ($pet = $petQuery->fetch_assoc()) {
         $pets[] = $pet;
+        $barangayName = trim((string)($pet['barangay_name'] ?? ''));
+        if ($barangayName !== '') $barangays[$barangayName] = $barangayName;
         $type = strtolower((string)$pet['pet_type']);
+        $filterType = in_array($type, ['dog', 'cat'], true) ? $type : 'other';
         $counts['total']++;
         if (isset($counts[$type])) $counts[$type]++;
         else $counts['other']++;
@@ -53,6 +57,7 @@ if ($petQuery) {
     error_log('Could not load staff registered pets: ' . $conn->error);
     $loadError = 'Registered pets could not be loaded. Please refresh the page or contact support.';
 }
+natcasesort($barangays);
 
 function registeredPetPhotoUrl($photoUrl, $baseUrl) {
     $photoUrl = trim((string)$photoUrl);
@@ -81,19 +86,21 @@ function registeredPetVaccination($status) {
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     .registered-pets-page{min-height:calc(100vh - var(--topbar-h,64px));margin:-1.75rem -2rem;padding:24px;background:#fff;color:#18181b;font-family:Inter,'Segoe UI',sans-serif}
-    .rp-header{margin:0 0 20px}
-    .rp-header h1{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em;color:#18181b}
-    .rp-header p{margin:5px 0 0;font-size:14px;color:#71717a}
     .rp-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px}
-    .rp-kpi{padding:16px 18px;background:#fff;border:1px solid #e4e4e7;border-radius:8px}
-    .rp-kpi-label{margin:0 0 9px;font-size:13px;font-weight:500;color:#71717a}
-    .rp-kpi-value{font-size:26px;font-weight:700;line-height:1.1;color:#18181b}
-    .rp-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-    .rp-search{position:relative;flex:1;max-width:420px}
-    .rp-search i{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#a1a1aa;font-size:13px}
-    .rp-search input,.rp-toolbar select,.rp-rows select{height:38px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:400 13px Inter,'Segoe UI',sans-serif}
-    .rp-search input{width:100%;padding-left:35px;outline:none}
-    .rp-search input:focus,.rp-toolbar select:focus{border-color:#a1a1aa}
+    .rp-kpi{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03);transition:all .2s cubic-bezier(.4,0,.2,1)}
+    .rp-kpi:hover{border-color:#d1d5db;box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)}
+    .rp-kpi-label{margin:0 0 8px;font-size:12.5px;font-weight:600;color:#000;text-transform:uppercase}
+    .rp-kpi-value{margin:0 0 8px;font-size:26px;font-weight:700;line-height:1;color:#18181b;letter-spacing:-.02em}
+    .rp-kpi-sub{margin:0;font-size:14px;color:#71717a}
+    .rp-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+    .rp-search{position:relative;flex:0 1 auto;width:380px;min-width:180px}
+    .rp-search i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#71717a;font-size:13px}
+    .rp-search input,.rp-toolbar select,.rp-rows select{box-sizing:border-box;height:36px;padding:0 10px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:500 14px Inter,'Segoe UI',sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+    .rp-search input{width:100%;padding-left:36px;font-weight:400;outline:none}
+    .rp-search input:focus,.rp-toolbar select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
+    .rp-search input::placeholder{color:#a1a1aa}
+    .rp-filters{display:flex;align-items:center;gap:8px}
+    .rp-filters select{min-width:120px;max-width:150px;padding-right:26px;cursor:pointer}
     .rp-table-wrap{overflow:auto;border:1px solid #e4e4e7;border-radius:8px;background:#fff}
     .rp-table{width:100%;min-width:980px;border-collapse:collapse;font-size:14px}
     .rp-table th{height:42px;padding:0 12px;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;color:#71717a;font-size:13px;font-weight:500;white-space:nowrap}
@@ -116,36 +123,45 @@ function registeredPetVaccination($status) {
     .rp-page-controls button{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;cursor:pointer}
     .rp-page-controls button:disabled{opacity:.45;cursor:not-allowed}
     .rp-empty{padding:42px 16px!important;text-align:center;color:#71717a!important}
-    @media(max-width:900px){.rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:768px){.registered-pets-page{width:100%;margin:-1.75rem 0;padding:18px 14px}.rp-toolbar{align-items:stretch;flex-direction:column}.rp-search{max-width:none}.rp-toolbar select{width:100%}.rp-pagination{justify-content:space-between;gap:10px}.rp-rows{display:flex;align-items:center;gap:7px}}
-    @media(max-width:480px){.rp-kpis{gap:10px}.rp-kpi{padding:13px}.rp-kpi-value{font-size:23px}.rp-header h1{font-size:20px}}
+    @media(max-width:900px){.rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rp-toolbar{align-items:stretch}.rp-search,.rp-filters{width:100%;max-width:100%;min-width:0}.rp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.rp-filters select{width:100%;min-width:0;max-width:none}}
+    @media(max-width:768px){.registered-pets-page{width:100%;margin:-1.75rem 0;padding:18px 14px}.rp-toolbar{flex-direction:column}.rp-search{max-width:none}.rp-pagination{justify-content:space-between;gap:10px}.rp-rows{display:flex;align-items:center;gap:7px}}
+    @media(max-width:480px){.rp-kpis{gap:10px}.rp-kpi{padding:13px}.rp-kpi-value{font-size:23px}}
   </style>
 </head>
 <body class="staff-theme" data-portal="staff">
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
-  <section class="registered-pets-page" aria-labelledby="registeredPetsTitle">
-    <header class="rp-header">
-      <h1 id="registeredPetsTitle">Registered Pets</h1>
-      <p>All pets registered by active residents in the DCVS system.</p>
-    </header>
+  <section class="registered-pets-page" aria-label="Registered pets">
     <div class="rp-kpis" aria-label="Registered pets summary">
-      <div class="rp-kpi"><p class="rp-kpi-label">Total Registered Pets</p><div class="rp-kpi-value"><?php echo number_format($counts['total']); ?></div></div>
-      <div class="rp-kpi"><p class="rp-kpi-label">Dogs</p><div class="rp-kpi-value"><?php echo number_format($counts['dog']); ?></div></div>
-      <div class="rp-kpi"><p class="rp-kpi-label">Cats</p><div class="rp-kpi-value"><?php echo number_format($counts['cat']); ?></div></div>
-      <div class="rp-kpi"><p class="rp-kpi-label">Other</p><div class="rp-kpi-value"><?php echo number_format($counts['other']); ?></div></div>
+      <div class="rp-kpi"><p class="rp-kpi-label">Total Pets</p><div class="rp-kpi-value"><?php echo number_format($counts['total']); ?></div><p class="rp-kpi-sub">Across active residents</p></div>
+      <div class="rp-kpi"><p class="rp-kpi-label">Dogs</p><div class="rp-kpi-value"><?php echo number_format($counts['dog']); ?></div><p class="rp-kpi-sub">Registered dogs</p></div>
+      <div class="rp-kpi"><p class="rp-kpi-label">Cats</p><div class="rp-kpi-value"><?php echo number_format($counts['cat']); ?></div><p class="rp-kpi-sub">Registered cats</p></div>
+      <div class="rp-kpi"><p class="rp-kpi-label">Other Pets</p><div class="rp-kpi-value"><?php echo number_format($counts['other']); ?></div><p class="rp-kpi-sub">Other registered species</p></div>
     </div>
     <div class="rp-toolbar">
       <label class="rp-search">
         <i class="fas fa-search" aria-hidden="true"></i>
-        <input type="search" id="registeredPetsSearch" placeholder="Search pet, owner, ID, or barangay" aria-label="Search registered pets" />
+        <input type="search" id="registeredPetsSearch" placeholder="Search client or pet name, ID, email..." aria-label="Search registered pets" />
       </label>
-      <select id="registeredPetsType" aria-label="Filter by species">
-        <option value="">All Species</option>
+      <div class="rp-filters">
+      <select id="registeredPetsType" aria-label="Filter by type">
+        <option value="">All Types</option>
         <option value="dog">Dog</option>
         <option value="cat">Cat</option>
         <option value="other">Other</option>
       </select>
+      <select id="registeredPetsQuickFilter" aria-label="Additional filters">
+        <option value="">All</option>
+        <option value="recent">Recently Added</option>
+        <option value="vaccinated">Vaccinated Pets</option>
+      </select>
+      <select id="registeredPetsBarangay" aria-label="Filter by barangay">
+        <option value="">All Barangays</option>
+        <?php foreach ($barangays as $barangay): ?>
+          <option value="<?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?></option>
+        <?php endforeach; ?>
+      </select>
+      </div>
     </div>
     <div class="rp-table-wrap">
       <table class="rp-table">
@@ -164,13 +180,14 @@ function registeredPetVaccination($status) {
         <tbody id="registeredPetsRows">
         <?php foreach ($pets as $pet):
           $type = strtolower((string)$pet['pet_type']);
+          $barangayName = trim((string)($pet['barangay_name'] ?? ''));
           $ref = $pet['reference_id'] ?: '#PET-' . fallbackRefId('#PET-', (int)$pet['pet_id']);
           $date = !empty($pet['created_at']) ? date('M d, Y', strtotime($pet['created_at'])) : '—';
           [$vaccinationLabel, $vaccinationClass] = registeredPetVaccination($pet['vaccination_status']);
           $photoUrl = registeredPetPhotoUrl($pet['photo_url'], $appBaseUrl);
-          $searchText = implode(' ', [$pet['pet_name'], $ref, $pet['owner_name'], $pet['owner_ref'], cpdTypeLabel($type), $pet['breed'], $pet['barangay_name']]);
+          $searchText = implode(' ', [$pet['pet_name'], $ref, $pet['owner_name'], $pet['owner_ref'], $pet['owner_email'], cpdTypeLabel($type), $pet['breed'], $pet['barangay_name']]);
         ?>
-          <tr data-species="<?php echo htmlspecialchars($type, ENT_QUOTES, 'UTF-8'); ?>" data-search="<?php echo htmlspecialchars(strtolower($searchText), ENT_QUOTES, 'UTF-8'); ?>">
+          <tr data-species="<?php echo htmlspecialchars($filterType, ENT_QUOTES, 'UTF-8'); ?>" data-barangay="<?php echo htmlspecialchars($barangayName, ENT_QUOTES, 'UTF-8'); ?>" data-recent="<?php echo !empty($pet['created_at']) && strtotime((string)$pet['created_at']) >= strtotime('-30 days') ? '1' : '0'; ?>" data-vaccinated="<?php echo $vaccinationClass === 'vacc-ok' ? '1' : '0'; ?>" data-search="<?php echo htmlspecialchars(strtolower($searchText), ENT_QUOTES, 'UTF-8'); ?>">
             <td><div class="rp-pet"><span class="rp-avatar"><?php if ($photoUrl !== ''): ?><img src="<?php echo htmlspecialchars($photoUrl, ENT_QUOTES, 'UTF-8'); ?>" alt=""><?php else: echo htmlspecialchars(cpdInitials($pet['pet_name']), ENT_QUOTES, 'UTF-8'); endif; ?></span><span class="rp-name"><?php echo htmlspecialchars($pet['pet_name'], ENT_QUOTES, 'UTF-8'); ?></span></div></td>
             <td class="rp-id" data-sort-value="<?php echo htmlspecialchars($ref, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($ref, ENT_QUOTES, 'UTF-8'); ?></td>
             <td><?php echo htmlspecialchars($pet['owner_name'], ENT_QUOTES, 'UTF-8'); ?></td>
@@ -209,6 +226,8 @@ function registeredPetVaccination($status) {
   var originalRows = Array.prototype.slice.call(body.querySelectorAll('tr'));
   var search = document.getElementById('registeredPetsSearch');
   var type = document.getElementById('registeredPetsType');
+  var quickFilter = document.getElementById('registeredPetsQuickFilter');
+  var barangay = document.getElementById('registeredPetsBarangay');
   var perPage = document.getElementById('registeredPetsPerPage');
   var pageLabel = document.getElementById('registeredPetsPageLabel');
   var page = 1;
@@ -219,7 +238,10 @@ function registeredPetVaccination($status) {
     var query = search.value.trim().toLowerCase();
     return originalRows.filter(function(row){
       return (!query || row.dataset.search.indexOf(query) !== -1) &&
-        (!type.value || row.dataset.species === type.value);
+        (!type.value || row.dataset.species === type.value) &&
+        (!quickFilter.value || (quickFilter.value === 'recent' && row.dataset.recent === '1') ||
+          (quickFilter.value === 'vaccinated' && row.dataset.vaccinated === '1')) &&
+        (!barangay.value || row.dataset.barangay === barangay.value);
     });
   }
   function render(){
@@ -242,6 +264,8 @@ function registeredPetVaccination($status) {
   }
   search.addEventListener('input', function(){ page = 1; render(); });
   type.addEventListener('change', function(){ page = 1; render(); });
+  quickFilter.addEventListener('change', function(){ page = 1; render(); });
+  barangay.addEventListener('change', function(){ page = 1; render(); });
   perPage.addEventListener('change', function(){ page = 1; render(); });
   document.getElementById('registeredPetsPrev').addEventListener('click', function(){ page--; render(); });
   document.getElementById('registeredPetsNext').addEventListener('click', function(){ page++; render(); });

@@ -2880,7 +2880,6 @@ $activePage = 'adoption-pool';
                 <th class="sd-th"><button type="button" class="th-sort" data-col="breed" onclick="sortBy('breed')">Breed<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="age" onclick="sortBy('age')">Age<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="species" onclick="sortBy('species')">Species<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-                <th class="sd-th">Rescue Type</th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="rescueSource" onclick="sortBy('rescueSource')">Rescue Source<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="rescueDate" onclick="sortBy('rescueDate')">Rescue Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="adoptionStatus" onclick="sortBy('adoptionStatus')">Adoption Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -3828,11 +3827,6 @@ $activePage = 'adoption-pool';
                 p.listingId = Number(row.listing_id);
                 changed = true;
               }
-              const rescueAnimalCount = Number(row.rescue_animal_count || 0);
-              if (Number(p.rescueAnimalCount || 0) !== rescueAnimalCount) {
-                p.rescueAnimalCount = rescueAnimalCount;
-                changed = true;
-              }
               const sourceLabel = POOL_RESCUE_SOURCE_LABELS[row.rescue_source];
               if (sourceLabel && p.rescueSource !== sourceLabel) { p.rescueSource = sourceLabel; changed = true; }
               const intakeDate = row.intake_rescue_date || '';
@@ -3911,7 +3905,6 @@ $activePage = 'adoption-pool';
                   rescueDate: row.intake_rescue_date || row.rescued_date || '',
                   fullRescueDate: row.intake_rescue_date || row.rescued_date || '',
                   rescueIntakeId: Number(row.rescue_intake_id || 0),
-                  rescueAnimalCount: Number(row.rescue_animal_count || 0),
                   adoptionStatus: adoptionStatus,
                   listingStatus: listingStatus,
                   image: resolvePetPhotoUrl(row.photo_url, row.species),
@@ -4067,12 +4060,11 @@ $activePage = 'adoption-pool';
           if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
           return '"' + text.replace(/"/g, '""') + '"';
         }
-        const headers = ['ID', 'Pet', 'Gender', 'Breed', 'Age', 'Species', 'Rescue Type', 'Rescue Source', 'Rescue Date', 'Adoption Status', 'Confirmed/Adopted Date', 'Pickup Period', 'Listing'];
+        const headers = ['ID', 'Pet', 'Gender', 'Breed', 'Age', 'Species', 'Rescue Source', 'Rescue Date', 'Adoption Status', 'Confirmed/Adopted Date', 'Pickup Period', 'Listing'];
         const rows = [headers.map(csvCell).join(',')];
         getFilteredPoolPets().forEach(pet => {
           rows.push([
             pet.listingId || pet.id, pet.name, pet.gender, pet.breed, pet.age, pet.species,
-            Number(pet.rescueAnimalCount || 0) > 1 ? 'Rescued from batch' : (Number(pet.rescueAnimalCount || 0) === 1 ? 'Rescued from single' : '—'),
             pet.rescueSource,
             pet.rescueDate, pet.adoptionStatus,
             formatPoolDate(pet.adoptedAtRaw || pet.confirmedAt || pet.adoptedDate),
@@ -4128,9 +4120,6 @@ $activePage = 'adoption-pool';
           const existingYearValue = petAge.match(/^(.+?)\s+years?$/i);
           const displayedAge = !petAge ? '—'
             : (/^unknown$/i.test(petAge) ? petAge : (existingYearValue ? existingYearValue[1] + ' years' : petAge + ' years'));
-          const rescueAnimalCount = Number(pet.rescueAnimalCount || 0);
-          const rescueTypeLabel = rescueAnimalCount > 1 ? 'Rescued from batch'
-            : (rescueAnimalCount === 1 ? 'Rescued from single' : '—');
           const displayPetId = pet.listingId ? '#' + pet.listingId : String(pet.id || '—');
 
           tr.innerHTML = `
@@ -4148,7 +4137,6 @@ $activePage = 'adoption-pool';
             <td>${pet.breed}</td>
             <td>${displayedAge}</td>
             <td>${pet.species}</td>
-            <td>${rescueTypeLabel}</td>
             <td>${pet.rescueSource}</td>
             <td data-sort="${pet.fullRescueDate || pet.rescueDate || ''}">${formatPoolDate(pet.fullRescueDate || pet.rescueDate)}</td>
             <td>
