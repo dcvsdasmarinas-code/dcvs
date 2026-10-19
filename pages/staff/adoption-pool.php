@@ -138,39 +138,17 @@ $activePage = 'adoption-pool';
     .adoption-review-drawer.open .adoption-review-drawer-panel{transform:translateX(0)}
     .adoption-review-drawer-header{display:flex;align-items:center;gap:12px;flex:none;padding:16px 20px;border-bottom:1px solid #e4e8ee}
     .adoption-review-drawer-header .adoption-review-pet-photo{width:44px;height:44px;flex-basis:44px}
-    .adoption-review-drawer-avatar{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:0 0 44px;border-radius:50%;background:var(--primary-green-light,#f0fdf4);color:var(--primary-green,#045e1f);font-size:16px;font-weight:600}
     .adoption-review-drawer-heading{min-width:0;flex:1}
     .adoption-review-drawer-heading h2{margin:0;color:#18181b;font-size:17px;font-weight:600}
     .adoption-review-drawer-heading p{margin:3px 0 0;color:#71717a;font-size:13px}
     .adoption-review-drawer-close{height:36px;padding:0 13px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:inherit;cursor:pointer}
     .adoption-review-drawer-body{min-height:0;flex:1;overflow:auto;padding:18px 20px}
-    .adoption-review-drawer-body .adoption-review-details{display:flex;flex-direction:column;min-height:100%;margin-top:0}
-    .adoption-review-progress{padding:4px 0 18px;margin-bottom:18px;border-bottom:1px solid #e4e4e7}
-    .adoption-review-progress-track{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:relative;margin:0;padding:0;list-style:none}
-    .adoption-review-progress-track:before{position:absolute;top:6px;left:10%;right:10%;height:2px;background:#e4e4e7;content:""}
-    .adoption-review-progress-step{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;color:#71717a;font-size:11px;line-height:1.25}
-    .adoption-review-progress-dot{width:12px;height:12px;border:2px solid #d4d4d8;border-radius:50%;background:#fff}
-    .adoption-review-progress-step.complete{color:var(--primary-green,#045e1f)}
-    .adoption-review-progress-step.complete .adoption-review-progress-dot{border-color:var(--primary-green,#045e1f);background:var(--primary-green,#045e1f)}
-    .adoption-review-progress-step.current{font-weight:600;color:var(--primary-green,#045e1f)}
-    .adoption-review-progress-step.current .adoption-review-progress-dot{border-color:var(--primary-green,#045e1f);box-shadow:0 0 0 3px var(--primary-green-light,#f0fdf4)}
-    .adoption-review-section{margin:0 0 18px}
-    .adoption-review-section-title{margin:0 0 8px;color:#18181b;font-size:14px;font-weight:600}
-    .adoption-review-requirements{padding:10px 12px;margin:0 0 18px;border:1px solid #e4e4e7;border-radius:8px;background:#fafafa}
-    .adoption-review-requirements-heading{display:flex;justify-content:space-between;gap:12px;margin-bottom:8px;color:#3f3f46;font-size:13px;font-weight:600}
-    .adoption-review-requirements-count{white-space:nowrap}
-    .adoption-review-requirements-bar{height:6px;overflow:hidden;border-radius:999px;background:#e4e4e7}
-    .adoption-review-requirements-fill{height:100%;border-radius:inherit;background:var(--primary-green,#045e1f);transition:width .2s ease}
-    .adoption-review-requirements-checks{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-    .adoption-review-requirements .adoption-review-check{font-size:12px}
-    .adoption-review-facts{display:flex;flex-direction:column;gap:0}
-    .adoption-review-fact{display:flex;justify-content:space-between;gap:16px;padding:9px 10px;border:0;border-bottom:1px solid #e4e4e7;border-radius:0;background:transparent}
-    .adoption-review-fact-label{margin:0;color:#71717a;font-size:13px;font-weight:400}
-    .adoption-review-fact-value{text-align:right;font-size:13px}
-    .adoption-review-inline-link{margin-left:4px;padding:0;border:0;background:none;color:var(--primary-green,#045e1f);font:inherit;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
-    .adoption-review-inline-link:hover{text-decoration-thickness:2px}
-    .adoption-review-note{padding:10px 12px;margin:0 0 8px;border:1px solid #fde68a;border-radius:7px;background:#fffbeb;color:#92400e;font-size:13px;line-height:1.45}
-    .adoption-review-drawer-body .adoption-review-actions{position:sticky;bottom:-18px;z-index:2;padding:12px 0 2px;margin-top:auto;border-top:1px solid #e4e4e7;background:#fff}
+    .adoption-review-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .adoption-review-fact{min-width:0;padding:10px 12px;border:1px solid #f4f4f5;border-radius:6px;background:#fafafa}
+    .adoption-review-fact-label{display:block;margin-bottom:2px;color:#71717a;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none}
+    .adoption-review-fact-value{display:block;color:#18181b;font-size:15px;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}
+    .adoption-review-drawer-body .adoption-review-details{margin-top:0}
+    .adoption-review-drawer-body .adoption-review-actions{position:sticky;bottom:-18px;padding:12px 0 2px;background:#fff}
     .adoption-review-empty{padding:24px 0;text-align:center;color:#71717a}
     @media(max-width:700px){
       .adoption-application-filter{padding-inline:12px}
@@ -179,10 +157,7 @@ $activePage = 'adoption-pool';
       .adoption-review-drawer-panel{width:100%}
       .adoption-review-drawer-header{padding:14px}
       .adoption-review-drawer-body{padding:14px}
-      .adoption-review-drawer-body .adoption-review-actions{bottom:-14px}
-      .adoption-review-progress-step{font-size:10px}
-      .adoption-review-fact{align-items:flex-start;gap:10px}
-      .adoption-review-fact-value{max-width:65%}
+      .adoption-review-facts{grid-template-columns:1fr}
     }
   </style>
 
@@ -3001,7 +2976,7 @@ $activePage = 'adoption-pool';
         <div class="adoption-review-drawer" id="adoption-review-drawer" aria-hidden="true">
           <section class="adoption-review-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="adoption-review-drawer-title">
             <header class="adoption-review-drawer-header">
-              <div class="adoption-review-drawer-avatar" id="adoption-review-drawer-avatar" aria-hidden="true"></div>
+              <img class="adoption-review-pet-photo" id="adoption-review-drawer-photo" alt="" hidden>
               <div class="adoption-review-drawer-heading">
                 <h2 id="adoption-review-drawer-title"></h2>
                 <p id="adoption-review-drawer-subtitle"></p>
@@ -6214,7 +6189,7 @@ $activePage = 'adoption-pool';
     var reviewDrawerBody = document.getElementById('adoption-review-drawer-body');
     var reviewDrawerTitle = document.getElementById('adoption-review-drawer-title');
     var reviewDrawerSubtitle = document.getElementById('adoption-review-drawer-subtitle');
-    var reviewDrawerAvatar = document.getElementById('adoption-review-drawer-avatar');
+    var reviewDrawerPhoto = document.getElementById('adoption-review-drawer-photo');
     var activeReviewDetails = null;
     var activeReviewTrigger = null;
 
@@ -6241,7 +6216,13 @@ $activePage = 'adoption-pool';
       if (activeReviewDetails) closeReviewDrawer();
       reviewDrawerTitle.textContent = item.full_name || 'Applicant';
       reviewDrawerSubtitle.textContent = 'Applying for ' + item.pet_name + ' · ' + readableDate(item.application_date);
-      reviewDrawerAvatar.textContent = (item.full_name || 'A').trim().charAt(0).toUpperCase();
+      if (item.photo_url) {
+        reviewDrawerPhoto.src = resolvePetPhotoUrl(item.photo_url, item.species);
+        reviewDrawerPhoto.hidden = false;
+      } else {
+        reviewDrawerPhoto.removeAttribute('src');
+        reviewDrawerPhoto.hidden = true;
+      }
       activeReviewDetails = details;
       activeReviewTrigger = trigger;
       details.hidden = false;
@@ -6470,73 +6451,10 @@ $activePage = 'adoption-pool';
       card.appendChild(cardHeader);
       group.appendChild(card);
 
-      var timeline = document.createElement('ol');
-      timeline.className = 'adoption-review-progress adoption-review-progress-track';
-      timeline.setAttribute('aria-label', 'Application progress');
-      var isAdopted = item.status === 'adopted';
-      var wasReserved = !!(item.reserved_at || item.response_deadline || item.confirmed_at || item.pickup_deadline);
-      var submittedSteps = [
-        true,
-        ['under_review', 'needs_info', 'approved', 'reserved', 'confirmed', 'adopted', 'declined', 'expired', 'rejected'].indexOf(item.status) !== -1,
-        !!(item.approved_pickup_at || item.interview_at || item.home_visit_at) || wasReserved,
-        ['approved', 'reserved', 'confirmed', 'adopted'].indexOf(item.status) !== -1 || wasReserved,
-        isAdopted
-      ];
-      var progressLabels = ['Submitted', 'Reviewed', 'Visit', 'Approved', 'Picked up'];
-      var isClosedWithoutReservation = ['declined', 'rejected'].indexOf(item.status) !== -1 && !wasReserved;
-      var currentStep = isClosedWithoutReservation ? -1 : submittedSteps.indexOf(false);
-      progressLabels.forEach(function (label, index) {
-        var step = document.createElement('li');
-        step.className = 'adoption-review-progress-step';
-        if (submittedSteps[index]) step.classList.add('complete');
-        else if (index === currentStep) step.classList.add('current');
-        var dot = document.createElement('span');
-        dot.className = 'adoption-review-progress-dot';
-        dot.setAttribute('aria-hidden', 'true');
-        step.appendChild(dot);
-        addText(step, 'span', label);
-        timeline.appendChild(step);
-      });
-      details.appendChild(timeline);
-
-      function addSection(parent, title) {
-        var section = document.createElement('section');
-        section.className = 'adoption-review-section';
-        addText(section, 'h4', title, 'adoption-review-section-title');
-        parent.appendChild(section);
-        return section;
-      }
-      function addFact(parent, label, value) {
-        var fact = document.createElement('div');
-        fact.className = 'adoption-review-fact';
-        addText(fact, 'span', label, 'adoption-review-fact-label');
-        var valueNode = addText(fact, 'span', value == null || value === '' ? 'Not provided' : value, 'adoption-review-fact-value');
-        parent.appendChild(fact);
-        return valueNode;
-      }
-
-      var requirements = document.createElement('section');
-      requirements.className = 'adoption-review-requirements';
-      var requirementHeading = document.createElement('div');
-      requirementHeading.className = 'adoption-review-requirements-heading';
-      addText(requirementHeading, 'span', 'Qualification & compliance verification');
-      var requirementCount = addText(requirementHeading, 'span', '', 'adoption-review-requirements-count');
-      requirements.appendChild(requirementHeading);
-      var requirementBar = document.createElement('div');
-      requirementBar.className = 'adoption-review-requirements-bar';
-      requirementBar.setAttribute('role', 'progressbar');
-      requirementBar.setAttribute('aria-label', 'Application requirements');
-      requirementBar.setAttribute('aria-valuemin', '0');
-      requirementBar.setAttribute('aria-valuemax', '4');
-      var requirementFill = document.createElement('div');
-      requirementFill.className = 'adoption-review-requirements-fill';
-      requirementBar.appendChild(requirementFill);
-      requirements.appendChild(requirementBar);
+      addText(details, 'h4', 'Qualification & compliance verification', 'adoption-review-details-title');
       var checks = document.createElement('div');
-      checks.className = 'adoption-review-requirements-checks';
-      var passedChecks = 0;
+      checks.className = 'adoption-review-checks';
       function addCheck(label, passed) {
-        if (passed) passedChecks++;
         addText(checks, 'span', (passed ? '✓ ' : '! ') + label, 'adoption-review-check' + (passed ? '' : ' pending'));
       }
       var age = item.date_of_birth ? calculateAge(item.date_of_birth) : null;
@@ -6544,62 +6462,56 @@ $activePage = 'adoption-pool';
       addCheck(item.residency_proof_file ? 'Residency proof submitted' : 'Residency proof missing', !!item.residency_proof_file);
       addCheck('Housing: ' + (item.housing_type || 'Not provided'), !!item.housing_type && (item.housing_type !== 'rented' || Number(item.landlord_permission) === 1));
       addCheck(item.agreed_at ? 'Adoption commitments accepted' : 'Agreement not recorded', !!item.agreed_at);
-      requirementCount.textContent = passedChecks + ' of 4 requirements met';
-      requirementBar.setAttribute('aria-valuenow', String(passedChecks));
-      requirementFill.style.width = (passedChecks / 4 * 100) + '%';
-      requirements.appendChild(checks);
-      details.appendChild(requirements);
+      details.appendChild(checks);
 
-      var applicantSection = addSection(details, 'Applicant');
-      addFact(applicantSection, 'Age', age === null ? 'Not provided' : age + (age >= 18 ? ' (meets legal age)' : ' (below legal age)'));
-      addFact(applicantSection, 'Barangay', item.barangay_name || 'Not provided');
-      var proofValue = addFact(applicantSection, 'Residency proof', item.residency_proof_file ? 'Submitted · ' : 'Missing');
-      if (item.residency_proof_file) {
-        var proofButton = document.createElement('button');
-        proofButton.type = 'button';
-        proofButton.className = 'adoption-review-inline-link';
-        proofButton.textContent = 'Preview';
-        proofButton.addEventListener('click', function () {
-          documentPreview.src = 'adoption-document.php?kind=residency&id=' + encodeURIComponent(item.application_id) + '&view=1';
-          documentDialog.classList.add('open');
-          documentDialog.setAttribute('aria-hidden', 'false');
-          document.getElementById('adoption-document-dialog-close').focus();
-        });
-        proofValue.appendChild(proofButton);
+      var facts = document.createElement('div');
+      facts.className = 'adoption-review-facts';
+      function addFact(label, value) {
+        var fact = document.createElement('div');
+        fact.className = 'adoption-review-fact';
+        addText(fact, 'span', label, 'adoption-review-fact-label');
+        addText(fact, 'span', value || 'Not provided', 'adoption-review-fact-value');
+        facts.appendChild(fact);
       }
-      addFact(applicantSection, 'Phone', item.phone || 'Not provided');
-      addFact(applicantSection, 'Email', item.email || 'Not provided');
-
-      var homeSection = addSection(details, 'Home and household');
       var housing = (item.housing_type || 'Not provided');
       if (item.housing_type === 'rented') housing += Number(item.landlord_permission) ? ' · Landlord permission confirmed' : ' · No landlord permission';
-      addFact(homeSection, 'Housing', housing + ' · ' + (item.home_type || 'Home type not provided') + ' · ' + (Number(item.has_fenced_yard) ? 'Fenced yard' : 'No fenced yard'));
-      addFact(homeSection, 'Household members', item.household_members ? item.household_members + ' household member(s)' : 'Not provided');
-      addFact(homeSection, 'Existing pets', Number(item.has_other_pets) ? (item.other_pets_details || 'Yes') : 'None');
-
-      var experienceSection = addSection(details, 'Experience');
-      addFact(experienceSection, 'Pet experience', item.pet_care_experience || 'Not provided');
-
-      var applicationSection = addSection(details, 'Application details');
-      addFact(applicationSection, 'Status', statusText);
-      if (item.approved_pickup_at) addFact(applicationSection, 'Scheduled DCVS visit', readableDate(item.approved_pickup_at));
+      addFact('Housing type & yard', housing + ' · ' + (item.home_type || 'Home type not provided') + ' · ' + (Number(item.has_fenced_yard) ? 'Fenced yard' : 'No fenced yard'));
+      addFact('Household composition', item.household_members ? item.household_members + ' household member(s)' : 'Not provided');
+      addFact('Existing pets', Number(item.has_other_pets) ? (item.other_pets_details || 'Yes') : 'No');
+      addFact('Pet experience', item.pet_care_experience);
+      addFact('Contact details', (item.phone || 'No phone') + ' / ' + (item.email || 'No email'));
+      addFact('Current application status', statusText);
+      if (item.approved_pickup_at) addFact('Scheduled DCVS visit', readableDate(item.approved_pickup_at));
       if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
-        addFact(applicationSection, 'Pickup period', window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status));
+        addFact('Pickup period', window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status));
       }
-      if (item.decline_reason) addFact(applicationSection, 'Decline reason', item.decline_reason === 'expired' ? 'You didn’t respond / pick up within the allotted time.' : item.decline_reason);
-      if (item.finalized_at) addFact(applicationSection, 'Confirmed/Adopted date', readableDate(item.finalized_at));
+      if (item.decline_reason) addFact('Decline reason', item.decline_reason === 'expired' ? 'You didn’t respond / pick up within the allotted time.' : item.decline_reason);
+      if (item.finalized_at) addFact('Confirmed/Adopted Date', readableDate(item.finalized_at));
+      details.appendChild(facts);
       var reasonSummary = document.createElement('div');
       reasonSummary.className = 'adoption-review-reason';
       addText(reasonSummary, 'span', 'Reason for adoption & care intentions', 'adoption-review-fact-label');
       addText(reasonSummary, 'div', item.reason_for_adoption || 'Not provided', 'adoption-review-fact-value');
-      applicationSection.appendChild(reasonSummary);
-      if (item.interview_at) addFact(applicationSection, 'Interview', readableDate(item.interview_at));
-      if (item.home_visit_at) addFact(applicationSection, 'Home visit', readableDate(item.home_visit_at));
-      if (item.requested_info || item.resident_response) {
-        var notes = addSection(details, 'Review notes');
-        if (item.requested_info) addText(notes, 'p', 'Information requested: ' + item.requested_info + (item.info_deadline ? ' · Deadline: ' + readableDate(item.info_deadline) : ''), 'adoption-review-note');
-        if (item.resident_response) addText(notes, 'p', 'Resident response: ' + item.resident_response, 'adoption-review-note');
-      }
+      details.appendChild(reasonSummary);
+      if (item.requested_info) addText(details, 'p', 'Information requested: ' + item.requested_info + ' · Deadline: ' + readableDate(item.info_deadline), 'adoption-review-submitted');
+      if (item.resident_response) addText(details, 'p', 'Resident response: ' + item.resident_response, 'adoption-review-submitted');
+      if (item.interview_at) addText(details, 'p', 'Interview: ' + readableDate(item.interview_at), 'adoption-review-submitted');
+      if (item.home_visit_at) addText(details, 'p', 'Home visit: ' + readableDate(item.home_visit_at), 'adoption-review-submitted');
+      var documents = document.createElement('p');
+      documents.className = 'adoption-review-documents';
+      var proofButton = document.createElement('button');
+      proofButton.type = 'button';
+      proofButton.className = 'adoption-review-toggle';
+      proofButton.style.minWidth = '0';
+      proofButton.textContent = 'View proof of residency';
+      proofButton.addEventListener('click', function () {
+        documentPreview.src = 'adoption-document.php?kind=residency&id=' + encodeURIComponent(item.application_id) + '&view=1';
+        documentDialog.classList.add('open');
+        documentDialog.setAttribute('aria-hidden', 'false');
+        document.getElementById('adoption-document-dialog-close').focus();
+      });
+      documents.appendChild(proofButton);
+      details.appendChild(documents);
 
       var reviewFields = document.createElement('div');
       reviewFields.className = 'adoption-review-grid';
