@@ -83,6 +83,7 @@ $activePage = 'adoption-pool';
     .adoption-review-status.pending{background:#fef3c7;color:#92400e;border-color:#fde68a}
     .adoption-review-status.active{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
     .adoption-review-status.needs-info{background:#fef3c7;color:#92400e;border-color:#fde68a}
+    .adoption-review-status.expired{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
     .adoption-review-toggle{min-width:130px;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:background-color .15s ease,border-color .15s ease}
     .adoption-review-toggle:hover{background:#f4f4f5}
     .adoption-review-details{margin-top:18px}
@@ -6274,7 +6275,7 @@ $activePage = 'adoption-pool';
       if (item.status === 'needs_info') statusLabel.classList.add('needs-info');
       if (item.status === 'reserved' || item.status === 'confirmed' || item.status === 'approved') statusLabel.classList.add('active');
       if (item.status === 'adopted') statusLabel.classList.add('active');
-      if (item.status === 'expired') statusLabel.classList.add('needs-info');
+      if (item.status === 'expired' || item.status === 'declined') statusLabel.classList.add('expired');
       var details = document.createElement('div');
       details.className = 'adoption-review-details';
       details.hidden = true;
