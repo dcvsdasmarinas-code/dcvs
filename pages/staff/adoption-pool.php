@@ -116,47 +116,12 @@ $activePage = 'adoption-pool';
     .adoption-review-notice{margin:10px 0;padding:10px;border:1px solid #e4e4e7;border-radius:6px;background:#fafafa;color:#3f3f46;font-size:13px}
     @media(max-width:850px){.adoption-review-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media(max-width:700px){.adoption-review-card{padding:14px}.adoption-review-summary{align-items:flex-start;flex-wrap:wrap}.adoption-review-summary-actions{flex-wrap:wrap;justify-content:flex-end;margin-left:auto}.adoption-review-grid,.adoption-review-facts{grid-template-columns:1fr}.adoption-review-toggle{min-width:0}.adoption-review-pet-photo{width:56px;height:56px;flex-basis:56px}}
-    .adoption-application-filters{display:flex;gap:0;margin:0 0 14px;border-bottom:1px solid #e4e4e7;overflow-x:auto}
-    .adoption-application-filter{display:inline-flex;align-items:center;gap:7px;flex:none}
-    .adoption-application-filter-count{color:#71717a}
-    .adoption-application-group{margin:0 0 20px}
-    .adoption-application-pet-heading{display:flex;align-items:center;gap:12px;margin:0 0 8px}
-    .adoption-application-pet-heading .adoption-review-pet-photo{width:42px;height:42px;flex-basis:42px}
-    .adoption-application-pet-copy{min-width:0}
-    .adoption-application-pet-title{margin:0;font-size:16px;font-weight:600;color:#18181b}
-    .adoption-application-pet-meta{margin:2px 0 0;color:#71717a;font-size:13px}
-    .adoption-application-count{margin-left:auto;color:#71717a;font-size:13px;white-space:nowrap}
-    .adoption-application-row{display:flex;align-items:center;gap:14px;padding:12px 16px;margin:0 0 8px;border:1px solid #e4e4e7;border-radius:8px;background:#fff}
-    .adoption-application-row-copy{min-width:0;flex:1}
-    .adoption-application-row-name{margin:0;color:#18181b;font-size:14px;font-weight:600}
-    .adoption-application-row-meta{margin:3px 0 0;color:#71717a;font-size:13px}
-    .adoption-application-row-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:none}
-    .adoption-application-row .adoption-review-toggle{min-width:0}
-    .adoption-review-drawer{position:fixed;inset:0;z-index:1200;display:flex;justify-content:flex-end;background:rgba(15,23,42,.45);opacity:0;visibility:hidden;transition:opacity .2s ease,visibility .2s ease}
-    .adoption-review-drawer.open{opacity:1;visibility:visible}
-    .adoption-review-drawer-panel{display:flex;flex-direction:column;width:min(600px,100%);height:100%;background:#fff;box-shadow:-8px 0 32px rgba(15,23,42,.18);transform:translateX(100%);transition:transform .25s ease}
-    .adoption-review-drawer.open .adoption-review-drawer-panel{transform:translateX(0)}
-    .adoption-review-drawer-header{display:flex;align-items:center;gap:12px;flex:none;padding:16px 20px;border-bottom:1px solid #e4e8ee}
-    .adoption-review-drawer-header .adoption-review-pet-photo{width:44px;height:44px;flex-basis:44px}
-    .adoption-review-drawer-heading{min-width:0;flex:1}
-    .adoption-review-drawer-heading h2{margin:0;color:#18181b;font-size:17px;font-weight:600}
-    .adoption-review-drawer-heading p{margin:3px 0 0;color:#71717a;font-size:13px}
-    .adoption-review-drawer-close{height:36px;padding:0 13px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:inherit;cursor:pointer}
-    .adoption-review-drawer-body{min-height:0;flex:1;overflow:auto;padding:18px 20px}
     .adoption-review-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
     .adoption-review-fact{min-width:0;padding:10px 12px;border:1px solid #f4f4f5;border-radius:6px;background:#fafafa}
     .adoption-review-fact-label{display:block;margin-bottom:2px;color:#71717a;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none}
     .adoption-review-fact-value{display:block;color:#18181b;font-size:15px;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}
-    .adoption-review-drawer-body .adoption-review-details{margin-top:0}
-    .adoption-review-drawer-body .adoption-review-actions{position:sticky;bottom:-18px;padding:12px 0 2px;background:#fff}
     .adoption-review-empty{padding:24px 0;text-align:center;color:#71717a}
     @media(max-width:700px){
-      .adoption-application-filter{padding-inline:12px}
-      .adoption-application-row{align-items:flex-start;flex-wrap:wrap;padding:12px}
-      .adoption-application-row-actions{width:100%;justify-content:flex-start;margin-left:0}
-      .adoption-review-drawer-panel{width:100%}
-      .adoption-review-drawer-header{padding:14px}
-      .adoption-review-drawer-body{padding:14px}
       .adoption-review-facts{grid-template-columns:1fr}
     }
   </style>
@@ -2966,26 +2931,7 @@ $activePage = 'adoption-pool';
       <!-- TAB: Adoption Applications -->
       <div class="tab-panel" id="tab-applications">
         <div class="adoption-review-notice" id="adoption-review-notice" role="status" hidden></div>
-        <div class="adoption-application-filters" id="adoption-application-filters" role="tablist" aria-label="Filter adoption applications">
-          <button type="button" class="pool-tab adoption-application-filter active" data-application-filter="all" role="tab" aria-selected="true">All <span class="adoption-application-filter-count"></span></button>
-          <button type="button" class="pool-tab adoption-application-filter" data-application-filter="review" role="tab" aria-selected="false">Under review <span class="adoption-application-filter-count"></span></button>
-          <button type="button" class="pool-tab adoption-application-filter" data-application-filter="approved" role="tab" aria-selected="false">Approved <span class="adoption-application-filter-count"></span></button>
-          <button type="button" class="pool-tab adoption-application-filter" data-application-filter="expired" role="tab" aria-selected="false">Expired <span class="adoption-application-filter-count"></span></button>
-        </div>
         <div id="adoption-application-queue"></div>
-        <div class="adoption-review-drawer" id="adoption-review-drawer" aria-hidden="true">
-          <section class="adoption-review-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="adoption-review-drawer-title">
-            <header class="adoption-review-drawer-header">
-              <img class="adoption-review-pet-photo" id="adoption-review-drawer-photo" alt="" hidden>
-              <div class="adoption-review-drawer-heading">
-                <h2 id="adoption-review-drawer-title"></h2>
-                <p id="adoption-review-drawer-subtitle"></p>
-              </div>
-              <button type="button" class="adoption-review-drawer-close" id="adoption-review-drawer-close">Close</button>
-            </header>
-            <div class="adoption-review-drawer-body" id="adoption-review-drawer-body"></div>
-          </section>
-        </div>
         <script type="application/json" id="adoption-review-data"><?php
           echo json_encode(
               ['applications' => $adoptionApplications],
@@ -6185,54 +6131,6 @@ $activePage = 'adoption-pool';
     var actionScheduleField = document.getElementById('adoption-action-schedule-field');
     var actionPickupAt = document.getElementById('adoption-action-pickup-at');
     var actionDialogTrigger = null;
-    var reviewDrawer = document.getElementById('adoption-review-drawer');
-    var reviewDrawerBody = document.getElementById('adoption-review-drawer-body');
-    var reviewDrawerTitle = document.getElementById('adoption-review-drawer-title');
-    var reviewDrawerSubtitle = document.getElementById('adoption-review-drawer-subtitle');
-    var reviewDrawerPhoto = document.getElementById('adoption-review-drawer-photo');
-    var activeReviewDetails = null;
-    var activeReviewTrigger = null;
-
-    function closeReviewDrawer() {
-      if (!reviewDrawer.classList.contains('open')) return;
-      reviewDrawer.classList.remove('open');
-      reviewDrawer.setAttribute('aria-hidden', 'true');
-      if (activeReviewDetails && activeReviewTrigger) {
-        activeReviewDetails.hidden = true;
-        activeReviewTrigger.setAttribute('aria-expanded', 'false');
-        activeReviewTrigger.textContent = 'Review';
-        activeReviewTrigger.closest('.adoption-application-row').appendChild(activeReviewDetails);
-      }
-      reviewDrawerBody.replaceChildren();
-      if (activeReviewTrigger) activeReviewTrigger.focus();
-      activeReviewDetails = null;
-      activeReviewTrigger = null;
-    }
-    document.getElementById('adoption-review-drawer-close').addEventListener('click', closeReviewDrawer);
-    reviewDrawer.addEventListener('click', function (event) {
-      if (event.target === reviewDrawer) closeReviewDrawer();
-    });
-    function openReviewDrawer(item, details, trigger) {
-      if (activeReviewDetails) closeReviewDrawer();
-      reviewDrawerTitle.textContent = item.full_name || 'Applicant';
-      reviewDrawerSubtitle.textContent = 'Applying for ' + item.pet_name + ' · ' + readableDate(item.application_date);
-      if (item.photo_url) {
-        reviewDrawerPhoto.src = resolvePetPhotoUrl(item.photo_url, item.species);
-        reviewDrawerPhoto.hidden = false;
-      } else {
-        reviewDrawerPhoto.removeAttribute('src');
-        reviewDrawerPhoto.hidden = true;
-      }
-      activeReviewDetails = details;
-      activeReviewTrigger = trigger;
-      details.hidden = false;
-      reviewDrawerBody.appendChild(details);
-      trigger.setAttribute('aria-expanded', 'true');
-      reviewDrawer.classList.add('open');
-      reviewDrawer.setAttribute('aria-hidden', 'false');
-      document.getElementById('adoption-review-drawer-close').focus();
-    }
-
     function closeDocumentDialog() {
       documentDialog.classList.remove('open');
       documentDialog.setAttribute('aria-hidden', 'true');
@@ -6256,7 +6154,6 @@ $activePage = 'adoption-pool';
       if (event.key === 'Escape') {
         if (actionDialog.classList.contains('open')) closeActionDialog();
         else if (documentDialog.classList.contains('open')) closeDocumentDialog();
-      else if (reviewDrawer.classList.contains('open')) closeReviewDrawer();
     }
     });
     function confirmReviewAction(title, description, confirmLabel, danger, trigger, callback, requiresPickupSchedule) {
@@ -6343,94 +6240,32 @@ $activePage = 'adoption-pool';
         });
     }
 
-    var applicationFilter = 'all';
-    var applicationGroups = new Map();
     var applications = queueData.applications || [];
-    function applicationFilterKey(status) {
-      if (['pending', 'under_review', 'needs_info'].indexOf(status) !== -1) return 'review';
-      if (['approved', 'reserved', 'confirmed', 'adopted'].indexOf(status) !== -1) return 'approved';
-      if (['declined', 'expired'].indexOf(status) !== -1) return 'expired';
-      return 'other';
-    }
-    var filterCounts = {all: applications.length, review: 0, approved: 0, expired: 0};
     applications.forEach(function (item) {
-      var key = applicationFilterKey(item.status);
-      if (Object.prototype.hasOwnProperty.call(filterCounts, key)) filterCounts[key]++;
-    });
-    document.querySelectorAll('.adoption-application-filter').forEach(function (button) {
-      var key = button.dataset.applicationFilter;
-      button.querySelector('.adoption-application-filter-count').textContent = filterCounts[key] || 0;
-      button.addEventListener('click', function () {
-        applicationFilter = key;
-        document.querySelectorAll('.adoption-application-filter').forEach(function (filterButton) {
-          var selected = filterButton === button;
-          filterButton.classList.toggle('active', selected);
-          filterButton.setAttribute('aria-selected', String(selected));
-        });
-        applicationGroups.forEach(function (group) {
-          var visibleRows = 0;
-          group.querySelectorAll('.adoption-application-row').forEach(function (row) {
-            var visible = key === 'all' || row.dataset.statusGroup === key;
-            row.hidden = !visible;
-            if (visible) visibleRows++;
-          });
-          group.hidden = visibleRows === 0;
-        });
-        var visibleApplications = applications.filter(function (item) {
-          return key === 'all' || applicationFilterKey(item.status) === key;
-        }).length;
-        var empty = applicationQueue.querySelector('.adoption-review-empty');
-        if (!visibleApplications && !empty) addText(applicationQueue, 'p', 'No applications in this status.', 'adoption-review-empty');
-        else if (visibleApplications && empty) empty.remove();
-      });
-    });
-
-    applications.forEach(function (item) {
-      var groupKey = String(item.pet_listing_id || item.pet_name);
-      var group = applicationGroups.get(groupKey);
-      if (!group) {
-        group = document.createElement('section');
-        group.className = 'adoption-application-group';
-        var petHeader = document.createElement('header');
-        petHeader.className = 'adoption-application-pet-heading';
-        if (item.photo_url) {
-          var groupPhoto = document.createElement('img');
-          groupPhoto.className = 'adoption-review-pet-photo';
-          groupPhoto.src = resolvePetPhotoUrl(item.photo_url, item.species);
-          groupPhoto.alt = '';
-          petHeader.appendChild(groupPhoto);
-        }
-        var petCopy = document.createElement('div');
-        petCopy.className = 'adoption-application-pet-copy';
-        addText(petCopy, 'h3', item.pet_name, 'adoption-application-pet-title');
-        addText(petCopy, 'p', [item.species, item.breed].filter(Boolean).join(' · '), 'adoption-application-pet-meta');
-        petHeader.appendChild(petCopy);
-        var applicantsCount = addText(petHeader, 'span', '0 applicants', 'adoption-application-count');
-        applicantsCount.dataset.applicantsCount = '1';
-        applicantsCount.dataset.count = '0';
-        group.appendChild(petHeader);
-        applicationQueue.appendChild(group);
-        applicationGroups.set(groupKey, group);
-      }
-      var applicantCount = group.querySelector('[data-applicants-count]');
-      var petApplicantCount = Number(applicantCount.dataset.count) + 1;
-      applicantCount.dataset.count = String(petApplicantCount);
-      applicantCount.textContent = petApplicantCount + ' applicant' + (petApplicantCount === 1 ? '' : 's');
-
       var card = document.createElement('article');
-      card.className = 'adoption-application-row';
-      card.dataset.statusGroup = applicationFilterKey(item.status);
+      card.className = 'adoption-review-card';
       var cardHeader = document.createElement('div');
-      cardHeader.className = 'adoption-application-row-copy';
-      var heading = document.createElement('div');
-      heading.className = 'adoption-application-row-copy';
+      cardHeader.className = 'adoption-review-summary';
+      if (item.photo_url) {
+        var petPhoto = document.createElement('img');
+        petPhoto.className = 'adoption-review-pet-photo';
+        petPhoto.src = resolvePetPhotoUrl(item.photo_url, item.species);
+        petPhoto.alt = item.pet_name || 'Pet';
+        cardHeader.appendChild(petPhoto);
+      }
+      var summaryCopy = document.createElement('div');
+      summaryCopy.className = 'adoption-review-summary-copy';
+      var petTitle = addText(summaryCopy, 'h3', item.pet_name, 'adoption-review-pet-title');
+      addText(petTitle, 'span', '(' + [item.species, item.breed].filter(Boolean).join(' · ') + ')', 'adoption-review-pet-meta');
       var applicantAge = item.date_of_birth ? calculateAge(item.date_of_birth) + ' yrs' : 'age not provided';
-      addText(heading, 'p', item.full_name + ', ' + applicantAge, 'adoption-application-row-name');
-      addText(heading, 'p', 'Brgy. ' + (item.barangay_name || 'Not provided') + ' · ' + readableDate(item.application_date), 'adoption-application-row-meta');
-      cardHeader.appendChild(heading);
-
+      addText(summaryCopy, 'p', 'Applicant: ' + item.full_name + ' (' + applicantAge + ') · Brgy. ' + (item.barangay_name || 'Not provided'), 'adoption-review-applicant');
+      addText(summaryCopy, 'p', 'Submitted: ' + readableDate(item.application_date) + ' · Phone: ' + (item.phone || 'Not provided'), 'adoption-review-submitted');
+      if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
+        addText(summaryCopy, 'p', 'Pickup period: ' + window.adoptionPickupPeriodLabel(item.response_deadline, item.pickup_deadline, item.status), 'adoption-review-submitted');
+      }
+      cardHeader.appendChild(summaryCopy);
       var summaryActions = document.createElement('div');
-      summaryActions.className = 'adoption-application-row-actions';
+      summaryActions.className = 'adoption-review-summary-actions';
       var statusLabels = {pending: 'Under Review', under_review: 'Under Review', needs_info: 'Action needed', reserved: 'Action needed', confirmed: 'Ready for Pickup', approved: 'Action needed', adopted: 'Adopted', declined: 'Expired', expired: 'Expired', rejected: 'Declined'};
       var statusText = statusLabels[item.status] || item.status.replace(/_/g, ' ');
       var statusLabel = addText(summaryActions, 'span', statusText, 'adoption-review-status');
@@ -6443,13 +6278,14 @@ $activePage = 'adoption-pool';
       var details = document.createElement('div');
       details.className = 'adoption-review-details';
       details.hidden = true;
-      var detailsToggle = addButton(summaryActions, 'Review', 'adoption-review-toggle', function () {
-        openReviewDrawer(item, details, detailsToggle);
+      var detailsToggle = addButton(summaryActions, 'Review Details ▾', 'adoption-review-toggle', function () {
+        details.hidden = !details.hidden;
+        detailsToggle.textContent = details.hidden ? 'Review Details ▾' : 'Collapse ▴';
+        detailsToggle.setAttribute('aria-expanded', String(!details.hidden));
       });
       detailsToggle.setAttribute('aria-expanded', 'false');
       cardHeader.appendChild(summaryActions);
       card.appendChild(cardHeader);
-      group.appendChild(card);
 
       addText(details, 'h4', 'Qualification & compliance verification', 'adoption-review-details-title');
       var checks = document.createElement('div');
@@ -6595,6 +6431,7 @@ $activePage = 'adoption-pool';
       }
       details.appendChild(actions);
       card.appendChild(details);
+      applicationQueue.appendChild(card);
     });
     if (!applications.length) addText(applicationQueue, 'p', 'No adoption applications found.', 'adoption-review-empty');
 
