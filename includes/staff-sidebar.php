@@ -209,6 +209,7 @@ $sbModules = [
                 'title' => 'Clients & Pets', 'icon' => 'fa-database',
                 'items' => [
                     sbItem('All Clients', 'fa-users', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'all']),
+                    sbItem('Registered Pets', 'fa-paw', ['href' => 'registered-pets.php', 'initialActive' => $activePage === 'registered-pets']),
                     sbItem('With Pets', 'fa-paw', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'with']),
                     sbItem('No Pets', 'fa-user-slash', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'none']),
                 ],
@@ -436,7 +437,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
         'reports-all' => 'All Reports', 'reports-pending' => 'Pending Validation',
         'reports-accepted' => 'Accepted by Barangay', 'reports-active' => 'Active Cases', 'reports-resolved' => 'Resolved Cases',
         'appointments' => 'Appointment Requests', 'calendar-schedule' => 'Calendar Schedule',
-        'client-pets' => 'All Clients', 'communication' => 'Communication',
+        'client-pets' => 'All Clients', 'registered-pets' => 'Registered Pets', 'communication' => 'Communication',
         'adoption-pool' => 'Adoption Pool', 'announcements' => 'Announcements', 'turnover' => 'Turnover',
       ];
       echo htmlspecialchars($breadcrumbMap[$activePage] ?? 'Dashboard');

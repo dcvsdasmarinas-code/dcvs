@@ -4094,6 +4094,10 @@ $activePage = 'adoption-pool';
 
           // Listing status text
           const listStatusLabel = pet.listingStatus === 'Published' ? 'Published' : 'Not Listed';
+          const petAge = String(pet.age || '').trim();
+          const existingYearValue = petAge.match(/^(.+?)\s+years?$/i);
+          const displayedAge = !petAge ? '—'
+            : (/^unknown$/i.test(petAge) ? petAge : (existingYearValue ? existingYearValue[1] + ' years' : petAge + ' years'));
 
           tr.innerHTML = `
             <td><input type="checkbox" class="sd-table-cb row-cb" value="${pet.id}" onclick="event.stopPropagation();updatePoolBulkBar()" /></td>
@@ -4107,7 +4111,7 @@ $activePage = 'adoption-pool';
             </td>
             <td>${pet.gender}</td>
             <td>${pet.breed}</td>
-            <td>${pet.age}</td>
+            <td>${displayedAge}</td>
             <td>${pet.species}</td>
             <td>${pet.rescueSource}</td>
             <td data-sort="${pet.fullRescueDate || pet.rescueDate || ''}">${formatPoolDate(pet.fullRescueDate || pet.rescueDate)}</td>
