@@ -89,7 +89,7 @@ function registeredPetVaccination($status) {
     .rp-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px}
     .rp-kpi{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:14px 16px;background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03);transition:all .2s cubic-bezier(.4,0,.2,1)}
     .rp-kpi:hover{border-color:#d1d5db;box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)}
-    .rp-kpi-label{margin:0 0 6px;font-family:Inter,'Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b}
+    .rp-kpi-label{margin:0 0 6px;font-family:Inter,'Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;text-transform:uppercase}
     .rp-kpi-value{margin:0 0 6px;font-family:Inter,'Segoe UI',sans-serif;font-size:26px;font-weight:600;line-height:1;color:#18181b;letter-spacing:-.02em}
     .rp-kpi-sub{margin:0;font-family:Inter,'Segoe UI',sans-serif;font-size:14px;color:#71717a}
     .rp-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
