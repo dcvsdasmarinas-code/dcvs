@@ -118,6 +118,107 @@ if ($row) {
     $outcomeTime = $row['scheduled_time'] ?: $row['preferred_time'];
     $row['can_mark_outcome'] = in_array($row['status'], ['scheduled', 'rescheduled', 'in_progress'], true)
         && strtotime($outcomeDate . ' ' . $outcomeTime) <= time();
+
+    $appointmentHistory = [];
+    $historyError = false;
+    $historyStmt = $conn->prepare("
+        SELECT a.appointment_id, a.appointment_type, a.preferred_date, a.preferred_time,
+               COALESCE(a.scheduled_date, a.preferred_date) AS scheduled_date,
+               COALESCE(a.scheduled_time, a.preferred_time) AS scheduled_time,
+               a.created_at, COALESCE(a.pet_name, p.pet_name, '') AS pet_name
+        FROM appointments a
+        LEFT JOIN pets p ON p.pet_id = a.pet_id
+        WHERE a.user_id = ?
+        ORDER BY a.created_at DESC, a.appointment_id DESC
+    ");
+    if ($historyStmt) {
+        $historyStmt->bind_param('i', $row['user_id']);
+        if ($historyStmt->execute()) {
+            $historyResult = $historyStmt->get_result();
+            while ($historyRow = $historyResult->fetch_assoc()) {
+                $scheduleDate = $historyRow['scheduled_date'] ?? '';
+                $scheduleTime = $historyRow['scheduled_time'] ?? '';
+                $schedule = '';
+                if ($scheduleDate !== '' && $scheduleTime !== '') {
+                    $scheduleTimestamp = strtotime($scheduleDate . ' ' . $scheduleTime);
+                    if ($scheduleTimestamp !== false) {
+                        $schedule = date('F j, Y', $scheduleTimestamp) . ' at ' . date('g:i A', $scheduleTimestamp);
+                    }
+                }
+                $description = 'Requested a ' . ucfirst($historyRow['appointment_type']) . ' appointment';
+                if ($historyRow['pet_name'] !== '') {
+                    $description .= ' for ' . $historyRow['pet_name'];
+                }
+                if ($schedule !== '') {
+                    $description .= '. Preferred schedule: ' . $schedule;
+                }
+                $appointmentHistory[] = [
+                    'title' => 'Appointment requested',
+                    'message' => $description . '.',
+                    'created_at' => $historyRow['created_at'],
+                    'source' => 'Resident request',
+                ];
+            }
+        } else {
+            error_log('Could not load resident appointment records: ' . $historyStmt->error);
+            $historyError = true;
+        }
+        $historyStmt->close();
+    } else {
+        error_log('Could not prepare resident appointment history query: ' . $conn->error);
+        $historyError = true;
+    }
+
+    if (!$historyError) {
+        $notificationStmt = $conn->prepare("
+            SELECT n.title, n.message, n.created_at,
+                   COALESCE(a.pet_name, p.pet_name, '') AS pet_name
+            FROM notifications n
+            INNER JOIN appointments a
+                ON a.appointment_id = n.reference_id
+               AND a.user_id = ?
+            LEFT JOIN pets p ON p.pet_id = a.pet_id
+            WHERE n.user_id = ?
+              AND n.reference_type = 'appointments'
+            ORDER BY n.created_at DESC, n.notification_id DESC
+        ");
+        if ($notificationStmt) {
+            $notificationStmt->bind_param('ii', $row['user_id'], $row['user_id']);
+            if ($notificationStmt->execute()) {
+                $notificationResult = $notificationStmt->get_result();
+                while ($notificationRow = $notificationResult->fetch_assoc()) {
+                    $message = $notificationRow['message'] ?? '';
+                    $petName = trim($notificationRow['pet_name'] ?? '');
+                    if ($petName !== '') {
+                        $message = preg_replace(
+                            '/\(#APT-[A-Z0-9]+\)/i',
+                            '(' . $petName . ')',
+                            $message
+                        );
+                    }
+                    $appointmentHistory[] = [
+                        'title' => $notificationRow['title'],
+                        'message' => $message,
+                        'created_at' => $notificationRow['created_at'],
+                        'source' => 'Appointment update',
+                    ];
+                }
+            } else {
+                error_log('Could not load appointment update notifications: ' . $notificationStmt->error);
+                $historyError = true;
+            }
+            $notificationStmt->close();
+        } else {
+            error_log('Could not prepare appointment update history query: ' . $conn->error);
+            $historyError = true;
+        }
+    }
+
+    usort($appointmentHistory, function ($left, $right) {
+        return strtotime($right['created_at'] ?? '') <=> strtotime($left['created_at'] ?? '');
+    });
+    $row['appointment_history'] = $appointmentHistory;
+    $row['appointment_history_error'] = $historyError;
     echo json_encode(['success' => true, 'data' => $row]);
 } else {
     echo json_encode(['success' => false, 'message' => 'Appointment request not found.']);

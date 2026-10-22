@@ -6475,6 +6475,52 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     padding-top:8px;
     background:#fff;
   }
+  #appointmentDetailsModal .rpt-tabs{
+    display:flex;
+    justify-content:center;
+    gap:28px;
+    width:100%;
+    margin:0 0 14px;
+    padding:0 0 0;
+    border-bottom:1px solid #e4e4e7;
+    box-sizing:border-box;
+  }
+  #appointmentDetailsModal .rpt-tab{
+    appearance:none;
+    padding:0 0 12px;
+    border:0;
+    border-bottom:2px solid transparent;
+    margin-bottom:-1px;
+    background:transparent;
+    color:#71717a;
+    font-family:Inter,'Segoe UI',sans-serif;
+    font-size:14px;
+    font-weight:500;
+    line-height:1.4;
+    cursor:pointer;
+  }
+  #appointmentDetailsModal .rpt-tab:hover{ color:#18181b; }
+  #appointmentDetailsModal .rpt-tab.active{
+    border-bottom-color:transparent;
+    color:#0e8131;
+    font-weight:600;
+  }
+  #appointmentDetailsModal .rpt-tab:focus-visible{
+    outline:2px solid #18181b;
+    outline-offset:3px;
+    border-radius:2px;
+  }
+  #appointmentDetailsModal .appt-history-panel{ flex:1 1 auto; min-height:0; overflow-y:auto; }
+  #appointmentDetailsModal .appt-history-timeline{ position:relative; margin:0 0 14px 3px; padding-left:14px; border-left:2px solid #e4e4e7; color:#09090b; font-family:'Inter','Segoe UI',sans-serif; }
+  #appointmentDetailsModal .appt-history-entry{ position:relative; padding:0 0 17px; }
+  #appointmentDetailsModal .appt-history-entry:last-child{ padding-bottom:0; }
+  #appointmentDetailsModal .appt-history-entry:before{ position:absolute; top:3px; left:-20px; width:10px; height:10px; border-radius:50%; background:#22c55e; content:""; box-shadow:0 0 0 2px #fff; }
+  #appointmentDetailsModal .appt-history-entry-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:3px; }
+  #appointmentDetailsModal .appt-history-entry-title{ min-width:0; color:#09090b; font-size:14px; font-weight:600; line-height:1.35; }
+  #appointmentDetailsModal .appt-history-entry-date{ flex:0 0 auto; color:#71717a; font-size:12px; line-height:1.4; text-align:right; }
+  #appointmentDetailsModal .appt-history-entry-source{ display:inline-block; margin:0 0 6px; padding:1px 7px; border:1px solid #e4e4e7; border-radius:4px; background:#fafafa; color:#71717a; font-size:12px; line-height:1.35; }
+  #appointmentDetailsModal .appt-history-entry-message{ margin:0; color:#27272a; font-size:14px; font-weight:400; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #appointmentDetailsModal .appt-history-empty{ margin:0 0 14px; color:#71717a; font-size:14px; }
   .staff-detail-drawer .sd-dialog-footer{
     box-sizing:border-box;
     flex:0 0 auto;
@@ -6644,6 +6690,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   #appointmentDetailsModal .appt-progress-dot.active{border-color:#16a34a;background:#fff}
   #appointmentDetailsModal .appt-progress-label{font-family:Inter,'Segoe UI',sans-serif;font-size:11px;font-weight:500;color:#a1a1aa;text-align:center;white-space:normal}
   #appointmentDetailsModal .appt-progress-label.active-label{color:#18181b;font-weight:600}
+  #appointmentDetailsModal .appt-outcome-unavailable{opacity:.55;cursor:not-allowed}
   #staffEditAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:1000; }
   #staffEditAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
   #staffEditAppointmentModal .sd-form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
@@ -6843,7 +6890,11 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         <h2 class="sd-dialog-title">Appointment Details</h2>
         <p class="sd-dialog-description">Complete details of this appointment request.</p>
       </div>
-      <div class="sd-field-group" style="flex:1;min-height:0;overflow-y:auto;">
+      <div class="rpt-tabs" role="tablist" aria-label="Appointment details sections">
+        <button type="button" class="rpt-tab active" id="apptDetailsTab" role="tab" aria-selected="true" aria-controls="apptDetailDetailsPanel" onclick="switchAppointmentDetailTab('details')">Details</button>
+        <button type="button" class="rpt-tab" id="apptHistoryTab" role="tab" aria-selected="false" aria-controls="apptDetailHistoryPanel" onclick="switchAppointmentDetailTab('history')">History</button>
+      </div>
+      <div class="sd-field-group" id="apptDetailDetailsPanel" role="tabpanel" aria-labelledby="apptDetailsTab" style="flex:1;min-height:0;overflow-y:auto;">
         <div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">
           <div id="detailAvatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">
             <i class="fas fa-user"></i>
@@ -6894,6 +6945,9 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
           <div id="detailNotes" style="background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;">-</div>
         </div>
         <p id="apptOutcomeGuidance" style="display:none;margin:8px 0 0;color:#52525b;font-size:13px;line-height:1.45;"></p>
+      </div>
+      <div class="sd-field-group appt-history-panel" id="apptDetailHistoryPanel" role="tabpanel" aria-labelledby="apptHistoryTab" style="display:none;">
+        <div id="apptDetailHistoryContent" aria-live="polite"><p class="appt-history-empty">Loading appointment history…</p></div>
       </div>
         <div id="apptBulkReviewMessage" style="display:none;color:#991b1b;background:#fef2f2;border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.45;"></div>
         <div id="apptBulkRejectPanel" style="display:none;">
@@ -9872,6 +9926,51 @@ window.APP = window.APP || {};
     hour = hour % 12 || 12;
     return hour + ':' + String(minute).padStart(2, '0') + ' ' + suffix;
   }
+  function formatApptHistoryDate(value) {
+    if (!value) return 'Date unavailable';
+    var dateText = String(value).trim();
+    var date = new Date(dateText.indexOf('T') === -1 ? dateText.replace(' ', 'T') : dateText);
+    return isNaN(date.getTime())
+      ? 'Date unavailable'
+      : date.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+  function renderAppointmentHistory(history, hasError) {
+    var target = document.getElementById('apptDetailHistoryContent');
+    if (!target) return;
+    if (hasError) {
+      target.innerHTML = '<p class="appt-history-empty">Appointment history could not be loaded. Please close and reopen the appointment to try again.</p>';
+      return;
+    }
+    if (!Array.isArray(history) || history.length === 0) {
+      target.innerHTML = '<p class="appt-history-empty">No appointment history has been recorded for this resident.</p>';
+      return;
+    }
+    target.innerHTML = '<div class="appt-history-timeline">' + history.map(function (item) {
+      return '<article class="appt-history-entry"><div class="appt-history-entry-head">' +
+        '<strong class="appt-history-entry-title">' + apptEsc(item.title || 'Appointment update') + '</strong>' +
+        '<time class="appt-history-entry-date">' + apptEsc(formatApptHistoryDate(item.created_at)) + '</time></div>' +
+        '<span class="appt-history-entry-source">' + apptEsc(item.source || 'Appointment history') + '</span>' +
+        (item.message ? '<p class="appt-history-entry-message">' + apptEsc(item.message) + '</p>' : '') +
+        '</article>';
+    }).join('') + '</div>';
+  }
+  window.switchAppointmentDetailTab = function (tab) {
+    var showHistory = tab === 'history';
+    var detailsPanel = document.getElementById('apptDetailDetailsPanel');
+    var historyPanel = document.getElementById('apptDetailHistoryPanel');
+    var detailsTab = document.getElementById('apptDetailsTab');
+    var historyTab = document.getElementById('apptHistoryTab');
+    if (detailsPanel) detailsPanel.style.display = showHistory ? 'none' : 'flex';
+    if (historyPanel) historyPanel.style.display = showHistory ? 'flex' : 'none';
+    if (detailsTab) {
+      detailsTab.classList.toggle('active', !showHistory);
+      detailsTab.setAttribute('aria-selected', String(!showHistory));
+    }
+    if (historyTab) {
+      historyTab.classList.toggle('active', showHistory);
+      historyTab.setAttribute('aria-selected', String(showHistory));
+    }
+  };
 
   APP.statusChange = function(id, newStatus) {
     var action = newStatus === 'completed' ? 'complete' : (newStatus === 'no_show' ? 'no_show' : (newStatus === 'cancelled' ? 'cancel' : ''));
@@ -10038,17 +10137,24 @@ window.APP = window.APP || {};
           }
         }
         openModal('appointmentDetailsModal');
+        window.switchAppointmentDetailTab('details');
+        renderAppointmentHistory(a.appointment_history, a.appointment_history_error);
 
         var footer = document.getElementById('apptDetailFooter');
         var outcomeGuidance = document.getElementById('apptOutcomeGuidance');
         if (outcomeGuidance) {
           var isScheduled = a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress';
           var autoNoShow = a.status === 'no_show';
+          var outcomeDate = a.scheduled_date || a.preferred_date || '';
+          var outcomeTime = a.scheduled_time || a.preferred_time || '';
+          var outcomeScheduleLabel = outcomeDate
+            ? formatApptDate(outcomeDate) + (outcomeTime ? ' at ' + formatApptTime(outcomeTime) : '')
+            : 'the scheduled date and time';
           outcomeGuidance.style.display = isScheduled || autoNoShow ? 'block' : 'none';
           outcomeGuidance.textContent = isScheduled
             ? (a.can_mark_outcome
               ? 'DCVS staff records the outcome after the final scheduled date and time: mark Completed if the appointment took place, or No-show if the resident did not attend.'
-              : 'DCVS staff may mark this appointment Completed or No-show after its final scheduled date and time.')
+              : 'These actions become available after ' + outcomeScheduleLabel + '.')
             : (autoNoShow ? 'This appointment was automatically marked No Show after its scheduled time. If the service was completed, you can correct the status below.' : '');
         }
         if (footer) {
@@ -10058,17 +10164,35 @@ window.APP = window.APP || {};
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="rejectAppointmentFromDrawer(' + a.appointment_id + ')">Reject</button>';
           }
           if (a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress') {
-            var outcomeDisabled = a.can_mark_outcome ? '' : ' disabled title="Available after the final scheduled date and time"';
-            footerHtml += '<button class="sd-btn sd-btn-default"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Mark as Completed</button>';
-            footerHtml += '<button class="sd-btn sd-btn-outline"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'no_show\')">Mark No-show</button>';
+            var completedButtonClass = a.can_mark_outcome ? 'sd-btn sd-btn-default' : 'sd-btn sd-btn-default appt-outcome-unavailable';
+            var noShowButtonClass = a.can_mark_outcome ? 'sd-btn sd-btn-outline' : 'sd-btn sd-btn-outline appt-outcome-unavailable';
+            var outcomeTitle = a.can_mark_outcome ? '' : ' title="Available after ' + outcomeScheduleLabel.replace(/"/g, '&quot;') + '"';
+            footerHtml += '<button type="button" class="' + completedButtonClass + '" data-appointment-outcome="completed"' + outcomeTitle + '>Mark as Completed</button>';
+            footerHtml += '<button type="button" class="' + noShowButtonClass + '" data-appointment-outcome="no_show"' + outcomeTitle + '>Mark No-show</button>';
           }
           if (a.status === 'no_show') {
-            footerHtml += '<button class="sd-btn sd-btn-default" onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Correct to Completed</button>';
+            footerHtml += '<button type="button" class="sd-btn sd-btn-default" data-appointment-outcome="completed">Correct to Completed</button>';
           }
           if (['completed', 'no_show', 'cancelled', 'rejected'].indexOf(a.status) !== -1) {
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveAppt(' + a.appointment_id + ', \'' + (a.pet_name || '').replace(/'/g, "\\'") + '\', \'' + (a.full_name || '').replace(/'/g, "\\'") + '\')">Archive</button>';
           }
           footer.innerHTML = footerHtml;
+          footer.querySelectorAll('[data-appointment-outcome]').forEach(function (button) {
+            button.addEventListener('click', function (event) {
+              event.preventDefault();
+              event.stopPropagation();
+              if (!a.can_mark_outcome && (a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress')) {
+                var actionDate = a.scheduled_date || a.preferred_date || '';
+                var actionTime = a.scheduled_time || a.preferred_time || '';
+                var availableAfter = actionDate
+                  ? formatApptDate(actionDate) + (actionTime ? ' at ' + formatApptTime(actionTime) : '')
+                  : 'the scheduled date and time';
+                apptToast('Action not available yet', 'Mark as Completed and Mark No-show will be available after ' + availableAfter + '.');
+                return;
+              }
+              APP.statusChange(a.appointment_id, button.getAttribute('data-appointment-outcome'));
+            });
+          });
         }
         if (typeof onReady === 'function') onReady(a);
       })

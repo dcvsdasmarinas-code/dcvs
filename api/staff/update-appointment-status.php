@@ -387,6 +387,10 @@ if (empty($targets)) {
     $allNoShow = count($rows) > 0 && count(array_filter($rows, function ($row) {
         return $row['status'] === 'no_show';
     })) === count($rows);
+    if ($allNoShow && $newStatus === 'no_show') {
+        echo json_encode(['success' => true, 'status' => 'no_show', 'message' => 'This appointment is already marked No Show.']);
+        exit;
+    }
     echo json_encode([
         'success' => false,
         'status' => $allNoShow ? 'no_show' : null,
