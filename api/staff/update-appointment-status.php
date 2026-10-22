@@ -18,7 +18,6 @@ require_once __DIR__ . '/../../includes/availability.php';
 require_once __DIR__ . '/../../mailer.php';
 require_once __DIR__ . '/../../sms-sender.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
-require_once __DIR__ . '/../../includes/appointment-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     echo json_encode(['success' => false, 'message' => 'Unauthorized.']);
@@ -45,8 +44,6 @@ if (!in_array($action, $allowed, true)) {
     echo json_encode(['success' => false, 'message' => 'Invalid action.']);
     exit;
 }
-
-dcvsMarkOverdueAppointmentsNoShow($conn);
 
 $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
 $staffId = $_SESSION['user_id'] ?? null;
@@ -377,6 +374,9 @@ if (empty($rows)) {
 $validFrom = $newStatus === 'cancelled'
     ? ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress', 'action_needed']
     : ['scheduled', 'rescheduled', 'in_progress'];
+if ($newStatus === 'completed') {
+    $validFrom[] = 'no_show';
+}
 
 $targets = [];
 foreach ($rows as $r) {

@@ -388,7 +388,11 @@ $apptSearchFilter = trim($_GET['appt_search'] ?? '');
 $apptWhere = "a.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL";
 if ($apptStatusFilter !== 'all' && $apptStatusFilter !== '') {
     $safeStatus = $conn->real_escape_string($apptStatusFilter);
-    $apptWhere .= " AND a.status = '$safeStatus'";
+    if ($safeStatus === 'scheduled') {
+        $apptWhere .= " AND a.status IN ('scheduled','approved','in_progress')";
+    } else {
+        $apptWhere .= " AND a.status = '$safeStatus'";
+    }
 }
 if ($apptSearchFilter !== '') {
     $safeSearch = $conn->real_escape_string($apptSearchFilter);
@@ -2553,16 +2557,11 @@ if (!empty($_GET['waitlist_booking'])) {
               <select id="apptStatusSelect" class="appt-status-select">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
-                <option value="action_needed">Action needed</option>
-                <option value="waitlisted">Waitlisted</option>
                 <option value="scheduled">Scheduled</option>
-                <option value="approved">Approved</option>
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
                 <option value="rescheduled">Rescheduled</option>
                 <option value="no_show">No Show</option>
-                <option value="rejected">Rejected</option>
-                <option value="in_progress">In Progress</option>
               </select>
             </div>
             <div class="appt-primary-actions" style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
@@ -6637,15 +6636,14 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-default{background:#18181b;border-color:#18181b;color:#fff}
   #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn:disabled{opacity:.5;cursor:not-allowed}
   @media(max-width:520px){#scheduleAppointmentDialog.modal{padding:8px}#scheduleAppointmentDialog .schedule-dialog-content{max-height:calc(100vh - 16px);padding:18px 16px 16px}#scheduleAppointmentDialog .schedule-time-grid{gap:7px}}
-  #appointmentDetailsModal .appt-status-progress{display:flex;align-items:flex-start;padding:8px 0 16px;position:relative;margin:0 0 4px}
+  #appointmentDetailsModal .appt-status-progress{display:flex;flex-direction:row;align-items:flex-start;padding:8px 0 16px;position:relative;margin:0 0 4px}
   #appointmentDetailsModal .appt-status-progress:before{content:'';position:absolute;top:17px;left:27px;right:27px;height:2px;background:#d4d4d8}
-  #appointmentDetailsModal .appt-progress-step{display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1;min-width:0}
-  #appointmentDetailsModal .appt-progress-dot{width:18px;height:18px;box-sizing:border-box;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
-  #appointmentDetailsModal .appt-progress-dot.done{border-color:#16a34a;background:#16a34a}
+  #appointmentDetailsModal .appt-progress-step{display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1;flex:1}
+  #appointmentDetailsModal .appt-progress-dot{width:18px;height:18px;border-radius:50%;border:2px solid #d4d4d8;background:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;position:relative;color:#fff}
+  #appointmentDetailsModal .appt-progress-dot.done{border-color:#16a34a;background:#16a34a;color:#fff}
   #appointmentDetailsModal .appt-progress-dot.active{border-color:#16a34a;background:#fff}
-  #appointmentDetailsModal .appt-progress-label{font:500 11px Inter,'Segoe UI',sans-serif;color:#a1a1aa;text-align:center;white-space:normal}
+  #appointmentDetailsModal .appt-progress-label{font-family:Inter,'Segoe UI',sans-serif;font-size:11px;font-weight:500;color:#a1a1aa;text-align:center;white-space:normal}
   #appointmentDetailsModal .appt-progress-label.active-label{color:#18181b;font-weight:600}
-  @media(max-width:520px){#appointmentDetailsModal .appt-progress-label{font-size:10px}}
   #staffEditAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:1000; }
   #staffEditAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
   #staffEditAppointmentModal .sd-form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
@@ -8371,6 +8369,9 @@ function openApptRowMenu(ev, apptId, apptStatus){
   if (apptStatus === 'approved' || apptStatus === 'scheduled' || apptStatus === 'rescheduled') {
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.reschedSingle('+apptId+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Reschedule</button>';
   }
+  if (apptStatus === 'no_show') {
+    items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.statusChange('+apptId+',\'completed\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Correct to Completed</button>';
+  }
   if (canMarkOutcome && (apptStatus === 'scheduled' || apptStatus === 'rescheduled' || apptStatus === 'in_progress')) {
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.statusChange('+apptId+',\'completed\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>Mark Completed</button>';
     items += '<button class="row-menu-item" onclick="closeApptRowMenu();APP.statusChange('+apptId+',\'no_show\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9 9l6 6m0-6-6 6"/></svg>Mark No-show</button>';
@@ -8398,8 +8399,8 @@ function confirmAppointmentAction(title, message, onConfirm, confirmLabel) {
     overlay = document.createElement('div');
     overlay.id = 'appointmentActionConfirm';
     overlay.className = 'modal';
-    overlay.style.cssText = 'background:rgba(0,0,0,.5);padding:1rem;z-index:1100;';
-    overlay.innerHTML = '<div class="sd-dialog-content" role="alertdialog" aria-modal="true" style="max-width:420px;"><div class="sd-dialog-header"><h2 class="sd-dialog-title" id="appointmentActionConfirmTitle"></h2><p class="sd-dialog-description" id="appointmentActionConfirmMessage"></p></div><div class="sd-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="appointmentActionConfirmCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="appointmentActionConfirmOk">Continue</button></div></div>';
+    overlay.style.cssText = 'background:rgba(0,0,0,.5);padding:1rem;z-index:1300;';
+    overlay.innerHTML = '<div class="sd-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="appointmentActionConfirmTitle" aria-describedby="appointmentActionConfirmMessage" style="max-width:420px;"><div class="sd-dialog-header"><h2 class="sd-dialog-title" id="appointmentActionConfirmTitle"></h2><p class="sd-dialog-description" id="appointmentActionConfirmMessage"></p></div><div class="sd-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="appointmentActionConfirmCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="appointmentActionConfirmOk">Continue</button></div></div>';
     document.body.appendChild(overlay);
     document.getElementById('appointmentActionConfirmCancel').onclick = function() { closeModal('appointmentActionConfirm'); };
   }
@@ -8411,6 +8412,8 @@ function confirmAppointmentAction(title, message, onConfirm, confirmLabel) {
     onConfirm();
   };
   openModal('appointmentActionConfirm');
+  var confirmButton = document.getElementById('appointmentActionConfirmOk');
+  if (confirmButton) confirmButton.focus();
 }
 function rejectAppointmentFromDrawer(id) {
   var modal = document.getElementById('appointmentRejectReasonDialog');
@@ -9873,17 +9876,23 @@ window.APP = window.APP || {};
   APP.statusChange = function(id, newStatus) {
     var action = newStatus === 'completed' ? 'complete' : (newStatus === 'no_show' ? 'no_show' : (newStatus === 'cancelled' ? 'cancel' : ''));
     if (!action) { alert('Unsupported action.'); return; }
+    var currentRow = document.querySelector('#appointmentsTable tr[data-id="' + id + '"]');
+    var currentStatus = window._currentApptId === Number(id) ? window._currentApptStatus : '';
+    if (currentRow) currentStatus = currentRow.getAttribute('data-status') || currentStatus;
+    var correctingNoShow = newStatus === 'completed' && currentStatus === 'no_show';
     var scheduledDate = window._currentApptDate || '';
     var scheduledTime = window._currentApptTime || '';
     var scheduledSlot = scheduledDate
       ? formatApptDate(scheduledDate) + (scheduledTime ? ' at ' + formatApptTime(scheduledTime) : '')
       : 'the scheduled date and time';
     var actionLabel = newStatus === 'completed'
-      ? 'Confirm that DCVS staff completed this appointment.'
+      ? (correctingNoShow
+        ? 'This appointment was automatically marked No Show after its scheduled time. Confirm that the service was completed and correct its status to Completed.'
+        : 'Confirm that DCVS staff completed this appointment.')
       : (newStatus === 'no_show'
         ? 'Mark the appointment for ' + scheduledSlot + ' as No-show? This releases the appointment date and time so it becomes available for another resident.'
         : 'Update this appointment?');
-    var title = newStatus === 'completed' ? 'Mark as Completed' : (newStatus === 'no_show' ? 'Mark as No-show' : 'Update Appointment');
+    var title = newStatus === 'completed' ? (correctingNoShow ? 'Correct to Completed' : 'Mark as Completed') : (newStatus === 'no_show' ? 'Mark as No-show' : 'Update Appointment');
     confirmAppointmentAction(title, actionLabel, function() { fetch(window.dcvsStaffUrl('update-appointment-status.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -9923,6 +9932,7 @@ window.APP = window.APP || {};
         set(document.getElementById('detailResidentId'), a.user_reference_id || '-');
         window._currentApptRef = a.reference_id || ('#APT-' + (a.appointment_id || ''));
         window._currentApptId = a.appointment_id || 0;
+        window._currentApptStatus = a.status || '';
         window._currentApptDate = a.scheduled_date || a.preferred_date || '';
         window._currentApptTime = a.scheduled_time || a.preferred_time || '';
         set(document.getElementById('detailType'), cap(a.appointment_type) + ((a.urgency_level || 'routine') === 'urgent' ? ' · Urgent' : ' · Routine'));
@@ -10033,12 +10043,13 @@ window.APP = window.APP || {};
         var outcomeGuidance = document.getElementById('apptOutcomeGuidance');
         if (outcomeGuidance) {
           var isScheduled = a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress';
-          outcomeGuidance.style.display = isScheduled ? 'block' : 'none';
+          var autoNoShow = a.status === 'no_show';
+          outcomeGuidance.style.display = isScheduled || autoNoShow ? 'block' : 'none';
           outcomeGuidance.textContent = isScheduled
             ? (a.can_mark_outcome
               ? 'DCVS staff records the outcome after the final scheduled date and time: mark Completed if the appointment took place, or No-show if the resident did not attend.'
               : 'DCVS staff may mark this appointment Completed or No-show after its final scheduled date and time.')
-            : '';
+            : (autoNoShow ? 'This appointment was automatically marked No Show after its scheduled time. If the service was completed, you can correct the status below.' : '');
         }
         if (footer) {
           var footerHtml = '';
@@ -10050,6 +10061,9 @@ window.APP = window.APP || {};
             var outcomeDisabled = a.can_mark_outcome ? '' : ' disabled title="Available after the final scheduled date and time"';
             footerHtml += '<button class="sd-btn sd-btn-default"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Mark as Completed</button>';
             footerHtml += '<button class="sd-btn sd-btn-outline"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'no_show\')">Mark No-show</button>';
+          }
+          if (a.status === 'no_show') {
+            footerHtml += '<button class="sd-btn sd-btn-default" onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Correct to Completed</button>';
           }
           if (['completed', 'no_show', 'cancelled', 'rejected'].indexOf(a.status) !== -1) {
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveAppt(' + a.appointment_id + ', \'' + (a.pet_name || '').replace(/'/g, "\\'") + '\', \'' + (a.full_name || '').replace(/'/g, "\\'") + '\')">Archive</button>';
