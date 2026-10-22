@@ -12,6 +12,7 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/appointment-workflow.php';
 
 header('Content-Type: application/json');
 
@@ -24,6 +25,8 @@ if (!isset($_GET['id'])) {
     echo json_encode(['success' => false, 'message' => 'Missing ID parameter']);
     exit;
 }
+
+dcvsMarkOverdueAppointmentsNoShow($conn);
 
 // Support both sequential ID and reference_id format (e.g. '12', '#APT-0012', '#APT-X7K29F', 'X7K29F')
 $id_input = trim($_GET['id']);

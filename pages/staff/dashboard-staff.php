@@ -17,6 +17,7 @@ require_once __DIR__ . '/../../includes/reports/staff-data.php';
 require_once __DIR__ . '/../../includes/programs/conflicts.php';
 require_once __DIR__ . '/../../includes/availability.php';
 require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
+require_once __DIR__ . '/../../includes/appointment-workflow.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/staff-app-base.php';
 $appBaseUrl = dcvsStaffAppBaseUrl();
@@ -51,6 +52,7 @@ if ($roleRow = $roleResult->fetch_assoc()) {
 }
 $roleCheck->close();
 dcvsExpireAppointmentRescheduleOffers($conn);
+dcvsMarkOverdueAppointmentsNoShow($conn);
 
 loadDcvsEnv();
 if (env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1') {
@@ -421,7 +423,7 @@ $statusColors = [
     'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
     'action_needed' => ['bg' => '#ffedd5', 'color' => '#9a3412', 'border' => '#fed7aa'],
     'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
-    'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+    'no_show'     => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
     'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
     'rejected'    => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
     'waitlisted'  => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
@@ -469,7 +471,7 @@ if ($apptsQuery) {
         } elseif ($row['status'] == 'pending') {
             $solidColor = '#f59e0b'; // orange
             $bgColor = 'rgba(245, 158, 11, 0.2)';
-        } elseif ($row['status'] == 'rejected') {
+        } elseif ($row['status'] == 'rejected' || $row['status'] == 'no_show') {
             $solidColor = '#b91c1c'; // red
             $bgColor = 'rgba(220, 38, 38, 0.15)';
         }
@@ -1466,7 +1468,7 @@ if (!empty($_GET['waitlist_booking'])) {
     .status-pill.status-completed { background:#f1f5f9; color:#475569; border-color:#e2e8f0; }
     .status-pill.status-cancelled { background:#f1f5f9; color:#64748b; border-color:#e2e8f0; }
     .status-pill.status-rescheduled { background:#ede9fe; color:#6d28d9; border-color:#ddd6fe; }
-    .status-pill.status-no_show { background:#fef3c7; color:#92400e; border-color:#fde68a; }
+    .status-pill.status-no_show { background:#fee2e2; color:#991b1b; border-color:#fecaca; }
     @media (max-width: 768px) {
       .settings-grid { grid-template-columns:1fr; }
       .geo-map-card { overflow:hidden; }
@@ -2629,6 +2631,7 @@ if (!empty($_GET['waitlist_booking'])) {
                       ? 'Cancelled by Resident'
                       : ($req['status'] === 'cancelled' && $req['cancelled_by'] === 'staff'
                         ? 'Cancelled by Staff' : ucfirst(str_replace('_',' ', $req['status'])));
+                    if ($req['status'] === 'no_show') $statusLabel = 'No Show';
                     $dt = date('F j, Y', strtotime($req['scheduled_date']));
                     $tm = date('g:i A', strtotime($req['scheduled_time']));
                     $sub = date('M d, Y', strtotime($req['created_at']));
@@ -6599,6 +6602,45 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   /* Review Requests = centered dialog */
   #addAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
   #addAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
+  #scheduleAppointmentDialog.modal{z-index:1200;padding:16px;background:rgba(0,0,0,.58)}
+  #scheduleAppointmentDialog .schedule-dialog-content{box-sizing:border-box;width:min(780px,100%);max-width:780px;max-height:calc(100vh - 32px);overflow:auto;display:flex;flex-direction:column;gap:18px;padding:18px 16px 16px;border:1px solid #454545;border-radius:14px;background:#303030;color:#f5f5f5;box-shadow:0 20px 50px rgba(0,0,0,.32)}
+  #scheduleAppointmentDialog .schedule-dialog-header{position:relative;padding:0 28px 18px 0;border-bottom:1px solid #454545}
+  #scheduleAppointmentDialog .schedule-dialog-header h2{margin:0 0 5px;color:#f5f5f5;font:600 18px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-dialog-header p{margin:0;color:#d4d4d4;font:400 13px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-dialog-close{position:absolute;top:0;right:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;background:transparent;color:#d4d4d4;font-size:22px;cursor:pointer}
+  #scheduleAppointmentDialog .schedule-dialog-label{display:block;margin:0 0 7px;color:#f5f5f5;font:500 13px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-date-input{box-sizing:border-box;width:100%;height:52px;padding:0 12px;border:1px solid #4a4a4a;border-radius:9px;background:#303030;color:#f5f5f5;font:400 14px Inter,'Segoe UI',sans-serif;color-scheme:dark}
+  #scheduleAppointmentDialog .schedule-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  #scheduleAppointmentDialog .schedule-time-option{min-height:52px;border:1px solid #4a4a4a;border-radius:9px;background:#303030;color:#f5f5f5;font:500 14px Inter,'Segoe UI',sans-serif;cursor:pointer}
+  #scheduleAppointmentDialog .schedule-time-option:hover{border-color:#737373;background:#383838}
+  #scheduleAppointmentDialog .schedule-time-option[aria-pressed="true"]{border-color:#111;background:#080808;color:#fff;box-shadow:inset 0 0 0 1px #080808}
+  #scheduleAppointmentDialog .schedule-time-option:disabled{opacity:.45;cursor:not-allowed}
+  #scheduleAppointmentDialog .schedule-time-option span{display:block;margin-top:3px;color:#d4d4d4;font-size:11px}
+  #scheduleAppointmentDialog .schedule-capacity{padding:14px;border-radius:10px;background:#090909;color:#f5f5f5}
+  #scheduleAppointmentDialog .schedule-capacity-heading{display:flex;align-items:center;gap:9px;margin:0 0 14px;font-size:14px;font-weight:600}
+  #scheduleAppointmentDialog .schedule-capacity-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid #22c55e;border-radius:50%;color:#22c55e;font-size:11px}
+  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-icon{border-color:#f87171;color:#f87171}
+  #scheduleAppointmentDialog .schedule-capacity.is-checking .schedule-capacity-icon{border-color:#a3a3a3;color:#a3a3a3}
+  #scheduleAppointmentDialog .schedule-capacity-counts{display:flex;justify-content:space-between;gap:12px;color:#e5e5e5;font-size:12px}
+  #scheduleAppointmentDialog .schedule-capacity-bar{height:6px;margin-top:10px;overflow:hidden;border-radius:99px;background:#3f3f3f}
+  #scheduleAppointmentDialog .schedule-capacity-fill{width:0;height:100%;border-radius:inherit;background:#16a34a;transition:width .2s ease}
+  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-fill{background:#ef4444}
+  #scheduleAppointmentDialog .schedule-capacity-detail{margin:10px 0 0;color:#d4d4d4;font-size:12px;line-height:1.4}
+  #scheduleAppointmentDialog .schedule-dialog-error{margin:0;padding:9px 11px;border:1px solid #7f1d1d;border-radius:7px;background:#450a0a;color:#fecaca;font-size:13px;line-height:1.4}
+  #scheduleAppointmentDialog .schedule-dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:-2px}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-outline{border-color:#4a4a4a;background:transparent;color:#f5f5f5}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-default{background:#111;border-color:#111;color:#fff}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn:disabled{opacity:.5;cursor:not-allowed}
+  @media(max-width:520px){#scheduleAppointmentDialog.modal{padding:8px}#scheduleAppointmentDialog .schedule-dialog-content{max-height:calc(100vh - 16px);padding:16px 12px 12px}#scheduleAppointmentDialog .schedule-time-grid{gap:7px}}
+  #appointmentDetailsModal .appt-status-progress{display:flex;align-items:flex-start;padding:8px 0 16px;position:relative;margin:0 0 4px}
+  #appointmentDetailsModal .appt-status-progress:before{content:'';position:absolute;top:17px;left:27px;right:27px;height:2px;background:#d4d4d8}
+  #appointmentDetailsModal .appt-progress-step{display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1;min-width:0}
+  #appointmentDetailsModal .appt-progress-dot{width:18px;height:18px;box-sizing:border-box;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+  #appointmentDetailsModal .appt-progress-dot.done{border-color:#16a34a;background:#16a34a}
+  #appointmentDetailsModal .appt-progress-dot.active{border-color:#16a34a;background:#fff}
+  #appointmentDetailsModal .appt-progress-label{font:500 11px Inter,'Segoe UI',sans-serif;color:#a1a1aa;text-align:center;white-space:normal}
+  #appointmentDetailsModal .appt-progress-label.active-label{color:#18181b;font-weight:600}
+  @media(max-width:520px){#appointmentDetailsModal .appt-progress-label{font-size:10px}}
   #staffEditAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:1000; }
   #staffEditAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
   #staffEditAppointmentModal .sd-form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
@@ -6812,6 +6854,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
           </div>
           <span id="detailStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
         </div>
+        <div id="apptStatusProgress" class="appt-status-progress" role="list" aria-label="Appointment progress"></div>
         <div>
           <div class="rpt-section-title-action" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;">Resident Information</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
@@ -8344,7 +8387,7 @@ function closeApptRowMenu(e) {
   if (pop) pop.classList.remove('open');
   document.removeEventListener('click', closeApptRowMenu);
 }
-function confirmAppointmentAction(title, message, onConfirm) {
+function confirmAppointmentAction(title, message, onConfirm, confirmLabel) {
   var overlay = document.getElementById('appointmentActionConfirm');
   if (!overlay) {
     overlay = document.createElement('div');
@@ -8357,6 +8400,7 @@ function confirmAppointmentAction(title, message, onConfirm) {
   }
   document.getElementById('appointmentActionConfirmTitle').textContent = title;
   document.getElementById('appointmentActionConfirmMessage').textContent = message;
+  document.getElementById('appointmentActionConfirmOk').textContent = confirmLabel || 'Continue';
   document.getElementById('appointmentActionConfirmOk').onclick = function() {
     closeModal('appointmentActionConfirm');
     onConfirm();
@@ -8439,15 +8483,14 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
     modal = document.createElement('div');
     modal.id = 'scheduleAppointmentDialog';
     modal.className = 'modal';
-    modal.style.cssText = 'background:rgba(0,0,0,.5);padding:1rem;z-index:1200;';
-    modal.innerHTML = '<div class="sd-dialog-content" role="alertdialog" aria-modal="true" style="width:100%;max-width:480px;box-sizing:border-box;background:#fff;border:1px solid #e4e4e7;border-radius:10px;padding:24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 20px 25px rgba(15,23,32,.18);">' +
-      '<button type="button" class="sd-dialog-close" id="scheduleAppointmentClose" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>' +
-      '<div class="sd-dialog-header"><h2 class="sd-dialog-title">Schedule Appointment</h2><p class="sd-dialog-description">Choose the final appointment date and time. The resident’s requested schedule remains recorded separately.</p></div>' +
-      '<div class="sd-form-grid"><div class="sd-field"><label class="sd-label" for="scheduleAppointmentDate">Final Date</label><input class="sd-input" id="scheduleAppointmentDate" type="date" required></div><div class="sd-field"><label class="sd-label" for="scheduleAppointmentTime">Final Time</label><select class="sd-input" id="scheduleAppointmentTime"><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></div></div>' +
-      '<p id="scheduleAppointmentCapacity" style="margin:0;color:#52525b;background:#f8fafc;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.45;">Checking capacity…</p>' +
-      '<p id="scheduleAppointmentError" style="display:none;margin:0;color:#991b1b;background:#fef2f2;border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.45;"></p>' +
-      '<div class="sd-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="scheduleAppointmentCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="scheduleAppointmentSubmit" disabled>Check Availability</button></div>' +
-      '</div>';
+    modal.innerHTML = '<section class="sd-dialog-content schedule-dialog-content" role="dialog" aria-modal="true" aria-labelledby="scheduleAppointmentTitle" aria-describedby="scheduleAppointmentDescription">' +
+      '<header class="schedule-dialog-header"><button type="button" class="schedule-dialog-close" id="scheduleAppointmentClose" aria-label="Close">&times;</button><h2 id="scheduleAppointmentTitle">Schedule Appointment</h2><p id="scheduleAppointmentDescription">Choose the final appointment date and time. The resident’s requested schedule remains recorded separately.</p></header>' +
+      '<div><label class="schedule-dialog-label" for="scheduleAppointmentDate">Final Appointment Date</label><input class="schedule-date-input" id="scheduleAppointmentDate" type="date" required></div>' +
+      '<div><span class="schedule-dialog-label">Final Appointment Time</span><div class="schedule-time-grid" id="scheduleAppointmentTimeOptions" role="group" aria-label="Final appointment time"></div><select id="scheduleAppointmentTime" aria-hidden="true" tabindex="-1" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);"><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></div>' +
+      '<section class="schedule-capacity is-checking" id="scheduleAppointmentCapacity" aria-live="polite"><div class="schedule-capacity-heading"><span class="schedule-capacity-icon" id="scheduleAppointmentCapacityIcon">…</span><span id="scheduleAppointmentCapacityTitle">Checking appointment availability</span></div><div class="schedule-capacity-counts"><span>Daily appointments</span><strong id="scheduleAppointmentDailyCount">Checking…</strong></div><div class="schedule-capacity-bar" aria-hidden="true"><div class="schedule-capacity-fill" id="scheduleAppointmentCapacityFill"></div></div><p class="schedule-capacity-detail" id="scheduleAppointmentCapacityDetail">Checking daily and time-slot capacity…</p></section>' +
+      '<p class="schedule-dialog-error" id="scheduleAppointmentError" role="alert" hidden></p>' +
+      '<footer class="schedule-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="scheduleAppointmentCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="scheduleAppointmentSubmit" disabled>Check Availability</button></footer>' +
+      '</section>';
     document.body.appendChild(modal);
   }
 
@@ -8455,7 +8498,39 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
   var capacity = document.getElementById('scheduleAppointmentCapacity');
   var dateInput = document.getElementById('scheduleAppointmentDate');
   var timeInput = document.getElementById('scheduleAppointmentTime');
+  var timeOptions = document.getElementById('scheduleAppointmentTimeOptions');
   var submit = document.getElementById('scheduleAppointmentSubmit');
+  var capacityTitle = document.getElementById('scheduleAppointmentCapacityTitle');
+  var capacityDailyCount = document.getElementById('scheduleAppointmentDailyCount');
+  var capacityFill = document.getElementById('scheduleAppointmentCapacityFill');
+  var capacityDetail = document.getElementById('scheduleAppointmentCapacityDetail');
+  var capacityIcon = document.getElementById('scheduleAppointmentCapacityIcon');
+  function updateSelectedTime() {
+    Array.prototype.forEach.call(timeOptions.querySelectorAll('.schedule-time-option'), function (button) {
+      var selected = button.dataset.time === timeInput.value;
+      button.setAttribute('aria-pressed', String(selected));
+      button.querySelector('span').textContent = selected ? 'Selected' : '';
+    });
+  }
+  timeOptions.replaceChildren();
+  Array.prototype.forEach.call(timeInput.options, function (option) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'schedule-time-option';
+    button.dataset.time = option.value;
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = option.textContent;
+    var selectedLabel = document.createElement('span');
+    button.appendChild(selectedLabel);
+    button.addEventListener('click', function () {
+      timeInput.value = option.value;
+      updateSelectedTime();
+      refreshCapacity();
+    });
+    timeOptions.appendChild(button);
+  });
+  var today = new Date();
+  dateInput.min = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
   var dismissSchedule = function () {
     closeModal('scheduleAppointmentDialog');
     if (typeof onComplete === 'function') onComplete(null);
@@ -8466,8 +8541,13 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
     if (event.target === modal) dismissSchedule();
   };
   error.textContent = '';
-  error.style.display = 'none';
-  capacity.textContent = 'Loading the resident’s requested schedule…';
+  error.hidden = true;
+  capacity.className = 'schedule-capacity is-checking';
+  capacityTitle.textContent = 'Loading requested schedule';
+  capacityDailyCount.textContent = 'Checking…';
+  capacityFill.style.width = '0%';
+  capacityDetail.textContent = 'Loading the resident’s requested schedule…';
+  capacityIcon.textContent = '…';
   submit.disabled = true;
   submit.textContent = 'Check Availability';
   var previewSequence = 0;
@@ -8480,7 +8560,13 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
     slotState = null;
     submit.disabled = true;
     submit.textContent = 'Checking…';
-    capacity.textContent = 'Checking daily and time-slot capacity…';
+    capacity.className = 'schedule-capacity is-checking';
+    capacityTitle.textContent = 'Checking appointment availability';
+    capacityDailyCount.textContent = 'Checking…';
+    capacityFill.style.width = '0%';
+    capacityDetail.textContent = 'Checking daily and time-slot capacity…';
+    capacityIcon.textContent = '…';
+    error.hidden = true;
     var query = new URLSearchParams({ appointment_id: id, date: date, time: time });
     fetch(window.dcvsStaffUrl('appointment-slot-capacity.php') + '?' + query.toString())
       .then(function (response) { return response.json(); })
@@ -8488,35 +8574,51 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
         if (request !== previewSequence) return;
         if (!result || !result.success) throw new Error((result && result.message) || 'Could not check appointment capacity.');
         slotState = result;
-        capacity.textContent = result.daily_count + ' of ' + result.daily_limit + ' daily appointments taken; '
-          + result.slot_count + ' of ' + result.slot_capacity + ' at this time.';
+        capacity.className = 'schedule-capacity';
+        capacityIcon.textContent = result.can_schedule ? '✓' : '!';
+        capacityTitle.textContent = result.can_schedule ? 'Appointment slot available' : 'Appointment slot unavailable';
+        capacityDailyCount.textContent = result.daily_count + ' of ' + result.daily_limit + ' booked';
+        capacityFill.style.width = Math.min(100, result.daily_count / Math.max(1, result.daily_limit) * 100) + '%';
+        capacityDetail.textContent = result.slot_count + ' of ' + result.slot_capacity + ' booked for this time.';
         if (result.conflict) {
-          capacity.textContent += ' This resident already has an appointment at the selected date and time.';
+          capacity.classList.add('is-unavailable');
+          capacityDetail.textContent += ' This resident already has an appointment at the selected date and time.';
           submit.textContent = 'Resolve Conflict';
           submit.disabled = true;
         } else if (result.past) {
-          capacity.textContent += ' The selected time has already passed.';
+          capacity.classList.add('is-unavailable');
+          capacityDetail.textContent += ' The selected time has already passed.';
           submit.textContent = 'Choose a Future Time';
           submit.disabled = true;
         } else if (!result.slot_open) {
-          capacity.textContent += ' This clinic time is closed or unavailable.';
+          capacity.classList.add('is-unavailable');
+          capacityDetail.textContent += ' This clinic time is closed or unavailable.';
           submit.textContent = 'Choose Another Time';
           submit.disabled = true;
         } else if (result.full && !result.has_pet) {
-          capacity.textContent += ' Capacity is full, but this request has no linked pet and cannot be added to the pet-required waitlist.';
+          capacity.classList.add('is-unavailable');
+          capacityDetail.textContent += ' Capacity is full, but this request has no linked pet and cannot be added to the pet-required waitlist.';
           submit.textContent = 'Cannot Waitlist';
           submit.disabled = true;
         } else {
-          submit.textContent = result.full ? 'Move to Waitlist' : 'Schedule Appointment';
+          if (result.full) {
+            capacity.classList.add('is-unavailable');
+            capacityTitle.textContent = 'Capacity reached — waitlist available';
+            capacityDetail.textContent = 'This request can be moved to the waitlist.';
+          }
+          submit.textContent = result.full ? 'Move to Waitlist' : 'Confirm Schedule';
           submit.disabled = false;
         }
       })
       .catch(function (failure) {
         if (request !== previewSequence) return;
         slotState = null;
-        capacity.textContent = '';
+        capacity.className = 'schedule-capacity is-unavailable';
+        capacityTitle.textContent = 'Availability check failed';
+        capacityDailyCount.textContent = 'Unavailable';
+        capacityDetail.textContent = '';
         error.textContent = failure.message || 'Could not check appointment capacity.';
-        error.style.display = 'block';
+        error.hidden = false;
         submit.textContent = 'Check Availability';
         submit.disabled = true;
       });
@@ -8554,12 +8656,12 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
           return;
         }
         error.textContent = (data && data.message) || 'Could not schedule this appointment.';
-        error.style.display = 'block';
+        error.hidden = false;
         refreshCapacity();
       })
       .catch(function () {
         error.textContent = 'Network error. Please try again.';
-        error.style.display = 'block';
+        error.hidden = false;
         refreshCapacity();
       });
   };
@@ -8571,12 +8673,16 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
       dateInput.value = appointment.preferred_date || '';
       var requestedTime = (appointment.preferred_time || '').substring(0, 5);
       if (requestedTime) timeInput.value = requestedTime;
+      updateSelectedTime();
       refreshCapacity();
     })
     .catch(function (failure) {
       error.textContent = failure.message || 'Could not load the requested schedule.';
-      error.style.display = 'block';
-      capacity.textContent = '';
+      error.hidden = false;
+      capacity.className = 'schedule-capacity is-unavailable';
+      capacityTitle.textContent = 'Could not load schedule';
+      capacityDailyCount.textContent = 'Unavailable';
+      capacityDetail.textContent = '';
     });
   openModal('scheduleAppointmentDialog');
 }
@@ -9762,9 +9868,16 @@ window.APP = window.APP || {};
   APP.statusChange = function(id, newStatus) {
     var action = newStatus === 'completed' ? 'complete' : (newStatus === 'no_show' ? 'no_show' : (newStatus === 'cancelled' ? 'cancel' : ''));
     if (!action) { alert('Unsupported action.'); return; }
+    var scheduledDate = window._currentApptDate || '';
+    var scheduledTime = window._currentApptTime || '';
+    var scheduledSlot = scheduledDate
+      ? formatApptDate(scheduledDate) + (scheduledTime ? ' at ' + formatApptTime(scheduledTime) : '')
+      : 'the scheduled date and time';
     var actionLabel = newStatus === 'completed'
       ? 'Confirm that DCVS staff completed this appointment.'
-      : (newStatus === 'no_show' ? 'Confirm that the resident did not attend this appointment.' : 'Update this appointment?');
+      : (newStatus === 'no_show'
+        ? 'Mark the appointment for ' + scheduledSlot + ' as No-show? This releases the appointment date and time so it becomes available for another resident.'
+        : 'Update this appointment?');
     var title = newStatus === 'completed' ? 'Mark as Completed' : (newStatus === 'no_show' ? 'Mark as No-show' : 'Update Appointment');
     confirmAppointmentAction(title, actionLabel, function() { fetch(window.dcvsStaffUrl('update-appointment-status.php'), {
       method: 'POST',
@@ -9775,11 +9888,16 @@ window.APP = window.APP || {};
     .then(function(d) {
       if (d.success) {
         if (window.apptUpdateRow) window.apptUpdateRow(id, newStatus);
-      closeModal('appointmentDetailsModal');
-      apptToast('Appointment updated', d.message || 'Appointment status updated.');
+        closeModal('appointmentDetailsModal');
+        apptToast('Appointment updated', d.message || 'Appointment status updated.');
+      } else if (d.status === 'no_show') {
+        if (window.apptUpdateRow) window.apptUpdateRow(id, 'no_show');
+        closeModal('appointmentDetailsModal');
+        apptToast('Appointment marked No Show', d.message || 'The scheduled time has passed.');
       } else { alert(d.message || 'Failed to update status.'); }
     })
-    .catch(function() { alert('Network error.'); }); });
+    .catch(function() { alert('Network error.'); }); },
+    newStatus === 'no_show' ? 'Confirm No-show' : 'Continue');
   };
 
   APP.view = function(id, onReady, onError) {
@@ -9800,6 +9918,8 @@ window.APP = window.APP || {};
         set(document.getElementById('detailResidentId'), a.user_reference_id || '-');
         window._currentApptRef = a.reference_id || ('#APT-' + (a.appointment_id || ''));
         window._currentApptId = a.appointment_id || 0;
+        window._currentApptDate = a.scheduled_date || a.preferred_date || '';
+        window._currentApptTime = a.scheduled_time || a.preferred_time || '';
         set(document.getElementById('detailType'), cap(a.appointment_type) + ((a.urgency_level || 'routine') === 'urgent' ? ' · Urgent' : ' · Routine'));
         set(document.getElementById('detailPreferredDate'), formatApptDate(a.preferred_date));
         set(document.getElementById('detailPreferredTime'), formatApptTime(a.preferred_time));
@@ -9813,7 +9933,7 @@ window.APP = window.APP || {};
             rescheduled: { bg: '#ede9fe', fg: '#7c3aed', border: '#DDD6FE' },
             completed: { bg: '#dbeafe', fg: '#1e40af', border: '#bfdbfe' },
             cancelled: { bg: '#fee2e2', fg: '#dc2626', border: '#FECACA' },
-            no_show: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' },
+            no_show: { bg: '#fee2e2', fg: '#991b1b', border: '#fecaca' },
             rejected: { bg: '#fee2e2', fg: '#dc2626', border: '#FECACA' },
             in_progress: { bg: '#dbeafe', fg: '#1e40af', border: '#BFDBFE' },
             waitlisted: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' }
@@ -9823,6 +9943,51 @@ window.APP = window.APP || {};
           statusEl.style.color = st.fg;
           statusEl.style.background = st.bg;
           statusEl.style.border = '1px solid ' + st.border;
+        }
+        var progressEl = document.getElementById('apptStatusProgress');
+        if (progressEl) {
+          var terminalLabels = {
+            completed: 'Completed',
+            no_show: 'No Show',
+            cancelled: 'Cancelled',
+            rejected: 'Rejected',
+            waitlisted: 'Waitlisted'
+          };
+          var terminal = Object.prototype.hasOwnProperty.call(terminalLabels, a.status);
+          var hasScheduledSlot = !!(a.scheduled_date || a.scheduled_time);
+          var progressStages = [
+            {label: 'Request Submitted', done: true},
+            {label: 'Pending Review', done: a.status !== 'pending' && a.status !== 'cancelled', active: a.status === 'pending'},
+            {
+              label: 'Scheduled',
+              done: a.status === 'completed' || a.status === 'no_show' || (a.status === 'cancelled' && hasScheduledSlot),
+              active: a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress'
+            },
+            {
+              label: terminal ? terminalLabels[a.status] : 'Completed',
+              done: terminal,
+              active: terminal
+            }
+          ];
+          progressEl.replaceChildren();
+          progressStages.forEach(function (stage) {
+            var step = document.createElement('div');
+            step.className = 'appt-progress-step';
+            step.setAttribute('role', 'listitem');
+            if (stage.active) step.setAttribute('aria-current', 'step');
+            var dot = document.createElement('div');
+            dot.className = 'appt-progress-dot' + (stage.done ? ' done' : (stage.active ? ' active' : ''));
+            if (stage.done) {
+              dot.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            }
+            var label = document.createElement('span');
+            label.className = 'appt-progress-label' + (stage.done || stage.active ? ' active-label' : '');
+            label.textContent = stage.label;
+            step.appendChild(dot);
+            step.appendChild(label);
+            progressEl.appendChild(step);
+          });
+          progressEl.setAttribute('aria-label', 'Appointment progress: ' + statusText);
         }
         set(document.getElementById('detailEmail'), a.email);
         set(document.getElementById('detailPhone'), a.phone);
@@ -9876,9 +10041,10 @@ window.APP = window.APP || {};
             footerHtml += '<button class="sd-btn sd-btn-default" onclick="schedulePendingAppointment(' + a.appointment_id + ')">Schedule</button>';
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="rejectAppointmentFromDrawer(' + a.appointment_id + ')">Reject</button>';
           }
-          if ((a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress') && a.can_mark_outcome) {
-            footerHtml += '<button class="sd-btn sd-btn-default" onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Mark as Completed</button>';
-            footerHtml += '<button class="sd-btn sd-btn-outline" onclick="APP.statusChange(' + a.appointment_id + ',\'no_show\')">Mark No-show</button>';
+          if (a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'in_progress') {
+            var outcomeDisabled = a.can_mark_outcome ? '' : ' disabled title="Available after the final scheduled date and time"';
+            footerHtml += '<button class="sd-btn sd-btn-default"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'completed\')">Mark as Completed</button>';
+            footerHtml += '<button class="sd-btn sd-btn-outline"' + outcomeDisabled + ' onclick="APP.statusChange(' + a.appointment_id + ',\'no_show\')">Mark No-show</button>';
           }
           if (['completed', 'no_show', 'cancelled', 'rejected'].indexOf(a.status) !== -1) {
             footerHtml += '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="archiveAppt(' + a.appointment_id + ', \'' + (a.pet_name || '').replace(/'/g, "\\'") + '\', \'' + (a.full_name || '').replace(/'/g, "\\'") + '\')">Archive</button>';

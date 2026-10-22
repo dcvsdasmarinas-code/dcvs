@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
 require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
+require_once __DIR__ . '/../../includes/appointment-workflow.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -28,6 +29,7 @@ if ($_SESSION['role'] !== 'resident') {
 
 expireAdoptionReservations($conn);
 dcvsExpireAppointmentRescheduleOffers($conn);
+dcvsMarkOverdueAppointmentsNoShow($conn);
 $adoptionClockResult = $conn->query('SELECT UNIX_TIMESTAMP(NOW()) AS server_now');
 if (!$adoptionClockResult) {
     throw new RuntimeException('The adoption reservation clock could not be loaded.');
@@ -3673,7 +3675,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
         'expired' => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
         'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
-        'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+        'no_show'     => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'rejected'    => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'waitlisted'  => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     ];
@@ -6754,7 +6756,7 @@ window.APPT = window.APPT || {};
     'expired': ['#fee2e2', '#991b1b', '#fecaca'],
     'completed': ['#dbeafe', '#1e40af', '#bfdbfe'],
     'cancelled': ['#fee2e2', '#991b1b'],
-    'no_show': ['#fef3c7', '#92400e'],
+    'no_show': ['#fee2e2', '#991b1b', '#fecaca'],
     'rejected': ['#fee2e2', '#991b1b', '#fecaca'],
     'waitlisted': ['#fef3c7', '#92400e', '#fde68a']
   };
@@ -7149,10 +7151,10 @@ window.APPT = window.APPT || {};
     if (cells[3]) cells[3].textContent = dateText;
     if (cells[4]) cells[4].textContent = timeText;
     var badge = row.querySelector('.appt-status-pill');
-    var colors = { pending:['#fef3c7','#92400e','#fde68a'], scheduled:['#0E8131','#ffffff','#0E8131'], rescheduled:['#ede9fe','#6d28d9','#ddd6fe'], completed:['#dbeafe','#1e40af','#bfdbfe'], cancelled:['#fee2e2','#991b1b','#fecaca'], no_show:['#fef3c7','#92400e','#fde68a'] };
+    var colors = { pending:['#fef3c7','#92400e','#fde68a'], scheduled:['#0E8131','#ffffff','#0E8131'], rescheduled:['#ede9fe','#6d28d9','#ddd6fe'], completed:['#dbeafe','#1e40af','#bfdbfe'], cancelled:['#fee2e2','#991b1b','#fecaca'], no_show:['#fee2e2','#991b1b','#fecaca'] };
     var style = colors[status] || ['#f1f5f9','#64748b','#e4e4e7'];
     if (badge) {
-      badge.textContent = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+      badge.textContent = status === 'no_show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
       badge.style.background = style[0];
       badge.style.color = style[1];
       badge.style.borderColor = style[2];
@@ -7435,7 +7437,7 @@ window.APPT = window.APPT || {};
 window.__apptList = <?php
   $jsonAppts = [];
   foreach ($appointments as $appt) {
-      $appointmentStatusLabel = ucfirst(str_replace('_', ' ', $appt['status']));
+      $appointmentStatusLabel = $appt['status'] === 'no_show' ? 'No Show' : ucfirst(str_replace('_', ' ', $appt['status']));
       if ($appt['status'] === 'action_needed') $appointmentStatusLabel = 'Action needed';
       elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $appointmentStatusLabel = 'Expired';
       elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $appointmentStatusLabel = 'Declined';

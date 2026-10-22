@@ -18,6 +18,7 @@ require_once __DIR__ . '/../../includes/availability.php';
 require_once __DIR__ . '/../../mailer.php';
 require_once __DIR__ . '/../../sms-sender.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
+require_once __DIR__ . '/../../includes/appointment-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     echo json_encode(['success' => false, 'message' => 'Unauthorized.']);
@@ -44,6 +45,8 @@ if (!in_array($action, $allowed, true)) {
     echo json_encode(['success' => false, 'message' => 'Invalid action.']);
     exit;
 }
+
+dcvsMarkOverdueAppointmentsNoShow($conn);
 
 $staffName = $_SESSION['full_name'] ?? 'DCVS Staff';
 $staffId = $_SESSION['user_id'] ?? null;
@@ -381,7 +384,16 @@ foreach ($rows as $r) {
 }
 
 if (empty($targets)) {
-    echo json_encode(['success' => false, 'message' => 'Selected appointment(s) cannot be updated from their current status.']);
+    $allNoShow = count($rows) > 0 && count(array_filter($rows, function ($row) {
+        return $row['status'] === 'no_show';
+    })) === count($rows);
+    echo json_encode([
+        'success' => false,
+        'status' => $allNoShow ? 'no_show' : null,
+        'message' => $allNoShow && in_array($newStatus, ['completed', 'no_show'], true)
+            ? 'The scheduled time has passed, so this appointment is now marked No Show.'
+            : 'Selected appointment(s) cannot be updated from their current status.',
+    ]);
     exit;
 }
 
