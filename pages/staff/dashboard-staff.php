@@ -6602,36 +6602,41 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   /* Review Requests = centered dialog */
   #addAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:999; }
   #addAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
-  #scheduleAppointmentDialog.modal{z-index:1200;padding:16px;background:rgba(0,0,0,.58)}
-  #scheduleAppointmentDialog .schedule-dialog-content{box-sizing:border-box;width:min(780px,100%);max-width:780px;max-height:calc(100vh - 32px);overflow:auto;display:flex;flex-direction:column;gap:18px;padding:18px 16px 16px;border:1px solid #454545;border-radius:14px;background:#303030;color:#f5f5f5;box-shadow:0 20px 50px rgba(0,0,0,.32)}
-  #scheduleAppointmentDialog .schedule-dialog-header{position:relative;padding:0 28px 18px 0;border-bottom:1px solid #454545}
-  #scheduleAppointmentDialog .schedule-dialog-header h2{margin:0 0 5px;color:#f5f5f5;font:600 18px Inter,'Segoe UI',sans-serif}
-  #scheduleAppointmentDialog .schedule-dialog-header p{margin:0;color:#d4d4d4;font:400 13px Inter,'Segoe UI',sans-serif}
-  #scheduleAppointmentDialog .schedule-dialog-close{position:absolute;top:0;right:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;background:transparent;color:#d4d4d4;font-size:22px;cursor:pointer}
-  #scheduleAppointmentDialog .schedule-dialog-label{display:block;margin:0 0 7px;color:#f5f5f5;font:500 13px Inter,'Segoe UI',sans-serif}
-  #scheduleAppointmentDialog .schedule-date-input{box-sizing:border-box;width:100%;height:52px;padding:0 12px;border:1px solid #4a4a4a;border-radius:9px;background:#303030;color:#f5f5f5;font:400 14px Inter,'Segoe UI',sans-serif;color-scheme:dark}
+  #scheduleAppointmentDialog.modal{z-index:1200;padding:16px;background:rgba(0,0,0,.5)}
+  #scheduleAppointmentDialog .schedule-dialog-content{box-sizing:border-box;width:min(780px,100%);max-width:780px;max-height:calc(100vh - 32px);overflow:auto;display:flex;flex-direction:column;gap:18px;padding:24px;border:1px solid #e4e4e7;border-radius:10px;background:#fff;color:#18181b;box-shadow:0 20px 25px rgba(15,23,32,.18)}
+  #scheduleAppointmentDialog .schedule-dialog-header{position:relative;padding:0 28px 18px 0;border-bottom:1px solid #e4e4e7}
+  #scheduleAppointmentDialog .schedule-dialog-header h2{margin:0 0 5px;color:#09090b;font:600 18px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-dialog-header p{margin:0;color:#71717a;font:400 13px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-dialog-close{position:absolute;top:0;right:0;display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:6px;background:transparent;color:#71717a;font-size:22px;cursor:pointer}
+  #scheduleAppointmentDialog .schedule-dialog-close:hover{background:#f4f4f5;color:#18181b}
+  #scheduleAppointmentDialog .schedule-dialog-label{display:block;margin:0 0 7px;color:#18181b;font:500 13px Inter,'Segoe UI',sans-serif}
+  #scheduleAppointmentDialog .schedule-date-input{box-sizing:border-box;width:100%;height:40px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:400 14px Inter,'Segoe UI',sans-serif;color-scheme:light;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  #scheduleAppointmentDialog .schedule-date-input:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b}
   #scheduleAppointmentDialog .schedule-time-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  #scheduleAppointmentDialog .schedule-time-option{min-height:52px;border:1px solid #4a4a4a;border-radius:9px;background:#303030;color:#f5f5f5;font:500 14px Inter,'Segoe UI',sans-serif;cursor:pointer}
-  #scheduleAppointmentDialog .schedule-time-option:hover{border-color:#737373;background:#383838}
-  #scheduleAppointmentDialog .schedule-time-option[aria-pressed="true"]{border-color:#111;background:#080808;color:#fff;box-shadow:inset 0 0 0 1px #080808}
-  #scheduleAppointmentDialog .schedule-time-option:disabled{opacity:.45;cursor:not-allowed}
-  #scheduleAppointmentDialog .schedule-time-option span{display:block;margin-top:3px;color:#d4d4d4;font-size:11px}
-  #scheduleAppointmentDialog .schedule-capacity{padding:14px;border-radius:10px;background:#090909;color:#f5f5f5}
+  #scheduleAppointmentDialog .schedule-time-option{min-height:44px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:500 14px Inter,'Segoe UI',sans-serif;cursor:pointer;transition:background .15s,border-color .15s}
+  #scheduleAppointmentDialog .schedule-time-option:hover{border-color:#a1a1aa;background:#f4f4f5}
+  #scheduleAppointmentDialog .schedule-time-option[aria-pressed="true"]{border-color:#18181b;background:#18181b;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+  #scheduleAppointmentDialog .schedule-time-option:disabled{opacity:.5;cursor:not-allowed}
+  #scheduleAppointmentDialog .schedule-time-option span{display:block;margin-top:3px;color:#71717a;font-size:11px}
+  #scheduleAppointmentDialog .schedule-time-option[aria-pressed="true"] span{color:#e4e4e7}
+  #scheduleAppointmentDialog .schedule-capacity{padding:14px;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;color:#18181b}
   #scheduleAppointmentDialog .schedule-capacity-heading{display:flex;align-items:center;gap:9px;margin:0 0 14px;font-size:14px;font-weight:600}
-  #scheduleAppointmentDialog .schedule-capacity-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid #22c55e;border-radius:50%;color:#22c55e;font-size:11px}
-  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-icon{border-color:#f87171;color:#f87171}
-  #scheduleAppointmentDialog .schedule-capacity.is-checking .schedule-capacity-icon{border-color:#a3a3a3;color:#a3a3a3}
-  #scheduleAppointmentDialog .schedule-capacity-counts{display:flex;justify-content:space-between;gap:12px;color:#e5e5e5;font-size:12px}
-  #scheduleAppointmentDialog .schedule-capacity-bar{height:6px;margin-top:10px;overflow:hidden;border-radius:99px;background:#3f3f3f}
+  #scheduleAppointmentDialog .schedule-capacity-icon{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border:1.5px solid #16a34a;border-radius:50%;color:#16a34a;font-size:11px}
+  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-icon{border-color:#dc2626;color:#dc2626}
+  #scheduleAppointmentDialog .schedule-capacity.is-checking .schedule-capacity-icon{border-color:#71717a;color:#71717a}
+  #scheduleAppointmentDialog .schedule-capacity-counts{display:flex;justify-content:space-between;gap:12px;color:#52525b;font-size:12px}
+  #scheduleAppointmentDialog .schedule-capacity-counts strong{color:#18181b}
+  #scheduleAppointmentDialog .schedule-capacity-bar{height:6px;margin-top:10px;overflow:hidden;border-radius:99px;background:#e4e4e7}
   #scheduleAppointmentDialog .schedule-capacity-fill{width:0;height:100%;border-radius:inherit;background:#16a34a;transition:width .2s ease}
-  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-fill{background:#ef4444}
-  #scheduleAppointmentDialog .schedule-capacity-detail{margin:10px 0 0;color:#d4d4d4;font-size:12px;line-height:1.4}
-  #scheduleAppointmentDialog .schedule-dialog-error{margin:0;padding:9px 11px;border:1px solid #7f1d1d;border-radius:7px;background:#450a0a;color:#fecaca;font-size:13px;line-height:1.4}
+  #scheduleAppointmentDialog .schedule-capacity.is-unavailable .schedule-capacity-fill{background:#dc2626}
+  #scheduleAppointmentDialog .schedule-capacity-detail{margin:10px 0 0;color:#52525b;font-size:12px;line-height:1.4}
+  #scheduleAppointmentDialog .schedule-dialog-error{margin:0;padding:9px 11px;border:1px solid #fecaca;border-radius:6px;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.4}
   #scheduleAppointmentDialog .schedule-dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:-2px}
-  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-outline{border-color:#4a4a4a;background:transparent;color:#f5f5f5}
-  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-default{background:#111;border-color:#111;color:#fff}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-outline{border-color:#e4e4e7;background:#fff;color:#18181b}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-outline:hover{background:#f4f4f5}
+  #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn-default{background:#18181b;border-color:#18181b;color:#fff}
   #scheduleAppointmentDialog .schedule-dialog-footer .sd-btn:disabled{opacity:.5;cursor:not-allowed}
-  @media(max-width:520px){#scheduleAppointmentDialog.modal{padding:8px}#scheduleAppointmentDialog .schedule-dialog-content{max-height:calc(100vh - 16px);padding:16px 12px 12px}#scheduleAppointmentDialog .schedule-time-grid{gap:7px}}
+  @media(max-width:520px){#scheduleAppointmentDialog.modal{padding:8px}#scheduleAppointmentDialog .schedule-dialog-content{max-height:calc(100vh - 16px);padding:18px 16px 16px}#scheduleAppointmentDialog .schedule-time-grid{gap:7px}}
   #appointmentDetailsModal .appt-status-progress{display:flex;align-items:flex-start;padding:8px 0 16px;position:relative;margin:0 0 4px}
   #appointmentDetailsModal .appt-status-progress:before{content:'';position:absolute;top:17px;left:27px;right:27px;height:2px;background:#d4d4d8}
   #appointmentDetailsModal .appt-progress-step{display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;position:relative;z-index:1;min-width:0}
