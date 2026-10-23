@@ -113,7 +113,7 @@ function validateFields($p) {
     return [$category, $subject, $status, $audienceType, $audienceBarangays, $barangayId, $publishAt, $featured];
 }
 
-function announcementEventInput(mysqli $conn, array $input, int $announcementId = 0): array
+function announcementEventInput(mysqli $conn, array $input, int $announcementId = 0, bool $allowHistoricalSchedule = false): array
 {
     $eventDate = trim((string)($input['event_date'] ?? ''));
     $eventEndDate = trim((string)($input['end_date'] ?? ''));
@@ -166,7 +166,9 @@ function announcementEventInput(mysqli $conn, array $input, int $announcementId 
         || !$parsedEnd || $parsedEnd->format('H:i') !== $endTime) {
         throw new InvalidArgumentException('Enter a valid event date and start/end time.');
     }
-    if ($eventDate < date('Y-m-d') || ($eventEndDate !== '' && $eventEndDate < $eventDate) || $startTime >= $endTime) {
+    if ((!$allowHistoricalSchedule && $eventDate < date('Y-m-d'))
+        || ($eventEndDate !== '' && $eventEndDate < $eventDate)
+        || $startTime >= $endTime) {
         throw new InvalidArgumentException('The event date must be today or later, and the end time must be after the start time.');
     }
     if (!in_array($targetMode, ['all', 'selected'], true)) {
@@ -175,7 +177,10 @@ function announcementEventInput(mysqli $conn, array $input, int $announcementId 
 
     $deadlineTimestamp = strtotime($deadlineInput);
     $eventStartTimestamp = strtotime($eventDate . ' ' . $startTime);
-    if (!$deadlineTimestamp || $deadlineTimestamp <= time() || !$eventStartTimestamp || $deadlineTimestamp > $eventStartTimestamp) {
+    if (!$deadlineTimestamp
+        || (!$allowHistoricalSchedule && $deadlineTimestamp <= time())
+        || !$eventStartTimestamp
+        || $deadlineTimestamp > $eventStartTimestamp) {
         throw new InvalidArgumentException('Set a response deadline in the future and no later than the event start time.');
     }
 
@@ -192,7 +197,7 @@ function announcementEventInput(mysqli $conn, array $input, int $announcementId 
         }
         $programRow = $programStmt->get_result()->fetch_assoc();
         $programStmt->close();
-        if (!$programRow || !in_array($programRow['status'], ['scheduled', 'live'], true)) {
+        if (!$programRow || (!$allowHistoricalSchedule && !in_array($programRow['status'], ['scheduled', 'live'], true))) {
             throw new InvalidArgumentException('Only scheduled or ongoing programs can be linked to an announcement.');
         }
 
@@ -301,6 +306,45 @@ function announcementEventInput(mysqli $conn, array $input, int $announcementId 
         'target_names' => $targetNames,
         'requirements' => $requirements
     ];
+}
+
+function announcementEventScheduleUnchanged(array $existing, array $input): bool
+{
+    $dateFields = [
+        'event_date' => 'event_date',
+        'event_end_date' => 'end_date',
+        'event_start_time' => 'event_start_time',
+        'event_end_time' => 'event_end_time',
+    ];
+    foreach ($dateFields as $existingField => $inputField) {
+        $existingValue = trim((string)($existing[$existingField] ?? ''));
+        $inputValue = trim((string)($input[$inputField] ?? ''));
+        if (in_array($existingField, ['event_start_time', 'event_end_time'], true)) {
+            $existingValue = substr($existingValue, 0, 5);
+            $inputValue = substr($inputValue, 0, 5);
+        }
+        if ($existingValue !== $inputValue) {
+            return false;
+        }
+    }
+
+    $existingDeadline = trim((string)($existing['response_deadline'] ?? ''));
+    $inputDeadline = trim((string)($input['response_deadline'] ?? ''));
+    if (($existingDeadline === '') !== ($inputDeadline === '')) {
+        return false;
+    }
+    if ($existingDeadline !== '') {
+        $existingDeadlineTimestamp = strtotime($existingDeadline);
+        $inputDeadlineTimestamp = strtotime($inputDeadline);
+        if (!$existingDeadlineTimestamp || !$inputDeadlineTimestamp
+            || date('Y-m-d H:i:s', $existingDeadlineTimestamp) !== date('Y-m-d H:i:s', $inputDeadlineTimestamp)) {
+            return false;
+        }
+    }
+
+    $existingProgramId = (int)($existing['program_id'] ?? 0);
+    $inputProgramId = (int)($input['program_id'] ?? 0);
+    return $existingProgramId === $inputProgramId;
 }
 
 function announcementHasCoordinationInput(array $input): bool
@@ -606,7 +650,7 @@ function handleSave($conn, $userId) {
     }
     $existing = null;
     if ($id > 0) {
-        $stmt = $conn->prepare("SELECT photo_url, photo_hover_url, is_event, program_id, status, facebook_posting_mode, facebook_opt_out FROM announcements WHERE announcement_id = ?");
+        $stmt = $conn->prepare("SELECT photo_url, photo_hover_url, is_event, event_date, event_end_date, event_start_time, event_end_time, response_deadline, program_id, status, facebook_posting_mode, facebook_opt_out FROM announcements WHERE announcement_id = ?");
         if (!$stmt) {
             return ['success' => false, 'message' => 'Could not load the announcement for editing.'];
         }
@@ -647,7 +691,11 @@ function handleSave($conn, $userId) {
     }
     if ($isEvent) {
         try {
-            $event = announcementEventInput($conn, $_POST, $id);
+            $allowHistoricalSchedule = $existing !== null
+                && (int)$existing['is_event'] === 1
+                && $existing['status'] === 'published'
+                && announcementEventScheduleUnchanged($existing, $_POST);
+            $event = announcementEventInput($conn, $_POST, $id, $allowHistoricalSchedule);
             $category = 'announcement';
             $audienceType = $event['target_mode'];
             $audienceBarangays = '';

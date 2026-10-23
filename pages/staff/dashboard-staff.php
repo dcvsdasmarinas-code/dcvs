@@ -5683,7 +5683,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<div class="pen-reporter-avatar" style="width:85px;height:85px;border-radius:8px;flex:0 0 85px;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
-        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + casEsc(r.reporter || '—') + '</span>' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
         casStatusPill(r.statusRaw === 'validated' ? 'validated' : 'pending', r.statusLabel || 'Pending Barangay Review').replace('class="rpt-status ', 'class="rpt-status pen-reporter-status ') +
         '</div>' +
@@ -5815,7 +5815,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
-        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + casEsc(r.reporter || '—') + '</span>' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
         '<span style="margin-left:auto;font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Active') + '</span>' +
         '</div>' +
@@ -5986,7 +5986,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<div class="avatar" style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#64748b;">' + casAvatar(r) + '</div>' +
         '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
-        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + casEsc(r.reporter || '—') + '</span>' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
         '<span style="margin-left:auto;font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Resolved') + '</span>' +
         '</div>' +

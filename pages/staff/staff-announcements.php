@@ -1371,6 +1371,18 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       </div>
     </div>
 
+    <div id="announcementAlertDialog" class="modal" aria-hidden="true">
+      <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="announcementAlertTitle" aria-describedby="announcementAlertDescription">
+        <div class="sd-alert-dialog-header">
+          <h2 class="sd-alert-dialog-title" id="announcementAlertTitle">Could not save announcement</h2>
+          <p class="sd-alert-dialog-description" id="announcementAlertDescription"></p>
+        </div>
+        <div class="sd-alert-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-default" id="announcementAlertCloseButton">OK</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Delete Confirmation Modal -->
     <div id="deleteModal" class="modal">
       <div class="sd-dialog">
@@ -2822,6 +2834,23 @@ function onScheduleChange(){
 /* ───────────────────────── Form submit ───────────────────────── */
 let announcementSaveInProgress = false;
 let announcementSaveSucceeded = false;
+function showAnnouncementAlert(message, title){
+  document.getElementById('announcementAlertTitle').textContent = title || 'Could not save announcement';
+  document.getElementById('announcementAlertDescription').textContent = message;
+  openModal('announcementAlertDialog');
+  document.getElementById('announcementAlertDialog').setAttribute('aria-hidden', 'false');
+  document.getElementById('announcementAlertCloseButton').focus();
+}
+function closeAnnouncementAlert(){
+  closeModal('announcementAlertDialog');
+  document.getElementById('announcementAlertDialog').setAttribute('aria-hidden', 'true');
+}
+document.getElementById('announcementAlertCloseButton').addEventListener('click', function(){
+  closeAnnouncementAlert();
+});
+document.getElementById('announcementAlertDialog').addEventListener('click', function(event){
+  if (event.target === this) closeAnnouncementAlert();
+});
 document.getElementById('announcementForm').addEventListener('submit', function(e){
   e.preventDefault();
   if (announcementSaveInProgress) return;
@@ -2829,21 +2858,21 @@ document.getElementById('announcementForm').addEventListener('submit', function(
   const requestedAnnouncementId = parseInt(document.getElementById('formId').value, 10) || 0;
   if ((requestedSaveMode === 'edit' && requestedAnnouncementId < 1)
     || (requestedSaveMode === 'create' && requestedAnnouncementId !== 0)) {
-    alert('This form lost its create/edit record. Close it and reopen the announcement before saving.');
+    showAnnouncementAlert('This form lost its create/edit record. Close it and reopen the announcement before saving.');
     return;
   }
   if (hasEventCoordinationInput()) {
     const missingFields = eventCoordinationMissingFields();
     if (missingFields.length) {
       setAnnouncementTab('event');
-      alert('Complete barangay coordination. Missing: ' + missingFields.join(', ') + '.');
+      showAnnouncementAlert('Complete barangay coordination. Missing: ' + missingFields.join(', ') + '.');
       return;
     }
     const responseDeadline = new Date(document.getElementById('eventResponseDeadline').value);
     const eventStartsAt = new Date(document.getElementById('eventDate').value + 'T' + document.getElementById('eventStartTime').value);
     if (responseDeadline > eventStartsAt) {
       setAnnouncementTab('event');
-      alert('The response deadline must be before the event starts.');
+      showAnnouncementAlert('The response deadline must be before the event starts.');
       return;
     }
   }
@@ -2864,7 +2893,7 @@ document.getElementById('announcementForm').addEventListener('submit', function(
       if(data.success){
         if (parseInt(data.id, 10) !== requestedAnnouncementId && !isNewAnnouncement) {
           announcementSaveSucceeded = false;
-          alert('The announcement ID returned after saving did not match the record being edited. Facebook was not updated. Please reload and verify the announcement.');
+          showAnnouncementAlert('The announcement ID returned after saving did not match the record being edited. Facebook was not updated. Please reload and verify the announcement.');
           return;
         }
         closeModal('announcementModal');
@@ -2988,9 +3017,9 @@ document.getElementById('announcementForm').addEventListener('submit', function(
         }
         annReloadWithToast(data.message || 'Announcement saved.');
       }
-      else alert('Error: ' + data.message);
+      else showAnnouncementAlert(data.message || 'The announcement could not be saved.');
     })
-    .catch(() => alert('Network error'))
+    .catch(() => showAnnouncementAlert('A network error prevented the announcement from being saved. Check your connection and try again.'))
     .finally(() => {
       if (!announcementSaveSucceeded) {
         announcementSaveInProgress = false;
