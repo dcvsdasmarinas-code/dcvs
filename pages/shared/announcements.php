@@ -5,13 +5,12 @@ $appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
-$conn->query("UPDATE announcements SET status='published', updated_at=NOW() WHERE status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND is_active=1");
 $aq = $conn->query(
     "SELECT title, location, content, category, subject, link_url, photo_url,
             status, created_at, publish_at, is_event, event_date, event_end_date
      FROM announcements
      WHERE is_active=1
-       AND (status='published' OR (status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW()))
+       AND status='published'
        AND archived_at IS NULL
      ORDER BY COALESCE(publish_at, created_at) DESC"
 );

@@ -706,15 +706,17 @@ function handleSave($conn, $userId) {
     $facebookOptOut = array_key_exists('facebook_opt_out', $_POST)
         ? !empty($_POST['facebook_opt_out'])
         : (int)($existing['facebook_opt_out'] ?? 0) === 1;
-    if (!$existing) {
+    if (!$existing || $status === 'scheduled') {
         $facebookPostingMode = 'automatic';
     } else {
         $facebookPostingMode = ($existing['facebook_posting_mode'] ?? 'manual') === 'automatic'
             ? 'automatic'
             : 'manual';
     }
-    $queueFacebookPost = !$existing && $facebookPostingMode === 'automatic' && !$facebookOptOut
-        && in_array($status, ['scheduled', 'published'], true);
+    $queueFacebookPost = !$facebookOptOut && $facebookPostingMode === 'automatic'
+        && ((!$existing && in_array($status, ['scheduled', 'published'], true))
+            || $status === 'scheduled'
+            || ($existing && $existing['status'] !== 'published' && $status === 'published'));
 
     if ($existing && (int)$existing['is_event'] === 1 && !$isEvent) {
         try {
@@ -1102,19 +1104,22 @@ function handleStatus($conn) {
     if ($next === 'published') {
         $publishAt = date('Y-m-d H:i:s');
     }
+    $facebookPostingMode = $next === 'scheduled'
+        ? 'automatic'
+        : (string)($row['facebook_posting_mode'] ?? 'manual');
 
     $conn->begin_transaction();
     try {
-        $stmt = $conn->prepare("UPDATE announcements SET status = ?, publish_at = ?, archived_at = ?, updated_at = NOW() WHERE announcement_id = ?");
+        $stmt = $conn->prepare("UPDATE announcements SET status = ?, publish_at = ?, archived_at = ?, facebook_posting_mode = ?, updated_at = NOW() WHERE announcement_id = ?");
         if (!$stmt) throw new RuntimeException('Could not prepare announcement status update: ' . $conn->error);
-        $stmt->bind_param("sssi", $next, $publishAt, $archivedAt, $id);
+        $stmt->bind_param("ssssi", $next, $publishAt, $archivedAt, $facebookPostingMode, $id);
         if (!$stmt->execute()) throw new RuntimeException('Could not update announcement status: ' . $stmt->error);
         $stmt->close();
         if ($next === 'published') notifyPublishedAnnouncementEventBarangays($conn, $id);
         $conn->commit();
         $queueFacebookPost = ($next === 'scheduled'
             || ($next === 'published' && $row['status'] !== 'published'))
-            && ($row['facebook_posting_mode'] ?? 'manual') === 'automatic'
+            && $facebookPostingMode === 'automatic'
             && (int)($row['facebook_opt_out'] ?? 0) !== 1;
         try {
             if (dcvsFacebookTrackingTableReady($conn)) {
@@ -1124,7 +1129,7 @@ function handleStatus($conn) {
                         $conn,
                         $id,
                         $config['page_id'],
-                        (string)($row['facebook_posting_mode'] ?? 'manual'),
+                        $facebookPostingMode,
                         (int)($row['facebook_opt_out'] ?? 0) === 1,
                         $queueFacebookPost
                     );

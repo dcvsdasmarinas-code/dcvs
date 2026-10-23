@@ -18,14 +18,65 @@ try {
         throw new RuntimeException('Facebook post tracking is not installed. Apply the Facebook posting migrations.');
     }
     $config = dcvsFacebookConfig();
-    if (!$config['enabled']) {
-        throw new RuntimeException('Facebook posting is disabled (FB_ENABLED=false). Pending posts were left unchanged.');
+    if ($config['enabled']) {
+        if ($config['page_id'] === '') {
+            throw new RuntimeException('Facebook Page is not configured.');
+        }
+        dcvsFacebookAssertDestinationAllowed($config);
+        dcvsFacebookRecoverStaleSocialPosts($conn);
     }
-    if ($config['page_id'] === '') {
-        throw new RuntimeException('Facebook Page is not configured.');
+
+    $due = $conn->prepare(
+        "SELECT announcement_id
+         FROM announcements
+         WHERE status = 'scheduled' AND publish_at IS NOT NULL
+           AND publish_at <= NOW() AND archived_at IS NULL
+           AND facebook_opt_out = 0"
+    );
+    if (!$due || !$due->execute()) {
+        $error = $due ? $due->error : $conn->error;
+        throw new RuntimeException('Could not load due announcements: ' . $error);
     }
-    dcvsFacebookAssertDestinationAllowed($config);
-    dcvsFacebookRecoverStaleSocialPosts($conn);
+    $dueResult = $due->get_result();
+    $dueAnnouncementIds = [];
+    while ($row = $dueResult->fetch_assoc()) {
+        $dueAnnouncementIds[] = (int)$row['announcement_id'];
+    }
+    $due->close();
+
+    $enableAutomaticPosting = $conn->prepare(
+        "UPDATE announcements
+         SET facebook_posting_mode = 'automatic'
+         WHERE status = 'scheduled' AND publish_at IS NOT NULL
+           AND publish_at <= NOW() AND archived_at IS NULL
+           AND facebook_opt_out = 0"
+    );
+    if (!$enableAutomaticPosting || !$enableAutomaticPosting->execute()) {
+        $error = $enableAutomaticPosting ? $enableAutomaticPosting->error : $conn->error;
+        throw new RuntimeException('Could not enable Facebook posting for due announcements: ' . $error);
+    }
+    $enableAutomaticPosting->close();
+
+    if ($config['page_id'] !== '') {
+        $queueDue = $conn->prepare(
+            "INSERT INTO announcement_social_posts (announcement_id, platform, page_id, status)
+             VALUES (?, 'facebook', ?, 'pending')
+             ON DUPLICATE KEY UPDATE
+               status = IF(status = 'skipped', 'pending', status)"
+        );
+        if (!$queueDue) {
+            throw new RuntimeException('Could not prepare due Facebook post tracking: ' . $conn->error);
+        }
+        foreach ($dueAnnouncementIds as $announcementId) {
+            $queueDue->bind_param('is', $announcementId, $config['page_id']);
+            if (!$queueDue->execute()) {
+                $error = $queueDue->error;
+                $queueDue->close();
+                throw new RuntimeException('Could not queue due Facebook announcement ' . $announcementId . ': ' . $error);
+            }
+        }
+        $queueDue->close();
+    }
 
     $publishDue = $conn->prepare(
         "UPDATE announcements
@@ -38,6 +89,12 @@ try {
         throw new RuntimeException('Could not publish scheduled announcements: ' . $error);
     }
     $publishDue->close();
+
+    if (!$config['enabled']) {
+        fwrite(STDOUT, 'Scheduled announcements published: ' . count($dueAnnouncementIds)
+            . '. Facebook posting is disabled; pending Facebook posts were left unchanged.' . PHP_EOL);
+        return;
+    }
 
     $pending = $conn->prepare(
         "SELECT sp.social_post_id, sp.announcement_id

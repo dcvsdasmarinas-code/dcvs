@@ -19,8 +19,7 @@ function loadBarangayAnnouncementsForPortal(mysqli $conn, int $barangayId, int $
           ON er.announcement_id = a.announcement_id AND er.barangay_id = b.barangay_id
         WHERE a.is_active = 1
           AND a.archived_at IS NULL
-          AND (a.status = 'published'
-               OR (a.status = 'scheduled' AND a.publish_at IS NOT NULL AND a.publish_at <= NOW()))
+          AND a.status = 'published'
           AND (a.publish_at IS NULL OR a.publish_at <= NOW())
           AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE())
           AND (

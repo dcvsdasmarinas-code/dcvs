@@ -26,16 +26,6 @@ $pageTitle = 'Announcements';
 $activePage = 'announcements';
 
 $announcements = [];
-$autoPublish = $conn->prepare("UPDATE announcements SET status = 'published', updated_at = NOW() WHERE status = 'scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND archived_at IS NULL");
-if (!$autoPublish) {
-    throw new RuntimeException('Could not prepare scheduled announcement publishing: ' . $conn->error);
-}
-if (!$autoPublish->execute()) {
-    $error = $autoPublish->error;
-    $autoPublish->close();
-    throw new RuntimeException('Could not publish scheduled announcements: ' . $error);
-}
-$autoPublish->close();
 $conn->begin_transaction();
 try {
     $pendingEventNotifications = $conn->query(
@@ -604,26 +594,100 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     #annProfileModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
     #annProfileModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #annProfileModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
-    #annProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
-    #annProfileModal .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:12px; overflow:hidden; background:var(--ink-100); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; margin-bottom:4px; }
+    #annProfileModal .sd-dialog-content{ overflow:hidden; gap:0; padding:0; }
+    #annProfileModal .sd-dialog-header{ flex:0 0 auto; padding:24px 24px 16px; border-bottom:0; }
+    #annProfileModal .sd-dialog-header .sd-dialog-eyebrow{ display:none; }
+    #annProfileModal .sd-dialog-header .sd-dialog-description{ display:block; }
+    #annProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:0; }
+    #annProfileModal .ann-detail-summary{ display:flex; align-items:center; gap:14px; padding:18px 24px; border-bottom:0; }
+    #annProfileModal .ann-detail-summary-image{ width:96px; height:96px; flex:0 0 96px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:10px; background:#f4f4f5; color:#a1a1aa; }
+    #annProfileModal .ann-detail-summary-image img{ width:100%; height:100%; object-fit:cover; }
+    #annProfileModal .ann-detail-summary-copy{ min-width:0; flex:1; }
+    #annProfileModal .ann-detail-status{ display:inline-flex; align-items:center; padding:3px 10px; margin-bottom:5px; border:1px solid #0e8131; border-radius:4px; background:#0e8131; color:#fff; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-detail-status.is-muted{ border-color:#e4e4e7; background:#f3f4f6; color:#6b7280; }
+    #annProfileModal .ann-detail-title{ margin:0 0 7px; color:#18181b; font-size:15px; font-weight:600; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-detail-meta{ display:flex; flex-direction:column; gap:5px; color:#52525b; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-detail-meta span{ display:flex; align-items:center; gap:7px; }
+    #annProfileModal .ann-detail-section{ padding:16px 24px; border-bottom:0; }
+    #annProfileModal .ann-detail-section-title{ display:flex; align-items:center; gap:7px; margin:0 0 10px; color:#18181b; font-size:14px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-glance-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+    #annProfileModal .ann-glance-card{ min-width:0; padding:12px; border:1px solid #e4e4e7; border-radius:8px; background:#f8fafc; }
+    #annProfileModal .ann-glance-label{ display:block; margin-bottom:5px; color:#71717a; font-size:13px; font-weight:600; line-height:1.35; }
+    #annProfileModal .ann-glance-value{ display:block; color:#18181b; font-size:15px; font-weight:400; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-event-coordination{ padding:0 0 14px; border-bottom:0; }
+    #annProfileModal .ann-event-details-card{ display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; padding:16px; border:1px solid #dbe4f0; border-radius:10px; background:#f8fafc; }
+    #annProfileModal .ann-coordination-field.is-wide{ grid-column:1/-1; }
+    #annProfileModal .ann-response-deadline{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-top:12px; border-top:1px solid #e4e4e7; }
+    #annProfileModal .ann-response-deadline-copy{ min-width:0; flex:1 1 auto; }
+    #annProfileModal .ann-deadline-status,
+    #annProfileModal .ann-target-status{ display:inline-flex; align-items:center; gap:5px; flex:0 0 auto; padding:3px 10px; border:1px solid #0e8131; border-radius:4px; background:#0e8131; color:#fff; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-deadline-status.is-muted,
+    #annProfileModal .ann-target-status.is-muted{ border-color:#e4e4e7; background:#fff; color:#71717a; }
+    #annProfileModal .ann-target-status.is-changes{ border-color:#fecaca; background:#fef2f2; color:#991b1b; }
+    #annProfileModal .ann-target-status.is-pending{ border-color:#fde68a; background:#fef3c7; color:#92400e; }
+    #annProfileModal .ann-event-coordination-title,
+    #annProfileModal .ann-event-subsection-title{ display:flex; align-items:center; gap:8px; margin:0 0 10px; color:#18181b; font-size:14px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-coordination-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+    #annProfileModal .ann-coordination-field{ min-width:0; }
+    #annProfileModal .ann-coordination-label{ display:block; margin-bottom:3px; color:#71717a; font-size:13px; font-weight:600; line-height:1.3; }
+    #annProfileModal .ann-coordination-value{ display:block; color:#18181b; font-size:15px; font-weight:400; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-event-subsection{ padding:14px 0; border-bottom:0; }
+    #annProfileModal .ann-event-subsection:last-child{ padding-bottom:0; border-bottom:0; }
+    #annProfileModal .ann-event-subsection-title{ justify-content:space-between; margin-bottom:10px; }
+    #annProfileModal .ann-event-subsection-title > span{ display:inline-flex; align-items:center; gap:8px; }
+    #annProfileModal .ann-readiness-badge,
+    #annProfileModal .ann-required-label{ display:inline-flex; align-items:center; flex:0 0 auto; padding:3px 10px; border:1px solid #fde68a; border-radius:4px; background:#fef3c7; color:#92400e; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-readiness-badge.is-ready{ border-color:#bbf7d0; background:#dcfce7; color:#166534; }
+    #annProfileModal .ann-requirement-list{ display:flex; flex-direction:column; gap:6px; }
+    #annProfileModal .ann-requirement-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 10px; border:1px solid #e4e4e7; border-radius:7px; background:#fafafa; color:#3f3f46; font-size:15px; line-height:1.4; }
+    #annProfileModal .ann-requirement-quantity{ color:#71717a; font-weight:500; text-align:right; }
+    #annProfileModal .ann-required-label{ border-color:#fecaca; background:#fee2e2; color:#991b1b; }
+    #annProfileModal .ann-response-list{ display:flex; flex-direction:column; gap:8px; }
+    #annProfileModal .ann-response-card{ padding:11px 12px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #annProfileModal .ann-response-card-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    #annProfileModal .ann-response-card-head-copy{ min-width:0; }
+    #annProfileModal .ann-response-card-name{ color:#18181b; font-size:15px; font-weight:400; line-height:1.4; }
+    #annProfileModal .ann-response-card-date{ display:block; margin-top:2px; color:#71717a; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-response-description{ margin:0 0 6px; color:#52525b; font-size:15px; line-height:1.45; }
+    #annProfileModal .ann-response-state{ margin:0; color:#b45309; font-size:12px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-response-state.is-ready{ color:#15803d; }
+    #annProfileModal .ann-response-state.is-changes{ color:#b91c1c; }
+    #annProfileModal .ann-response-note{ margin:7px 0 0; color:#71717a; font-size:15px; line-height:1.45; white-space:pre-wrap; }
+    #annProfileModal .ann-checklist{ margin-top:8px; padding-top:0; }
+    #annProfileModal .ann-response-list-intro{ margin:0 0 4px; color:#18181b; font-size:15px; line-height:1.45; }
+    #annProfileModal .ann-checklist ul{ margin:0; padding-left:22px; color:#18181b; font-size:15px; line-height:1.5; }
+    #annProfileModal .ann-checklist-readiness{ color:#71717a; font-size:13px; }
+    #annProfileModal .ann-content-label{ margin:0 0 8px; color:#71717a; font-size:13px; font-weight:600; }
+    #annProfileModal .ann-content-message{ margin:0; color:#27272a; font-size:15px; font-weight:400; line-height:1.55; text-align:justify; white-space:pre-line; overflow:hidden; }
+    #annProfileModal .ann-content-message.is-collapsed{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; }
+    #annProfileModal .ann-content-toggle{ display:inline-flex; align-items:center; gap:6px; margin-top:9px; padding:0; border:0; background:transparent; color:#0e8131; font:500 12px/1.4 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #annProfileModal .ann-content-toggle:hover{ color:#166534; text-decoration:underline; }
+    #annProfileModal .ann-photo-toggle{ display:flex; align-items:center; gap:6px; margin-top:10px; padding:0; border:0; background:transparent; color:#0e8131; font:500 12px/1.4 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #annProfileModal .ann-photo-toggle:hover{ color:#166534; text-decoration:underline; }
+    #annProfileModal .ann-photo-preview[hidden]{ display:none!important; }
+    #annProfileModal .ann-event-public-details{ display:flex; flex-direction:column; gap:7px; margin-top:10px; color:#3f3f46; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-event-public-details span{ display:flex; align-items:flex-start; gap:7px; }
+    #annProfileModal .ann-event-public-details i{ width:14px; margin-top:2px; color:#71717a; text-align:center; }
+    #annProfileModal .ann-detail-section .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:10px; overflow:hidden; background:#f4f4f5; border:1px solid #e4e4e7; display:flex; align-items:center; justify-content:center; margin:10px 0 0; }
     #annProfileModal .acms-preview-stage img{ width:100%; height:100%; object-fit:cover; display:block; }
-    #annProfileModal .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--ink-300); font-size:46px; }
+    #annProfileModal .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:#a1a1aa; font-size:46px; }
     #annProfileModal .type-badge, #annProfileModal .ann-profile-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
     #annProfileModal .profile-header{ flex-shrink:0; }
-    #annProfileModal .sd-dialog-footer{ flex-shrink:0; display:flex; flex-direction:row; justify-content:flex-end; gap:8px; padding-top:12px; margin-top:4px; padding-left:16px; border-top:1px solid #e4e4e7; }
+    #annProfileModal .sd-dialog-footer{ flex:0 0 auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); margin:0; border-top:0; background:#fff; }
+    #annProfileModal .sd-dialog-footer .sd-btn{ width:100%; min-width:0; padding:0 8px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; }
     #annProfileModal .rpt-section-title-action{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
     #annProfileModal .ann-edit-icon{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; cursor:pointer; }
     #annProfileModal .ann-edit-icon img{ display:block; width:16px; height:16px; object-fit:contain; }
     #annProfileModal .ann-edit-icon:hover{ border-color:#18181b; background:#f4f4f5; }
     #annProfileModal .ann-event-coordination,
     #annProfileModal .ann-content-message{ font-family:'Inter','Segoe UI',sans-serif; }
-    #annProfileModal .ann-event-section-title{ font-family:inherit; font-size:13px; font-weight:600; color:#71717a; }
+    #annProfileModal .ann-event-section-title{ font-family:inherit; font-size:14px; font-weight:600; color:#18181b; }
     #annProfileModal .ann-event-requirement-list,
-    #annProfileModal .ann-event-checklist{ font-family:inherit; font-size:14px; font-weight:400; line-height:1.5; color:#18181b; }
-    #annProfileModal .ann-event-response-name{ font-family:inherit; font-size:14px; font-weight:400; color:#18181b; }
+    #annProfileModal .ann-event-checklist{ font-family:inherit; font-size:15px; font-weight:400; line-height:1.5; color:#18181b; }
+    #annProfileModal .ann-event-response-name{ font-family:inherit; font-size:15px; font-weight:400; color:#18181b; }
     #annProfileModal .ann-event-response-status{ font-family:inherit; font-size:12px; font-weight:600; }
-    #annProfileModal .ann-event-response-note{ font-family:inherit; font-size:14px; font-weight:400; line-height:1.5; color:#18181b; }
-    #annProfileModal .ann-content-message{ font-size:14px; font-weight:400; line-height:1.55; color:#18181b; white-space:pre-line; }
+    #annProfileModal .ann-event-response-note{ font-family:inherit; font-size:15px; font-weight:400; line-height:1.5; color:#18181b; }
+    #annProfileModal .ann-content-message{ font-size:15px; font-weight:400; line-height:1.55; color:#18181b; white-space:pre-line; }
     @media (max-width: 820px){
       .announcements-cms .db-panel,
       .announcements-cms .db-table-area,
@@ -660,6 +724,10 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       }
       .announcements-cms .db-toolbar > .sd-btn{ width:100%; }
       #annProfileModal .sd-dialog-content{ width:100%; max-width:100%; }
+      #annProfileModal .ann-event-details-card{ gap:12px; padding:14px; }
+      #annProfileModal .ann-detail-summary,
+      #annProfileModal .ann-detail-section{ padding-left:16px; padding-right:16px; }
+      #annProfileModal .ann-coordination-grid{ gap:10px 12px; }
     }
     #draftModal .sd-dialog{ width:100%; display:flex; justify-content:center; }
     #draftModal .sd-dialog-content{ position:relative; width:100%; max-width:420px; background:#fff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; }
@@ -886,8 +954,8 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
           <div class="sd-dialog-header">
-            <h2 class="sd-dialog-title">Announcement Details</h2>
-            <p class="sd-dialog-description">Review announcement content and publishing details.</p>
+            <h2 class="sd-dialog-title">Announcement details</h2>
+            <p class="sd-dialog-description">Review content and publishing details.</p>
           </div>
           <div class="sd-field-group">
             <div id="profileContent"></div>
@@ -1958,87 +2026,156 @@ function closeProfile(){
   document.getElementById('profileContent').innerHTML =
     '<div class="profile-empty"><i class="fas fa-bullhorn"></i><p>Select a post to view its details</p></div>';
 }
+function toggleAnnouncementContent(button){
+  const message = document.getElementById('annDetailPublicMessage');
+  if(!message) return;
+  const expanded = message.classList.toggle('is-collapsed') === false;
+  button.textContent = expanded ? 'Show less' : 'View full announcement';
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+function toggleAnnouncementPhoto(button){
+  const photo = document.getElementById('annDetailPhoto');
+  if(!photo) return;
+  const isShown = photo.hidden;
+  photo.hidden = !isShown;
+  button.textContent = isShown ? 'Hide attached photo' : 'Show attached photo';
+  button.setAttribute('aria-expanded', isShown ? 'true' : 'false');
+}
 function renderDetail(){
   const a = DATA.find(x => x.id === state.selected);
   const box = document.getElementById('profileContent');
   if(!a){ closeProfile(); return; }
   const sm = statusMeta(a.status);
-  const tm = a.is_event ? { label: 'Event', cls: 'type-announcement' } : typeMeta(a.category);
-  const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
-  const pubDate = a.publish_at ? fmtDateTime(a.publish_at) : fmtDate(a.created_at);
-  const profileDateLabel = a.is_event ? 'Event date: ' : 'Posted on: ';
-  const profileDate = a.is_event && a.event_date
-    ? fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date
-      ? ' – ' + fmtDate(a.event_end_date)
-      : '')
-    : pubDate;
-  let eventDetails = '';
-  if (a.is_event) {
-    const providerLabels = { dcvs_office: 'DCVS Office', barangay_venue: 'Barangay venue', other: 'Other' };
-    const requirementRows = (a.event_requirements || []).map(function(requirement){
-      return '<li style="padding:3px 0;">' + esc(requirement.requirement_label) +
-        (requirement.quantity ? ' <span style="color:#71717a;">× ' + esc(requirement.quantity) + '</span>' : '') +
-        (parseInt(requirement.is_required, 10) === 1 ? ' <span style="color:#dc2626;font-size:11px;">Required</span>' : '') + '</li>';
-    }).join('');
-    const targetRows = (a.event_targets || []).map(function(target, index){
-      const responseUpdate = target.status === 'confirmed'
-        ? 'confirmed the preparedness.'
-        : target.status === 'changes_requested'
-          ? 'requested changes to the preparedness plan.'
-          : 'has not confirmed the preparedness yet.';
-      return '<article style="padding:10px 0;' + (index > 0 ? 'border-top:1px solid #e4e4e7;' : '') + '">' +
-        '<p class="ann-event-response-note" style="margin:0;color:#18181b;">Barangay ' +
-        esc(target.barangay_name) + ' ' + responseUpdate + '</p>' +
-        (target.response_note ? '<p class="ann-event-response-note" style="margin:4px 0;color:#52525b;">' + esc(target.response_note) + '</p>' : '') +
-        '</article>';
-    }).join('');
-    eventDetails = '<div class="ann-event-coordination" style="margin-top:16px;padding:12px 14px;border:1px solid #e4e4e7;border-radius:8px;">' +
-      '<div class="rpt-section-title" style="margin-top:0;">Event coordination</div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">' +
-        infoRow('calendar-day', a.event_end_date && a.event_end_date !== a.event_date ? 'Event dates' : 'Event date',
-          a.event_end_date && a.event_end_date !== a.event_date
-            ? fmtDate(a.event_date) + ' – ' + fmtDate(a.event_end_date)
-            : fmtDate(a.event_date)) +
-        infoRow('clock', 'Time', (a.event_start_time || '').slice(0, 5) + '–' + (a.event_end_time || '').slice(0, 5)) +
-        infoRow('location-dot', 'Venue', (providerLabels[a.venue_provider] || 'Venue') + ': ' + (a.venue_name || '—')) +
-        infoRow('clock', 'Response deadline', fmtDateTime(a.response_deadline)) +
+  const statusIsPublished = a.status === 'published';
+  const displayedDate = a.is_event && a.event_date
+    ? fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date ? ' – ' + fmtDate(a.event_end_date) : '')
+    : (a.publish_at ? fmtDateTime(a.publish_at) : fmtDate(a.created_at));
+  const displayedLocation = a.is_event ? (a.venue_name || a.location || 'Venue not specified') : (a.location || 'Location not specified');
+  const eventTime = [a.event_start_time, a.event_end_time]
+    .filter(Boolean)
+    .map(function(value){ return formatAnnouncementTime(value); })
+    .join('–');
+  const eventTargets = Array.isArray(a.event_targets) ? a.event_targets : [];
+  const eventRequirements = Array.isArray(a.event_requirements) ? a.event_requirements : [];
+  const confirmedCount = eventTargets.filter(function(target){ return target.status === 'confirmed'; }).length;
+  const pendingCount = eventTargets.filter(function(target){ return target.status !== 'confirmed'; }).length;
+  const targetStatusLabels = {
+    confirmed: 'confirmed the preparedness plan',
+    pending: 'has not confirmed the preparedness plan yet',
+    changes_requested: 'requested changes to the preparedness plan'
+  };
+  const targetRows = eventTargets.map(function(target){
+    const status = target.status || 'pending';
+    const barangayName = target.barangay_name || 'Barangay';
+    const statusText = targetStatusLabels[status] || ('provided this response: ' + status.replace(/_/g, ' '));
+    const statusLabel = status === 'confirmed' ? 'Confirmed'
+      : (status === 'changes_requested' ? 'Changes requested' : 'Pending');
+    const statusClass = status === 'confirmed' ? ''
+      : (status === 'changes_requested' ? ' is-changes' : ' is-pending');
+    const responseText = 'The Barangay ' + barangayName + ' ' + statusText + '.';
+    const checklist = Array.isArray(target.checklist) && target.checklist.length
+      ? '<div class="ann-checklist"><p class="ann-response-list-intro">' +
+          (status === 'confirmed' ? 'They will prepare the following:' : 'Preparation checklist:') +
+        '</p><ul>' + target.checklist.map(function(item){
+          return '<li>' + esc(item.label || 'Requirement') +
+            ' <span class="ann-checklist-readiness">(' + (item.is_ready ? 'Ready' : 'Not ready') + ')</span></li>';
+        }).join('') + '</ul></div>'
+      : '';
+    return '<article class="ann-response-card">' +
+      '<div class="ann-response-card-head"><div class="ann-response-card-head-copy">' +
+        '<strong class="ann-response-card-name">Barangay ' + esc(barangayName) + '</strong>' +
+        (target.responded_at ? '<span class="ann-response-card-date">' + esc(fmtDateTime(target.responded_at)) + '</span>' : '') +
+      '</div><span class="ann-target-status' + statusClass + '">' +
+        esc(statusLabel) + '</span></div>' +
+      (target.response_note ? '<p class="ann-response-note"><em>"' + esc(target.response_note) + '"</em></p>' : '') +
+      '<p class="ann-response-description">' + esc(responseText) + '</p>' +
+      checklist +
+      '</article>';
+  }).join('');
+  const requirementRows = eventRequirements.map(function(requirement){
+    const quantity = requirement.quantity ? '× ' + String(requirement.quantity) : '';
+    const isRequired = parseInt(requirement.is_required, 10) === 1;
+    return '<div class="ann-requirement-row"><span>' + esc(requirement.requirement_label || 'Requirement') +
+      (quantity ? ' <span class="ann-requirement-quantity">' + esc(quantity) + '</span>' : '') + '</span>' +
+      (isRequired ? '<span class="ann-required-label">Required</span>' : '') + '</div>';
+  }).join('');
+  const eventDateRange = a.event_date
+    ? fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date ? ' – ' + fmtDate(a.event_end_date) : '')
+    : 'Date not specified';
+  const responseDeadline = a.response_deadline ? fmtDateTime(a.response_deadline) : 'Not specified';
+  const allTargetsRespondedOnTime = eventTargets.length > 0 && eventTargets.every(function(target){
+    if (target.status !== 'confirmed' || !target.responded_at || !a.response_deadline) return false;
+    const respondedAt = new Date(String(target.responded_at).replace(' ', 'T'));
+    const deadline = new Date(String(a.response_deadline).replace(' ', 'T'));
+    return Number.isFinite(respondedAt.getTime()) && Number.isFinite(deadline.getTime()) &&
+      respondedAt.getTime() <= deadline.getTime();
+  });
+  const eventSections = a.is_event
+    ? '<section class="ann-detail-section">' +
+      '<h3 class="ann-detail-section-title">Event details</h3>' +
+      '<div class="ann-event-details-card">' +
+        '<div class="ann-coordination-field"><span class="ann-coordination-label">Date</span><strong class="ann-coordination-value">' + esc(eventDateRange) + '</strong></div>' +
+        '<div class="ann-coordination-field"><span class="ann-coordination-label">Time</span><strong class="ann-coordination-value">' + esc(eventTime || 'Time not specified') + '</strong></div>' +
+        '<div class="ann-coordination-field is-wide"><span class="ann-coordination-label">Venue</span><strong class="ann-coordination-value">' + esc(a.venue_name || a.location || 'Venue not specified') + '</strong></div>' +
+        '<div class="ann-response-deadline ann-coordination-field is-wide">' +
+          '<div class="ann-response-deadline-copy"><span class="ann-coordination-label">Response deadline</span><strong class="ann-coordination-value">' + esc(responseDeadline) + '</strong></div>' +
+          (allTargetsRespondedOnTime ? '<span class="ann-deadline-status">Responded on time</span>' : '') +
+        '</div>' +
       '</div>' +
-      '<div style="margin-top:12px;"><strong class="ann-event-section-title">Preparedness requirements</strong><ul class="ann-event-requirement-list" style="margin:5px 0;padding-left:18px;">' + requirementRows + '</ul></div>' +
-      '<div style="margin-top:12px;"><strong class="ann-event-section-title">Barangay responses</strong>' +
-        (targetRows || '<p style="margin:5px 0;color:#71717a;">No barangay targets saved.</p>') + '</div>' +
-      '</div>';
-  }
+      '</section>' +
+      '<section class="ann-detail-section">' +
+        '<h3 class="ann-detail-section-title">Preparedness requirements</h3>' +
+        '<div class="ann-requirement-list">' + (requirementRows || '<div class="ann-requirement-row"><span>No preparedness requirements saved</span></div>') + '</div>' +
+      '</section>' +
+      '<section class="ann-detail-section">' +
+        '<h3 class="ann-detail-section-title">Barangay responses' +
+          '<span class="ann-readiness-badge' + (eventTargets.length > 0 && pendingCount === 0 ? ' is-ready' : '') + '">' +
+            (pendingCount > 0 ? pendingCount + ' pending' : (eventTargets.length ? confirmedCount + ' confirmed' : 'No targets')) +
+          '</span>' +
+        '</h3>' +
+        '<div class="ann-response-list">' + (targetRows || '<p class="ann-response-description">No barangay targets saved.</p>') + '</div>' +
+      '</section>'
+    : '';
+  const image = a.photo_url
+    ? '<img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="' + esc(a.title) + '">'
+    : '';
+  const statusStyle = statusIsPublished || a.status === 'scheduled' ? '' : ' is-muted';
   box.innerHTML =
-    '<div class="profile-header" style="display:flex;align-items:flex-start;justify-content:space-between;padding-top:8px;">' +
-      '<div>' +
-        '<div class="profile-name-row"><h2>' + esc(a.title) + '</h2></div>' +
-        '<span class="ann-profile-date">' + profileDateLabel + profileDate + '</span>' +
-      '</div>' +
-      '<span class="status-pill ' + (a.status === 'published' ? 'status-active' : 'status-inactive') + '" style="flex-shrink:0;margin-top:4px;' + (a.status === 'published' ? 'background:#ECFDF3;color:#027A48;border-color:#D1FADF;' : 'background:#FEF3C7;color:#92400E;border-color:#FDE68A;') + '">' + sm.label + '</span>' +
-    '</div>' +
-    '<div class="rpt-section-title rpt-section-title-action" style="margin-top:6px;"><span>Preview</span><button type="button" class="ann-edit-icon" onclick="openEdit(' + a.id + ')" aria-label="Edit announcement" title="Edit announcement"><img src="assets/images/edit%20icon.png" alt=""></button></div>' +
-    '<div class="acms-preview-stage">' + (a.photo_url ? '<img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="">' : '<div class="acms-preview-placeholder"><i class="fas fa-bullhorn"></i></div>') + '</div>' +
-    '<div class="rpt-section-title">Details</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
-      infoRow('tag', 'Type', tm.label) +
-      infoRow('tag2', 'Category', subjectLabel(a.subject)) +
-      infoRow('map-marker-alt', 'Location/s', a.location || '—') +
-      infoRow('pen', 'Last Updated', a.updated_at ? fmtDate(a.updated_at) : '—') +
-    '</div>' +
-    eventDetails +
-    '<div class="ann-content-message" style="margin-top:16px;background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;">' +
-      esc(a.content) +
-    '</div>';
+    '<div class="ann-detail-summary"><div class="ann-detail-summary-image">' + image + '</div>' +
+      '<div class="ann-detail-summary-copy"><span class="ann-detail-status' + statusStyle + '">' + esc(sm.label) + '</span>' +
+        '<h3 class="ann-detail-title">' + esc(a.title) + '</h3>' +
+        '<div class="ann-detail-meta">' +
+          '<span>Last updated ' + esc(a.updated_at ? fmtDate(a.updated_at) : '—') + '</span>' +
+        '</div>' +
+      '</div></div>' +
+    '<section class="ann-detail-section">' +
+      '<h3 class="ann-detail-section-title">Announcement</h3>' +
+      '<p class="ann-content-message is-collapsed" id="annDetailPublicMessage">' + esc(a.content || 'No announcement message provided.') + '</p>' +
+      '<button type="button" class="ann-content-toggle" aria-expanded="false" onclick="toggleAnnouncementContent(this)">View full announcement</button>' +
+      (a.photo_url
+        ? '<button type="button" class="ann-photo-toggle" aria-expanded="false" onclick="toggleAnnouncementPhoto(this)">Show attached photo</button>' +
+          '<div class="acms-preview-stage ann-photo-preview" id="annDetailPhoto" hidden><img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="' + esc(a.title) + '"></div>'
+        : '') +
+    '</section>';
+  box.innerHTML += eventSections;
   var footer = document.getElementById('annProfileFooter');
   if (footer) {
-    const showPublish = a.status !== 'published' && a.status !== 'scheduled';
     footer.innerHTML =
-      (a.status !== 'archived' ? '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmArchive(' + a.id + ')"><i class="fas fa-archive"></i> Archive</button>' : '') +
-      (showPublish
-      ? '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmPublish(' + a.id + ')"><i class="fas fa-check-circle"></i> Publish</button>'
-      : '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmDraft(' + a.id + ')"><i class="fas fa-file"></i> Draft</button>') +
-      '<button type="button" class="sd-btn sd-btn-outline" onclick="window.open(\'announcements.php\',\'_blank\')"><i class="fas fa-external-link-alt"></i> View on Public Page</button>';
+      (a.status === 'archived'
+        ? '<button type="button" class="sd-btn sd-btn-outline" onclick="setPostStatus(' + a.id + ',\'draft\')">Restore</button>'
+        : '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmArchive(' + a.id + ')">Archive</button>') +
+      '<button type="button" class="sd-btn sd-btn-outline" onclick="openEdit(' + a.id + ')">Edit Draft</button>' +
+      '<button type="button" class="sd-btn sd-btn-default" onclick="window.open(\'announcements.php\',\'_blank\',\'noopener\')">Public Page</button>';
   }
+}
+function formatAnnouncementTime(value){
+  if(!value) return '';
+  const parts = String(value).split(':');
+  const hour = Number(parts[0]);
+  const minute = Number(parts[1]);
+  if(!Number.isFinite(hour) || !Number.isFinite(minute)) return String(value);
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  return (hour % 12 || 12) + ':' + String(minute).padStart(2, '0') + ' ' + suffix;
 }
 
 /* ───────────────────────── Create / edit modal ───────────────────────── */
