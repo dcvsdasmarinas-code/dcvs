@@ -1763,7 +1763,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
                 <h3 class="help-headline">We're here for you and your pets.</h3>
                 <p class="help-subtext">Contact the DCVS team for appointment or report assistance.</p>
               </div>
-              <a href="#" class="help-cta-link" onclick="switchSection('account-settings');return false;">
+              <a href="contact.php" class="help-cta-link">
                 <span>Contact support</span>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </a>
@@ -5267,7 +5267,8 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
             </div>
             <div class="ps-field">
               <label>Phone Number</label>
-              <input type="tel" name="phone" value="<?php echo htmlspecialchars($userPhoneDb); ?>" disabled data-group="personal">
+              <input type="tel" id="residentPhone" name="phone" value="<?php echo htmlspecialchars($userPhoneDb); ?>" inputmode="numeric" pattern="09[0-9]{9}" required disabled data-group="personal">
+              <small id="residentPhoneError" style="display:block;margin-top:4px;color:#b91c1c;font-size:12px;" role="alert" aria-live="polite"><?php echo htmlspecialchars($_SESSION['profile_phone_error'] ?? ''); unset($_SESSION['profile_phone_error']); ?></small>
             </div>
           </div>
           <div class="ps-form-row">
@@ -8818,8 +8819,36 @@ function toggleEdit(group) {
 // Enable all disabled inputs before form submission
 document.addEventListener('DOMContentLoaded', function() {
     var sf = document.getElementById('settingsForm');
+    var phoneInput = document.getElementById('residentPhone');
+    var phoneError = document.getElementById('residentPhoneError');
+    window.DCVSPhilippinePhone?.attach(phoneInput);
+    if (phoneInput && phoneError) {
+        phoneInput.addEventListener('input', function() {
+            if (phoneInput.dataset.phoneTouched !== 'true' && phoneInput.dataset.phoneOverflow !== 'true') {
+                phoneError.textContent = '';
+                return;
+            }
+            phoneError.textContent = window.DCVSPhilippinePhone.error(phoneInput);
+        });
+        phoneInput.addEventListener('blur', function() {
+            phoneInput.dataset.phoneTouched = 'true';
+            phoneError.textContent = window.DCVSPhilippinePhone.error(phoneInput);
+        });
+    }
     if (sf) {
-        sf.addEventListener('submit', function() {
+        sf.addEventListener('submit', function(event) {
+            if (phoneInput) phoneInput.dataset.phoneTouched = 'true';
+            var phoneValidationMessage = window.DCVSPhilippinePhone.error(phoneInput);
+            if (phoneValidationMessage) {
+                event.preventDefault();
+                if (phoneError) phoneError.textContent = phoneValidationMessage;
+                var personalEditButton = document.querySelector('#personal-card .ps-edit-btn');
+                if (phoneInput.disabled && personalEditButton) {
+                    personalEditButton.click();
+                }
+                phoneInput.focus();
+                return;
+            }
             this.querySelectorAll('[disabled]').forEach(function(el) { el.disabled = false; });
         });
     }
@@ -9134,6 +9163,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <?php endif; ?>
+<script src="assets/js/philippine-phone-validation.js"></script>
 <script src="includes/realtime.js"></script>
 <script>
 document.addEventListener('dcvs:realtime', function(e) {

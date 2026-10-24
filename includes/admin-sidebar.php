@@ -22,13 +22,8 @@ if (!isset($adminAvatar)) {
 }
 if (!isset($activePage)) $activePage = '';
 if (!isset($pageTitle)) $pageTitle = 'Admin Portal';
-$notifRootPath = realpath(__DIR__ . DIRECTORY_SEPARATOR . '..');
-$notifDocumentRoot = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
-$notifAppBaseUrl = '';
-if ($notifRootPath !== false && $notifDocumentRoot !== false
-    && strncasecmp($notifRootPath, $notifDocumentRoot, strlen($notifDocumentRoot)) === 0) {
-    $notifAppBaseUrl = '/' . trim(str_replace(DIRECTORY_SEPARATOR, '/', substr($notifRootPath, strlen($notifDocumentRoot))), '/');
-}
+require_once __DIR__ . '/app-base.php';
+$notifAppBaseUrl = dcvsAppBaseUrl();
 $adminNotifications = [];
 $adminArchivedNotifications = [];
 $adminUnreadNotificationCount = 0;
@@ -350,7 +345,6 @@ window.SB2_CONFIG = {
   </div>
 </header>
 
-<link rel="stylesheet" href="<?php echo htmlspecialchars($notifAppBaseUrl . '/assets/css/notification.css?v=' . (int)filemtime(__DIR__ . '/../assets/css/notification.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 <script src="<?php echo htmlspecialchars($notifAppBaseUrl . '/assets/js/notification-panel.js?v=' . (int)filemtime(__DIR__ . '/../assets/js/notification-panel.js'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 
 <style>

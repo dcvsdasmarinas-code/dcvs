@@ -540,11 +540,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     }
 }
 
-// ── Fetch users for initial display ──────────────────────────────
+// ── Fetch one page of users for initial display ───────────────────
 $search = trim($_GET['search'] ?? '');
 $roleFilter = $_GET['role'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 $barangayFilter = isset($_GET['barangay']) ? intval($_GET['barangay']) : 0;
+$perPage = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 15;
+if (!in_array($perPage, [15, 25, 50], true)) $perPage = 15;
+$currentPage = max(1, (int)($_GET['page'] ?? 1));
 $where = "WHERE u.deleted_at IS NULL";
 $params = [];
 $types = "";
@@ -577,13 +580,30 @@ if ($barangayFilter) {
     $types .= "i";
 }
 
-$sql = "SELECT u.*, b.barangay_name FROM users u LEFT JOIN barangays b ON u.barangay_id = b.barangay_id $where ORDER BY u.created_at DESC";
+$countQuery = $conn->prepare("SELECT COUNT(*) FROM users u $where");
+if ($types) $countQuery->bind_param($types, ...$params);
+$countQuery->execute();
+$totalUsers = (int)$countQuery->get_result()->fetch_row()[0];
+$countQuery->close();
+
+$totalPages = max(1, (int)ceil($totalUsers / $perPage));
+if ($currentPage > $totalPages) $currentPage = $totalPages;
+$offset = ($currentPage - 1) * $perPage;
+$sql = "SELECT u.user_id, u.username, u.email, u.full_name, u.role, u.barangay_id, u.phone, u.address, u.status, u.reference_id, u.created_at, u.avatar_url, u.archived_at, b.barangay_name
+        FROM users u
+        LEFT JOIN barangays b ON u.barangay_id = b.barangay_id
+        $where
+        ORDER BY u.created_at DESC
+        LIMIT ?, ?";
 $q = $conn->prepare($sql);
-if ($types) $q->bind_param($types, ...$params);
+$queryParams = $params;
+$queryParams[] = $offset;
+$queryParams[] = $perPage;
+$queryTypes = $types . 'ii';
+$q->bind_param($queryTypes, ...$queryParams);
 $q->execute();
 $users = $q->get_result()->fetch_all(MYSQLI_ASSOC);
 $q->close();
-$totalUsers = count($users);
 
 $barangays = [];
 $br = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
@@ -686,6 +706,7 @@ body { background:#ffffff; }
 .dt-page-btn{height:32px;width:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:1px solid #e4e4e7;background:#fff;color:#18181b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}
 .dt-page-btn:hover:not(:disabled){background:#f4f4f5;}
 .dt-page-btn:disabled{opacity:.5;cursor:not-allowed;}
+.dt-page-btn[aria-disabled="true"]{opacity:.5;cursor:not-allowed;pointer-events:none;}
 
 /* ── Reused sd-dialog (shadcn) style ── */
 .sd-dialog{width:100%;display:flex;justify-content:center;}
@@ -864,6 +885,7 @@ body { background:#ffffff; }
   #viewProfileModal .resident-profile-footer{padding:12px 16px;}
 }
 </style>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
 </head>
 <body>
 
@@ -1001,7 +1023,26 @@ body { background:#ffffff; }
         </tbody>
       </table>
   </div>
-  <div id="rolePagination" class="appt-pagination"></div>
+  <div id="rolePagination" class="appt-pagination">
+    <div class="dt-pagination-right">
+      <div class="dt-rows"><span>Rows per page</span><select onchange="window.rolePageSetPerPage(this.value)"><option value="15" <?php echo $perPage === 15 ? 'selected' : ''; ?>>15</option><option value="25" <?php echo $perPage === 25 ? 'selected' : ''; ?>>25</option><option value="50" <?php echo $perPage === 50 ? 'selected' : ''; ?>>50</option></select></div>
+      <div class="dt-page-label">Showing <?php echo $totalUsers === 0 ? 0 : $offset + 1; ?>-<?php echo min($offset + $perPage, $totalUsers); ?> of <?php echo $totalUsers; ?> users | Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></div>
+      <div class="dt-page-btns">
+        <?php
+          $pageParams = $_GET;
+          $pageParams['per_page'] = $perPage;
+          $paginationUrl = static function (int $page) use ($pageParams): string {
+              $pageParams['page'] = $page;
+              return 'role-management.php?' . http_build_query($pageParams);
+          };
+        ?>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(1), ENT_QUOTES, 'UTF-8'); ?>" aria-label="First page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-double-left" aria-hidden="true"></i></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(max(1, $currentPage - 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Previous page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-left" aria-hidden="true"></i></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(min($totalPages, $currentPage + 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Next page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-right" aria-hidden="true"></i></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl($totalPages), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Last page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-double-right" aria-hidden="true"></i></a>
+      </div>
+    </div>
+  </div>
 </main>
 
 <div class="toast-container" id="toastContainer"></div>
@@ -1378,6 +1419,7 @@ function reloadTable() {
   if (r) p.push('role=' + encodeURIComponent(r));
   if (st) p.push('status=' + encodeURIComponent(st));
   if (br) p.push('barangay=' + encodeURIComponent(br));
+  p.push('per_page=' + encodeURIComponent(new URLSearchParams(window.location.search).get('per_page') || '15'));
   window.location.href = 'role-management.php?' + p.join('&');
 }
 
@@ -1394,53 +1436,12 @@ function clearAllFilters() {
   window.location.href = 'role-management.php';
 }
 
-// ── Client-side pagination ──
-(function() {
-  var PER_PAGE = 15;
-  var tbody = document.querySelector('#userTableBody');
-  var pag = document.getElementById('rolePagination');
-  if (!tbody || !pag) return;
-  var allRows = Array.from(tbody.querySelectorAll('tr'));
-  var currentPage = 1;
-
-  function renderTable() {
-    allRows.forEach(function(r) { r.style.display = 'none'; });
-    var total = allRows.length;
-    var tp = Math.max(1, Math.ceil(total / PER_PAGE));
-    if (currentPage > tp) currentPage = tp;
-    if (currentPage < 1) currentPage = 1;
-    var start = (currentPage - 1) * PER_PAGE;
-    var end = start + PER_PAGE;
-    allRows.slice(start, end).forEach(function(r) { r.style.display = ''; });
-    var h = '';
-    h += '<div class="dt-pagination-right">';
-    h += '<div class="dt-rows"><span>Rows per page</span><select onchange="window.rolePageSetPerPage(this.value)"><option value="15"'+(PER_PAGE===15?' selected':'')+'>15</option><option value="25"'+(PER_PAGE===25?' selected':'')+'>25</option><option value="50"'+(PER_PAGE===50?' selected':'')+'>50</option></select></div>';
-    h += '<div class="dt-page-label">Page ' + currentPage + ' of ' + tp + '</div>';
-    h += '<div class="dt-page-btns">';
-    h += '<button class="dt-page-btn" onclick="window.rolePageGo(1)"'+(currentPage<=1?' disabled':'')+' title="First page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></button>';
-    h += '<button class="dt-page-btn" onclick="window.rolePageGo('+(currentPage-1)+')"'+(currentPage<=1?' disabled':'')+' title="Previous"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></button>';
-    h += '<button class="dt-page-btn" onclick="window.rolePageGo('+(currentPage+1)+')"'+(currentPage>=tp?' disabled':'')+' title="Next"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
-    h += '<button class="dt-page-btn" onclick="window.rolePageGo('+tp+')"'+(currentPage>=tp?' disabled':'')+' title="Last page"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></button>';
-    h += '</div></div>';
-    pag.innerHTML = h;
-  }
-
-  window.rolePageGo = function(page) {
-    var total = allRows.length;
-    var tp = Math.ceil(total / PER_PAGE);
-    if (page < 1 || page > tp) return;
-    currentPage = page;
-    renderTable();
-  };
-
-  window.rolePageSetPerPage = function(val) {
-    PER_PAGE = parseInt(val) || 15;
-    currentPage = 1;
-    renderTable();
-  };
-
-  renderTable();
-})();
+window.rolePageSetPerPage = function(value) {
+  var params = new URLSearchParams(window.location.search);
+  params.set('per_page', value);
+  params.set('page', '1');
+  window.location.href = 'role-management.php?' + params.toString();
+};
 
 // ── Table sort (all columns) ──
 var RM = (function() {

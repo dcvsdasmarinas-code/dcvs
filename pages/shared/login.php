@@ -205,7 +205,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       --error: #ef4444;
       --error-bg: #fef2f2;
       --surface: #ffffff;
-      --bg: #f8fafc;
+      --bg: #ffffff;
     }
 
     body {
@@ -220,6 +220,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .auth-wrapper {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      align-items: start;
       min-height: 100vh;
       width: 100%;
     }
@@ -230,9 +231,11 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      position: sticky;
+      top: 0;
+      height: 100vh;
       padding: 4rem 4rem 2.5rem;
       background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%);
-      position: relative;
       overflow: hidden;
     }
 
@@ -337,39 +340,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 3rem;
-      overflow-y: auto;
-      max-height: 100vh;
+      min-height: 100vh;
+      padding: 2rem clamp(1.5rem, 4vw, 3rem);
       background: var(--bg);
     }
 
     .auth-form-card {
       width: 100%;
       max-width: 440px;
-      background: var(--surface);
-      border: 1px solid var(--border-color);
-      border-radius: 3px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-      padding: 2.5rem 2.5rem 2rem;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ── Login Logo ── */
-    .login-logo {
-      display: flex;
-      justify-content: center;
-      padding-top: 0.25rem;
-      margin-bottom: 1.75rem;
-    }
-
-    .login-logo img {
-      width: 80px;
-      height: 80px;
-      object-fit: contain;
     }
 
     /* ── Header ── */
@@ -611,20 +589,17 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
     /* ── Responsive ── */
     @media (max-width: 900px) {
-      body { background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%); }
+      body { background: #ffffff; }
       .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
       .auth-brand-panel, .brand-content { display: contents; }
       .auth-brand-panel::before { display: none; }
       .brand-title { order: 1; justify-self: center; width: 100%; max-width: 420px; margin-inline: auto; padding: 1.25rem 1rem 0; font-size: clamp(1.65rem, 7vw, 2.15rem); line-height: 1.15; text-align: center; text-wrap: balance; overflow-wrap: normal; }
+      .brand-trust { display: none; }
       .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
       .brand-tagline { display: none; }
-      .auth-form-panel { order: 3; min-width: 0; width: 100%; max-height: none; padding: 0.5rem 16px 0; background: transparent; }
-      .auth-form-card { width: 100%; max-width: 460px; margin: 0 auto; padding: 1.5rem clamp(1rem, 5vw, 2rem); }
-      .login-logo { display: none; }
+      .auth-form-panel { order: 3; min-width: 0; width: 100%; min-height: 0; padding: 1rem 16px; background: #ffffff; }
+      .auth-form-card { width: 100%; max-width: 460px; margin: 0 auto; padding: 0; }
       .login-header { text-align: center; }
-      .brand-trust { order: 4; position: relative; width: 100%; max-width: 100%; margin: 0; padding: 1rem 0 1.25rem; }
-      .brand-logo-item { padding: 0 0.75rem; }
-      .brand-logo-item img { height: 48px; max-width: 140px; }
     }
 
     @media (max-width: 480px) {
@@ -663,10 +638,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     <!-- Right Panel: Login Form -->
     <div class="auth-form-panel">
       <div class="auth-form-card">
-
-        <div class="login-logo">
-          <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" />
-        </div>
 
         <div class="login-header">
           <h2>Welcome Back</h2>

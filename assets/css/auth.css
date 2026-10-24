@@ -667,9 +667,8 @@ a { text-decoration: none; color: inherit; }
   width: 0%;
 }
 
-.strength-fill.weak   { width: 25%; background: var(--error); }
-.strength-fill.fair   { width: 50%; background: var(--gold); }
-.strength-fill.good   { width: 75%; background: #eab308; }
+.strength-fill.weak   { width: 33%; background: var(--error); }
+.strength-fill.medium { width: 66%; background: var(--gold); }
 .strength-fill.strong { width: 100%; background: var(--success); }
 
 .strength-label {
@@ -679,6 +678,24 @@ a { text-decoration: none; color: inherit; }
   min-width: 45px;
   text-align: right;
 }
+.password-requirements {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.password-requirements li::before {
+  content: '○';
+  display: inline-block;
+  width: 1.15rem;
+  color: var(--text-muted);
+}
+.password-requirements li.is-met { color: var(--green-primary); }
+.password-requirements li.is-met::before { content: '✓'; color: var(--green-primary); }
 
 /* ── Remember Me / Terms ── */
 .remember-me,

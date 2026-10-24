@@ -685,6 +685,7 @@ $activePage = 'overview';
   @media(max-width:600px) { .overview-page-heading { align-items:flex-start; flex-direction:column; } .overview-stats { grid-template-columns:1fr 1fr; gap:9px; } .overview-stat-card { min-height:102px; padding:12px 10px; } .overview-stat-card strong { font-size:24px; } .overview-stat-note { font-size:12px; } .overview-role-chart-layout { grid-template-columns:1fr; } .overview-doughnut-wrap { width:165px; height:165px; } }
   @media(max-width:390px) { .overview-stats { grid-template-columns:1fr; } }
   </style>
+  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
 </head>
 <body>
 

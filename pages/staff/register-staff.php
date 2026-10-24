@@ -18,6 +18,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/registration-validation.php';
 
 $officialBarangays = dcvsLoadApprovedBarangays($conn);
 $officialBarangaysByCode = [];
@@ -60,11 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($lastName)) {
         $errors[] = "Last name is required.";
     }
-    if (empty($phone)) {
-        $errors[] = "Phone number is required.";
-    } elseif (!preg_match('/^(\+63|0)[0-9]{10}$/', preg_replace('/\s/', '', $phone))) {
-        $errors[] = "Enter a valid PH number (e.g. 09XX XXX XXXX).";
-    }
+    $phoneError = dcvsRegistrationPhoneError($phone);
+    if ($phoneError !== '') $errors[] = $phoneError;
     if (empty($birthdate)) {
         $errors[] = "Date of birth is required.";
     } else {
@@ -89,19 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Please enter a valid email address.";
     }
-    if (empty($password)) {
-        $errors[] = "Password is required.";
-    } elseif (strlen($password) < 8) {
-        $errors[] = "Password must be at least 8 characters.";
-    } elseif (!preg_match('/[A-Z]/', $password)) {
-        $errors[] = "Password must contain at least one uppercase letter.";
-    } elseif (!preg_match('/[a-z]/', $password)) {
-        $errors[] = "Password must contain at least one lowercase letter.";
-    } elseif (!preg_match('/[0-9]/', $password)) {
-        $errors[] = "Password must contain at least one number.";
-    } elseif (!preg_match('/[^A-Za-z0-9]/', $password)) {
-        $errors[] = "Password must contain at least one special character.";
-    }
+    $passwordError = dcvsRegistrationPasswordError($password);
+    if ($passwordError !== '') $errors[] = $passwordError;
     if ($password !== $confirmPassword) {
         $errors[] = "Passwords do not match.";
     }
@@ -349,7 +336,7 @@ $conn->close();
         <?php else: ?>
           <div class="auth-alert auth-alert-error" id="registerAlert" style="display:none;">
             <i class="fas fa-exclamation-circle"></i>
-            <span id="registerAlertMsg">Please fix the errors below.</span>
+            <span id="registerAlertMsg">Review the highlighted fields and try again.</span>
           </div>
         <?php endif; ?>
 
@@ -392,7 +379,7 @@ $conn->close();
                 <label for="phone">Phone Number <span class="required">*</span></label>
                 <div class="input-wrapper">
                   <i class="fas fa-phone input-icon"></i>
-                  <input type="tel" id="phone" name="phone" placeholder="+63 9XX XXX XXXX" required />
+                  <input type="tel" id="phone" name="phone" inputmode="numeric" pattern="09[0-9]{9}" placeholder="09XXXXXXXXX" required />
                 </div>
                 <span class="field-error" id="phoneError"></span>
               </div>
@@ -500,6 +487,13 @@ $conn->close();
                 </div>
                 <span class="strength-label" id="strengthLabel">Weak</span>
               </div>
+              <ul class="password-requirements" id="passwordRequirements" aria-label="Password requirements">
+                <li data-password-rule="length">At least 8 characters</li>
+                <li data-password-rule="uppercase">At least one uppercase letter (A-Z)</li>
+                <li data-password-rule="lowercase">At least one lowercase letter (a-z)</li>
+                <li data-password-rule="number">At least one number (0-9)</li>
+                <li data-password-rule="special">At least one special character (such as !, @, #, or $)</li>
+              </ul>
             </div>
             <div class="form-group" id="confirmPasswordGroup">
               <label for="confirmPassword">Confirm Password <span class="required">*</span></label>
@@ -589,6 +583,7 @@ $conn->close();
     </div>
   </div>
 
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/philippine-phone-validation.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script>
   function openTermsModal() { var m = document.getElementById('termsModal'); if (m) m.style.display = 'flex'; }
@@ -622,10 +617,13 @@ $conn->close();
         if (grp) grp.classList.add('has-error');
         valid = false;
       }
-      if (f === 'phone' && inp && inp.value.trim() && !/^(\+63|0)[0-9]{10}$/.test(inp.value.replace(/\s/g,''))) {
-        if (err) err.textContent = 'Enter a valid PH number.';
+      if (f === 'phone' && inp && window.DCVSPhilippinePhone.error(inp)) {
+        inp.dataset.phoneTouched = 'true';
+        if (err) err.textContent = window.DCVSPhilippinePhone.error(inp);
         if (grp) grp.classList.add('has-error');
         valid = false;
+      } else if (f === 'phone' && inp) {
+        inp.dataset.phoneTouched = 'true';
       }
     });
     return valid;
@@ -676,16 +674,25 @@ $conn->close();
       if (!val) { if (pwStrength) pwStrength.style.display = 'none'; return; }
       if (pwStrength) pwStrength.style.display = 'flex';
       var score = 0;
-      if (val.length >= 8) score++;
+      if (Array.from(val).length >= 8) score++;
       if (/[A-Z]/.test(val)) score++;
       if (/[a-z]/.test(val)) score++;
       if (/[0-9]/.test(val)) score++;
       if (/[^A-Za-z0-9]/.test(val)) score++;
-      var levels = ['', 'weak', 'weak', 'fair', 'good', 'strong'];
-      var labels = ['', 'Weak', 'Weak', 'Fair', 'Good', 'Strong'];
-      var colors = ['', '#ef4444', '#ef4444', '#f97316', '#eab308', '#16a34a'];
-      if (strengthFill) { strengthFill.className = 'strength-fill ' + levels[score]; strengthFill.style.background = colors[score]; }
-      if (strengthLabel) { strengthLabel.textContent = labels[score]; strengthLabel.style.color = colors[score]; }
+      var strength = score === 5 ? 'strong' : (score >= 3 ? 'medium' : 'weak');
+      var label = strength === 'strong' ? 'Strong' : (strength === 'medium' ? 'Medium' : 'Weak');
+      var color = strength === 'strong' ? '#16a34a' : (strength === 'medium' ? '#f59e0b' : '#ef4444');
+      document.querySelectorAll('#passwordRequirements [data-password-rule]').forEach(function(item) {
+        var met = false;
+        if (item.dataset.passwordRule === 'length') met = Array.from(val).length >= 8;
+        if (item.dataset.passwordRule === 'uppercase') met = /[A-Z]/.test(val);
+        if (item.dataset.passwordRule === 'lowercase') met = /[a-z]/.test(val);
+        if (item.dataset.passwordRule === 'number') met = /[0-9]/.test(val);
+        if (item.dataset.passwordRule === 'special') met = /[^A-Za-z0-9]/.test(val);
+        item.classList.toggle('is-met', met);
+      });
+      if (strengthFill) { strengthFill.className = 'strength-fill ' + strength; strengthFill.style.background = color; }
+      if (strengthLabel) { strengthLabel.textContent = label; strengthLabel.style.color = color; }
     });
   }
 
@@ -717,7 +724,7 @@ $conn->close();
         valid = false;
       }
       var pw = document.getElementById('regPassword')?.value;
-      if (pw && pw.length < 8) {
+      if (pw && Array.from(pw).length < 8) {
         var pwErr = document.getElementById('regPasswordError');
         if (pwErr) pwErr.textContent = 'Password must be at least 8 characters.';
         document.getElementById('regPasswordGroup')?.classList.add('has-error');

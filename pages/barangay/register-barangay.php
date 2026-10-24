@@ -19,6 +19,7 @@ if (empty($_SESSION['logged_in']) || ($_SESSION['role'] ?? '') !== 'admin') {
 }
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/registration-validation.php';
 
 // Fetch barangay list for the dropdown
 $barangays = dcvsLoadApprovedBarangays($conn);
@@ -45,19 +46,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $errors = [];
 
     if (empty($fullName)) $errors[] = "Full name is required.";
-    if (empty($phone)) $errors[] = "Phone number is required.";
-    elseif (!preg_match('/^(\+63|0)[0-9]{10}$/', preg_replace('/\s/', '', $phone)))
-        $errors[] = "Enter a valid PH number (e.g. 09XX XXX XXXX).";
+    $phoneError = dcvsRegistrationPhoneError($phone);
+    if ($phoneError !== '') $errors[] = $phoneError;
     if (empty($email)) $errors[] = "Email address is required.";
     elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Please enter a valid email address.";
     if (empty($username)) $errors[] = "Username is required.";
     elseif (strlen($username) < 3) $errors[] = "Username must be at least 3 characters.";
-    if (empty($password)) $errors[] = "Password is required.";
-    elseif (strlen($password) < 8) $errors[] = "Password must be at least 8 characters.";
-    elseif (!preg_match('/[A-Z]/', $password)) $errors[] = "Password must contain at least one uppercase letter.";
-    elseif (!preg_match('/[a-z]/', $password)) $errors[] = "Password must contain at least one lowercase letter.";
-    elseif (!preg_match('/[0-9]/', $password)) $errors[] = "Password must contain at least one number.";
-    elseif (!preg_match('/[^A-Za-z0-9]/', $password)) $errors[] = "Password must contain at least one special character.";
+    $passwordError = dcvsRegistrationPasswordError($password);
+    if ($passwordError !== '') $errors[] = $passwordError;
     if ($password !== $confirmPassword) $errors[] = "Passwords do not match.";
     if (!isset($officialBarangayIds[$barangayId])) $errors[] = "Please select a valid official barangay.";
     if (!$agreeTerms) $errors[] = "You must agree to the Terms and Conditions.";
@@ -467,14 +463,17 @@ $conn->close();
     .strength-fill {
       height: 100%; border-radius: 2px; transition: width 0.4s ease, background 0.4s ease; width: 0%;
     }
-    .strength-fill.weak { width: 25%; background: var(--error); }
-    .strength-fill.fair { width: 50%; background: #f59e0b; }
-    .strength-fill.good { width: 75%; background: #eab308; }
+    .strength-fill.weak { width: 33%; background: var(--error); }
+    .strength-fill.medium { width: 66%; background: #f59e0b; }
     .strength-fill.strong { width: 100%; background: #10b981; }
     .strength-label {
       font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
       min-width: 40px; text-align: right;
     }
+    .password-requirements { display:grid;gap:0.25rem;margin:0.15rem 0 0;padding:0;list-style:none;color:var(--text-muted);font-size:0.75rem;line-height:1.4; }
+    .password-requirements li::before { content:'○';display:inline-block;width:1.15rem;color:var(--text-muted); }
+    .password-requirements li.is-met { color:var(--green-primary); }
+    .password-requirements li.is-met::before { content:'✓';color:var(--green-primary); }
 
     /* Terms */
     .terms-label {
@@ -681,7 +680,7 @@ $conn->close();
         <?php else: ?>
           <div class="auth-alert auth-alert-error" id="registerAlert" style="display:none;">
             <i class="fas fa-exclamation-circle"></i>
-            <span id="registerAlertMsg">Please fix the errors below.</span>
+            <span id="registerAlertMsg">Review the highlighted fields and try again.</span>
           </div>
         <?php endif; ?>
 
@@ -709,7 +708,7 @@ $conn->close();
               <label for="phone">Phone Number <span class="required">*</span></label>
               <div class="input-wrapper">
                 <i class="fas fa-phone input-icon"></i>
-                <input type="tel" id="phone" name="phone" placeholder="+63 9XX XXX XXXX" required />
+                <input type="tel" id="phone" name="phone" inputmode="numeric" pattern="09[0-9]{9}" placeholder="09XXXXXXXXX" required />
               </div>
               <span class="field-error" id="phoneError"></span>
             </div>
@@ -762,6 +761,13 @@ $conn->close();
                 <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
                 <span class="strength-label" id="strengthLabel">Weak</span>
               </div>
+              <ul class="password-requirements" id="passwordRequirements" aria-label="Password requirements">
+                <li data-password-rule="length">At least 8 characters</li>
+                <li data-password-rule="uppercase">At least one uppercase letter (A-Z)</li>
+                <li data-password-rule="lowercase">At least one lowercase letter (a-z)</li>
+                <li data-password-rule="number">At least one number (0-9)</li>
+                <li data-password-rule="special">At least one special character (such as !, @, #, or $)</li>
+              </ul>
             </div>
             <div class="form-group" id="confirmPasswordGroup">
               <label for="confirmPassword">Confirm Password <span class="required">*</span></label>
@@ -855,6 +861,7 @@ $conn->close();
     </div>
   </div>
 
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/philippine-phone-validation.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
   <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

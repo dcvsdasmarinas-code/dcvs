@@ -1087,11 +1087,11 @@
         '</div>' +
         '<div class="rpt-detail-body" data-tab="details">' +
 
-        '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
+        '<div style="margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">' +
         '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<div style="display:flex;flex:1 1 150px;flex-direction:column;gap:2px;min-width:0;">' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
-        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.reporter || '\u2014') + '</span>' +
+        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '\u2014') + '</span>' +
         '</div>' +
         '<span style="margin-left:auto;font-size:13px;font-weight:500;' + statusStyle + 'padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + esc(structuredStatus) + '</span>' +
         '</div>' +
@@ -1161,11 +1161,11 @@
 
       '<div class="rpt-detail-body" data-tab="details">' +
 
-      '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
+      '<div style="margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">' +
       '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+      '<div style="display:flex;flex:1 1 150px;flex-direction:column;gap:2px;min-width:0;">' +
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
-      '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + esc(r.reporter || '—') + '</span>' +
+      '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '—') + '</span>' +
       '</div>' +
       '<span style="margin-left:auto;font-size:13px;font-weight:500;' + statusStyle + 'padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + esc(r.statusLabel || r.status) + (r.status === 'resolved' ? ' (Resident)' : '') + '</span>' +
       '</div>' +
