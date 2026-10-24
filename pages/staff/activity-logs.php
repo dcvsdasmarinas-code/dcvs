@@ -257,7 +257,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
   <style>
     .activity-cms { background: #ffffff; }
-    .al-wrap { padding: 1.5rem 2rem 3rem; background: #ffffff; }
+    .al-wrap { padding: 0 0 3rem; background: #ffffff; }
 
     .table-card { display: flex; flex-direction: column; border: 1px solid #e4e4e7; border-radius: 8px; background: #ffffff; overflow: hidden; }
 
@@ -273,13 +273,26 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
     /* ── Table ── */
     .table-card .sd-data-table-wrap { overflow-x: auto; min-height: 31.5rem; flex: 1; }
-    .table-card .sd-data-table { width: 100%; border-collapse: collapse; }
-    .table-card .sd-data-table .sd-tr { border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
+    .table-card .sd-data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .table-card .sd-data-table .sd-tr { height: 44px; border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
     .table-card .sd-data-table .sd-tr:last-child { border-bottom: none; }
     .table-card .sd-data-table .sd-tr.sd-last-row { border-bottom: none; }
-    .table-card .sd-data-table tbody .sd-tr:hover { background: #f4f4f5; }
-    .table-card .sd-th { height: 40px; padding: 0 12px; text-align: left; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 12px; font-weight: 500; color: #71717a; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: transparent; }
-    .table-card .sd-td { padding: 12px; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; color: #18181b; line-height: 1.4; }
+    .table-card .sd-data-table tbody .sd-tr:hover { background: #fafafa; }
+    .table-card .sd-th { height: 40px; padding: 0 8px; text-align: left; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 500; color: #71717a; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
+    .table-card .sd-td { padding: 8px; vertical-align: middle; text-align: left; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 400; color: #18181b; line-height: 1.4; overflow-wrap: anywhere; }
+    .table-card .sd-th:nth-child(1) { width: 4%; }
+    .table-card .sd-th:nth-child(2) { width: 10%; }
+    .table-card .sd-th:nth-child(3) { width: 15%; }
+    .table-card .sd-th:nth-child(4) { width: 10%; }
+    .table-card .sd-th:nth-child(5) { width: 18%; }
+    .table-card .sd-th:nth-child(6) { width: 29%; }
+    .table-card .sd-th:nth-child(7) { width: 14%; }
+    .table-card .activity-log-number,
+    .table-card .activity-log-id,
+    .table-card .activity-log-details,
+    .table-card .activity-log-timestamp { color: #71717a; }
+    .table-card .activity-log-user strong { font-weight: 600; }
+    .table-card .activity-log-timestamp { white-space: nowrap; }
 
     /* ── Pagination (all-clients design) ── */
     .activity-cms .dt-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid #e4e4e7; }
@@ -304,7 +317,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
     .table-card .sd-pagination-link.sd-pagination-next { padding-right: 10px; }
 
     @media (max-width: 900px) {
-      .al-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: 1rem 0.75rem 2rem; }
+      .al-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: 0 0 2rem; }
       .al-filters { min-width: 0; }
       .appt-search-wrap { flex: 1 1 100%; width: 100%; min-width: 0; }
       .appt-search-input { box-sizing: border-box; width: 100%; }
@@ -318,7 +331,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
       .al-filters #actClearBtn { flex: 1 1 calc(50% - 4px); justify-content: center; min-width: 0; }
       .table-card { min-width: 0; }
       .table-card .sd-data-table-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 0; flex: 0 0 auto; -webkit-overflow-scrolling: touch; }
-      .table-card .activities-table { width: max-content; min-width: 980px; }
+      .table-card .activities-table { width: 100%; min-width: 1000px; }
     }
 
     @media (max-width: 480px) {
@@ -398,7 +411,7 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
         <table class="sd-data-table activities-table no-responsive">
           <thead>
             <tr class="sd-tr">
-              <th class="sd-th" style="width:45px;">No.</th>
+              <th class="sd-th">No.</th>
               <th class="sd-th">Log ID</th>
               <th class="sd-th">User</th>
               <th class="sd-th">Role</th>
@@ -413,13 +426,13 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
             <?php else: ?>
               <?php $actNum = 1; foreach ($allActivity as $act): ?>
                 <tr class="sd-tr" data-action="<?php echo htmlspecialchars(strtolower($act['action'])); ?>">
-                  <td class="sd-td" style="color:#71717a; font-size:0.85rem; font-weight:600;"><?php echo $actNum++; ?></td>
-                  <td class="sd-td" style="color:#71717a;">#LOG-<?php echo str_pad($act['log_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                  <td class="sd-td"><strong><?php echo htmlspecialchars($act['full_name']); ?></strong></td>
-                  <td class="sd-td" style="font-weight:500; color:#18181b;"><?php echo ucfirst($act['role'] ?? ''); ?></td>
-                  <td class="sd-td" style="color:#18181b;"><?php echo htmlspecialchars($act['action']); ?></td>
-                  <td class="sd-td" style="color:#71717a; font-size:0.9rem;"><?php echo htmlspecialchars(formatActivityLogDetails($act['details'], $activityEntityMaps)); ?></td>
-                  <td class="sd-td" style="color:#71717a; font-size:0.85rem;"><?php echo date('M d, Y h:i A', strtotime($act['created_at'])); ?></td>
+                  <td class="sd-td activity-log-number"><?php echo $actNum++; ?></td>
+                  <td class="sd-td activity-log-id">#LOG-<?php echo str_pad($act['log_id'], 4, '0', STR_PAD_LEFT); ?></td>
+                  <td class="sd-td activity-log-user"><strong><?php echo htmlspecialchars($act['full_name']); ?></strong></td>
+                  <td class="sd-td"><?php echo ucfirst($act['role'] ?? ''); ?></td>
+                  <td class="sd-td"><?php echo htmlspecialchars($act['action']); ?></td>
+                  <td class="sd-td activity-log-details"><?php echo htmlspecialchars(formatActivityLogDetails($act['details'], $activityEntityMaps)); ?></td>
+                  <td class="sd-td activity-log-timestamp"><?php echo date('M d, Y h:i A', strtotime($act['created_at'])); ?></td>
                 </tr>
               <?php endforeach; ?>
             <?php endif; ?>

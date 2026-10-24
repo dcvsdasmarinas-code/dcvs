@@ -307,6 +307,7 @@ if ($cpdCq) {
             'birthdate'=> (string)$r['birthdate'],
             'pets'     => (int)$r['total_pets'],
             'ts'       => strtotime($r['created_at']),
+            'dateKey'  => substr((string)$r['created_at'], 0, 10),
             'date'     => date('M d, Y', strtotime($r['created_at'])),
             'initials' => cpdInitials($r['full_name']),
             'avatar'   => dcvsStaffReportMediaUrl($r['avatar_url']),
@@ -347,7 +348,8 @@ if ($cpdPq) {
             'ownerRef'  => $r['owner_ref'] ?: '',
             'brgy'     => $r['barangay_name'] ?? '',
             'brgyId'   => (int)($r['barangay_id'] ?? 0),
-'ts'       => strtotime($r['created_at']),
+            'ts'        => strtotime($r['created_at']),
+            'dateKey'  => substr((string)$r['created_at'], 0, 10),
             'date'     => date('M d, Y', strtotime($r['created_at'])),
             'reported' => $r['created_at'] ? date('M d, Y h:i A', strtotime($r['created_at'])) : '',
             'initials'  => cpdInitials($r['pet_name']),
@@ -912,6 +914,33 @@ foreach ($activeResidentReportItems as $ri) {
 }
 
 // ── Handle Program Creation (POST) ──
+function dcvsNormalizeProgramBarangayIds($conn, $rawIds)
+{
+    if (!is_array($rawIds)) return null;
+    $ids = [];
+    foreach ($rawIds as $rawId) {
+        if (!is_scalar($rawId) || !preg_match('/^[1-9][0-9]*$/', (string)$rawId)) return null;
+        $ids[] = (int)$rawId;
+    }
+    $ids = array_values(array_unique($ids));
+    if (!$ids) return [];
+
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+    $stmt = $conn->prepare("SELECT barangay_id FROM barangays WHERE barangay_id IN ($placeholders)");
+    if (!$stmt) return null;
+    $types = str_repeat('i', count($ids));
+    $stmt->bind_param($types, ...$ids);
+    if (!$stmt->execute()) {
+        $stmt->close();
+        return null;
+    }
+    $result = $stmt->get_result();
+    $foundIds = [];
+    while ($row = $result->fetch_assoc()) $foundIds[] = (int)$row['barangay_id'];
+    $stmt->close();
+    return count($foundIds) === count($ids) ? $ids : null;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     if (!validateCsrf($_POST['csrf_token'] ?? null)) {
         $_SESSION['program_error'] = 'Your session could not be verified. Refresh the page and try again.';
@@ -932,7 +961,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     $operTime    = trim($_POST['operating_time'] ?? '');
     $locMode     = $_POST['location_mode'] ?? 'single';
     $venue       = trim($_POST['venue'] ?? '');
-    $barangayIds = is_array($_POST['barangay_ids'] ?? null) ? $_POST['barangay_ids'] : [];
+    $barangayIds = dcvsNormalizeProgramBarangayIds($conn, $_POST['barangay_ids'] ?? []);
     $targetReach = intval($_POST['target_reach'] ?? 0);
     $dogsTarget  = intval($_POST['dogs_target'] ?? 0);
     $catsTarget  = intval($_POST['cats_target'] ?? 0);
@@ -968,8 +997,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
         $_SESSION['program_error'] = "Invalid program type.";
     } elseif (!in_array($locMode, ['single', 'multiple'], true)) {
         $_SESSION['program_error'] = "Invalid program location mode.";
+    } elseif ($barangayIds === null) {
+        $_SESSION['program_error'] = "Select valid barangays for the program.";
     } elseif ($locMode === 'single' && empty($venue)) {
         $_SESSION['program_error'] = "Please enter a venue for the program.";
+    } elseif ($locMode === 'single' && count($barangayIds) !== 1) {
+        $_SESSION['program_error'] = "Please select one barangay for the program.";
     } elseif ($locMode === 'multiple' && empty($barangayIds)) {
         $_SESSION['program_error'] = "Please select at least one barangay for the program.";
     } elseif ($targetReach > 0 && ($dogsTarget + $catsTarget) > $targetReach) {
@@ -984,7 +1017,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
             $newProgId = $stmt->insert_id;
             $stmt->close();
 
-            if ($locMode === 'multiple' && !empty($barangayIds)) {
+            if (!empty($barangayIds)) {
                 $bStmt = $conn->prepare("INSERT INTO program_barangays (program_id, barangay_id) VALUES (?, ?)");
                 foreach ($barangayIds as $bid) {
                     $bid = intval($bid);
@@ -1059,7 +1092,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     $operTime    = trim($_POST['operating_time'] ?? '');
     $locMode     = $_POST['location_mode'] ?? 'single';
     $venue       = trim($_POST['venue'] ?? '');
-    $barangayIds = is_array($_POST['barangay_ids'] ?? null) ? $_POST['barangay_ids'] : [];
+    $barangayIds = dcvsNormalizeProgramBarangayIds($conn, $_POST['barangay_ids'] ?? []);
     $targetReach = intval($_POST['target_reach'] ?? 0);
     $dogsTarget  = intval($_POST['dogs_target'] ?? 0);
     $catsTarget  = intval($_POST['cats_target'] ?? 0);
@@ -1104,8 +1137,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
         $_SESSION['program_error'] = "Invalid program type.";
     } elseif (!in_array($locMode, ['single', 'multiple'], true)) {
         $_SESSION['program_error'] = "Invalid program location mode.";
+    } elseif ($barangayIds === null) {
+        $_SESSION['program_error'] = "Select valid barangays for the program.";
     } elseif ($locMode === 'single' && empty($venue)) {
         $_SESSION['program_error'] = "Please enter a venue for the program.";
+    } elseif ($locMode === 'single' && count($barangayIds) !== 1) {
+        $_SESSION['program_error'] = "Please select one barangay for the program.";
     } elseif ($locMode === 'multiple' && empty($barangayIds)) {
         $_SESSION['program_error'] = "Please select at least one barangay for the program.";
     } elseif ($targetReach > 0 && ($dogsTarget + $catsTarget) > $targetReach) {
@@ -1119,7 +1156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
 
             $conn->query("DELETE FROM program_barangays WHERE program_id = " . $progId);
 
-            if ($locMode === 'multiple' && !empty($barangayIds)) {
+            if (!empty($barangayIds)) {
                 $bStmt = $conn->prepare("INSERT INTO program_barangays (program_id, barangay_id) VALUES (?, ?)");
                 foreach ($barangayIds as $bid) {
                     $bid = intval($bid);
@@ -1374,6 +1411,7 @@ if (!empty($_GET['waitlist_booking'])) {
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-compose-dialog.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-compose-dialog.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <script>window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl); ?>; window.dcvsStaffUrl = function(path) { path = String(path || '').trim(); return /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(path) ? path : window.DCVS_APP_BASE_URL + '/' + path.replace(/^\.?\/*/, ''); };</script>
   
   <!-- Chart.js -->
@@ -2554,6 +2592,13 @@ if (!empty($_GET['waitlist_booking'])) {
                 <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search by ID, Resident Name, or Pet�?�">
               </div>
+              <div class="staff-date-filter" data-date-filter="appt">
+                <button class="staff-date-filter-button" type="button" aria-label="Filter appointment requests by date" title="Filter by date" aria-expanded="false">
+                  <i class="fas fa-filter" aria-hidden="true"></i>
+                </button>
+                <input type="hidden" id="apptDateFrom" value="">
+                <input type="hidden" id="apptDateTo" value="">
+              </div>
               <select id="apptStatusSelect" class="appt-status-select">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
@@ -2643,7 +2688,7 @@ if (!empty($_GET['waitlist_booking'])) {
                     if ($initials === '') $initials = '?';
                   ?>
                     <?php $canMarkOutcome = in_array($statusKey, ['scheduled', 'rescheduled', 'in_progress'], true) && strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']) <= time(); ?>
-                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-can-outcome="<?php echo $canMarkOutcome ? '1' : '0'; ?>" data-date="<?php echo (int)strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
+                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-can-outcome="<?php echo $canMarkOutcome ? '1' : '0'; ?>" data-date="<?php echo (int)strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']); ?>" data-date-key="<?php echo htmlspecialchars((string)$req['scheduled_date'], ENT_QUOTES, 'UTF-8'); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
                       <td class="sd-td">
                         <input type="checkbox" class="sd-table-cb appt-row-check" data-id="<?php echo (int)$req['appointment_id']; ?>" onclick="event.stopPropagation();APP.toggleSelect(<?php echo (int)$req['appointment_id']; ?>)" />
                       </td>
@@ -2783,6 +2828,13 @@ if (!empty($_GET['waitlist_booking'])) {
                     <option value="active">Active Clients</option>
                     <option value="vax">Vaccinated Pets</option>
                   </select>
+                  <div class="staff-date-filter" data-date-filter="cpd">
+                    <button class="staff-date-filter-button" type="button" aria-label="Filter clients and pets by registration date" title="Filter by registration date" aria-expanded="false">
+                      <i class="fas fa-filter" aria-hidden="true"></i>
+                    </button>
+                    <input type="hidden" id="cpdDateFrom" value="">
+                    <input type="hidden" id="cpdDateTo" value="">
+                  </div>
                   <select class="select-input tf-select" id="brgyFilter" onchange="setBrgy(this.value)">
                     <option value="">All Barangays</option>
                     <?php foreach ($cpdBarangays as $b): ?>
@@ -4319,6 +4371,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                   <option value="active">Active Residents</option>
                   <option value="inactive">Inactive Resident History</option>
                 </select>
+                <div class="staff-date-filter" data-date-filter="rpt">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter reports by date" title="Filter by date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="rptDateFrom" value="">
+                  <input type="hidden" id="rptDateTo" value="">
+                </div>
               </div>
               <div class="db-toolbar-actions">
                 <button type="button" class="sd-btn sd-btn-outline" onclick="rptExportCSV()" title="Export CSV">
@@ -4411,7 +4470,10 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
         <div class="sd-dialog-header">
-          <h2 class="sd-dialog-title">Report Details</h2>
+          <div class="rpt-drawer-header-row">
+            <h2 class="sd-dialog-title">Report Details</h2>
+            <span id="rptDrawerStatus" hidden></span>
+          </div>
           <p class="sd-dialog-description">Review report information and case details.</p>
         </div>
         <div class="sd-field-group">
@@ -4637,6 +4699,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
+                    <div class="staff-date-filter" data-date-filter="pen">
+                      <button class="staff-date-filter-button" type="button" aria-label="Filter pending reports by date" title="Filter by date" aria-expanded="false">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                      </button>
+                      <input type="hidden" id="penDateFrom" value="">
+                      <input type="hidden" id="penDateTo" value="">
+                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -5219,6 +5288,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                     <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                   <?php endforeach; ?>
                 </select>
+                <div class="staff-date-filter" data-date-filter="brg">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter accepted cases by date" title="Filter by date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="brgDateFrom" value="">
+                  <input type="hidden" id="brgDateTo" value="">
+                </div>
               </div>
             </div>
             <div class="db-table-area staff-report-table-area">
@@ -5319,6 +5395,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
+                    <div class="staff-date-filter" data-date-filter="act">
+                      <button class="staff-date-filter-button" type="button" aria-label="Filter active cases by date" title="Filter by date" aria-expanded="false">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                      </button>
+                      <input type="hidden" id="actDateFrom" value="">
+                      <input type="hidden" id="actDateTo" value="">
+                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -5436,6 +5519,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
+                    <div class="staff-date-filter" data-date-filter="res">
+                      <button class="staff-date-filter-button" type="button" aria-label="Filter resolved cases by date" title="Filter by date" aria-expanded="false">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46v6.54l4 2v-8.54L22 3z"/></svg>
+                      </button>
+                      <input type="hidden" id="resDateFrom" value="">
+                      <input type="hidden" id="resDateTo" value="">
+                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -5502,6 +5592,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   var RESOLVED_ITEMS = <?php echo json_encode($resolvedItems, $jsonFlags); ?>;
   </script>
   <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/case-database.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/case-database.js'); ?>"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'); ?>"></script>
   <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/response-workflow.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
   <script>
   var BARANGAY_RESPONSE_ITEMS = <?php echo json_encode($barangayResponseItems, $jsonFlags); ?>;
@@ -6456,6 +6547,39 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     flex:0 0 auto;
     padding-right:28px;
   }
+  #rptDetailsModal .sd-dialog-header{
+    padding-right:54px;
+  }
+  #rptDetailsModal .rpt-drawer-header-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    min-width:0;
+  }
+  #rptDetailsModal .rpt-drawer-header-row .sd-dialog-title{
+    min-width:0;
+    white-space:nowrap;
+  }
+  #rptDetailsModal #rptDrawerStatus{
+    flex:0 1 auto;
+    max-width:100%;
+    overflow:hidden;
+    padding:4px 10px;
+    border-radius:6px;
+    font-family:'Inter','Segoe UI',sans-serif;
+    font-size:12px;
+    font-weight:500;
+    line-height:1.4;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  #rptDetailsModal #rptDrawerStatus[hidden]{display:none;}
+  @media(max-width:600px){
+    #rptDetailsModal .sd-dialog-header{padding-right:48px;}
+    #rptDetailsModal .rpt-drawer-header-row{gap:6px;}
+    #rptDetailsModal #rptDrawerStatus{padding:3px 7px;font-size:11px;}
+  }
   .staff-detail-drawer .sd-field-group{
     display:flex;
     flex:1 1 auto;
@@ -6552,10 +6676,10 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   }
   body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{
     box-sizing:border-box;
-    flex:1 1 220px;
-    width:auto;
-    min-width:220px;
-    max-width:none;
+    flex:0 1 260px;
+    width:260px;
+    min-width:200px;
+    max-width:280px;
   }
   body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap input{ height:36px; }
   body.staff-theme #mainContent .staff-report-filters{
@@ -6586,7 +6710,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   }
   .staff-report-table-area{ box-sizing:border-box; width:100%; min-width:0; padding-top:0; }
   @media (max-width: 1100px){
-    body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{ flex-basis:100%; }
+    body.staff-theme #mainContent .staff-report-toolbar .search-grow-wrap{ flex-basis:260px; }
   }
   @media (max-width: 1024px){
     #mainContent > .staff-report-section.content-section{
@@ -6634,6 +6758,11 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     }
     body.staff-theme .staff-detail-drawer.active .sd-dialog-content{ transform:none; }
     .staff-detail-drawer .sd-dialog-footer{ padding-bottom:calc(12px + env(safe-area-inset-bottom)); }
+    #rptDetailsModal .rpt-detail-body .info-rows.info-rows-2col{
+      display:grid;
+      grid-template-columns:repeat(2,minmax(0,1fr));
+      gap:14px 16px;
+    }
   }
 
   #appointmentDetailsModal.appt-bulk-dialog.modal{ align-items:center; justify-content:center; padding:16px; }
@@ -7490,6 +7619,7 @@ function openRejectionModal(reportId) {
     var currentPage = 1;
     var filterStatus = 'all';
     var filterSearch = '';
+    var filterDate = '';
 
     function getStatus(row) {
         var st = row.getAttribute('data-status');
@@ -7504,9 +7634,17 @@ function openRejectionModal(reportId) {
             var text = r.textContent.toLowerCase();
             var matchS = filterStatus === 'all' || status === filterStatus;
             var matchQ = !filterSearch || text.includes(filterSearch);
-            return matchS && matchQ;
+            var rowDate = (r.getAttribute('data-date-key') || '').slice(0, 10);
+            var matchD = !filterDate || rowDate === filterDate;
+            return matchS && matchQ && matchD;
         });
     }
+
+    window.apptSetDate = function() {
+        filterDate = document.getElementById('apptDateFrom').value;
+        currentPage = 1;
+        renderTable();
+    };
 
     function setAppointmentResidentCell(cell, appt) {
         if (!cell) return;

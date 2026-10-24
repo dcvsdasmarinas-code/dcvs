@@ -68,6 +68,7 @@ $activePage = 'adoption-pool';
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     .adoption-review-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:16px 20px;margin:0 0 14px;box-shadow:0 1px 2px rgba(0,0,0,.05);font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
     .adoption-review-summary{display:flex;align-items:center;gap:14px;min-width:0}
@@ -2777,6 +2778,13 @@ $activePage = 'adoption-pool';
             </svg>
             <input type="text" id="table-search-input" class="table-search-input" placeholder="Search pet name, breed, ID...">
           </div>
+          <div class="staff-date-filter" data-date-filter="pool">
+            <button class="staff-date-filter-button" type="button" aria-label="Filter adoption pool by rescue date" title="Filter by rescue date" aria-expanded="false">
+              <i class="fas fa-filter" aria-hidden="true"></i>
+            </button>
+            <input type="hidden" id="poolDateFrom" value="">
+            <input type="hidden" id="poolDateTo" value="">
+          </div>
 
           <!-- Species Dropdown Filter -->
           <select id="filter-species" class="table-filter-select">
@@ -3961,6 +3969,7 @@ $activePage = 'adoption-pool';
       let currentFilterCard = null;
       let poolPage = 1;
       let poolPerPage = 10;
+      let poolDate = '';
 
       var sortCol = '';
       var sortDir = 'asc';
@@ -3991,6 +4000,12 @@ $activePage = 'adoption-pool';
         poolPerPage = parseInt(value, 10) || 10;
         poolPage = 1;
         renderTable();
+      };
+      window.poolSetDate = function() {
+        poolDate = document.getElementById('poolDateFrom').value;
+        poolPage = 1;
+        renderTable();
+        updateResetBtn();
       };
 
       function renderPoolPagination(total) {
@@ -4029,8 +4044,10 @@ $activePage = 'adoption-pool';
           const matchesSource = source === 'all' || p.rescueSource === source;
           const matchesAdStatus = adStatus === 'all' || p.adoptionStatus === adStatus;
           const matchesListStatus = listStatus === 'all' || p.listingStatus === listStatus;
+          const rescueDate = String(p.fullRescueDate || p.rescueDate || '').slice(0, 10);
+          const matchesDate = !poolDate || rescueDate === poolDate;
 
-          return matchesSearch && matchesSpecies && matchesSource && matchesAdStatus && matchesListStatus;
+          return matchesSearch && matchesSpecies && matchesSource && matchesAdStatus && matchesListStatus && matchesDate;
         });
 
         if (sortCol) {
@@ -4468,7 +4485,7 @@ $activePage = 'adoption-pool';
       // Filter events
       const btnResetFilters = document.getElementById('btn-reset-filters');
       function updateResetBtn() {
-        const hasFilter = searchInput.value || filterSpecies.value !== 'all' || filterSource.value !== 'all' || filterAdoptionStatus.value !== 'all' || filterListingStatus.value !== 'all';
+        const hasFilter = searchInput.value || filterSpecies.value !== 'all' || filterSource.value !== 'all' || filterAdoptionStatus.value !== 'all' || filterListingStatus.value !== 'all' || poolDate;
         btnResetFilters.style.display = hasFilter ? '' : 'none';
       }
       searchInput.addEventListener('input', () => { renderTable(); updateResetBtn(); });
@@ -4483,6 +4500,10 @@ $activePage = 'adoption-pool';
         filterSource.value = 'all';
         filterAdoptionStatus.value = 'all';
         filterListingStatus.value = 'all';
+        poolDate = '';
+        document.getElementById('poolDateFrom').value = '';
+        document.getElementById('poolDateTo').value = '';
+        document.querySelector('[data-date-filter="pool"] .staff-date-filter-button').classList.remove('has-date');
         document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active-filter'));
         renderTable();
         updateResetBtn();
@@ -6435,5 +6456,6 @@ $activePage = 'adoption-pool';
     }
   })();
   </script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

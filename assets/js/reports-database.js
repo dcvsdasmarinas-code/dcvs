@@ -98,7 +98,7 @@
     if (state.type) rows = rows.filter(function (r) { return r.type === state.type; });
     if (state.brgy) rows = rows.filter(function (r) { return r.brgy === state.brgy; });
     if (state.status) rows = rows.filter(function (r) { return r.status === state.status; });
-    if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom).getTime(); });
+    if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom + 'T00:00:00').getTime(); });
     if (state.dateTo) rows = rows.filter(function (r) { return r.ts <= new Date(state.dateTo + 'T23:59:59').getTime(); });
     rows.sort(function (a, b) {
       if (state.sort === 'oldest') return a.ts - b.ts;
@@ -154,6 +154,8 @@
   }
   function statusClassForReport(report) {
     var rawStatus = String(report.statusRaw || '').toLowerCase();
+    var statusLabel = String(report.statusLabel || '').toLowerCase();
+    if (/^pending(?:\s|$)/.test(statusLabel)) return 'pending';
     if (rawStatus === 'validated') return 'validated';
     if (rawStatus === 'confirmed' || rawStatus === 'scheduled') return 'active';
     return String(report.status || 'pending').toLowerCase();
@@ -948,24 +950,71 @@
 
   // Detail drawer with tabs
   var rptDetailTab = 'details';
-  function rptHasHighResponseRisk(r) {
+  function rptHighResponseRiskReasons(r) {
+    var reasons = [];
     var count = String(r.animalCount || '').trim();
     var countIsHigh = /^(?:6\+|[6-9]\d*|\d{2,})$/.test(count);
-    var riskText = [r.type, r.typeLabel, r.desc, r.animalBehavior, r.urgencyRaw, r.urgency].join(' ').toLowerCase();
-    return String(r.type || '').toLowerCase() === 'rabies'
-      || /^(?:high|critical)$/.test(String(r.urgencyRaw || r.urgency || '').toLowerCase())
-      || /bit(e|ten)|aggress|rabies|sever|malubha|critical/.test(riskText)
-      || countIsHigh;
+    var type = String(r.type || '').toLowerCase();
+    var urgency = String(r.urgencyRaw || r.urgency || '').toLowerCase();
+    var behavior = String(r.animalBehavior || '');
+    var description = String(r.desc || '');
+
+    if (type === 'rabies') reasons.push('Report type is identified as a rabies concern.');
+    if (/^(?:high|critical)$/.test(urgency)) reasons.push('The submitted priority is ' + String(r.urgency || r.urgencyRaw) + '.');
+    if (/bit(e|ten)|aggress|sever|malubha|critical/i.test(behavior)) {
+      reasons.push('Reported animal behavior: ' + behavior + '.');
+    }
+    if (/bit(e|ten)/i.test(description)) reasons.push('The description reports a bite or biting.');
+    if (/aggress/i.test(description)) reasons.push('The description reports aggressive behavior.');
+    if (/rabies/i.test(description)) reasons.push('The description mentions rabies.');
+    if (/sever|malubha|critical/i.test(description)) reasons.push('The description indicates a severe or critical condition.');
+    if (countIsHigh) reasons.push('The reported number of animals is ' + count + '.');
+    return reasons;
+  }
+
+  function rptHasHighResponseRisk(r) {
+    return rptHighResponseRiskReasons(r).length > 0;
+  }
+
+  function rptResponseRiskExplanation(r) {
+    var priority = String(r.urgency || r.urgencyRaw || 'not specified');
+    var type = String(r.type || '').toLowerCase();
+    var behavior = String(r.animalBehavior || '').trim();
+    var description = String(r.desc || '');
+    var count = String(r.animalCount || '').trim();
+    var details = [];
+
+    if (type === 'rabies') details.push('The report is categorized as a rabies concern.');
+    if (/bit(e|ten)/i.test(behavior)) details.push('The animal was reported to have bitten someone.');
+    else if (/aggress/i.test(behavior)) details.push('The animal was reported to be aggressive.');
+    else if (/sever|malubha|critical/i.test(behavior)) details.push('The animal was reported to be in a severe or critical condition.');
+    if (/bit(e|ten)/i.test(description) && !/bit(e|ten)/i.test(behavior)) details.push('The report description mentions a bite.');
+    if (/aggress/i.test(description) && !/aggress/i.test(behavior)) details.push('The report description mentions aggressive behavior.');
+    if (/rabies/i.test(description) && type !== 'rabies') details.push('The report description mentions rabies.');
+    if (/sever|malubha|critical/i.test(description) && !/sever|malubha|critical/i.test(behavior)) details.push('The report description indicates a severe or critical condition.');
+    if (/^(?:6\+|[6-9]\d*|\d{2,})$/.test(count)) details.push('Six or more animals were reported.');
+
+    var opening = 'The report was submitted with ' + priority + ' priority';
+    if (details.length) {
+      opening += ', but the details also help us assess the case. ';
+      if (details.length === 1) {
+        return opening + details[0].slice(0, -1) + ', so please keep this in mind when reviewing it.';
+      }
+      return opening + details.join(' ') + ' Please keep these details in mind when reviewing the case.';
+    }
+    return opening + ', so please keep this in mind when reviewing the case.';
   }
 
   function rptResponseRiskPanel(r, previewOnly) {
     if (r.responseState !== 'awaiting_dcvs_decision') return '';
-    var highRisk = rptHasHighResponseRisk(r);
+    var reasons = rptHighResponseRiskReasons(r);
+    var highRisk = reasons.length > 0;
     return '<section class="rpt-response-risk ' + (highRisk ? 'is-high-risk' : 'is-low-risk') + '" aria-label="DCVS response coordination check">' +
       '<div class="rpt-response-risk-title"><span aria-hidden="true">' + (highRisk ? '&#9888;' : '&#10003;') + '</span> Barangay response check</div>' +
       '<p class="rpt-response-risk-explanation">' + (highRisk
-        ? 'High-risk indicators detected. Coordinate a DCVS response according to protocol. Risk does not prevent Barangay from accepting responsibility during its review.'
+        ? esc(rptResponseRiskExplanation(r))
         : 'No high-risk indicators detected. This forwarded report still needs a DCVS handling decision.') + '</p>' +
+      (highRisk ? '<p class="rpt-response-risk-explanation">This is just a coordination note. The barangay can still accept the case while reviewing the details.</p>' : '') +
       '</section>';
   }
 
@@ -1007,9 +1056,10 @@
 
   function rptResponseDecisionFooter(r) {
     var reportId = Number(r.id);
-    var highRisk = rptHasHighResponseRisk(r);
+    var riskReasons = rptHighResponseRiskReasons(r);
+    var highRisk = riskReasons.length > 0;
     var hint = highRisk
-      ? 'DCVS decision needed: dispatch, return, or reject. High-risk indicators detected.'
+      ? 'DCVS decision needed: dispatch, return, or reject. Risk indicators: ' + riskReasons.join(' ')
       : 'DCVS decision needed: dispatch, return, or reject.';
     var moreMenu = '<div class="rpt-response-more-wrap"><button type="button" class="sd-btn sd-btn-outline rpt-response-more" aria-label="More actions" title="More actions" aria-expanded="false" onclick="rptToggleDecisionMore(this)">&#8230;</button>' +
       '<div class="rpt-response-more-menu" hidden><button type="button" onclick="responseWorkflowAction(' + reportId + ',\'return_for_validation\');rptCloseDecisionMore()">Return to Barangay</button>' +
@@ -1079,8 +1129,13 @@
 
     var typeTag = r.typeLabel || r.type || 'Report';
     var statusStyle = statusBadgeStyle(r);
+    var drawerStatus = document.getElementById('rptDrawerStatus');
+    if (drawerStatus) {
+      drawerStatus.textContent = (r.statusLabel || r.status || '-') + (!r.structured && r.status === 'resolved' ? ' (Resident)' : '');
+      drawerStatus.setAttribute('style', statusStyle + 'border-radius:6px;font-family:Inter,sans-serif;font-size:12px;font-weight:500;padding:4px 10px;');
+      drawerStatus.hidden = false;
+    }
     if (r.structured) {
-      var structuredStatus = r.statusLabel || r.status || '-';
       box.innerHTML = '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="rptDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="updates" onclick="rptDetailGo(\'updates\')">Updates</button>' +
@@ -1093,7 +1148,6 @@
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '\u2014') + '</span>' +
         '</div>' +
-        '<span style="margin-left:auto;font-size:13px;font-weight:500;' + statusStyle + 'padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + esc(structuredStatus) + '</span>' +
         '</div>' +
 
         '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;">' +
@@ -1167,7 +1221,6 @@
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '—') + '</span>' +
       '</div>' +
-      '<span style="margin-left:auto;font-size:13px;font-weight:500;' + statusStyle + 'padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + esc(r.statusLabel || r.status) + (r.status === 'resolved' ? ' (Resident)' : '') + '</span>' +
       '</div>' +
 
       '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;">' +
@@ -1305,6 +1358,8 @@
     var dt = document.getElementById('rptDateTo');
     if (df) df.value = '';
     if (dt) dt.value = '';
+    var dateButton = document.querySelector('[data-date-filter="rpt"] .staff-date-filter-button');
+    if (dateButton) dateButton.classList.remove('has-date');
     var st = document.getElementById('rptStatus');
     if (st) st.value = '';
     var residentStatus = document.getElementById('rptResidentStatus');

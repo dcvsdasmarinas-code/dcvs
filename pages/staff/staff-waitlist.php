@@ -110,6 +110,7 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <style>
     body.staff-theme { background:#fff; }
     .waitlist-page { padding-bottom:32px; font-family:'Inter','Segoe UI',sans-serif; color:#18181b; }
@@ -244,11 +245,12 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
     </section>
     <form class="waitlist-toolbar" method="get" action="staff-waitlist.php" data-draft-ignore>
       <input type="search" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search resident or pet" aria-label="Search resident or pet">
-      <span class="waitlist-date-filter">
-        <button type="button" class="waitlist-date-button <?php echo $dateFilter !== '' ? 'has-date' : ''; ?>" id="waitlistDateButton" aria-label="Filter by date" title="Filter by date">
+      <span class="staff-date-filter waitlist-date-filter" data-date-filter="waitlist">
+        <button type="button" class="waitlist-date-button staff-date-filter-button <?php echo $dateFilter !== '' ? 'has-date' : ''; ?>" id="waitlistDateButton" aria-label="Filter waitlist by preferred date" title="Filter by date" aria-expanded="false">
           <i class="fas fa-filter" aria-hidden="true"></i>
         </button>
-        <input type="date" name="date" id="waitlistDate" value="<?php echo htmlspecialchars($dateFilter); ?>" aria-label="Filter by preferred date">
+        <input type="hidden" name="date" id="waitlistDateFrom" value="<?php echo htmlspecialchars($dateFilter); ?>">
+        <input type="hidden" id="waitlistDateTo" value="<?php echo htmlspecialchars($dateFilter); ?>">
       </span>
       <?php if ($dateFilter !== ''): ?><button type="button" class="waitlist-date-clear" id="clearWaitlistDate" aria-label="Clear date filter"><i class="fas fa-times"></i></button><?php endif; ?>
       <select class="waitlist-service-filter" name="service" aria-label="Filter by service" onchange="this.form.submit()">
@@ -462,14 +464,9 @@ function waitlistSubmitWith(values) {
 }
 function waitlistGoToPage(page) { waitlistSubmitWith({page: String(page)}); }
 function waitlistSetPerPage(value) { waitlistSubmitWith({per_page: value, page: '1'}); }
-var waitlistDateInput = document.getElementById('waitlistDate');
-document.getElementById('waitlistDateButton').addEventListener('click', function() {
-  if (waitlistDateInput.showPicker) waitlistDateInput.showPicker();
-  else waitlistDateInput.click();
-});
-waitlistDateInput.addEventListener('change', function() {
-  waitlistDateInput.form.submit();
-});
+window.waitlistSetDate = function() {
+  waitlistSubmitWith({date: document.getElementById('waitlistDateFrom').value});
+};
 var clearWaitlistDate = document.getElementById('clearWaitlistDate');
 if (clearWaitlistDate) clearWaitlistDate.addEventListener('click', function() { waitlistSubmitWith({date: null}); });
 var waitlistSearchInput = document.querySelector('.waitlist-toolbar input[name="search"]');
@@ -484,5 +481,6 @@ if (waitlistSearchInput) waitlistSearchInput.addEventListener('input', function(
   }, 350);
 });
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

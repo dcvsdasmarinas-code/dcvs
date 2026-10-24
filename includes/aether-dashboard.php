@@ -733,6 +733,8 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 .ab-label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
 .ab-input, .ab-select { width:100%; height:40px; padding:0 0.8rem; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; background:var(--ab-bg); color:var(--ab-fg); border:1px solid var(--ab-border); outline:none; }
 .ab-input:focus, .ab-select:focus { border-color:var(--ab-lime); box-shadow:0 0 0 1px var(--ab-lime); }
+#abBrgyDropdown .ab-brgy-opt { display:flex; align-items:center; min-height:36px; line-height:20px; }
+#abBrgyDropdown .ab-brgy-name { display:block; flex:1 1 auto; min-width:0; line-height:20px; }
 .ab-modal-backdrop { position:fixed; inset:0; background:rgba(5,5,5,0.8); backdrop-filter:blur(4px); z-index:200; display:none; align-items:center; justify-content:center; padding:1rem; }
 .ab-modal-backdrop.open { display:flex; }
 .ab-modal { background:var(--ab-card); border:1px solid var(--ab-border); width:100%; max-width:460px; padding:1.5rem; max-height:90vh; overflow-y:auto; }
@@ -1962,23 +1964,32 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           </div>
           <div id="abBrgyChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:0;"></div>
           <div id="abBrgyList" hidden></div>
-          <div id="singleBrgyWrap">
-            <input class="ab-input" name="venue" id="abVenueInput" placeholder="e.g. Barangay Paliparan I Covered Court" style="height:36px;">
+          <div id="abSingleBrgySelectWrap">
+            <select class="ab-select" id="abSingleBrgySelect" required onchange="aethSelectSingleBrgy(this)" style="height:36px;padding:0 10px;appearance:auto;cursor:pointer;">
+              <option value="">Select a barangay...</option>
+              <?php foreach ($aeth_allBarangays as $br): ?>
+                <option value="<?php echo (int)$br['barangay_id']; ?>"><?php echo htmlspecialchars($br['barangay_name']); ?></option>
+              <?php endforeach; ?>
+            </select>
           </div>
-          <div id="multiBrgyWrap" style="display:none;">
+          <div id="abMultiBrgySelectWrap" style="display:none;">
             <div style="position:relative;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              <input class="ab-input" id="abBrgySearch" type="text" placeholder="Search and add barangays..." oninput="aethFilterBrgys(this.value)" onfocus="aethShowBrgyDropdown()" style="height:36px;padding-left:32px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;">
+              <input class="ab-input" id="abBrgySearch" type="search" autocomplete="off" placeholder="Search and add barangays..." aria-label="Search barangays" aria-controls="abBrgyDropdown" oninput="aethFilterBrgys(this.value)" onfocus="aethShowBrgyDropdown()" style="height:36px;padding-left:32px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;">
             </div>
           </div>
-          <div id="abBrgyDropdown" style="display:none;max-height:160px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:6px;margin-top:4px;background:#fff;">
+          <div id="abBrgyDropdown" data-mode="multiple" role="listbox" aria-label="Barangays" style="display:none;max-height:160px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:6px;margin-top:4px;background:#fff;">
             <?php foreach ($aeth_allBarangays as $br): ?>
-              <div class="ab-brgy-opt" data-id="<?php echo $br['barangay_id']; ?>" data-name="<?php echo htmlspecialchars($br['barangay_name']); ?>" onclick="aethToggleBrgy(this)" style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:14px;cursor:pointer;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;border-radius:4px;transition:background 0.1s;">
+              <div class="ab-brgy-opt" role="option" aria-selected="false" tabindex="0" data-id="<?php echo (int)$br['barangay_id']; ?>" data-name="<?php echo htmlspecialchars($br['barangay_name'], ENT_QUOTES, 'UTF-8'); ?>" onclick="aethToggleBrgy(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();aethToggleBrgy(this);}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:14px;cursor:pointer;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;border-radius:4px;transition:background 0.1s;">
                 <span class="ab-brgy-check" style="width:16px;height:16px;border:1px solid #d4d4d8;border-radius:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.1s;"></span>
-                <?php echo htmlspecialchars($br['barangay_name']); ?>
+                <span class="ab-brgy-name"><?php echo htmlspecialchars($br['barangay_name']); ?></span>
               </div>
             <?php endforeach; ?>
             <div id="abBrgyNoMatch" style="display:none;padding:8px 0;font-size:13px;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;text-align:center;">No barangays found</div>
+          </div>
+          <div id="singleBrgyWrap">
+            <label class="ab-label" for="abVenueInput" style="margin-top:10px;">Venue / Specific Location <span style="color:#e53e3e;">*</span></label>
+            <input class="ab-input" name="venue" id="abVenueInput" placeholder="e.g. Covered court or community center" style="height:36px;">
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
@@ -2851,18 +2862,41 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   /* Toggle barangay mode (single/multiple) in Create Program form */
   window.toggleBrgyMode = function(mode) {
     var singleWrap = document.getElementById('singleBrgyWrap');
-    var multiWrap = document.getElementById('multiBrgyWrap');
     var chips = document.getElementById('abBrgyChips');
+    var singleSelectWrap = document.getElementById('abSingleBrgySelectWrap');
+    var multiSelectWrap = document.getElementById('abMultiBrgySelectWrap');
+    var dropdown = document.getElementById('abBrgyDropdown');
     if (singleWrap) singleWrap.style.display = mode === 'single' ? '' : 'none';
-    if (multiWrap) multiWrap.style.display = mode === 'multiple' ? '' : 'none';
-    if (chips) {
-      if (mode === 'single') { abSelectedBrgys = {}; chips.innerHTML = ''; }
-      chips.style.display = mode === 'multiple' ? '' : 'none';
+    if (singleSelectWrap) singleSelectWrap.style.display = mode === 'single' ? '' : 'none';
+    if (multiSelectWrap) multiSelectWrap.style.display = mode === 'multiple' ? '' : 'none';
+    if (dropdown) dropdown.dataset.mode = mode;
+    if (mode === 'single' && Object.keys(abSelectedBrgys).length > 1) {
+      var firstId = Object.keys(abSelectedBrgys)[0];
+      var firstName = abSelectedBrgys[firstId];
+      abSelectedBrgys = {};
+      abSelectedBrgys[firstId] = firstName;
     }
-    if (mode === 'single') aethSyncBrgyInputs();
+    if (chips) chips.style.display = mode === 'multiple' && Object.keys(abSelectedBrgys).length ? 'flex' : 'none';
+    var singleSelect = document.getElementById('abSingleBrgySelect');
+    if (singleSelect) {
+      singleSelect.required = mode === 'single';
+      singleSelect.value = mode === 'single' ? (Object.keys(abSelectedBrgys)[0] || '') : '';
+    }
+    aethRenderBrgyChips();
+    aethUpdateBrgyChecks();
+    aethSyncBrgyInputs();
   };
 
   var abSelectedBrgys = {};
+
+  window.aethSelectSingleBrgy = function(select) {
+    var id = select.value;
+    var option = select.options[select.selectedIndex];
+    abSelectedBrgys = {};
+    if (id) abSelectedBrgys[id] = option.text;
+    aethSyncBrgyInputs();
+    aethSaveProgramDraft();
+  };
 
   window.aethShowBrgyDropdown = function() {
     var dd = document.getElementById('abBrgyDropdown');
@@ -2872,7 +2906,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   window.aethToggleBrgy = function(el) {
     var id = el.getAttribute('data-id');
     var name = el.getAttribute('data-name');
-    if (abSelectedBrgys[id]) {
+    var mode = document.querySelector('input[name="location_mode"]:checked');
+    if (mode && mode.value === 'single') {
+      abSelectedBrgys = {};
+      abSelectedBrgys[id] = name;
+    } else if (abSelectedBrgys[id]) {
       delete abSelectedBrgys[id];
     } else {
       abSelectedBrgys[id] = name;
@@ -2880,6 +2918,13 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     aethRenderBrgyChips();
     aethUpdateBrgyChecks();
     aethSyncBrgyInputs();
+    if (mode && mode.value === 'single') {
+      var search = document.getElementById('abBrgySearch');
+      var dropdown = document.getElementById('abBrgyDropdown');
+      if (search) search.value = '';
+      if (dropdown) dropdown.style.display = 'none';
+      aethFilterBrgys('');
+    }
     aethSaveProgramDraft();
   };
 
@@ -2896,6 +2941,8 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (!wrap) return;
     wrap.innerHTML = '';
     var keys = Object.keys(abSelectedBrgys);
+    var mode = document.querySelector('input[name="location_mode"]:checked');
+    wrap.style.display = mode && mode.value === 'multiple' && keys.length ? 'flex' : 'none';
     keys.forEach(function(id) {
       var chip = document.createElement('span');
       chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:4px;font-size:13px;font-family:"Inter","Segoe UI",sans-serif;color:#18181b;';
@@ -2915,11 +2962,13 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var id = el.getAttribute('data-id');
       var check = el.querySelector('.ab-brgy-check');
       if (abSelectedBrgys[id]) {
+        el.setAttribute('aria-selected', 'true');
         el.style.background = '#f0fdf4';
         check.style.background = '#18181b';
         check.style.borderColor = '#18181b';
         check.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
       } else {
+        el.setAttribute('aria-selected', 'false');
         el.style.background = '';
         check.style.background = '';
         check.style.borderColor = '#d4d4d8';
@@ -3064,19 +3113,19 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     toggleBrgyMode(mode);
     if (mode === 'single') {
       document.getElementById('abVenueInput').value = camp.venue || '';
-    } else {
-      abSelectedBrgys = {};
-      document.getElementById('abBrgyChips').innerHTML = '';
-      var ids = (camp.barangay_ids || '').split(',').filter(Boolean);
-      var names = (camp.barangay_names || '').split(',').map(function(n) { return n.trim(); });
-      ids.forEach(function(bid, i) {
-        abSelectedBrgys[bid] = names[i] || '';
-      });
-      aethRenderBrgyChips();
-      aethUpdateBrgyChecks();
-      aethSyncBrgyInputs();
-      document.getElementById('abBrgySearch').value = '';
     }
+    abSelectedBrgys = {};
+    document.getElementById('abBrgyChips').innerHTML = '';
+    var ids = (camp.barangay_ids || '').split(',').filter(Boolean);
+    var names = (camp.barangay_names || '').split(',').map(function(n) { return n.trim(); });
+    ids.forEach(function(bid, i) {
+      abSelectedBrgys[bid] = names[i] || '';
+    });
+    aethRenderBrgyChips();
+    aethUpdateBrgyChecks();
+    aethSyncBrgyInputs();
+    toggleBrgyMode(mode);
+    document.getElementById('abBrgySearch').value = '';
     dlg.querySelector('.sd-btn-primary[type="submit"]').textContent = 'Save Changes';
     aethOpenModal('abNewCampModal');
     aethCheckProgramConflicts();
@@ -3525,6 +3574,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     aethRenderBrgyChips();
     aethUpdateBrgyChecks();
     aethSyncBrgyInputs();
+    toggleBrgyMode(mode);
     if (draft.timeStart) document.getElementById('abTimeStart').value = draft.timeStart;
     if (draft.timeEnd) document.getElementById('abTimeEnd').value = draft.timeEnd;
     aethSyncOpTime();

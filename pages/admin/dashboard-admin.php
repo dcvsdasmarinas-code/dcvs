@@ -627,7 +627,7 @@ $activePage = 'overview';
   .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   #settings.content-section { background:#fff; }
   .admin-overview { --overview-ink:#18181b; --overview-muted:#71717a; --overview-border:#e4e4e7; color:var(--overview-ink); font-family:'Inter','Segoe UI',sans-serif; }
-  .overview-page-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+  .overview-page-heading { display:flex; align-items:center; justify-content:flex-end; gap:16px; margin-bottom:20px; }
   .overview-page-heading h1 { margin:0; font-size:24px; font-weight:600; letter-spacing:-.025em; color:var(--overview-ink); }
   .overview-page-heading p { margin:4px 0 0; color:var(--overview-muted); font-size:14px; line-height:1.5; }
   .overview-primary-link,.overview-view-all { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 14px; border:1px solid transparent; border-radius:6px; font-family:inherit; font-size:14px; font-weight:500; text-decoration:none; white-space:nowrap; transition:background-color .15s ease,border-color .15s ease,color .15s ease; }
@@ -682,7 +682,7 @@ $activePage = 'overview';
   .overview-empty { padding:24px!important; color:var(--overview-muted)!important; text-align:center; }
   .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
   @media(max-width:1050px) { .overview-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .overview-panels { grid-template-columns:1fr; } }
-  @media(max-width:600px) { .overview-page-heading { align-items:flex-start; flex-direction:column; } .overview-stats { grid-template-columns:1fr 1fr; gap:9px; } .overview-stat-card { min-height:102px; padding:12px 10px; } .overview-stat-card strong { font-size:24px; } .overview-stat-note { font-size:12px; } .overview-role-chart-layout { grid-template-columns:1fr; } .overview-doughnut-wrap { width:165px; height:165px; } }
+  @media(max-width:600px) { .overview-page-heading { align-items:flex-end; flex-direction:column; } .overview-stats { grid-template-columns:1fr 1fr; gap:9px; } .overview-stat-card { min-height:102px; padding:12px 10px; } .overview-stat-card strong { font-size:24px; } .overview-stat-note { font-size:12px; } .overview-role-chart-layout { grid-template-columns:1fr; } .overview-doughnut-wrap { width:165px; height:165px; } }
   @media(max-width:390px) { .overview-stats { grid-template-columns:1fr; } }
   </style>
   <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />

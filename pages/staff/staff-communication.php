@@ -310,6 +310,10 @@ if (isset($_GET['ajax_logs'])) {
     $perPage = max(1, intval($_GET['per_page'] ?? 20));
     $search = trim($_GET['search'] ?? '');
     $type   = trim($_GET['type'] ?? '');
+    $dateFrom = trim($_GET['date_from'] ?? '');
+    $dateTo = trim($_GET['date_to'] ?? '');
+    if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) $dateFrom = '';
+    if ($dateTo !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) $dateTo = '';
     $sortCol = $_GET['sort'] ?? 'date';
     $sortDir = strtolower($_GET['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
     $sortMap = [
@@ -334,6 +338,16 @@ if (isset($_GET['ajax_logs'])) {
         $where .= " AND (el.recipient_name LIKE ? OR el.recipient_email LIKE ? OR el.subject LIKE ?)";
         $params[] = $like; $params[] = $like; $params[] = $like;
         $types .= 'sss';
+    }
+    if ($dateFrom !== '') {
+        $where .= " AND el.created_at >= ?";
+        $params[] = $dateFrom . ' 00:00:00';
+        $types .= 's';
+    }
+    if ($dateTo !== '') {
+        $where .= " AND el.created_at < DATE_ADD(?, INTERVAL 1 DAY)";
+        $params[] = $dateTo . ' 00:00:00';
+        $types .= 's';
     }
 
     $countStmt = $conn->prepare("SELECT COUNT(*) AS c FROM email_logs el WHERE $where");
@@ -400,6 +414,7 @@ $composeBarangays = $barangays;
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-compose-dialog.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-compose-dialog.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     /* ── Semantic color tokens (light only) ── */
     :root {
@@ -680,6 +695,13 @@ $composeBarangays = $barangays;
           <option value="other">Other</option>
         </select>
       </div>
+      <div class="staff-date-filter" data-date-filter="message">
+        <button class="staff-date-filter-button" type="button" aria-label="Filter sent messages by date" title="Filter by date" aria-expanded="false">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+        </button>
+        <input type="hidden" id="messageDateFrom" value="">
+        <input type="hidden" id="messageDateTo" value="">
+      </div>
       <div class="comm-toolbar-actions">
         <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDialog()">Compose Message</button>
       </div>
@@ -850,7 +872,9 @@ function renderLogPage(page) {
     var q = (document.getElementById('logSearch')?.value || '').trim();
     var f = (document.getElementById('logTypeFilter')?.value || '');
 
-    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f) + "&sort=" + commSortCol + "&dir=" + commSortDir;
+    var dateFrom = (document.getElementById('messageDateFrom') || {}).value || '';
+    var dateTo = (document.getElementById('messageDateTo') || {}).value || '';
+    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f) + "&date_from=" + encodeURIComponent(dateFrom) + "&date_to=" + encodeURIComponent(dateTo) + "&sort=" + commSortCol + "&dir=" + commSortDir;
     fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -906,6 +930,9 @@ function renderLogPage(page) {
 
 window.logPageGo = function(page) {
     renderLogPage(page);
+};
+window.messageSetDate = function() {
+    renderLogPage(1);
 };
 
 window.commSort = function(col) {
@@ -970,5 +997,6 @@ function dismissToast(el) {
 }
 </script>
 <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-compose-dialog.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-compose-dialog.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

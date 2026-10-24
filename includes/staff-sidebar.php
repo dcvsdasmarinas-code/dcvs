@@ -439,8 +439,12 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
         'appointments' => 'Appointment Requests', 'calendar-schedule' => 'Calendar Schedule',
         'client-pets' => 'All Clients', 'registered-pets' => 'Registered Pets', 'communication' => 'Communication',
         'adoption-pool' => 'Adoption Pool', 'announcements' => 'Announcements', 'turnover' => 'Turnover',
+        'availability' => empty($_GET['panel']) ? 'Weekly Schedule' : (($_GET['panel'] ?? '') === 'overrides' ? 'Date Overrides' : (($_GET['panel'] ?? '') === 'bulk' ? 'Bulk Schedule' : 'Schedule Preview')),
+        'waitlist' => 'Waitlist', 'geo' => 'Geo-Mapping', 'activity-logs' => 'Activity Logs',
+        'pet-listings' => 'Pet Listings',
+        'archive' => $pageTitleShort ?? $pageTitle,
       ];
-      echo htmlspecialchars($breadcrumbMap[$activePage] ?? 'Dashboard');
+      echo htmlspecialchars($breadcrumbMap[$activePage] ?? ($pageTitleShort ?? $pageTitle ?? 'Staff Portal'));
     ?></span>
   </div>
   <div class="topbar-right">

@@ -2,7 +2,7 @@
 // Expects globals: CLIENTS, PETS, VIEW_OWNER (output by the page before this script)
 var currentProfile = null;
 
-var state = { mode:'clients', view:'table', group:'all', quick:'', brgy:'', type:'', petSearch:'', search:'', sort:'newest', page:1, perPage:10, selected:0, sortCol:'', sortDir:'' };
+var state = { mode:'clients', view:'table', group:'all', quick:'', brgy:'', type:'', date:'', petSearch:'', search:'', sort:'newest', page:1, perPage:10, selected:0, sortCol:'', sortDir:'' };
 
 function cpdEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function vaxInfo(v){ var s=String(v||'').toLowerCase(); var ok = s.indexOf('vaccinated')!==-1 && s.indexOf('not')===-1; return ok ? {l:'Vaccinated',c:'vax-yes'} : {l:'Not vaccinated',c:'vax-no'}; }
@@ -81,6 +81,7 @@ function currentList(){
       if (state.group==='dog' && x.type!=='dog') return false;
     }
     if (state.quick==='recent' && (now - x.ts) > 30*86400) return false;
+    if (state.date && x.dateKey !== state.date) return false;
     if (state.mode==='clients'){
       if (state.quick==='active' && x.status!=='Active') return false;
       if (state.quick==='inactive' && x.status!=='Inactive') return false;
@@ -284,6 +285,11 @@ function setSearch(v){ state.search = v; state.page = 1; render(); }
 function setPetSearch(v){ state.petSearch = v; state.page = 1; render(); }
 function setBrgy(v){ state.brgy = v; state.page = 1; render(); }
 function setType(v){ state.type = v; state.page = 1; render(); }
+function cpdSetDate(){
+  state.date = document.getElementById('cpdDateFrom').value;
+  state.page = 1;
+  render();
+}
 
 function setGroup(v){
   state.group = v; state.page = 1;
@@ -310,6 +316,7 @@ function clearFilters(){
   state.quick = '';
   state.brgy = '';
   state.type = '';
+  state.date = '';
   state.petSearch = '';
   state.search = '';
   state.page = 1;
@@ -321,6 +328,12 @@ function clearFilters(){
   if (ps) ps.value = '';
   if (bf) bf.value = '';
   if (tf) tf.value = '';
+  var dateFrom = document.getElementById('cpdDateFrom');
+  var dateTo = document.getElementById('cpdDateTo');
+  if (dateFrom) dateFrom.value = '';
+  if (dateTo) dateTo.value = '';
+  var dateButton = document.querySelector('[data-date-filter="cpd"] .staff-date-filter-button');
+  if (dateButton) dateButton.classList.remove('has-date');
   document.querySelectorAll('.cpd .filter-item').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-filter')==='group' && b.getAttribute('data-value')==='all');
   });

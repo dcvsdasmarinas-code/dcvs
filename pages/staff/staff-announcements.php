@@ -175,6 +175,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     /* ── Client & Pet Database (CPD) design system ── */
@@ -866,6 +867,13 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
                       <option value="<?php echo (int)$b['id']; ?>"><?php echo htmlspecialchars($b['name']); ?></option>
                     <?php endforeach; ?>
                   </select>
+                  <div class="staff-date-filter" data-date-filter="ann">
+                    <button class="staff-date-filter-button" type="button" aria-label="Filter announcements by date" title="Filter by date" aria-expanded="false">
+                      <i class="fas fa-filter" aria-hidden="true"></i>
+                    </button>
+                    <input type="hidden" id="annDateFrom" value="">
+                    <input type="hidden" id="annDateTo" value="">
+                  </div>
                 </div>
               </div>
               <button type="button" class="sd-btn sd-btn-default" onclick="openCreate('announcement')">
@@ -1571,6 +1579,7 @@ let state = {
   cat: 'all',
   q: '',
   brgy: '',
+  date: '',
   sort: 'newest',
   view: 'table',
   page: 1,
@@ -1699,6 +1708,12 @@ function applyFilters(){
         return ids.indexOf(bid) !== -1;
       }
       return false;
+    });
+  }
+  if(state.date){
+    items = items.filter(a => {
+      const date = String(a.is_event && a.event_date ? a.event_date : (a.status === 'scheduled' ? a.publish_at : a.created_at) || '').slice(0, 10);
+      return date === state.date;
     });
   }
   if(state.q){
@@ -1935,6 +1950,11 @@ function setCat(v){
 }
 function setSearch(v){ state.q = v; state.page = 1; render(); }
 function setBrgy(v){ state.brgy = v; state.page = 1; render(); }
+window.annSetDate = function(){
+  state.date = document.getElementById('annDateFrom').value;
+  state.page = 1;
+  render();
+};
 function setSort(v){ state.sort = v; state.page = 1; render(); }
 function setView(v){
   state.view = v; state.page = 1;
@@ -1942,7 +1962,7 @@ function setView(v){
   render();
 }
 function clearFilters(){
-  state.post = 'all'; state.status = 'all'; state.cat = 'all'; state.q = ''; state.brgy = ''; state.page = 1;
+  state.post = 'all'; state.status = 'all'; state.cat = 'all'; state.q = ''; state.brgy = ''; state.date = ''; state.page = 1;
   const ms = document.getElementById('mainSearch');
   const rs = document.getElementById('railSearch');
   if(ms) ms.value = '';
@@ -1951,6 +1971,12 @@ function clearFilters(){
   if(rt) rt.value = 'all';
   const ab = document.getElementById('annBrgy');
   if(ab) ab.value = '';
+  const dateFrom = document.getElementById('annDateFrom');
+  const dateTo = document.getElementById('annDateTo');
+  if(dateFrom) dateFrom.value = '';
+  if(dateTo) dateTo.value = '';
+  const dateButton = document.querySelector('[data-date-filter="ann"] .staff-date-filter-button');
+  if(dateButton) dateButton.classList.remove('has-date');
   document.querySelectorAll('[data-rail="post"],[data-rail="status"],[data-rail="trash"],[data-rail="cat"]').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('[data-rail="post"][data-val="all"],[data-rail="status"][data-val="all"],[data-rail="cat"][data-val="all"]').forEach(el => el.classList.add('active'));
   render();
@@ -3653,5 +3679,6 @@ render();
 })();
 </script>
 
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

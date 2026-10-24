@@ -175,7 +175,7 @@
       }
       if (state.type) rows = rows.filter(function (r) { return r.type === state.type; });
       if (state.brgy) rows = rows.filter(function (r) { return r.brgy === state.brgy; });
-      if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom).getTime(); });
+      if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom + 'T00:00:00').getTime(); });
       if (state.dateTo) rows = rows.filter(function (r) { return r.ts <= new Date(state.dateTo + 'T23:59:59').getTime(); });
       rows.sort(function (a, b) {
         if (state.sort === 'oldest') return a.ts - b.ts;

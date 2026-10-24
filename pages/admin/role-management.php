@@ -130,6 +130,90 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         exit;
     }
 
+    if ($action === 'get_user_activity') {
+        $userId = intval($_POST['user_id'] ?? 0);
+        if ($userId < 1) {
+            echo json_encode(['success' => false, 'message' => 'Invalid user.']);
+            exit;
+        }
+        $userStmt = $conn->prepare("SELECT full_name, created_at FROM users WHERE user_id = ? AND deleted_at IS NULL");
+        $userStmt->bind_param("i", $userId);
+        $userStmt->execute();
+        $profile = $userStmt->get_result()->fetch_assoc();
+        $userStmt->close();
+        if (!$profile) {
+            echo json_encode(['success' => false, 'message' => 'User not found.']);
+            exit;
+        }
+
+        $activities = [];
+        if (!empty($profile['created_at'])) {
+            $activities[] = [
+                'action' => 'Account registered',
+                'details' => '',
+                'created_at' => $profile['created_at'],
+                'sort_at' => strtotime($profile['created_at']),
+            ];
+        }
+
+        $petStmt = $conn->prepare("SELECT pet_name, pet_type, created_at FROM pets WHERE owner_id = ? ORDER BY created_at DESC");
+        $petStmt->bind_param("i", $userId);
+        $petStmt->execute();
+        $petResult = $petStmt->get_result();
+        while ($pet = $petResult->fetch_assoc()) {
+            $activities[] = [
+                'action' => 'Pet registered: ' . $pet['pet_name'],
+                'details' => ucfirst((string)$pet['pet_type']),
+                'created_at' => $pet['created_at'],
+                'sort_at' => strtotime($pet['created_at']),
+            ];
+        }
+        $petStmt->close();
+
+        $reportStmt = $conn->prepare("SELECT report_type, status, created_at FROM reports WHERE reporter_id = ? AND archived_at IS NULL ORDER BY created_at DESC");
+        $reportStmt->bind_param("i", $userId);
+        $reportStmt->execute();
+        $reportResult = $reportStmt->get_result();
+        while ($report = $reportResult->fetch_assoc()) {
+            $activities[] = [
+                'action' => ucfirst((string)$report['report_type']) . ' report submitted',
+                'details' => 'Status: ' . ucfirst((string)$report['status']),
+                'created_at' => $report['created_at'],
+                'sort_at' => strtotime($report['created_at']),
+            ];
+        }
+        $reportStmt->close();
+
+        $appointmentStmt = $conn->prepare("SELECT appointment_type, preferred_date, status, created_at FROM appointments WHERE user_id = ? AND archived_at IS NULL ORDER BY created_at DESC");
+        $appointmentStmt->bind_param("i", $userId);
+        $appointmentStmt->execute();
+        $appointmentResult = $appointmentStmt->get_result();
+        while ($appointment = $appointmentResult->fetch_assoc()) {
+            $details = 'Status: ' . ucfirst((string)$appointment['status']);
+            if (!empty($appointment['preferred_date'])) {
+                $details .= ' · Scheduled date: ' . date('M j, Y', strtotime($appointment['preferred_date']));
+            }
+            $activities[] = [
+                'action' => ucfirst((string)$appointment['appointment_type']) . ' appointment requested',
+                'details' => $details,
+                'created_at' => $appointment['created_at'],
+                'sort_at' => strtotime($appointment['created_at']),
+            ];
+        }
+        $appointmentStmt->close();
+
+        usort($activities, function ($left, $right) {
+            return $right['sort_at'] <=> $left['sort_at'];
+        });
+        $activities = array_slice($activities, 0, 100);
+        foreach ($activities as &$activity) {
+            unset($activity['sort_at']);
+        }
+        unset($activity);
+        echo json_encode(['success' => true, 'activities' => $activities]);
+        exit;
+    }
+
     if ($action === 'create_user' || $action === 'edit_user') {
         $isEdit = ($action === 'edit_user');
         $userId = intval($_POST['user_id'] ?? 0);
@@ -545,8 +629,8 @@ $search = trim($_GET['search'] ?? '');
 $roleFilter = $_GET['role'] ?? '';
 $statusFilter = $_GET['status'] ?? '';
 $barangayFilter = isset($_GET['barangay']) ? intval($_GET['barangay']) : 0;
-$perPage = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 15;
-if (!in_array($perPage, [15, 25, 50], true)) $perPage = 15;
+$perPage = isset($_GET['per_page']) ? (int)$_GET['per_page'] : 10;
+if (!in_array($perPage, [10, 15, 25, 50], true)) $perPage = 10;
 $currentPage = max(1, (int)($_GET['page'] ?? 1));
 $where = "WHERE u.deleted_at IS NULL";
 $params = [];
@@ -627,13 +711,13 @@ $activePage = 'users';
 <link rel="stylesheet" href="assets/css/responsive.css" />
 <style>
 body { background:#ffffff; }
-.main-content { padding:1.75rem 2rem; }
+.main-content { box-sizing:border-box; min-width:0; padding:1.75rem 2rem; }
 
 /* ── Toolbar ── */
 .appt-card-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:1rem;}
 .appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .appt-search-wrap{display:flex;align-items:center;gap:8px;}
-.appt-search-input{height:36px;border:1px solid #e4e4e7;border-radius:6px;padding:0 12px;font-size:14px;font-family:'Inter','Segoe UI',sans-serif;color:#18181b;background:#fff;outline:none;transition:border-color .15s;min-width:200px;}
+.appt-search-input{box-sizing:border-box;height:36px;border:1px solid #e4e4e7;border-radius:6px;padding:0 12px;font-size:14px;font-family:'Inter','Segoe UI',sans-serif;color:#18181b;background:#fff;outline:none;transition:border-color .15s;min-width:200px;}
 .appt-search-input:focus{border-color:#045e1f;box-shadow:0 0 0 3px rgba(4,94,31,.1);}
 .appt-search-input::placeholder{color:#a1a1aa;}
 .appt-status-select{height:36px;border:1px solid #e4e4e7;border-radius:6px;padding:0 12px;font-size:14px;font-family:'Inter','Segoe UI',sans-serif;color:#18181b;background:#fff;cursor:pointer;outline:none;transition:border-color .15s;}
@@ -646,7 +730,8 @@ body { background:#ffffff; }
 .pet-action-btn.primary-btn:hover{background:#27272a;}
 
 /* ── Table ── */
-.appt-db-table-area{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;}
+.appt-db-table-area{box-sizing:border-box;width:100%;min-width:0;background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden;}
+.user-table-scroll{width:100%;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;}
 .appt-table{width:100%;border-collapse:collapse;font-family:'Inter','Segoe UI',sans-serif;}
 .appt-table thead th{padding:10px 12px;font-size:14px;font-weight:500;color:#71717a;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;white-space:nowrap;}
 .appt-table tbody tr{border-bottom:1px solid #f4f4f5;cursor:default;transition:background .1s;}
@@ -696,7 +781,7 @@ body { background:#ffffff; }
 .tag-barangay{background:#faf5ff;color:#6b21a8;border-color:#e9d5ff;}
 
 /* ── Pagination ── */
-.appt-pagination{display:flex;align-items:center;justify-content:flex-end;padding:12px 16px;border-top:1px solid #e4e4e7;}
+.appt-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;padding:12px 8px;border-top:1px solid #e4e4e7;}
 .dt-pagination-right{display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
 .dt-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}
 .dt-rows select{height:32px;width:70px;border-radius:6px;border:1px solid #e4e4e7;background:#fff;padding:0 8px;font-size:14px;color:#18181b;cursor:pointer;font-family:inherit;}
@@ -723,8 +808,8 @@ body { background:#ffffff; }
 .alert-dialog-content .sd-dialog-description{font-size:14px;line-height:1.5;}
 .alert-dialog-content .sd-dialog-footer{padding-top:8px;}
 .alert-dialog-content .sd-btn{height:36px;padding:0 16px;border-radius:6px;font-size:14px;font-weight:500;}
-.alert-dialog-content .sd-btn-danger{background:#18181b;border-color:#18181b;color:#fff;}
-.alert-dialog-content .sd-btn-danger:hover{background:#27272a;border-color:#27272a;}
+.alert-dialog-content .sd-btn-danger{background:#dc2626;border-color:#dc2626;color:#fff;}
+.alert-dialog-content .sd-btn-danger:hover{background:#b91c1c;border-color:#b91c1c;}
 .sd-field-group{display:flex;flex-direction:column;gap:16px;}
 .sd-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .sd-field-full{grid-column:1 / -1;}
@@ -872,17 +957,115 @@ body { background:#ffffff; }
 #viewProfileModal .resident-profile-content[hidden],
 #viewProfileModal .resident-profile-footer[hidden],
 #viewProfileModal .legacy-profile-content[hidden]{display:none!important;}
+#viewProfileModal.modal{position:fixed;inset:0;z-index:1200;display:none;align-items:stretch;justify-content:flex-end;padding:0;background:rgba(0,0,0,.5);opacity:0;visibility:hidden;transition:opacity .25s ease,visibility .25s ease;}
+#viewProfileModal.modal.active{opacity:1;visibility:visible;}
+#viewProfileModal .sd-dialog{width:100%;height:100%;display:flex;justify-content:flex-end;}
+#viewProfileModal .sd-dialog-content,
+#viewProfileModal .sd-dialog-content.resident-profile-dialog{box-sizing:border-box;display:flex;flex-direction:column;flex:0 0 auto;width:min(480px,100vw);min-width:0;max-width:480px;height:100%;max-height:none;min-height:0;gap:0;padding:0;overflow:hidden;border:0;border-radius:0;box-shadow:-8px 0 40px rgba(15,23,32,.18);animation:none;transform:translateX(105%);transition:transform .32s cubic-bezier(.32,.72,.25,1);}
+#viewProfileModal.active .sd-dialog-content{transform:translateX(0);}
+#viewProfileModal .sd-dialog-header{position:relative;flex:0 0 auto;padding:18px 56px 18px 24px;border-bottom:1px solid #e4e4e7;}
+#viewProfileModal .sd-dialog-close{z-index:2;top:18px;right:20px;}
+#viewProfileModal .resident-profile-section-title,
+#viewProfileModal .sd-section-title{margin:6px 0 10px;padding:0;border:0;color:#18181b;font-size:14px;font-weight:600;line-height:1.45;letter-spacing:0;}
+#viewProfileModal .sd-dialog-header,
+#viewProfileModal .user-profile-tabs,
+#viewProfileModal .resident-profile-summary,
+#viewProfileModal .resident-profile-section,
+#viewProfileModal .sd-profile-head{border-bottom:0;}
+#viewProfileModal .user-profile-tab.active{border-bottom-color:transparent;}
+#viewProfileModal .sd-dialog-header{border:0!important;}
+#viewProfileModal .resident-profile-info-grid,
+#viewProfileModal .sd-info-grid{column-gap:18px;row-gap:16px;}
+#viewProfileModal .resident-profile-info-label,
+#viewProfileModal .sd-info-item .sd-info-label{margin-bottom:2px;color:#71717a;font-size:13px;font-weight:600;line-height:1.45;letter-spacing:0;}
+#viewProfileModal .resident-profile-info-value,
+#viewProfileModal .sd-info-item .sd-info-value{margin-top:0;color:#18181b;font-size:15px;font-weight:400;line-height:1.5;letter-spacing:0;word-break:break-word;}
+#viewProfileModal .user-profile-tabs{display:flex;flex:0 0 auto;justify-content:center;gap:28px;margin:0 24px 14px;padding:12px 0 0;border-bottom:1px solid #e4e4e7;}
+#viewProfileModal .user-profile-tab{appearance:none;margin:0 0 -1px;padding:0 0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;line-height:1.4;cursor:pointer;}
+#viewProfileModal .user-profile-tab:hover{color:#18181b;}
+#viewProfileModal .user-profile-tab.active{border-bottom-color:#0e8131;color:#0e8131;font-weight:600;}
+#viewProfileModal .user-profile-tab:focus-visible{outline:2px solid #18181b;outline-offset:3px;border-radius:2px;}
+#viewProfileModal .user-profile-tab-content{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;}
+#viewProfileModal .user-profile-details-panel{display:flex;flex:1;flex-direction:column;min-height:0;overflow:hidden;}
+#viewProfileModal .user-profile-details-panel[hidden],
+#viewProfileModal .user-profile-activity-panel[hidden]{display:none!important;}
+#viewProfileModal .resident-profile-content{flex:1;min-height:0;}
+#viewProfileModal .legacy-profile-content{flex:1;min-height:0;padding:0 24px 20px;overflow-x:hidden;overflow-y:auto;}
+#viewProfileModal .user-profile-activity-panel{flex:1;min-height:0;padding:0 24px 20px;overflow-x:hidden;overflow-y:auto;}
+#viewProfileModal .user-activity-heading{margin:0 0 14px;color:#18181b;font-size:14px;font-weight:600;}
+#viewProfileModal .user-activity-timeline{position:relative;margin:0 0 14px 3px;padding-left:14px;border-left:2px solid #e4e4e7;color:#09090b;}
+#viewProfileModal .user-activity-entry{position:relative;padding:0 0 17px;}
+#viewProfileModal .user-activity-entry:last-child{padding-bottom:0;}
+#viewProfileModal .user-activity-entry:before{position:absolute;top:3px;left:-20px;width:10px;height:10px;border-radius:50%;background:#22c55e;content:"";box-shadow:0 0 0 2px #fff;}
+#viewProfileModal .user-activity-entry-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px;}
+#viewProfileModal .user-activity-entry-title{min-width:0;color:#09090b;font-size:14px;font-weight:600;line-height:1.35;}
+#viewProfileModal .user-activity-entry-date{flex:0 0 auto;color:#71717a;font-size:12px;line-height:1.4;text-align:right;}
+#viewProfileModal .user-activity-entry-actor{display:inline-block;margin:0 0 6px;padding:1px 7px;border:1px solid #e4e4e7;border-radius:4px;background:#fafafa;color:#71717a;font-size:12px;line-height:1.35;}
+#viewProfileModal .user-activity-entry-copy{margin:0 0 8px;color:#27272a;font-size:14px;font-weight:400;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;}
+#viewProfileModal .user-activity-empty{margin:0 0 14px;color:#71717a;font-size:14px;}
+#viewProfileModal .resident-profile-footer{flex:0 0 auto;}
 .appt-table tbody tr{cursor:pointer;}
 
 @media(max-width:768px){
+  #roleModal.modal{box-sizing:border-box;align-items:center!important;justify-content:center;padding:16px!important;overflow-y:auto;}
+  #roleModal .sd-dialog{box-sizing:border-box;width:100%;max-width:480px;min-height:0;align-items:center;}
+  #roleModal .sd-dialog-content{box-sizing:border-box;width:100%;max-width:480px;max-height:calc(100dvh - 32px);padding:20px;overflow-y:auto;border-radius:10px;transform:none;animation:none;}
+  #confirmModal.modal{box-sizing:border-box;align-items:center!important;justify-content:center;padding:16px!important;overflow-y:auto;}
+  #confirmModal .sd-dialog{box-sizing:border-box;width:100%;max-width:512px;min-height:0;align-items:center;}
+  #confirmModal .alert-dialog-content{box-sizing:border-box;width:100%;max-width:512px;max-height:calc(100dvh - 32px);padding:20px;overflow-y:auto;border-radius:10px;}
+  #userModal.modal{box-sizing:border-box;align-items:center!important;justify-content:center;padding:16px!important;overflow-y:auto;}
+  #userModal .sd-dialog{box-sizing:border-box;width:100%;max-width:480px;height:auto;min-height:0;align-items:center;}
+  #userModal .sd-dialog-content{box-sizing:border-box;width:100%;max-width:480px;max-height:calc(100dvh - 32px);min-height:0;padding:20px;overflow-x:hidden;overflow-y:auto;border-radius:10px;transform:none;animation:none;}
+  #userModal h2.sd-dialog-title{font-size:17px!important;}
+  #userModal .sd-dialog-description{font-size:13px;line-height:1.45;}
+  #userModal .sd-label{font-size:12px;}
+  #userModal .sd-input,
+  #userModal .sd-select{font-size:13px;}
+  #userModal .sd-dialog-footer .sd-btn{font-size:13px;}
+  #userModal .sd-dialog-header{padding-right:36px;}
+  #userModal .sd-form-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;}
+  #userModal .sd-dialog-footer{flex-wrap:wrap;margin-top:16px!important;}
+  #userModal .sd-dialog-footer .sd-btn{flex:1 1 auto;}
   .appt-card-header{flex-direction:column;align-items:stretch;}
   .appt-search-input{min-width:none;width:100%;}
   .appt-status-select{width:100%;}
   .appt-pagination{flex-direction:column;align-items:stretch;text-align:center;}
-  #viewProfileModal .resident-profile-dialog{width:calc(100vw - 24px);max-height:92vh;}
+  #viewProfileModal.modal{width:100vw;height:100vh;height:100dvh;overflow:hidden;}
+  #viewProfileModal .sd-dialog{box-sizing:border-box;width:100vw;height:100vh;height:100dvh;max-width:none;min-width:100vw;}
+  #viewProfileModal .sd-dialog-content,
+  #viewProfileModal .sd-dialog-content.resident-profile-dialog{box-sizing:border-box;flex:0 0 100vw;width:100vw;min-width:100vw;max-width:100vw;height:100vh;height:100dvh;max-height:100dvh;padding:16px 14px calc(14px + env(safe-area-inset-bottom));transform:none;transition:none;}
+  #viewProfileModal.active .sd-dialog-content,
+  #viewProfileModal.active .sd-dialog-content.resident-profile-dialog{transform:none;}
+  #viewProfileModal .sd-dialog-header{padding:8px 36px 12px 0;}
+  #viewProfileModal .resident-profile-body{padding:0;}
+  #viewProfileModal .resident-profile-summary{padding:16px 0;}
+  #viewProfileModal .resident-profile-footer{padding:12px 0;}
   #viewProfileModal .resident-profile-pets{grid-template-columns:1fr;}
-  #viewProfileModal .resident-profile-info-grid{column-gap:16px;}
-  #viewProfileModal .resident-profile-footer{padding:12px 16px;}
+  #viewProfileModal .resident-profile-info-grid{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:12px;}
+  #viewProfileModal .user-profile-tabs{margin-right:0;margin-left:0;}
+  #viewProfileModal .user-profile-activity-panel,
+  #viewProfileModal .legacy-profile-content{padding-right:0;padding-left:0;}
+  .main-content{width:100%;max-width:100%;min-width:0;padding:0.75rem!important;overflow-x:hidden;}
+  .appt-card-header{box-sizing:border-box;width:100%;min-width:0;align-items:stretch;gap:10px;margin-bottom:12px;}
+  .appt-header-right{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%;min-width:0;gap:8px;}
+  .appt-search-wrap{grid-column:1/-1;width:100%;min-width:0;}
+  .appt-search-input{width:100%;min-width:0;}
+  .appt-status-select{box-sizing:border-box;width:100%;min-width:0;max-width:100%;}
+  #clearFiltersBtn{grid-column:1/-1;width:100%;justify-content:center;}
+  .appt-card-header > .pet-action-btn{width:100%;min-height:36px;}
+  .bulk-bar{width:100%;min-width:0;align-items:stretch;}
+  .bulk-bar .bulk-actions{box-sizing:border-box;width:100%;flex-wrap:wrap;justify-content:center;}
+  .bulk-bar .bulk-count{width:100%;text-align:center;}
+  .user-table-scroll .appt-table{width:100%;min-width:1050px;}
+  .appt-pagination{box-sizing:border-box;width:100%;justify-content:center;padding:12px 8px;}
+  .appt-pagination .dt-pagination-right{justify-content:center;gap:12px;}
+  .appt-pagination .dt-page-label{width:auto;}
+}
+@media(max-width:360px){
+  .appt-header-right{grid-template-columns:minmax(0,1fr);}
+  .appt-search-wrap,#clearFiltersBtn{grid-column:1;}
+  .appt-pagination .dt-pagination-right{gap:8px;}
+  .appt-pagination .dt-rows{flex-basis:100%;justify-content:center;}
 }
 </style>
 <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
@@ -936,6 +1119,7 @@ body { background:#ffffff; }
   </div>
 
   <div class="appt-db-table-area" id="tableWrap">
+    <div class="user-table-scroll">
       <table class="appt-table">
         <thead>
           <tr>
@@ -991,11 +1175,6 @@ body { background:#ffffff; }
                       <button class="action-menu-item" onclick="closeDropdowns();openEditModal(<?php echo $u['user_id']; ?>)">
                         <i class="fas fa-edit"></i> Edit
                       </button>
-                      <?php if ($u['role'] !== 'resident'): ?>
-                      <button class="action-menu-item" onclick="closeDropdowns();openRoleModal(<?php echo (int)$u['user_id']; ?>, '<?php echo htmlspecialchars($u['role'], ENT_QUOTES); ?>')">
-                        <i class="fas fa-exchange-alt"></i> Change Role
-                      </button>
-                      <?php endif; ?>
                       <div class="menu-divider"></div>
                       <?php if ($u['archived_at']): ?>
                         <button class="action-menu-item success" onclick="closeDropdowns();confirmAction('restore_user', <?php echo $u['user_id']; ?>, 'Unarchive user <strong><?php echo htmlspecialchars($u['full_name']); ?></strong>? Their account access status will not change.')">
@@ -1022,11 +1201,12 @@ body { background:#ffffff; }
           <?php endif; ?>
         </tbody>
       </table>
+    </div>
   </div>
   <div id="rolePagination" class="appt-pagination">
     <div class="dt-pagination-right">
-      <div class="dt-rows"><span>Rows per page</span><select onchange="window.rolePageSetPerPage(this.value)"><option value="15" <?php echo $perPage === 15 ? 'selected' : ''; ?>>15</option><option value="25" <?php echo $perPage === 25 ? 'selected' : ''; ?>>25</option><option value="50" <?php echo $perPage === 50 ? 'selected' : ''; ?>>50</option></select></div>
-      <div class="dt-page-label">Showing <?php echo $totalUsers === 0 ? 0 : $offset + 1; ?>-<?php echo min($offset + $perPage, $totalUsers); ?> of <?php echo $totalUsers; ?> users | Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></div>
+      <div class="dt-rows"><span>Rows per page</span><select onchange="window.rolePageSetPerPage(this.value)"><option value="10" <?php echo $perPage === 10 ? 'selected' : ''; ?>>10</option><option value="15" <?php echo $perPage === 15 ? 'selected' : ''; ?>>15</option><option value="25" <?php echo $perPage === 25 ? 'selected' : ''; ?>>25</option><option value="50" <?php echo $perPage === 50 ? 'selected' : ''; ?>>50</option></select></div>
+      <div class="dt-page-label">Page <?php echo $currentPage; ?> of <?php echo $totalPages; ?></div>
       <div class="dt-page-btns">
         <?php
           $pageParams = $_GET;
@@ -1036,10 +1216,10 @@ body { background:#ffffff; }
               return 'role-management.php?' . http_build_query($pageParams);
           };
         ?>
-        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(1), ENT_QUOTES, 'UTF-8'); ?>" aria-label="First page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-double-left" aria-hidden="true"></i></a>
-        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(max(1, $currentPage - 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Previous page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-left" aria-hidden="true"></i></a>
-        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(min($totalPages, $currentPage + 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Next page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-right" aria-hidden="true"></i></a>
-        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl($totalPages), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Last page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-angle-double-right" aria-hidden="true"></i></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(1), ENT_QUOTES, 'UTF-8'); ?>" aria-label="First page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(max(1, $currentPage - 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Previous page" <?php echo $currentPage <= 1 ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl(min($totalPages, $currentPage + 1)), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Next page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a class="dt-page-btn" href="<?php echo htmlspecialchars($paginationUrl($totalPages), ENT_QUOTES, 'UTF-8'); ?>" aria-label="Last page" <?php echo $currentPage >= $totalPages ? 'aria-disabled="true" tabindex="-1"' : ''; ?>><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg></a>
       </div>
     </div>
   </div>
@@ -1231,6 +1411,12 @@ body { background:#ffffff; }
         <h2 class="sd-dialog-title">User Profile</h2>
         <p class="sd-dialog-description">View user account details and information.</p>
       </div>
+      <div class="user-profile-tabs" role="tablist" aria-label="User profile sections">
+        <button type="button" class="user-profile-tab active" id="userProfileDetailsTab" role="tab" aria-selected="true" aria-controls="userProfileDetailsPanel" onclick="switchUserProfileTab('details')">Details</button>
+        <button type="button" class="user-profile-tab" id="userProfileActivityTab" role="tab" aria-selected="false" aria-controls="userProfileActivityPanel" onclick="switchUserProfileTab('activity')">Activity</button>
+      </div>
+      <div class="user-profile-tab-content">
+      <div class="user-profile-details-panel" id="userProfileDetailsPanel" role="tabpanel" aria-labelledby="userProfileDetailsTab">
       <div class="resident-profile-content" id="residentProfileContent" hidden>
         <div class="resident-profile-body">
           <div>
@@ -1321,26 +1507,55 @@ body { background:#ffffff; }
               <div class="sd-info-item"><div class="sd-info-label">Registered</div><div class="sd-info-value" id="vpRegistered">—</div></div>
             </div>
           </div>
+          </div>
+          </div>
+          </div>
+          <div class="user-profile-activity-panel" id="userProfileActivityPanel" role="tabpanel" aria-labelledby="userProfileActivityTab" hidden>
+            <div id="userProfileActivityContent" aria-live="polite"><p class="user-activity-empty">Select Activity to view this user's reports, appointments, and registered pets.</p></div>
+          </div>
+          </div>
         </div>
       </div>
-    </div>
   </div>
 </div>
 
 <script>
 function toggleDropdown(btn) {
-  var menu = btn.parentElement.querySelector('.action-menu');
-  var isOpen = menu.classList.contains('open');
+  var openMenu = Array.from(document.querySelectorAll('.action-menu.open')).find(function(menu) {
+    return menu._actionTrigger === btn;
+  });
   closeDropdowns();
-  if (!isOpen) {
-    var rect = btn.getBoundingClientRect();
-    menu.style.top = (rect.bottom + 4) + 'px';
-    menu.style.left = Math.max(8, rect.right - 210) + 'px';
-    menu.classList.add('open');
+  if (openMenu) return;
+
+  var menu = btn.parentElement.querySelector('.action-menu');
+  if (!menu) return;
+  menu._actionDropdown = btn.parentElement;
+  menu._actionTrigger = btn;
+  menu._actionNextSibling = menu.nextSibling;
+  document.body.appendChild(menu);
+  menu.classList.add('open');
+
+  var rect = btn.getBoundingClientRect();
+  var menuHeight = menu.getBoundingClientRect().height;
+  var top = rect.bottom + 4;
+  if (top + menuHeight > window.innerHeight && rect.top - menuHeight - 4 >= 0) {
+    top = rect.top - menuHeight - 4;
   }
+  menu.style.top = top + 'px';
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - 218, rect.right - 210)) + 'px';
 }
 function closeDropdowns() {
-  document.querySelectorAll('.action-menu.open').forEach(function(m) { m.classList.remove('open'); });
+  document.querySelectorAll('.action-menu.open').forEach(function(menu) {
+    menu.classList.remove('open');
+    menu.style.top = '';
+    menu.style.left = '';
+    if (menu._actionDropdown) {
+      menu._actionDropdown.insertBefore(menu, menu._actionNextSibling);
+      delete menu._actionDropdown;
+      delete menu._actionTrigger;
+      delete menu._actionNextSibling;
+    }
+  });
 }
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.action-dropdown')) closeDropdowns();
@@ -1793,6 +2008,92 @@ function submitConfirmedAction() {
 }
 
 var residentProfileUser = null;
+var currentProfileUser = null;
+var userActivityLoadedFor = null;
+var userActivityLoadingFor = null;
+
+function switchUserProfileTab(tab) {
+  var isActivity = tab === 'activity';
+  document.getElementById('userProfileDetailsTab').classList.toggle('active', !isActivity);
+  document.getElementById('userProfileDetailsTab').setAttribute('aria-selected', isActivity ? 'false' : 'true');
+  document.getElementById('userProfileActivityTab').classList.toggle('active', isActivity);
+  document.getElementById('userProfileActivityTab').setAttribute('aria-selected', isActivity ? 'true' : 'false');
+  document.getElementById('userProfileDetailsPanel').hidden = isActivity;
+  document.getElementById('userProfileActivityPanel').hidden = !isActivity;
+  if (isActivity) loadUserProfileActivity();
+}
+
+function formatUserActivityDate(value) {
+  if (!value) return '';
+  var date = new Date(String(value).replace(' ', 'T'));
+  if (isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('en-US', {month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit'});
+}
+
+function renderUserProfileActivity(activities) {
+  var content = document.getElementById('userProfileActivityContent');
+  content.textContent = '';
+  if (!activities.length) {
+    var empty = document.createElement('p');
+    empty.className = 'user-activity-empty';
+    empty.textContent = 'No reports, appointments, or pet registrations have been recorded for this user.';
+    content.appendChild(empty);
+    return;
+  }
+  var timeline = document.createElement('div');
+  timeline.className = 'user-activity-timeline';
+  activities.forEach(function(activity) {
+    var entry = document.createElement('article');
+    entry.className = 'user-activity-entry';
+    var head = document.createElement('div');
+    head.className = 'user-activity-entry-head';
+    var title = document.createElement('span');
+    title.className = 'user-activity-entry-title';
+    title.textContent = activity.action || 'Resident history';
+    var time = document.createElement('time');
+    time.className = 'user-activity-entry-date';
+    time.textContent = formatUserActivityDate(activity.created_at);
+    head.appendChild(title);
+    head.appendChild(time);
+    var actor = document.createElement('span');
+    actor.className = 'user-activity-entry-actor';
+    actor.textContent = 'Resident history';
+    entry.appendChild(head);
+    entry.appendChild(actor);
+    if (activity.details) {
+      var details = document.createElement('p');
+      details.className = 'user-activity-entry-copy';
+      details.textContent = activity.details;
+      entry.appendChild(details);
+    }
+    timeline.appendChild(entry);
+  });
+  content.appendChild(timeline);
+}
+
+function loadUserProfileActivity() {
+  if (!currentProfileUser) return;
+  var userId = Number(currentProfileUser.user_id);
+  if (userActivityLoadedFor === userId || userActivityLoadingFor === userId) return;
+  var content = document.getElementById('userProfileActivityContent');
+  content.textContent = 'Loading resident history…';
+  userActivityLoadingFor = userId;
+  apiPost({action:'get_user_activity', user_id:userId}, function(resp) {
+    if (userActivityLoadingFor === userId) userActivityLoadingFor = null;
+    if (!currentProfileUser || Number(currentProfileUser.user_id) !== userId) return;
+    if (resp.success && Array.isArray(resp.activities)) {
+      userActivityLoadedFor = userId;
+      renderUserProfileActivity(resp.activities);
+      return;
+    }
+    content.textContent = '';
+    var error = document.createElement('p');
+    error.className = 'user-activity-empty';
+    error.textContent = resp.message || 'Could not load resident history. Please try again.';
+    content.appendChild(error);
+    showToast('Could not load resident history', {type:'error', description:error.textContent});
+  });
+}
 
 function escapeProfileHtml(value) {
   var el = document.createElement('span');
@@ -1884,6 +2185,11 @@ function editResidentFromProfile() {
 }
 
 function viewUserProfile(u) {
+  currentProfileUser = u;
+  userActivityLoadedFor = null;
+  userActivityLoadingFor = null;
+  document.getElementById('userProfileActivityContent').innerHTML = '<p class="user-activity-empty">Select Activity to view this user\'s reports, appointments, and registered pets.</p>';
+  switchUserProfileTab('details');
   residentProfileUser = u.role === 'resident' ? u : null;
   var isResident = Boolean(residentProfileUser);
   var dialog = document.querySelector('#viewProfileModal .sd-dialog-content');
