@@ -14,6 +14,8 @@ session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../mailer.php';
 require_once __DIR__ . '/../../sms-sender.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -308,6 +310,10 @@ if (isset($_GET['ajax_logs'])) {
     $perPage = max(1, intval($_GET['per_page'] ?? 20));
     $search = trim($_GET['search'] ?? '');
     $type   = trim($_GET['type'] ?? '');
+    $dateFrom = trim($_GET['date_from'] ?? '');
+    $dateTo = trim($_GET['date_to'] ?? '');
+    if ($dateFrom !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) $dateFrom = '';
+    if ($dateTo !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) $dateTo = '';
     $sortCol = $_GET['sort'] ?? 'date';
     $sortDir = strtolower($_GET['dir'] ?? 'desc') === 'asc' ? 'ASC' : 'DESC';
     $sortMap = [
@@ -332,6 +338,16 @@ if (isset($_GET['ajax_logs'])) {
         $where .= " AND (el.recipient_name LIKE ? OR el.recipient_email LIKE ? OR el.subject LIKE ?)";
         $params[] = $like; $params[] = $like; $params[] = $like;
         $types .= 'sss';
+    }
+    if ($dateFrom !== '') {
+        $where .= " AND el.created_at >= ?";
+        $params[] = $dateFrom . ' 00:00:00';
+        $types .= 's';
+    }
+    if ($dateTo !== '') {
+        $where .= " AND el.created_at < DATE_ADD(?, INTERVAL 1 DAY)";
+        $params[] = $dateTo . ' 00:00:00';
+        $types .= 's';
     }
 
     $countStmt = $conn->prepare("SELECT COUNT(*) AS c FROM email_logs el WHERE $where");
@@ -381,6 +397,7 @@ if ($barangayResult) {
     $barangays[] = $barangayRow;
   }
 }
+$composeBarangays = $barangays;
 
 // DO NOT close $conn here — sidebar include uses it for notifications
 ?>
@@ -394,8 +411,10 @@ if ($barangayResult) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-compose-dialog.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-compose-dialog.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     /* ── Semantic color tokens (light only) ── */
     :root {
@@ -520,8 +539,8 @@ if ($barangayResult) {
     .log-empty i { font-size: 2.4rem; display: block; margin-bottom: 0.6rem; color: #cbd5e1; }
 
     /* ── Compose dialog (shadcn style) ── */
-    #composeDialog { z-index: 10000; background: rgba(0,0,0,0.5); }
-    #composeDialog .comm-compose-dialog-content { position: relative; width: 100%; max-width: 560px; max-height: 90vh; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation: modalIn 0.2s ease; font-family:'Inter','Segoe UI',sans-serif; }
+    #composeDialog { z-index: 10000; padding: 16px; background: rgba(0,0,0,0.5); }
+    #composeDialog .comm-compose-dialog-content { position: relative; box-sizing: border-box; width: min(520px,100%); max-width: 520px; max-height: calc(100dvh - 32px); display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid #e4e4e7; border-radius: 8px; background: #fff; box-shadow: 0 20px 25px rgba(15,23,32,.18); animation: none; font-family:'Inter','Segoe UI',sans-serif; }
     .comm-compose-header { display: flex; flex-direction: column; gap: 6px; padding-right: 32px; }
     .comm-compose-header h2 { margin: 0; color: #18181b; font-size: 18px; font-weight: 600; line-height: 1; letter-spacing: -0.025em; }
     .comm-compose-header p { margin: 0; color: #71717a; font-size: 14px; font-weight: 400; line-height: 1.5; }
@@ -562,17 +581,28 @@ if ($barangayResult) {
       .comm-header > div { width: 100%; }
       .btn-compose { width: 100%; justify-content: center; }
       .comm-toolbar { flex-direction: column; align-items: stretch; }
+      .comm-page { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+      .comm-toolbar .comm-toolbar-actions { width: 100%; margin-left: 0; }
+      .comm-toolbar .comm-toolbar-actions .btn-compose { width: 100%; }
       .comm-count { margin-left: 0; align-self: flex-start; }
       .comm-toolbar .comm-search,
       .comm-toolbar .comm-filter { flex: 1 1 100%; width: 100%; max-width: none; min-width: 0; }
       .comm-toolbar .comm-filter select { width: 100%; max-width: none; box-sizing: border-box; }
+      .comm-card { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+      .comm-card .sd-data-table-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; contain: paint; }
       .comm-card .sd-pagination { flex-direction: column; gap: 0.5rem; align-items: center; }
       .comm-card .sd-data-table { min-width: 1000px; }
     }
 
     @media (max-width: 640px) {
       .comm-card .sd-data-table-wrap { min-height: 24rem; }
-      #composeDialog .comm-compose-dialog-content { padding: 20px; }
+      #composeDialog { padding: 0 !important; align-items: stretch !important; justify-content: stretch !important; }
+      #composeDialog .comm-compose-dialog-content { width: 100%; max-width: none; height: 100vh; height: 100dvh; max-height: none; padding: 20px; border: 0; border-radius: 0; box-shadow: none; }
+      .toast-container { left: 1rem; right: 1rem; }
+      .toast { min-width: 0; max-width: 100%; }
+    }
+    @media (min-width: 641px) and (max-width: 768px) {
+      #composeDialog { padding: 16px !important; align-items: center !important; justify-content: center !important; }
     }
 
     /* ── Dialog font + button style (shadcn) — Communication ── */
@@ -649,13 +679,22 @@ if ($barangayResult) {
     <?php endif; ?>
 
     <!-- History toolbar (outside the table container) -->
-    <div class="comm-toolbar comm-toolbar-inner">
-      <div class="comm-search">
+    <div class="comm-toolbar comm-toolbar-inner staff-mobile-toolbar">
+      <div class="staff-toolbar-search-row">
+      <div class="comm-search staff-toolbar-search">
         <i class="fas fa-search search-icon"></i>
-        <input type="text" id="logSearch" placeholder="Search by recipient or subject..." oninput="logDebouncedSearch()" />
+        <input type="text" id="logSearch" placeholder="Search messages..." oninput="logDebouncedSearch()" />
       </div>
-      <div class="comm-filter">
-        <select id="logTypeFilter" onchange="renderLogPage(1)">
+      <div class="staff-date-filter staff-toolbar-filter" data-date-filter="message">
+        <button class="staff-date-filter-button" type="button" aria-label="Filter sent messages by date" title="Filter by date" aria-expanded="false">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+        </button>
+        <input type="hidden" id="messageDateFrom" value="">
+        <input type="hidden" id="messageDateTo" value="">
+      </div>
+      </div>
+      <div class="comm-filter staff-toolbar-filters">
+        <select class="staff-toolbar-select staff-toolbar-last-filter" id="logTypeFilter" onchange="renderLogPage(1)">
           <option value="">All Types</option>
           <option value="report">Report</option>
           <option value="adoption">Adoption</option>
@@ -665,8 +704,8 @@ if ($barangayResult) {
           <option value="other">Other</option>
         </select>
       </div>
-      <div class="comm-toolbar-actions">
-        <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDialog()">Compose Message</button>
+      <div class="comm-toolbar-actions staff-toolbar-actions staff-toolbar-single-secondary">
+        <button type="button" class="sd-btn sd-btn-default btn-compose staff-toolbar-primary" onclick="openComposeDialog()">Compose Message</button>
       </div>
     </div>
 
@@ -733,67 +772,7 @@ if ($barangayResult) {
 
 <div class="toast-container" id="toastContainer"></div>
 
-<!-- Compose Message Dialog -->
-<div class="modal" id="composeDialog" onclick="if(event.target === this) closeComposeDialog()">
-  <section class="comm-compose-dialog-content" role="dialog" aria-modal="true" aria-labelledby="composeDialogTitle" aria-describedby="composeDialogDescription">
-    <button type="button" class="comm-compose-close" onclick="closeComposeDialog()" aria-label="Close compose message dialog"><i class="fas fa-times"></i></button>
-    <div class="comm-compose-header">
-      <h2 id="composeDialogTitle">Compose Message</h2>
-      <p id="composeDialogDescription">Send a message directly to a resident or barangay officer.</p>
-    </div>
-    <form method="POST" action="staff-communication.php" id="composeForm" class="comm-compose-form">
-      <div class="comm-compose-body">
-      <div class="form-group">
-        <label for="recipient_role">Send To <span class="req">*</span></label>
-        <select id="recipient_role" name="recipient_role" onchange="onRoleChange()" required>
-          <option value="">Select role...</option>
-          <option value="resident">Resident</option>
-          <option value="barangay">Barangay Officer</option>
-        </select>
-      </div>
-      <div class="form-group recipient-filter-group" id="recipientBarangayGroup">
-          <label for="recipientBarangay">Barangay <span class="req">*</span></label>
-          <select id="recipientBarangay" onchange="filterCommunicationRecipients()" disabled>
-            <option value="">Select Barangay...</option>
-            <?php foreach ($barangays as $barangay): ?>
-              <option value="<?php echo (int)$barangay['barangay_id']; ?>"><?php echo htmlspecialchars($barangay['barangay_name']); ?></option>
-            <?php endforeach; ?>
-          </select>
-      </div>
-      <div class="form-group recipient-filter-group" id="recipientAccountGroup">
-        <label for="recipient_id" id="recipientAccountLabel">Registered Accounts <span class="req">*</span></label>
-        <select id="recipient_id" name="recipient_id" required disabled>
-          <option value="">Select a barangay first...</option>
-        </select>
-        <div class="recipient-count" id="recipientCount"></div>
-      </div>
-      <div class="form-group">
-        <label for="message_type">Message Type <span class="req">*</span></label>
-        <select id="message_type" name="message_type" onchange="onMessageTypeChange()" required>
-          <?php foreach ($messageTypes as $key => $label): ?>
-            <option value="<?php echo $key; ?>"><?php echo $label; ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="form-group">
-        <label for="subject">Subject <span class="req">*</span></label>
-        <input type="text" id="subject" name="subject" placeholder="e.g. Update on your report" required />
-        <div class="subject-suggestions" id="subjectSuggestions"></div>
-      </div>
-      <div class="form-group">
-        <label for="message">Message <span class="req">*</span></label>
-        <textarea id="message" name="message" placeholder="Type your message here..." required></textarea>
-      </div>
-
-      </div>
-      <input type="hidden" name="send_message" value="1">
-      <div class="comm-compose-footer">
-        <button type="button" class="sd-btn sd-btn-outline" onclick="closeComposeDialog()">Cancel</button>
-        <button type="submit" class="sd-btn sd-btn-default btn-send" id="sendBtn"><span id="sendBtnLabel">Send Message</span></button>
-      </div>
-    </form>
-  </section>
-</div>
+<?php require __DIR__ . '/../../includes/staff-compose-dialog.php'; ?>
 
 <!-- Resend Confirm Modal -->
 <div id="resendModal" class="modal">
@@ -817,165 +796,10 @@ if ($barangayResult) {
 var residents = <?php echo json_encode($residents); ?>;
 var barangayUsers = <?php echo json_encode($barangayUsers); ?>;
 
-var subjectTemplates = {
-    general:     ['Important Update from DCVS', 'Notification from DCVS Staff'],
-    report:      ['Update on Animal Report', 'Action Needed on Report', 'Follow-up on Report'],
-    appointment: ['Appointment Confirmation', 'Appointment Reminder', 'Appointment Rescheduled'],
-    adoption:    ['Update on Adoption Request', 'Adoption Application Status'],
-    followup:    ['Friendly Reminder from DCVS', 'Follow-up on Previous Concern'],
-    other:       []
-};
-var messageTypeOptions = {
-    resident: [
-        { value: 'general', label: 'General Message' },
-        { value: 'report', label: 'Animal Report' },
-        { value: 'appointment', label: 'Appointment' },
-        { value: 'adoption', label: 'Adoption Request' },
-        { value: 'followup', label: 'Follow-up / Reminder' },
-        { value: 'other', label: 'Other' }
-    ],
-    barangay: [
-        { value: 'barangay_general', label: 'General Message' },
-        { value: 'barangay_report', label: 'Animal Report' },
-        { value: 'barangay_rescue', label: 'Rescue Case' },
-        { value: 'barangay_pets', label: 'Pet Records' },
-        { value: 'barangay_vaccination', label: 'Vaccination' },
-        { value: 'barangay_coordination', label: 'Barangay Coordination' },
-        { value: 'barangay_followup', label: 'Follow-up / Reminder' },
-        { value: 'barangay_other', label: 'Other' }
-    ]
-};
-var barangaySubjectTemplates = {
-    barangay_general: ['Barangay Coordination'],
-    barangay_report: ['Report Follow-up', 'Report Validation'],
-    barangay_rescue: ['Rescue Coordination'],
-    barangay_pets: ['Pet Record Verification'],
-    barangay_vaccination: ['Vaccination Update'],
-    barangay_coordination: ['Barangay Coordination'],
-    barangay_followup: ['Follow-up Required', 'Reminder'],
-    barangay_other: []
-};
-
 function escapeHtml(s) {
     if (s === null || s === undefined) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
-
-function onRoleChange() {
-    updateRecipients();
-    updateMessageTypeOptions();
-}
-
-function updateMessageTypeOptions() {
-    var role = document.getElementById('recipient_role').value;
-    var typeSelect = document.getElementById('message_type');
-    var options = messageTypeOptions[role] || messageTypeOptions.resident;
-    typeSelect.innerHTML = '';
-    options.forEach(function(option) {
-        var element = document.createElement('option');
-        element.value = option.value;
-        element.textContent = option.label;
-        typeSelect.appendChild(element);
-    });
-    document.getElementById('subject').value = '';
-    onMessageTypeChange();
-}
-
-function updateRecipients() {
-    var role = document.getElementById('recipient_role').value;
-    var select = document.getElementById('recipient_id');
-    var count = document.getElementById('recipientCount');
-    var barangaySelect = document.getElementById('recipientBarangay');
-    var hasRole = role === 'resident' || role === 'barangay';
-    document.getElementById('recipientBarangayGroup').classList.toggle('visible', hasRole);
-    document.getElementById('recipientAccountGroup').classList.remove('visible');
-    document.getElementById('recipientAccountLabel').innerHTML = (role === 'barangay' ? 'Registered Accounts' : 'Registered Clients') + ' <span class="req">*</span>';
-    barangaySelect.value = '';
-    barangaySelect.disabled = !hasRole;
-    select.disabled = true;
-    select.required = false;
-    select.innerHTML = '<option value="">' + (hasRole ? 'Select a barangay first...' : 'Select a role first...') + '</option>';
-    count.textContent = '';
-}
-
-function filterCommunicationRecipients() {
-    var role = document.getElementById('recipient_role').value;
-    var barangayId = document.getElementById('recipientBarangay').value;
-    var select = document.getElementById('recipient_id');
-    var accountGroup = document.getElementById('recipientAccountGroup');
-    var count = document.getElementById('recipientCount');
-    var users = role === 'barangay' ? barangayUsers : residents;
-
-    select.innerHTML = '<option value="">' + (barangayId ? 'Select a registered account...' : 'Select a barangay first...') + '</option>';
-    accountGroup.classList.toggle('visible', !!barangayId);
-    select.disabled = !barangayId;
-    select.required = !!barangayId;
-    count.textContent = '';
-    if (!barangayId) return;
-
-    var matches = users.filter(function(user) {
-      return String(user.barangay_id || '') === String(barangayId);
-    });
-
-    count.textContent = matches.length + ' registered ' + (role === 'barangay' ? 'account' : 'client') + (matches.length !== 1 ? 's' : '') + ' found';
-    matches.forEach(function(user) {
-        var option = document.createElement('option');
-        option.value = user.user_id;
-        option.textContent = user.full_name + (user.email ? ' — ' + user.email : '');
-        select.appendChild(option);
-    });
-    if (!matches.length) {
-        select.innerHTML = '<option value="">No registered ' + (role === 'barangay' ? 'accounts' : 'clients') + ' for this barangay</option>';
-        select.disabled = true;
-        select.required = false;
-    }
-}
-
-function onMessageTypeChange() {
-    var type = document.getElementById('message_type').value;
-    var suggestions = document.getElementById('subjectSuggestions');
-    var subjectInput = document.getElementById('subject');
-    suggestions.innerHTML = '';
-    var subs = barangaySubjectTemplates[type] || subjectTemplates[type] || [];
-    subs.forEach(function(s) {
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.textContent = s;
-        btn.onclick = function() { subjectInput.value = s; };
-        suggestions.appendChild(btn);
-    });
-}
-
-/* ── Compose dialog ── */
-function openComposeDialog() {
-  document.getElementById('composeDialog').classList.add('active');
-    document.body.style.overflow = 'hidden';
-  document.getElementById('recipient_role').focus();
-}
-function closeComposeDialog() {
-  document.getElementById('composeDialog').classList.remove('active');
-    document.body.style.overflow = '';
-}
-
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape' && document.getElementById('composeDialog').classList.contains('active')) closeComposeDialog();
-});
-
-document.getElementById('composeForm')?.addEventListener('submit', function(e) {
-  var role = document.getElementById('recipient_role').value;
-  var barangay = document.getElementById('recipientBarangay').value;
-  var recipient = document.getElementById('recipient_id').value;
-  if ((role === 'resident' || role === 'barangay') && (!barangay || !recipient)) {
-    e.preventDefault();
-    document.getElementById('recipientCount').textContent = !barangay
-      ? 'Select a barangay before sending.'
-      : 'Select a registered ' + (role === 'barangay' ? 'barangay account' : 'client') + ' before sending.';
-    return;
-  }
-    var btn = document.getElementById('sendBtn');
-    btn.disabled = true;
-    document.getElementById('sendBtnLabel').textContent = 'Sending...';
-});
 
 /* ── Sent Message History: server-side search + filter + pagination (8/page) ── */
 var logPerPage = 20;
@@ -1050,7 +874,9 @@ function renderLogPage(page) {
     var q = (document.getElementById('logSearch')?.value || '').trim();
     var f = (document.getElementById('logTypeFilter')?.value || '');
 
-    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f) + "&sort=" + commSortCol + "&dir=" + commSortDir;
+    var dateFrom = (document.getElementById('messageDateFrom') || {}).value || '';
+    var dateTo = (document.getElementById('messageDateTo') || {}).value || '';
+    var url = "staff-communication.php?ajax_logs=1&page=" + page + "&per_page=" + logPerPage + "&search=" + encodeURIComponent(q) + "&type=" + encodeURIComponent(f) + "&date_from=" + encodeURIComponent(dateFrom) + "&date_to=" + encodeURIComponent(dateTo) + "&sort=" + commSortCol + "&dir=" + commSortDir;
     fetch(url)
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -1106,6 +932,9 @@ function renderLogPage(page) {
 
 window.logPageGo = function(page) {
     renderLogPage(page);
+};
+window.messageSetDate = function() {
+    renderLogPage(1);
 };
 
 window.commSort = function(col) {
@@ -1169,5 +998,7 @@ function dismissToast(el) {
   setTimeout(function() { el.remove(); }, 300);
 }
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-compose-dialog.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-compose-dialog.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

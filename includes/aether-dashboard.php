@@ -111,7 +111,6 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                     'operating_time' => $row['operating_time'] ?? '',
                     'program_start_time' => $row['program_start_time'] ?? '',
                     'program_end_time' => $row['program_end_time'] ?? '',
-                    'staff_required_count' => (int)($row['staff_required_count'] ?? 1),
                     'location_mode'  => $row['location_mode'],
                     'venue'          => $row['venue'] ?? '',
                     'barangay_ids'   => $brgyIds,
@@ -412,7 +411,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     $aeth_apptSummary = ['total_30d' => 0, 'upcoming' => 0, 'completed_30d' => 0, 'no_show_30d' => 0];
     $__r = $conn->query("SELECT
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS total_30d,
-      SUM(CASE WHEN archived_at IS NULL AND preferred_date >= CURDATE() AND status IN ('pending','approved','scheduled','rescheduled') THEN 1 ELSE 0 END) AS upcoming,
+      SUM(CASE WHEN archived_at IS NULL AND preferred_date >= CURDATE() AND status IN ('pending','approved','scheduled','rescheduled','action_needed') THEN 1 ELSE 0 END) AS upcoming,
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'completed' THEN 1 ELSE 0 END) AS completed_30d,
       SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'no_show' THEN 1 ELSE 0 END) AS no_show_30d
       FROM appointments");
@@ -733,6 +732,8 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 .ab-label { display:block; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; line-height:1; color:#18181b; margin-bottom:6px; }
 .ab-input, .ab-select { width:100%; height:40px; padding:0 0.8rem; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; background:var(--ab-bg); color:var(--ab-fg); border:1px solid var(--ab-border); outline:none; }
 .ab-input:focus, .ab-select:focus { border-color:var(--ab-lime); box-shadow:0 0 0 1px var(--ab-lime); }
+#abBrgyDropdown .ab-brgy-opt { display:flex; align-items:center; min-height:36px; line-height:20px; }
+#abBrgyDropdown .ab-brgy-name { display:block; flex:1 1 auto; min-width:0; line-height:20px; }
 .ab-modal-backdrop { position:fixed; inset:0; background:rgba(5,5,5,0.8); backdrop-filter:blur(4px); z-index:200; display:none; align-items:center; justify-content:center; padding:1rem; }
 .ab-modal-backdrop.open { display:flex; }
 .ab-modal { background:var(--ab-card); border:1px solid var(--ab-border); width:100%; max-width:460px; padding:1.5rem; max-height:90vh; overflow-y:auto; }
@@ -779,8 +780,8 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 #ab-page-citydrives .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
 #ab-page-citydrives .kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:14px 16px; background:#fff; border:1px solid #E5E7EB; border-radius:14px; box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03); transition:all .2s cubic-bezier(.4,0,.2,1); font-family:'Inter','Segoe UI',sans-serif; }
 #ab-page-citydrives .kpi-card:hover{ border-color:#D1D5DB; box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03); }
-#ab-page-citydrives .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
-#ab-page-citydrives .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:26px; font-weight:600; color:#18181b; letter-spacing:-0.02em; line-height:1; margin:0 0 6px; }
+#ab-page-citydrives .kpi-label{ font-family:'Inter','Segoe UI',sans-serif; font-size:0.85rem; font-weight:500; color:#18181b; margin:0 0 6px; text-transform:uppercase; letter-spacing:0.03em; }
+#ab-page-citydrives .kpi-value{ font-family:'Inter','Segoe UI',sans-serif; font-size:1.75rem !important; font-weight:600; color:#18181b; letter-spacing:normal; line-height:1; margin:0 0 6px; }
 #ab-page-citydrives .kpi-sub{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#71717a; }
 #ab-page-citydrives .dt-container{ min-height:var(--staff-table-min-height); }
 #ab-page-citydrives .dt-pagination{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-wrap:wrap; padding:12px 8px; }
@@ -916,7 +917,353 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 @media (max-width:1200px) { .ab-grid-4 { grid-template-columns:repeat(2,1fr); } .ab-grid-6 { grid-template-columns:repeat(3,1fr); } }
 @media (max-width:1024px) { .ab-grid-3 { grid-template-columns:1fr; } .ab-grid-2 { grid-template-columns:1fr; } }
-@media (max-width:640px) { .ab-grid-4 { grid-template-columns:1fr; } .ab-grid-6 { grid-template-columns:repeat(2,1fr); } .ab-page { padding:1rem; } }
+@media (max-width:640px) { .ab-grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); } .ab-grid-6 { grid-template-columns:repeat(2,minmax(0,1fr)); } .ab-page { padding:1rem; } }
+@media (max-width:480px) { .ab-grid-4, .ab-grid-6 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+.aether-analytics,
+.aether-analytics .aether-dash,
+.aether-analytics .ab-page,
+.aether-analytics .ab-card,
+.aether-analytics .ab-chart-card {
+  min-width: 0;
+}
+.aether-analytics .ab-grid-4,
+.aether-analytics .ab-grid-3,
+.aether-analytics .ab-grid-2,
+.aether-analytics .ab-grid-6 {
+  min-width: 0;
+}
+.aether-analytics .ab-chart-canvas {
+  min-width: 0;
+}
+.aether-analytics .ab-spark-wrap {
+  width: 100%;
+  min-width: 0;
+}
+.aether-analytics .ab-chart-canvas canvas {
+  max-width: 100%;
+}
+.aether-analytics .ab-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width:768px) {
+  #ab-page-engine .ab-grid-3 {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .aether-analytics .ab-head {
+    align-items: stretch;
+  }
+  .aether-analytics .ab-head > * {
+    min-width: 0;
+  }
+  .aether-analytics .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .aether-analytics .ab-chart-head {
+    flex-wrap: wrap;
+  }
+  .aether-analytics .ab-chart-head > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+@media (max-width:480px) {
+  .aether-analytics .ab-grid-4,
+  .aether-analytics .ab-grid-6 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .aether-analytics .ab-page {
+    padding: 0.75rem;
+  }
+  .aether-analytics .ab-chart-card {
+    padding: 0.85rem;
+  }
+  .aether-analytics .ab-chart-canvas {
+    height: 260px;
+  }
+  .aether-analytics .ab-range {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .aether-analytics .ab-range-btn {
+    padding-inline: 0.5rem;
+  }
+  .aether-analytics .ab-legend {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+}
+
+/* Appointment Overview responsive layout */
+#ab-page-intel,
+#ab-page-intel > *,
+#ab-page-intel .ab-card,
+#ab-page-intel .ab-chart-card,
+#ab-page-intel .ab-table-card {
+  min-width: 0;
+  max-width: 100%;
+}
+#ab-page-intel > div:first-child {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+#ab-page-intel .ab-chart-card h2 {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+#ab-page-intel .ab-donut-canvas {
+  height: clamp(12rem, 56vw, 16rem) !important;
+}
+#ab-page-intel .ab-chart-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100%;
+}
+#ab-page-intel .ab-donut-canvas canvas {
+  max-width: 100%;
+  margin-inline: auto;
+}
+#ab-page-intel .ab-donut-legend {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  min-width: 0;
+}
+#ab-page-intel .ab-donut-legend-item {
+  flex: 1 1 8rem;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#ab-page-intel .ab-bar-label-row {
+  min-width: 0;
+  gap: 0.75rem;
+}
+#ab-page-intel .ab-bar-label-row span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#ab-page-intel .ab-bar-label-row span:last-child {
+  flex: 0 0 auto;
+}
+#ab-page-intel .ab-bar {
+  width: 100%;
+}
+#ab-page-intel .ab-table-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  contain: paint;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width:1024px) {
+  #ab-page-intel .ab-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width:768px) {
+  #ab-page-engine > div:first-child {
+    justify-content: flex-end !important;
+  }
+  #ab-page-engine > div:first-child .sd-btn {
+    flex: 0 1 auto;
+    width: auto;
+    justify-content: center;
+  }
+  #ab-page-intel .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-intel .ab-grid-3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  #ab-page-intel .ab-stat {
+    width: 100%;
+  }
+  #ab-page-intel > div:first-child {
+    justify-content: stretch !important;
+  }
+  #ab-page-intel > div:first-child .sd-btn {
+    flex: 1 1 100%;
+    justify-content: center;
+  }
+  #ab-page-intel .ab-chart-card h2 {
+    font-size: 0.9rem;
+    line-height: 1.35;
+  }
+  #ab-page-intel .ab-chart-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  #ab-page-intel #abApptLocType {
+    width: 100%;
+    max-width: 100%;
+  }
+  #ab-page-intel .ab-table {
+    width: max-content;
+    min-width: 100%;
+  }
+  #ab-page-intel .ab-table th,
+  #ab-page-intel .ab-table td {
+    padding: 0.6rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  #ab-page-intel .ab-table th:first-child,
+  #ab-page-intel .ab-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    background: var(--ab-card);
+  }
+  #ab-page-intel .ab-table th:first-child {
+    z-index: 2;
+  }
+}
+@media (max-width:480px) {
+  #ab-page-intel .ab-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-intel .ab-chart-card {
+    padding: 0.85rem;
+  }
+  #ab-page-intel .ab-chart-canvas:not(.ab-donut-canvas) {
+    height: 15rem !important;
+  }
+  #ab-page-intel .ab-donut-legend-item {
+    flex-basis: 7rem;
+  }
+  #ab-page-intel .ab-table th,
+  #ab-page-intel .ab-table td {
+    padding: 0.5rem 0.6rem;
+    font-size: 0.7rem;
+  }
+}
+
+/* Programs & Services and City Drives responsive layout */
+#ab-page-architect,
+#ab-page-citydrives,
+#ab-page-architect > *,
+#ab-page-citydrives > *,
+#ab-page-architect .ab-card,
+#ab-page-citydrives .kpi-card {
+  min-width: 0;
+  max-width: 100%;
+}
+#ab-page-architect #abCampGrid {
+  min-width: 0;
+}
+#ab-page-architect .ab-gantt {
+  min-width: 0;
+}
+#ab-page-architect .ab-gantt-scroll {
+  max-width: 100%;
+  contain: paint;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+#ab-page-architect .ab-gantt-head > *,
+#ab-page-architect .ab-gantt-legend,
+#ab-page-architect .ab-camp-card,
+#ab-page-architect .ab-camp-foot {
+  min-width: 0;
+}
+#ab-page-citydrives .kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#ab-page-citydrives .dt-container {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width:1024px) {
+  #ab-page-architect #abCampGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  #ab-page-citydrives .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #ab-page-citydrives .dt-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    contain: paint;
+    -webkit-overflow-scrolling: touch;
+  }
+  #ab-page-citydrives table {
+    width: max-content;
+    min-width: 100%;
+  }
+}
+@media (max-width:768px) {
+  #ab-page-architect #abCampGrid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  #ab-page-architect > div[style*="justify-content:flex-end"] {
+    justify-content: stretch !important;
+  }
+  #ab-page-architect > div[style*="justify-content:flex-end"] .sd-btn {
+    width: 100%;
+    justify-content: center;
+  }
+  #ab-page-architect > div[style*="justify-content:space-between"] {
+    align-items: flex-start !important;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  #ab-page-architect .ab-gantt-head {
+    align-items: flex-start;
+    padding: 0.85rem;
+  }
+  #ab-page-architect .ab-gantt-legend {
+    gap: 0.5rem 0.75rem;
+  }
+  #ab-page-architect .ab-camp-foot {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  #ab-page-architect .ab-camp-foot > div {
+    flex-wrap: wrap;
+  }
+  #ab-page-citydrives .dt-pagination,
+  #ab-page-citydrives .dt-pagination-right {
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  #ab-page-citydrives .dt-pagination {
+    padding-inline: 0;
+  }
+}
+@media (max-width:480px) {
+  #ab-page-citydrives .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+  #ab-page-citydrives .kpi-card {
+    width: 100%;
+  }
+  #ab-page-citydrives thead th,
+  #ab-page-citydrives tbody td {
+    padding: 0.65rem 0.7rem;
+    font-size: 0.75rem;
+  }
+  #ab-page-citydrives .dt-rows {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  #ab-page-citydrives .dt-page-label {
+    width: auto;
+  }
+  #ab-page-architect .ab-camp-card {
+    padding: 0.85rem;
+  }
+}
 </style>
 
 <!-- ═══════════ ENGINE ═══════════ -->
@@ -1014,7 +1361,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
       <p style="margin:0;font-size:14px;font-weight:600;color:#991B1B;"><?php echo $aeth_highPriorityCount; ?> high-priority report<?php echo $aeth_highPriorityCount !== 1 ? 's' : ''; ?> require immediate attention.</p>
       <p style="margin:0.15rem 0 0;font-size:13px;color:#991B1B;opacity:0.85;">Review these reports to confirm and assign the appropriate action.</p>
     </div>
-    <a href="dashboard-staff.php#reports-pending" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
+    <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
   </div>
   <?php endif; ?>
 
@@ -1025,7 +1372,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
           <h2>Priority Reports</h2>
           <span style="font-size:12px;font-weight:500;padding:0.2rem 0.55rem;border-radius:4px;background:rgba(234,179,8,0.12);color:#92400e;border:1px solid rgba(234,179,8,0.4);font-family:'Inter','Segoe UI',sans-serif;"><?php echo $aeth_priorityTotal; ?> need attention</span>
         </div>
-        <a href="dashboard-staff.php#reports-pending" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
+        <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
       </div>
       <div style="padding:0.6rem 1.25rem;border-bottom:1px solid var(--ab-border);font-size:13px;color:var(--ab-muted-fg);font-family:'Inter','Segoe UI',sans-serif;">Reports requiring staff review and confirmation</div>
       <div class="ab-feed-list">
@@ -1048,7 +1395,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                   <?php echo htmlspecialchars($rpt['note']); ?> &middot; <?php echo htmlspecialchars($rpt['timeAgo']); ?>
                 </p>
               </div>
-              <a href="dashboard-staff.php#reports-pending" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
+              <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
             </div>
           <?php endforeach; ?>
         <?php endif; ?>
@@ -1072,7 +1419,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
   <div class="ab-grid-3" style="margin-bottom:1.5rem;">
     <div class="ab-card ab-chart-card">
       <h2>Appointment Type Distribution</h2>
-      <div class="ab-chart-canvas" style="height:256px;"><canvas id="abIntelAge"></canvas></div>
+      <div class="ab-chart-canvas ab-donut-canvas" style="height:256px;"><canvas id="abIntelAge"></canvas></div>
       <div class="ab-donut-legend">
         <?php foreach ($aeth_apptTypeLabels as $__i => $__label): ?>
           <div class="ab-donut-legend-item"><span class="ab-dot" style="background:<?php echo $aeth_apptTypeColors[$__i]; ?>;"></span><?php echo $__label; ?></div>
@@ -1147,7 +1494,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     <button type="button" class="sd-btn sd-btn-outline" onclick="aethExportAdoptionPdf()"><i class="fas fa-file-pdf"></i> Export PDF</button>
   </div>
 
-  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.5rem;">
+  <div class="ab-budget-overview" style="display:grid;grid-template-columns:repeat(2,1fr);gap:1rem;margin-bottom:1.5rem;">
     <div class="ab-card" style="padding:1.25rem;">
       <h2 style="font-size:14px;font-weight:600;margin-bottom:1rem;">Annual Adoption Progress</h2>
       <div style="display:flex;align-items:baseline;gap:0.5rem;margin-bottom:1rem;flex-wrap:wrap;">
@@ -1530,8 +1877,10 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         <h2 class="sd-dialog-title">Create New Program</h2>
         <p class="sd-dialog-description">Set up a new city drive or veterinary program.</p>
       </div>
-      <form id="createProgramForm" method="POST" action="dashboard-staff.php#analytics" style="display:flex;flex-direction:column;gap:16px;">
+      <form id="createProgramForm" method="POST" action="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#analytics', ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;flex-direction:column;gap:16px;">
         <input type="hidden" name="create_program" value="1">
+        <?php echo csrfField(); ?>
+        <input type="hidden" name="reschedule_offers_json" id="abRescheduleOffersJson" value="[]">
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Program Name <span style="color:#e53e3e;">*</span></label>
           <input class="ab-input" name="program_name" placeholder="e.g. Free Kapon Drive" required>
@@ -1565,11 +1914,31 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
             <input class="ab-input" type="date" name="end_date" required>
           </div>
         </div>
-        <div id="abProgramConflictSummary" role="status" aria-live="polite" hidden style="padding:10px 12px;border-radius:6px;font-size:13px;line-height:1.5;"></div>
-        <label id="abNotifyAffectedWrap" hidden style="align-items:flex-start;gap:8px;font-size:13px;line-height:1.45;color:#991b1b;">
-          <input type="checkbox" name="notify_affected" value="1" style="margin-top:2px;">
-          <span>Notify affected residents through their DCVS portal and registered email/SMS. Their appointments will not be moved or cancelled automatically.</span>
-        </label>
+        <div id="abProgramConflictSummary" role="status" aria-live="polite" hidden style="padding:12px 14px;border:1px solid #e5e7eb;border-top:2px solid #b45309;border-radius:8px;font-size:13px;line-height:1.5;"></div>
+        <div id="abProgramConflictChoices" hidden style="border-top:1px solid #e5e7eb;">
+          <label style="display:flex;align-items:flex-start;gap:12px;padding:10px 4px;border-bottom:1px solid #e5e7eb;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="reschedule" id="abRescheduleAppointmentsChoice" style="flex:0 0 auto;margin-top:3px;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Reschedule affected appointments</strong>
+              <span>Set a new date and time for each affected appointment. Residents have 3 days to accept or decline.</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid #e5e7eb;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="notify" id="abKeepAppointmentsChoice" style="flex:0 0 auto;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Keep appointments as they are</strong>
+              <span>Appointments remain unchanged.</span>
+            </span>
+          </label>
+          <label style="display:flex;align-items:center;gap:12px;padding:10px 4px;cursor:pointer;">
+            <input type="radio" name="program_conflict_choice" value="adjust_hours" id="abChangeProgramHoursChoice" style="flex:0 0 auto;">
+            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
+              <strong style="display:block;color:#18181b;font-size:14px;">Change program hours</strong>
+              <span>Adjust Operating Time above. Conflicts are recalculated when the hours change.</span>
+            </span>
+          </label>
+          <input type="checkbox" name="notify_affected" id="abNotifyAffectedInput" value="1" hidden>
+        </div>
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Operating Time</label>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -1580,11 +1949,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <input type="hidden" name="operating_time" id="abOpTimeHidden">
           <input type="hidden" name="program_start_time" id="abProgramStartTime">
           <input type="hidden" name="program_end_time" id="abProgramEndTime">
-        </div>
-        <div class="ab-field" style="margin-bottom:0;">
-          <label class="ab-label">Staff Required <span style="color:#e53e3e;">*</span></label>
-          <input class="ab-input" type="number" name="staff_required_count" id="abStaffRequiredCount" min="1" max="<?php echo max(1, dcvsActiveStaffCount($conn)); ?>" value="1" required>
-          <div style="font-size:12px;color:#71717a;margin-top:4px;">Available routine appointment capacity is reduced by this number during program hours.</div>
         </div>
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Coverage / Barangay <span style="color:#e53e3e;">*</span></label>
@@ -1598,23 +1962,32 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           </div>
           <div id="abBrgyChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:0;"></div>
           <div id="abBrgyList" hidden></div>
-          <div id="singleBrgyWrap">
-            <input class="ab-input" name="venue" id="abVenueInput" placeholder="e.g. Barangay Paliparan I Covered Court" style="height:36px;">
+          <div id="abSingleBrgySelectWrap">
+            <select class="ab-select" id="abSingleBrgySelect" required onchange="aethSelectSingleBrgy(this)" style="height:36px;padding:0 10px;appearance:auto;cursor:pointer;">
+              <option value="">Select a barangay...</option>
+              <?php foreach ($aeth_allBarangays as $br): ?>
+                <option value="<?php echo (int)$br['barangay_id']; ?>"><?php echo htmlspecialchars($br['barangay_name']); ?></option>
+              <?php endforeach; ?>
+            </select>
           </div>
-          <div id="multiBrgyWrap" style="display:none;">
+          <div id="abMultiBrgySelectWrap" style="display:none;">
             <div style="position:relative;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#71717a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);pointer-events:none;"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-              <input class="ab-input" id="abBrgySearch" type="text" placeholder="Search and add barangays..." oninput="aethFilterBrgys(this.value)" onfocus="aethShowBrgyDropdown()" style="height:36px;padding-left:32px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;">
+              <input class="ab-input" id="abBrgySearch" type="search" autocomplete="off" placeholder="Search and add barangays..." aria-label="Search barangays" aria-controls="abBrgyDropdown" oninput="aethFilterBrgys(this.value)" onfocus="aethShowBrgyDropdown()" style="height:36px;padding-left:32px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;">
             </div>
           </div>
-          <div id="abBrgyDropdown" style="display:none;max-height:160px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:6px;margin-top:4px;background:#fff;">
+          <div id="abBrgyDropdown" data-mode="multiple" role="listbox" aria-label="Barangays" style="display:none;max-height:160px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:6px;margin-top:4px;background:#fff;">
             <?php foreach ($aeth_allBarangays as $br): ?>
-              <div class="ab-brgy-opt" data-id="<?php echo $br['barangay_id']; ?>" data-name="<?php echo htmlspecialchars($br['barangay_name']); ?>" onclick="aethToggleBrgy(this)" style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:14px;cursor:pointer;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;border-radius:4px;transition:background 0.1s;">
+              <div class="ab-brgy-opt" role="option" aria-selected="false" tabindex="0" data-id="<?php echo (int)$br['barangay_id']; ?>" data-name="<?php echo htmlspecialchars($br['barangay_name'], ENT_QUOTES, 'UTF-8'); ?>" onclick="aethToggleBrgy(this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();aethToggleBrgy(this);}" style="display:flex;align-items:center;gap:8px;padding:6px 8px;font-size:14px;cursor:pointer;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;border-radius:4px;transition:background 0.1s;">
                 <span class="ab-brgy-check" style="width:16px;height:16px;border:1px solid #d4d4d8;border-radius:3px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all 0.1s;"></span>
-                <?php echo htmlspecialchars($br['barangay_name']); ?>
+                <span class="ab-brgy-name"><?php echo htmlspecialchars($br['barangay_name']); ?></span>
               </div>
             <?php endforeach; ?>
             <div id="abBrgyNoMatch" style="display:none;padding:8px 0;font-size:13px;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;text-align:center;">No barangays found</div>
+          </div>
+          <div id="singleBrgyWrap">
+            <label class="ab-label" for="abVenueInput" style="margin-top:10px;">Venue / Specific Location <span style="color:#e53e3e;">*</span></label>
+            <input class="ab-input" name="venue" id="abVenueInput" placeholder="e.g. Covered court or community center" style="height:36px;">
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
@@ -1669,7 +2042,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         <h2 class="sd-dialog-title">Log Program Progress</h2>
         <p class="sd-dialog-description" id="abLogProgName">Record animals served during this program.</p>
       </div>
-      <form method="POST" action="dashboard-staff.php#analytics" style="display:flex;flex-direction:column;gap:24px;">
+      <form method="POST" action="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#analytics', ENT_QUOTES, 'UTF-8'); ?>" style="display:flex;flex-direction:column;gap:24px;">
         <input type="hidden" name="log_progress" value="1">
         <input type="hidden" name="program_id" id="abLogProgId">
         <div class="sd-field">
@@ -2093,7 +2466,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.barangayName = barangayName;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2114,7 +2487,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.locationTypeLabel = typeSelect && typeSelect.selectedOptions.length ? typeSelect.selectedOptions[0].textContent : 'All Types';
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2131,7 +2504,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.reportType = 'adoption';
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'analytics-export.php';
+    form.action = window.dcvsStaffUrl('analytics-export.php');
     form.target = '_blank';
     var input = document.createElement('input');
     input.type = 'hidden';
@@ -2160,11 +2533,47 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         data: { labels: APPT_LOCS.map(function(l) { return l[0]; }), datasets: [{ data: APPT_LOCS.map(function(l) { return l[1]; }), backgroundColor: '#18181b', borderRadius: 0, barThickness: 14 }] },
         options: Object.assign(baseOpts(), {
           indexAxis: 'y',
-          scales: { x: { beginAtZero: true, grid: { color: aethChartColors().grid }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 10 }, precision: 0 } }, y: { grid: { display: false }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 11 } } } }
+          layout: { padding: { left: 4, right: 4 } },
+          plugins: {
+            legend: { display: false },
+            tooltip: Object.assign(tooltipStyle(), {
+              callbacks: {
+                title: function(items) { return items.length ? items[0].label : ''; }
+              }
+            })
+          },
+          scales: {
+            x: { beginAtZero: true, grid: { color: aethChartColors().grid }, ticks: { color: aethChartColors().tick, font: { family: 'Inter', size: 10 }, precision: 0 } },
+            y: {
+              grid: { display: false },
+              ticks: {
+                color: aethChartColors().tick,
+                font: { family: 'Inter', size: 11 },
+                callback: function(value) {
+                  var label = String(this.getLabelForValue(value));
+                  var maxLength = window.innerWidth <= 768 ? 14 : (window.innerWidth <= 1024 ? 22 : 1000);
+                  return label.length > maxLength ? label.slice(0, maxLength - 3) + '...' : label;
+                }
+              }
+            }
+          }
         })
       });
     }
   }
+  var intelResizeFrame = 0;
+  window.addEventListener('resize', function() {
+    if (intelResizeFrame) cancelAnimationFrame(intelResizeFrame);
+    intelResizeFrame = requestAnimationFrame(function() {
+      intelResizeFrame = 0;
+      var intelPage = document.getElementById('ab-page-intel');
+      var analyticsSection = document.getElementById('analytics');
+      if (intelPage.classList.contains('active') && analyticsSection.getClientRects().length) {
+        if (charts['abIntelAge']) charts['abIntelAge'].resize();
+        if (charts['abIntelLoc']) charts['abIntelLoc'].resize();
+      }
+    });
+  });
   window.aethSetApptLoc = function(key) {
     var chart = charts['abIntelLoc'];
     if (!chart) return;
@@ -2277,6 +2686,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       : [[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0],[0,0,0,0,0,0,0,0,0,0,0,0]];
     data.forEach(function(d, i) { initSpark('abSpark-' + i, d); });
   }
+  window.addEventListener('resize', function() {
+    Object.keys(charts).forEach(function(id) {
+      if (id.indexOf('abSpark-') === 0 && charts[id]) charts[id].resize();
+    });
+  });
   // Render KPI values immediately, with commas and decimals preserved.
   function aethCompact(n) {
     if (Number.isInteger(n)) return n.toLocaleString('en-US');
@@ -2338,7 +2752,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var targetReached = camp.target > 0 && (camp.completed || 0) >= camp.target;
     var canEditProgram = camp.status === 'scheduled' || camp.status === 'paused';
     var editProgramButton = canEditProgram
-      ? '<button type="button" class="ab-program-edit-icon" onclick="aethEditProgram(\'' + camp.id + '\')" aria-label="Edit program" title="Edit program"><img src="assets/images/edit%20icon.png" alt=""></button>'
+      ? '<button type="button" class="ab-program-edit-icon" onclick="aethEditProgram(\'' + camp.id + '\')" aria-label="Edit program" title="Edit program"><img src="' + window.dcvsStaffUrl('assets/images/edit%20icon.png') + '" alt=""></button>'
       : '';
     var logProgressButton = (camp.status === 'live' || camp.status === 'paused')
       ? '<button type="button" class="ab-program-log-icon" onclick="aethOpenLogProgress(\'' + camp.id + '\')" aria-label="Log progress" title="Log progress"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"></rect><path d="M9 3.5h6"></path><path d="M9 9h6"></path><path d="M9 13h6"></path><path d="M9 17h4"></path></svg></button>'
@@ -2446,18 +2860,41 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   /* Toggle barangay mode (single/multiple) in Create Program form */
   window.toggleBrgyMode = function(mode) {
     var singleWrap = document.getElementById('singleBrgyWrap');
-    var multiWrap = document.getElementById('multiBrgyWrap');
     var chips = document.getElementById('abBrgyChips');
+    var singleSelectWrap = document.getElementById('abSingleBrgySelectWrap');
+    var multiSelectWrap = document.getElementById('abMultiBrgySelectWrap');
+    var dropdown = document.getElementById('abBrgyDropdown');
     if (singleWrap) singleWrap.style.display = mode === 'single' ? '' : 'none';
-    if (multiWrap) multiWrap.style.display = mode === 'multiple' ? '' : 'none';
-    if (chips) {
-      if (mode === 'single') { abSelectedBrgys = {}; chips.innerHTML = ''; }
-      chips.style.display = mode === 'multiple' ? '' : 'none';
+    if (singleSelectWrap) singleSelectWrap.style.display = mode === 'single' ? '' : 'none';
+    if (multiSelectWrap) multiSelectWrap.style.display = mode === 'multiple' ? '' : 'none';
+    if (dropdown) dropdown.dataset.mode = mode;
+    if (mode === 'single' && Object.keys(abSelectedBrgys).length > 1) {
+      var firstId = Object.keys(abSelectedBrgys)[0];
+      var firstName = abSelectedBrgys[firstId];
+      abSelectedBrgys = {};
+      abSelectedBrgys[firstId] = firstName;
     }
-    if (mode === 'single') aethSyncBrgyInputs();
+    if (chips) chips.style.display = mode === 'multiple' && Object.keys(abSelectedBrgys).length ? 'flex' : 'none';
+    var singleSelect = document.getElementById('abSingleBrgySelect');
+    if (singleSelect) {
+      singleSelect.required = mode === 'single';
+      singleSelect.value = mode === 'single' ? (Object.keys(abSelectedBrgys)[0] || '') : '';
+    }
+    aethRenderBrgyChips();
+    aethUpdateBrgyChecks();
+    aethSyncBrgyInputs();
   };
 
   var abSelectedBrgys = {};
+
+  window.aethSelectSingleBrgy = function(select) {
+    var id = select.value;
+    var option = select.options[select.selectedIndex];
+    abSelectedBrgys = {};
+    if (id) abSelectedBrgys[id] = option.text;
+    aethSyncBrgyInputs();
+    aethSaveProgramDraft();
+  };
 
   window.aethShowBrgyDropdown = function() {
     var dd = document.getElementById('abBrgyDropdown');
@@ -2467,7 +2904,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   window.aethToggleBrgy = function(el) {
     var id = el.getAttribute('data-id');
     var name = el.getAttribute('data-name');
-    if (abSelectedBrgys[id]) {
+    var mode = document.querySelector('input[name="location_mode"]:checked');
+    if (mode && mode.value === 'single') {
+      abSelectedBrgys = {};
+      abSelectedBrgys[id] = name;
+    } else if (abSelectedBrgys[id]) {
       delete abSelectedBrgys[id];
     } else {
       abSelectedBrgys[id] = name;
@@ -2475,6 +2916,13 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     aethRenderBrgyChips();
     aethUpdateBrgyChecks();
     aethSyncBrgyInputs();
+    if (mode && mode.value === 'single') {
+      var search = document.getElementById('abBrgySearch');
+      var dropdown = document.getElementById('abBrgyDropdown');
+      if (search) search.value = '';
+      if (dropdown) dropdown.style.display = 'none';
+      aethFilterBrgys('');
+    }
     aethSaveProgramDraft();
   };
 
@@ -2491,6 +2939,8 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (!wrap) return;
     wrap.innerHTML = '';
     var keys = Object.keys(abSelectedBrgys);
+    var mode = document.querySelector('input[name="location_mode"]:checked');
+    wrap.style.display = mode && mode.value === 'multiple' && keys.length ? 'flex' : 'none';
     keys.forEach(function(id) {
       var chip = document.createElement('span');
       chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:#f4f4f5;border:1px solid #e4e4e7;border-radius:4px;font-size:13px;font-family:"Inter","Segoe UI",sans-serif;color:#18181b;';
@@ -2510,11 +2960,13 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var id = el.getAttribute('data-id');
       var check = el.querySelector('.ab-brgy-check');
       if (abSelectedBrgys[id]) {
+        el.setAttribute('aria-selected', 'true');
         el.style.background = '#f0fdf4';
         check.style.background = '#18181b';
         check.style.borderColor = '#18181b';
         check.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
       } else {
+        el.setAttribute('aria-selected', 'false');
         el.style.background = '';
         check.style.background = '';
         check.style.borderColor = '#d4d4d8';
@@ -2586,7 +3038,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (!confirm(label + ' this program?')) return;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden';
     input.name = action + '_program';
@@ -2626,7 +3078,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     form.querySelector('input[name="end_date"]').value = camp.end || '';
     if (camp.program_start_time) document.getElementById('abTimeStart').value = camp.program_start_time.slice(0, 5);
     if (camp.program_end_time) document.getElementById('abTimeEnd').value = camp.program_end_time.slice(0, 5);
-    form.querySelector('#abStaffRequiredCount').value = camp.staff_required_count || 1;
     form.querySelector('#abTargetReach').value = camp.target || '';
     form.querySelector('#abDogsTarget').value = camp.dogs || '';
     form.querySelector('#abCatsTarget').value = camp.cats || '';
@@ -2659,19 +3110,19 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     toggleBrgyMode(mode);
     if (mode === 'single') {
       document.getElementById('abVenueInput').value = camp.venue || '';
-    } else {
-      abSelectedBrgys = {};
-      document.getElementById('abBrgyChips').innerHTML = '';
-      var ids = (camp.barangay_ids || '').split(',').filter(Boolean);
-      var names = (camp.barangay_names || '').split(',').map(function(n) { return n.trim(); });
-      ids.forEach(function(bid, i) {
-        abSelectedBrgys[bid] = names[i] || '';
-      });
-      aethRenderBrgyChips();
-      aethUpdateBrgyChecks();
-      aethSyncBrgyInputs();
-      document.getElementById('abBrgySearch').value = '';
     }
+    abSelectedBrgys = {};
+    document.getElementById('abBrgyChips').innerHTML = '';
+    var ids = (camp.barangay_ids || '').split(',').filter(Boolean);
+    var names = (camp.barangay_names || '').split(',').map(function(n) { return n.trim(); });
+    ids.forEach(function(bid, i) {
+      abSelectedBrgys[bid] = names[i] || '';
+    });
+    aethRenderBrgyChips();
+    aethUpdateBrgyChecks();
+    aethSyncBrgyInputs();
+    toggleBrgyMode(mode);
+    document.getElementById('abBrgySearch').value = '';
     dlg.querySelector('.sd-btn-primary[type="submit"]').textContent = 'Save Changes';
     aethOpenModal('abNewCampModal');
     aethCheckProgramConflicts();
@@ -2725,7 +3176,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'pause_program'; input.value = '1';
     form.appendChild(input);
@@ -2752,7 +3203,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'resume_program'; input.value = '1';
     form.appendChild(input);
@@ -2779,7 +3230,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'cancel_program'; input.value = '1';
     form.appendChild(input);
@@ -2806,7 +3257,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'mark_completed'; input.value = '1';
     form.appendChild(input);
@@ -2833,7 +3284,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     btn.disabled = true;
     var form = document.createElement('form');
     form.method = 'POST';
-    form.action = 'dashboard-staff.php#analytics';
+    form.action = window.dcvsStaffUrl('dashboard-staff.php') + '#analytics';
     var input = document.createElement('input');
     input.type = 'hidden'; input.name = 'archive_program'; input.value = '1';
     form.appendChild(input);
@@ -2850,7 +3301,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var params = new URLSearchParams();
     params.set('create_from_program', String(id));
     try { localStorage.removeItem('sb2State'); } catch(e) {}
-    window.location.href = 'staff-announcements.php?' + params.toString();
+    window.location.href = window.dcvsStaffUrl('staff-announcements.php') + '?' + params.toString();
   };
 
   var abLogProgState = { target: 0, completed: 0 };
@@ -3033,7 +3484,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var detailFields = ['program_name', 'program_description', 'start_date', 'end_date', 'venue'];
     if (detailFields.some(function(name) { return firstValue(name) !== ''; })) return true;
     if (firstValue('operating_time') && firstValue('operating_time') !== '08:00 AM \u2014 05:00 PM') return true;
-    if (firstValue('staff_required_count') && firstValue('staff_required_count') !== '1') return true;
     if (['target_reach', 'dogs_target', 'cats_target'].some(function(name) {
       var value = firstValue(name);
       return value !== '' && value !== '0';
@@ -3120,6 +3570,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     aethRenderBrgyChips();
     aethUpdateBrgyChecks();
     aethSyncBrgyInputs();
+    toggleBrgyMode(mode);
     if (draft.timeStart) document.getElementById('abTimeStart').value = draft.timeStart;
     if (draft.timeEnd) document.getElementById('abTimeEnd').value = draft.timeEnd;
     aethSyncOpTime();
@@ -3134,17 +3585,29 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var end = form.querySelector('input[name="end_date"]').value;
     var startTime = form.querySelector('input[name="program_start_time"]').value;
     var endTime = form.querySelector('input[name="program_end_time"]').value;
-    var staffRequired = form.querySelector('input[name="staff_required_count"]').value;
-    var notifyWrap = document.getElementById('abNotifyAffectedWrap');
-    var notifyInput = notifyWrap ? notifyWrap.querySelector('input[name="notify_affected"]') : null;
-    if (!start || !end || !startTime || !endTime || !staffRequired) {
+    var conflictChoices = document.getElementById('abProgramConflictChoices');
+    var notifyInput = document.getElementById('abNotifyAffectedInput');
+    var keepChoice = document.getElementById('abKeepAppointmentsChoice');
+    var hoursChoice = document.getElementById('abChangeProgramHoursChoice');
+    var rescheduleChoice = document.getElementById('abRescheduleAppointmentsChoice');
+    var offersInput = document.getElementById('abRescheduleOffersJson');
+    if (!start || !end || !startTime || !endTime) {
       summary.hidden = true;
-      if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+      if (conflictChoices) conflictChoices.hidden = true;
       if (notifyInput) notifyInput.checked = false;
+      if (keepChoice) keepChoice.checked = false;
+      if (hoursChoice) hoursChoice.checked = false;
+      if (rescheduleChoice) rescheduleChoice.checked = false;
+      if (offersInput) offersInput.value = '[]';
       return;
     }
 
     var requestId = ++abConflictRequest;
+    if (keepChoice) keepChoice.checked = false;
+    if (hoursChoice) hoursChoice.checked = false;
+    if (rescheduleChoice) rescheduleChoice.checked = false;
+    if (notifyInput) notifyInput.checked = false;
+    if (offersInput) offersInput.value = '[]';
     summary.hidden = false;
     summary.style.background = '#f4f4f5';
     summary.style.color = '#52525b';
@@ -3154,12 +3617,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       start_date: start,
       end_date: end,
       start_time: startTime,
-      end_time: endTime,
-      staff_required_count: staffRequired
+      end_time: endTime
     });
     if (programId && programId.value) params.set('program_id', programId.value);
 
-    fetch('program-conflicts.php?' + params.toString())
+    fetch(window.dcvsStaffUrl('program-conflicts.php') + '?' + params.toString())
       .then(function(response) { return response.json(); })
       .then(function(data) {
         if (requestId !== abConflictRequest) return;
@@ -3168,28 +3630,138 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         var appointments = data.appointments || [];
         var reports = data.reports || [];
         if (appointments.length) {
-          summary.style.background = '#fef2f2';
-          summary.style.color = '#991b1b';
-          var intro = document.createElement('div');
-          intro.textContent = appointments.length + ' appointment(s) would exceed the remaining staff capacity during the program hours. Reschedule them first or choose to notify the affected residents.';
-          summary.appendChild(intro);
-          var appointmentList = document.createElement('ul');
-          appointmentList.style.cssText = 'margin:6px 0 0;padding-left:20px;';
-          appointments.slice(0, 8).forEach(function(item) {
-            var li = document.createElement('li');
-            li.textContent = item.preferred_date + ' ' + item.preferred_time + ' · ' + (item.reference_id || 'Appointment') + ' · ' + item.full_name;
-            appointmentList.appendChild(li);
+          summary.style.background = '#fff';
+          summary.style.color = '#1e293b';
+          summary.style.borderColor = '#dbe3ec';
+          var statusCounts = {};
+          appointments.forEach(function(item) {
+            var label = String(item.status || 'active').replace(/_/g, ' ');
+            label = label.charAt(0).toUpperCase() + label.slice(1);
+            statusCounts[label] = (statusCounts[label] || 0) + 1;
           });
-          summary.appendChild(appointmentList);
-          if (notifyWrap) { notifyWrap.hidden = false; notifyWrap.style.display = 'flex'; }
+          var heading = document.createElement('div');
+          heading.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-weight:600;color:#18181b;';
+          var headingText = document.createElement('span');
+          headingText.textContent = appointments.length + ' appointment' + (appointments.length === 1 ? '' : 's') + ' affected';
+          var headingCount = document.createElement('span');
+          headingCount.style.cssText = 'font-size:12px;font-weight:400;color:#64748b;white-space:nowrap;';
+          headingCount.textContent = Object.keys(statusCounts).map(function(label) {
+            return statusCounts[label] + ' ' + label;
+          }).join(' · ');
+          heading.appendChild(headingText);
+          heading.appendChild(headingCount);
+          summary.appendChild(heading);
+
+          var context = document.createElement('p');
+          context.style.cssText = 'margin:4px 0 10px;color:#334155;';
+          var remainingRoutineCapacity = appointments.reduce(function(minimum, item) {
+            return Math.min(minimum, Number(item.slot_capacity_after) || 0);
+          }, Number.POSITIVE_INFINITY);
+          context.textContent = 'This program is from ' + formatProgramTime(startTime) + ' to ' + formatProgramTime(endTime) + ' on '
+            + formatProgramDate(start) + ' to ' + formatProgramDate(end) + ', leaving '
+            + remainingRoutineCapacity + ' for routine appointments at the affected times.';
+          summary.appendChild(context);
+
+          var grouped = {};
+          appointments.forEach(function(item) {
+            if (!grouped[item.schedule_date]) grouped[item.schedule_date] = [];
+            grouped[item.schedule_date].push(item);
+          });
+          Object.keys(grouped).sort().forEach(function(date) {
+            var items = grouped[date];
+            var card = document.createElement('div');
+            card.style.cssText = 'border:1px solid #e2e8f0;border-radius:7px;margin-top:7px;padding:8px 10px;background:#fff;';
+            var dayHeader = document.createElement('div');
+            dayHeader.style.cssText = 'display:flex;justify-content:space-between;gap:8px;font-weight:600;';
+            var dayDate = document.createElement('span');
+            dayDate.textContent = formatProgramDate(date);
+            var dayCount = document.createElement('span');
+            dayCount.style.cssText = 'font-weight:400;color:#64748b;';
+            dayCount.textContent = items.length + ' appointment' + (items.length === 1 ? '' : 's');
+            dayHeader.appendChild(dayDate);
+            dayHeader.appendChild(dayCount);
+            card.appendChild(dayHeader);
+
+            items.forEach(function(item) {
+              var row = document.createElement('div');
+              row.style.cssText = 'display:flex;align-items:flex-start;gap:10px;padding-top:8px;margin-top:6px;border-top:1px solid #f1f5f9;';
+              var time = document.createElement('span');
+              time.style.cssText = 'flex:0 0 66px;color:#475569;white-space:nowrap;';
+              time.textContent = formatProgramTime(item.schedule_time);
+              var detail = document.createElement('div');
+              detail.style.cssText = 'flex:1;min-width:0;';
+              var primary = document.createElement('div');
+              primary.style.cssText = 'color:#334155;';
+              var service = document.createElement('span');
+              var serviceName = String(item.appointment_type || 'Appointment').replace(/_/g, ' ');
+              serviceName = serviceName.charAt(0).toUpperCase() + serviceName.slice(1);
+              service.textContent = serviceName + (item.pet_name ? ' for ' + item.pet_name : '');
+              primary.appendChild(service);
+              detail.appendChild(primary);
+              var resident = document.createElement('div');
+              resident.style.cssText = 'display:flex;flex-wrap:wrap;gap:0 5px;font-size:12px;color:#64748b;';
+              var residentName = document.createElement('span');
+              residentName.textContent = item.full_name || 'Resident';
+              var reference = document.createElement('span');
+              reference.textContent = item.reference_id || 'Appointment';
+              resident.appendChild(residentName);
+              resident.appendChild(reference);
+              detail.appendChild(resident);
+              var badge = document.createElement('span');
+              badge.style.cssText = 'flex-shrink:0;padding:2px 7px;border-radius:5px;background:#fef3c7;color:#92400e;font-size:11px;';
+              badge.textContent = String(item.status || 'pending').replace(/_/g, ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); });
+              row.appendChild(time);
+              row.appendChild(detail);
+              row.appendChild(badge);
+              card.appendChild(row);
+
+              var proposal = document.createElement('div');
+              proposal.className = 'ab-reschedule-proposal';
+              proposal.setAttribute('data-appointment-id', item.appointment_id);
+              proposal.style.cssText = 'display:none;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0 2px 76px;';
+              var proposedDate = document.createElement('input');
+              proposedDate.type = 'date';
+              proposedDate.required = false;
+              proposedDate.setAttribute('aria-label', 'Proposed date for ' + (item.reference_id || 'appointment'));
+              proposedDate.min = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+              proposedDate.style.cssText = 'width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #cbd5e1;border-radius:6px;font:13px Inter,sans-serif;';
+              var proposedTime = document.createElement('select');
+              proposedTime.required = false;
+              proposedTime.setAttribute('aria-label', 'Proposed time for ' + (item.reference_id || 'appointment'));
+              proposedTime.style.cssText = proposedDate.style.cssText;
+              [
+                ['', 'Choose time'],
+                ['09:00', '9:00 AM'],
+                ['10:00', '10:00 AM'],
+                ['11:00', '11:00 AM'],
+                ['14:00', '2:00 PM'],
+                ['15:00', '3:00 PM']
+              ].forEach(function(optionData) {
+                var option = document.createElement('option');
+                option.value = optionData[0];
+                option.textContent = optionData[1];
+                proposedTime.appendChild(option);
+              });
+              proposal.appendChild(proposedDate);
+              proposal.appendChild(proposedTime);
+              card.appendChild(proposal);
+            });
+            summary.appendChild(card);
+          });
+          if (conflictChoices) conflictChoices.hidden = false;
         } else {
           summary.style.background = reports.length ? '#fffbeb' : '#f0fdf4';
           summary.style.color = reports.length ? '#92400e' : '#166534';
+          summary.style.borderColor = reports.length ? '#fde68a' : '#bbf7d0';
           var clear = document.createElement('div');
           clear.textContent = reports.length ? 'No appointment staffing conflicts found.' : 'No appointment or report conflicts found.';
           summary.appendChild(clear);
-          if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+          if (conflictChoices) conflictChoices.hidden = true;
           if (notifyInput) notifyInput.checked = false;
+          if (keepChoice) keepChoice.checked = false;
+          if (hoursChoice) hoursChoice.checked = false;
+          if (rescheduleChoice) rescheduleChoice.checked = false;
+          if (offersInput) offersInput.value = '[]';
         }
         if (reports.length) {
           var reportWarning = document.createElement('div');
@@ -3211,14 +3783,95 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         summary.style.background = '#fffbeb';
         summary.style.color = '#92400e';
         summary.textContent = error.message + ' The server will validate conflicts when saving.';
-        if (notifyWrap) { notifyWrap.hidden = true; notifyWrap.style.display = 'none'; }
+        if (conflictChoices) conflictChoices.hidden = true;
+        if (notifyInput) notifyInput.checked = false;
       });
   }
 
+  function formatProgramDate(value) {
+    var parts = String(value || '').substring(0, 10).split('-');
+    if (parts.length !== 3) return value || '';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+  }
+
+  function formatProgramTime(value) {
+    var parts = String(value || '').split(':');
+    if (parts.length < 2) return value || '';
+    var date = new Date();
+    date.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return isNaN(date.getTime()) ? value : date.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  }
+
+  function syncProgramRescheduleOffers() {
+    var selected = document.getElementById('abRescheduleAppointmentsChoice');
+    var notify = document.getElementById('abNotifyAffectedInput');
+    var offersInput = document.getElementById('abRescheduleOffersJson');
+    var proposals = Array.prototype.slice.call(document.querySelectorAll('.ab-reschedule-proposal'));
+    var active = !!(selected && selected.checked);
+    proposals.forEach(function(proposal) {
+      proposal.style.display = active ? 'grid' : 'none';
+      proposal.querySelectorAll('input, select').forEach(function(field) {
+        field.required = active;
+      });
+    });
+    var keepChoice = document.getElementById('abKeepAppointmentsChoice');
+    if (notify) notify.checked = active || !!(keepChoice && keepChoice.checked);
+    if (!offersInput) return;
+    var offers = proposals.map(function(proposal) {
+      var fields = proposal.querySelectorAll('input, select');
+      return {
+        appointment_id: Number(proposal.getAttribute('data-appointment-id')),
+        date: fields[0].value,
+        time: fields[1].value
+      };
+    });
+    offersInput.value = JSON.stringify(offers);
+  }
+
   if (programForm) {
+    var keepAppointmentsChoice = document.getElementById('abKeepAppointmentsChoice');
+    var changeProgramHoursChoice = document.getElementById('abChangeProgramHoursChoice');
+    var rescheduleAppointmentsChoice = document.getElementById('abRescheduleAppointmentsChoice');
+    var notifyAffectedInput = document.getElementById('abNotifyAffectedInput');
+    if (keepAppointmentsChoice) {
+      keepAppointmentsChoice.addEventListener('change', function() {
+        syncProgramRescheduleOffers();
+      });
+    }
+    if (rescheduleAppointmentsChoice) {
+      rescheduleAppointmentsChoice.addEventListener('change', syncProgramRescheduleOffers);
+    }
+    if (changeProgramHoursChoice) {
+      changeProgramHoursChoice.addEventListener('change', function() {
+        if (!changeProgramHoursChoice.checked) return;
+        if (notifyAffectedInput) notifyAffectedInput.checked = false;
+        var startTimeControl = document.getElementById('abTimeStart');
+        if (startTimeControl) {
+          startTimeControl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          startTimeControl.focus();
+          if (typeof startTimeControl.showPicker === 'function') startTimeControl.showPicker();
+        }
+      });
+    }
     programForm.addEventListener('input', aethSaveProgramDraft);
     programForm.addEventListener('change', aethSaveProgramDraft);
     programForm.addEventListener('submit', aethSaveProgramDraft);
+    programForm.addEventListener('input', syncProgramRescheduleOffers);
+    programForm.addEventListener('change', syncProgramRescheduleOffers);
+    programForm.addEventListener('submit', function(event) {
+      syncProgramRescheduleOffers();
+      if (!rescheduleAppointmentsChoice || !rescheduleAppointmentsChoice.checked) return;
+      var proposals = Array.prototype.slice.call(document.querySelectorAll('.ab-reschedule-proposal'));
+      var incomplete = proposals.some(function(proposal) {
+        var fields = proposal.querySelectorAll('input, select');
+        return !fields[0].value || !fields[1].value;
+      });
+      if (!proposals.length || incomplete) {
+        event.preventDefault();
+        alert('Choose a proposed date and time for every affected appointment.');
+      }
+    });
     var startDateInput = programForm.querySelector('input[name="start_date"]');
     var endDateInput = programForm.querySelector('input[name="end_date"]');
     if (startDateInput) {
@@ -3228,7 +3881,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (endDateInput) {
       endDateInput.addEventListener('focus', function() { aethSetProgramDateLimits(!!programForm.querySelector('input[name="create_program"]')); });
     }
-    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], input[name="staff_required_count"]').forEach(function(input) {
+    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], #abTimeStart, #abTimeEnd').forEach(function(input) {
       input.addEventListener('change', aethCheckProgramConflicts);
     });
   }
@@ -3456,7 +4109,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   function apLoadAnimals() {
     document.getElementById('apAnimalList').innerHTML = '<div class="ap-empty"><i class="fas fa-spinner fa-spin"></i>Loading...</div>';
-    fetch('geo-map/adoption-pool.php')
+    fetch(window.dcvsStaffUrl('geo-map/adoption-pool.php'))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         allAnimals = data.animals || [];
@@ -3493,7 +4146,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var statusClass = 'ap-tag-' + (a.status || 'rescued');
       var statusLabel = (a.status || 'rescued').charAt(0).toUpperCase() + (a.status || 'rescued').slice(1);
       var photoHtml = a.photo
-        ? '<img src="' + escH(a.photo) + '" alt="">'
+        ? '<img src="' + escH(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">'
         : '<i class="fas ' + speciesIcon + '"></i>';
       var actionHtml = '';
       if (a.status === 'rescued') {
@@ -3523,7 +4176,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var speciesIcon = a.species === 'dog' ? 'fa-dog' : a.species === 'cat' ? 'fa-cat' : 'fa-paw';
     var photoEl = document.getElementById('apDetailPhoto');
     if (a.photo) {
-      photoEl.innerHTML = '<img src="' + escH(a.photo) + '" alt="">';
+      photoEl.innerHTML = '<img src="' + escH(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">';
     } else {
       photoEl.innerHTML = '<i class="fas ' + speciesIcon + '"></i>';
     }
@@ -3552,7 +4205,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   window.apPromoteAnimal = function(id) {
     if (!confirm('Promote this animal to Available for adoption?')) return;
-    fetch('promote-pet-handler.php', {
+    fetch(window.dcvsStaffUrl('promote-pet-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pet_id: id, status: 'available' })
@@ -3586,7 +4239,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   window.poolLoad = function() {
     var el = document.getElementById('poolAnimalList');
     el.innerHTML = '<div style="text-align:center;padding:40px;color:#a1a1aa;font-size:13px;"><i class="fas fa-spinner fa-spin" style="font-size:20px;display:block;margin-bottom:8px;color:#d4d4d8;"></i>Loading...</div>';
-    fetch('geo-map/adoption-pool.php')
+    fetch(window.dcvsStaffUrl('geo-map/adoption-pool.php'))
       .then(function(r) { return r.json(); })
       .then(function(data) {
         poolAnimals = data.animals || [];
@@ -3625,7 +4278,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       var statusClass = 'ap-tag-' + (a.status || 'rescued');
       var statusLabel = (a.status || 'rescued').charAt(0).toUpperCase() + (a.status || 'rescued').slice(1);
       var photoHtml = a.photo
-        ? '<img src="' + escP(a.photo) + '" alt="">'
+        ? '<img src="' + escP(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="">'
         : '<i class="fas ' + speciesIcon + '"></i>';
       var actionHtml = '';
       if (a.status === 'rescued') {
@@ -3653,7 +4306,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var speciesIcon = a.species === 'dog' ? 'fa-dog' : a.species === 'cat' ? 'fa-cat' : 'fa-paw';
     var photoEl = document.getElementById('poolDetailPhoto');
     if (a.photo) {
-      photoEl.innerHTML = '<img src="' + escP(a.photo) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
+      photoEl.innerHTML = '<img src="' + escP(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(a.photo) : a.photo) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
     } else {
       photoEl.innerHTML = '<i class="fas ' + speciesIcon + '" style="font-size:40px;color:#d4d4d8;"></i>';
     }
@@ -3680,7 +4333,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   window.poolPromote = function(id) {
     if (!confirm('Promote this animal to Available for adoption?')) return;
-    fetch('promote-pet-handler.php', {
+    fetch(window.dcvsStaffUrl('promote-pet-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pet_id: id, status: 'available' })
@@ -3841,7 +4494,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       notes: document.getElementById('rrNotes').value
     };
 
-    fetch('record-rescue-handler.php', {
+    fetch(window.dcvsStaffUrl('record-rescue-handler.php'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

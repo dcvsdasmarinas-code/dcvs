@@ -1,4 +1,6 @@
 ﻿<?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
@@ -118,6 +120,7 @@ $apptUrl = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) ? 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/site-navbar.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 <style>
 /* Mobile navbar: match About Us (shared navbar responsive rules) */
 .nav-links { justify-content: center !important; }
@@ -142,6 +145,7 @@ $apptUrl = (isset($_SESSION['logged_in']) && $_SESSION['logged_in'] === true) ? 
   .dropdown-toggle { padding:5px 10px !important; font-size:0.8rem !important; }
 }
 </style>
+<link rel="icon" href="<?php echo htmlspecialchars($appBaseUrl . '/favicon.ico?v=' . (int)filemtime(__DIR__ . '/../../favicon.ico'), ENT_QUOTES, 'UTF-8'); ?>" sizes="16x16 32x32 48x48" />
 </head><body data-barba="wrapper" data-navigation-status="is-close" data-about-status="is-closed" data-theme-nav="dark" data-scroll-time="0" class="body">
 <?php $currentPage='home'; $homePage='landing-page.php'; include __DIR__ . '/../../includes/landing-navbar.php'; ?>
 <div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span></div><div class="cursor_css w-embed"><style>
@@ -1308,15 +1312,40 @@ html.wf-design-mode .guide_wrap {
   .gap_home_wrap{height:auto!important;min-height:100svh;}
   .gap_home_wrap .gap_home_contain{position:relative;top:auto;height:auto;min-height:100svh;}
   .gap_home_wrap .gap_home_inner{height:auto;min-height:100svh;}
-  .gap_home_wrap .gap_home_inner_content{left:0;right:0;width:100%;justify-content:center;column-gap:clamp(8px,1.4vw,20px);}
+  .gap_home_wrap .gap_home_inner_content{
+    top:calc(50% - min(281.25px, calc(62.5vw - 15px)) - 8.5rem)!important;
+    left:0;
+    right:0;
+    width:100%;
+    flex-flow:row nowrap!important;
+    align-items:center;
+    justify-content:flex-start;
+    column-gap:clamp(8px,1.4vw,20px);
+    transform:none!important;
+  }
   .gap_home_wrap .gap_home_inner_heading-contain,
   .gap_home_wrap .gap_home_inner_heading-contain.is-left,
   .gap_home_wrap .gap_home_inner_heading-contain.is-right{width:max-content!important;max-width:none!important;flex:0 0 auto;overflow:visible;transform:none!important;}
   .gap_home_wrap .gap_home_inner_heading{width:max-content!important;max-width:none!important;white-space:nowrap!important;}
-  .gap_home_wrap .gap_home_inner_heading{color:#045e1f!important;}
-  .gap_home_wrap .gap_home_cover{width:min(450px,calc(100vw - 24px))!important;max-width:none!important;aspect-ratio:4/5;transform:translate(-50%,-50%)!important;clip-path:inset(0 round .25rem)!important;transition:none!important;animation:none!important;}
+  .gap_home_wrap .gap_home_inner_heading{
+    color:#045e1f!important;
+    text-align:center;
+  }
+  .hero_home_wrap .hero_home_heading,
+  .hero_home_wrap .hero-primary-accent,
+  .process_home_wrap .process_home_heading,
+  .process_home_wrap .process_home_content_heading{
+    color:#045e1f!important;
+  }
+  .gap_home_wrap .gap_home_cover{width:min(450px,calc(100vw - 24px))!important;max-width:none!important;aspect-ratio:4/5;transform:translate(-50%,calc(-50% + 1rem))!important;clip-path:inset(0 round .25rem)!important;transition:none!important;animation:none!important;}
   @media screen and (max-width:767px){
-    .gap_home_wrap .gap_home_inner_content{top:17%!important;flex-flow:row nowrap!important;column-gap:6px;}
+    .gap_home_wrap .gap_home_inner_content{
+      top:calc(50% - min(231.25px, calc(62.5vw - 15px)) - 3.25rem)!important;
+      column-gap:6px;
+    }
+    .gap_home_wrap .gap_home_cover{
+      transform:translate(-50%,calc(-50% + .75rem))!important;
+    }
     .gap_home_wrap .gap_home_inner_heading-contain,
     .gap_home_wrap .gap_home_inner_heading-contain.is-left,
     .gap_home_wrap .gap_home_inner_heading-contain.is-right{flex:0 0 auto;}
@@ -1335,6 +1364,110 @@ html.wf-design-mode .guide_wrap {
     max-width: 19rem !important;
     height: auto !important;
     object-fit: contain;
+  }
+  @media screen and (max-width: 767px) {
+    .site-header {
+      padding: 0 !important;
+    }
+    .site-header .navbar {
+      width: 100% !important;
+      min-height: 68px !important;
+      margin: 0 !important;
+      padding: 0 0.75rem !important;
+      border-radius: 0 !important;
+    }
+    .gap_home_wrap .gap_home_inner_content {
+      justify-content: center !important;
+      column-gap: 4px !important;
+    }
+    .gap_home_wrap .gap_home_inner_heading {
+      font-size: clamp(1.65rem, 8vw, 2rem) !important;
+      text-align: center !important;
+    }
+    .problems_home_wrap .problems_home_bottom {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 1.5rem !important;
+    }
+    .problems_home_wrap .problems_home_left {
+      width: 100% !important;
+      text-align: center !important;
+    }
+    .problems_home_wrap .problems_home_left .g_eyebrow {
+      justify-content: center !important;
+      text-align: center !important;
+    }
+    .problems_home_wrap .problems_home_left .g_eyebrow_circle {
+      display: none !important;
+    }
+    .problems_home_wrap .problems_home_list {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      gap: 1rem 0.75rem !important;
+      align-items: start !important;
+    }
+    .problems_home_wrap .problems_home_item {
+      display: flex !important;
+      min-width: 0 !important;
+      min-height: 0 !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      gap: 0.5rem !important;
+      padding: 0 0.25rem 0.5rem !important;
+    }
+    .problems_home_wrap .problems_home_image {
+      position: static !important;
+      display: block !important;
+      width: 100% !important;
+      height: 76px !important;
+      object-fit: contain !important;
+    }
+    .problems_home_wrap .problems_home_label {
+      position: static !important;
+      display: block !important;
+      width: 100% !important;
+      min-height: 2.6em !important;
+      margin: 0 !important;
+      text-align: center !important;
+      font-size: 0.65rem !important;
+      line-height: 1.3 !important;
+      overflow-wrap: anywhere !important;
+    }
+    .process_home_wrap .process_home_content-left {
+      display: block !important;
+    }
+    .process_home_wrap .process_home_content-item {
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 1rem !important;
+    }
+    .process_home_wrap .process_home_content_index {
+      display: none !important;
+    }
+    .process_home_wrap .process_home_content_inner {
+      width: 100% !important;
+      margin: 0 !important;
+      text-align: left !important;
+    }
+    .process_home_wrap .process_home_content_heading,
+    .process_home_wrap .process_home_content-p {
+      width: 100% !important;
+      text-align: left !important;
+    }
+    .process_home_wrap .process_home_video {
+      display: block !important;
+      position: relative !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      margin: 0 !important;
+      aspect-ratio: 16 / 9 !important;
+    }
+    .process_home_wrap .overview_home_video {
+      display: block !important;
+      width: 100% !important;
+      height: 100% !important;
+      object-fit: cover !important;
+    }
   }
 </style>
 <script>
@@ -1407,4 +1540,5 @@ html.wf-design-mode .guide_wrap {
   if(document.readyState === "complete"){ animateHero(); }
 })();
 </script>
+<script src="assets/js/landing-feature-videos.js"></script>
 </body></html>

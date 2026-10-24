@@ -12,6 +12,62 @@ const RISK_COLORS = {
 
 let refreshTimer = null;
 let cachedFeatures = [];
+let pendingSearchQuery = null;
+
+function normalizeBarangayName(value) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function editDistance(left, right) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row++) {
+    let diagonal = previous[0];
+    previous[0] = row;
+    for (let column = 1; column <= right.length; column++) {
+      const above = previous[column];
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + (left[row - 1] === right[column - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[right.length];
+}
+
+function rankBarangays(query) {
+  const normalizedQuery = normalizeBarangayName(query);
+  if (!normalizedQuery) return [];
+
+  return cachedFeatures.map((feature) => {
+    const name = feature.properties && feature.properties.name || '';
+    const normalizedName = normalizeBarangayName(name);
+    const exact = normalizedName === normalizedQuery;
+    const prefix = normalizedName.startsWith(normalizedQuery);
+    const contains = normalizedName.includes(normalizedQuery);
+    const distance = editDistance(normalizedQuery, normalizedName);
+    const threshold = Math.max(2, Math.floor(normalizedQuery.length * 0.35));
+    if (!exact && !prefix && !contains && distance > threshold) return null;
+    return {
+      feature,
+      exact,
+      prefix,
+      contains,
+      distance,
+      rank: exact ? 0 : prefix ? 1 : contains ? 2 : 3,
+      name,
+    };
+  }).filter(Boolean).sort((left, right) =>
+    left.rank - right.rank ||
+    left.distance - right.distance ||
+    left.name.localeCompare(right.name)
+  );
+}
 
 function getRiskBadgeColor(risk) {
   switch (risk) {
@@ -264,53 +320,91 @@ function stopAutoRefresh() {
   if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
 }
 
+function resetSearchStyle(map) {
+  map.setPaintProperty('barangay-fill', 'fill-color', [
+    'match', ['get', 'risk'],
+    'Green', RISK_COLORS.Green,
+    'Yellow', RISK_COLORS.Yellow,
+    'Orange', RISK_COLORS.Orange,
+    'Red', RISK_COLORS.Red,
+    RISK_COLORS.Green,
+  ]);
+  map.setPaintProperty('barangay-fill', 'fill-opacity', 0.5);
+  map.setPaintProperty('barangay-outline', 'line-color', '#ffffff');
+  map.setPaintProperty('barangay-outline', 'line-width', [
+    'interpolate', ['linear'], ['zoom'],
+    10, 1,
+    12, 1.5,
+    15, 3,
+  ]);
+  map.setPaintProperty('barangay-outline', 'line-opacity', 0.7);
+}
+
+function dispatchSearchState(map, id) {
+  const mapElement = map.getContainer().closest('#geoMap');
+  if (mapElement) {
+    mapElement.dispatchEvent(new CustomEvent('dcvs:barangaysearch', {
+      detail: { id: id === null ? null : Number(id), active: id !== null },
+    }));
+  }
+}
+
 function searchBarangay(map, query) {
-  if (!map || !map.getSource('barangays')) return;
-  query = (query || '').toLowerCase().trim();
+  if (!map || !map.getSource('barangays') || !map.getLayer('barangay-fill')) return null;
+  query = normalizeBarangayName(query);
 
   if (!query) {
-    map.setPaintProperty('barangay-fill', 'fill-opacity', 0.5);
-    map.setPaintProperty('barangay-outline', 'line-width', [
-      'interpolate', ['linear'], ['zoom'],
-      10, 1,
-      12, 1.5,
-      15, 3,
-    ]);
-    map.setPaintProperty('barangay-outline', 'line-opacity', 0.7);
-    return;
+    resetSearchStyle(map);
+    dispatchSearchState(map, null);
+    return false;
   }
 
-  const matchIdx = cachedFeatures.findIndex((f) =>
-    (f.properties.name || '').toLowerCase().includes(query)
-  );
+  const match = rankBarangays(query)[0];
+  const feature = match && match.feature;
 
-  if (matchIdx !== -1) {
-    const feature = cachedFeatures[matchIdx];
+  if (feature) {
     const matchId = feature.properties.id;
+    const highlightedRiskColor = [
+      'match', ['get', 'risk'],
+      'Green', RISK_COLORS.Green,
+      'Yellow', RISK_COLORS.Yellow,
+      'Orange', RISK_COLORS.Orange,
+      'Red', RISK_COLORS.Red,
+      RISK_COLORS.Green,
+    ];
+    map.setPaintProperty('barangay-fill', 'fill-color', [
+      'case',
+      ['==', ['to-number', ['get', 'id']], matchId],
+      highlightedRiskColor,
+      '#cbd5e1',
+    ]);
     map.setPaintProperty('barangay-fill', 'fill-opacity', [
-      'case', ['==', ['get', 'id'], matchId], 0.7, 0.2,
+      'case', ['==', ['to-number', ['get', 'id']], matchId], 0.72, 0.42,
+    ]);
+    map.setPaintProperty('barangay-outline', 'line-color', [
+      'case', ['==', ['to-number', ['get', 'id']], matchId], '#0e8131', '#ffffff',
     ]);
     map.setPaintProperty('barangay-outline', 'line-width', [
-      'case', ['==', ['get', 'id'], matchId],
+      'case', ['==', ['to-number', ['get', 'id']], matchId],
       ['interpolate', ['linear'], ['zoom'], 10, 2.5, 12, 4, 15, 7],
       ['interpolate', ['linear'], ['zoom'], 10, 0.5, 12, 1, 15, 2],
     ]);
     map.setPaintProperty('barangay-outline', 'line-opacity', [
-      'case', ['==', ['get', 'id'], matchId], 1, 0.3,
+      'case', ['==', ['to-number', ['get', 'id']], matchId], 1, 0.55,
     ]);
     if (feature.geometry) {
-      const center = computeCentroid(feature.geometry.coordinates);
-      map.flyTo({ center, zoom: 14, duration: 800 });
+      map.fitBounds(computeBounds([feature]), {
+        padding: 64,
+        maxZoom: 14,
+        duration: 800,
+      });
     }
+    dispatchSearchState(map, matchId);
+    return true;
   } else {
-    map.setPaintProperty('barangay-fill', 'fill-opacity', 0.5);
-    map.setPaintProperty('barangay-outline', 'line-width', [
-      'interpolate', ['linear'], ['zoom'],
-      10, 1,
-      12, 1.5,
-      15, 3,
-    ]);
-    map.setPaintProperty('barangay-outline', 'line-opacity', 0.7);
+    resetSearchStyle(map);
+    dispatchSearchState(map, null);
+    return false;
   }
 }
 
@@ -324,6 +418,11 @@ export function initBarangayOverlay(map, opts) {
       updateSummary(data.metadata);
       setupInteractions(map);
       startAutoRefresh(map);
+      if (pendingSearchQuery !== null) {
+        searchBarangay(map, pendingSearchQuery);
+        pendingSearchQuery = null;
+      }
+      document.dispatchEvent(new CustomEvent('dcvs:barangaysready'));
       // Stop auto-refresh when map is removed
       map.on('remove', stopAutoRefresh);
     })
@@ -349,7 +448,21 @@ window.MapCN.barangayOverlay = {
   destroy: destroyBarangayOverlay,
   search: (query) => {
     const map = window.MapCN && window.MapCN.map;
-    if (map) searchBarangay(map, query);
+    if (!map || !map.getSource('barangays') || !map.getLayer('barangay-fill')) {
+      pendingSearchQuery = (query || '').trim();
+      return null;
+    }
+    pendingSearchQuery = null;
+    return searchBarangay(map, query);
+  },
+  suggest: (query, limit = 5) => rankBarangays(query)
+    .slice(0, limit)
+    .map((match) => ({
+      id: match.feature.properties.id,
+      name: match.name,
+    })),
+  cancelPendingSearch: () => {
+    pendingSearchQuery = null;
   },
   refresh: () => {
     const map = window.MapCN && window.MapCN.map;

@@ -34,7 +34,8 @@
     return '<span class="type-badge ' + typeClass(t) + '"><span class="type-dot"></span>' + esc(label) + '</span>';
   }
   function avatarHtml(r) {
-    return r.avatar ? '<img src="' + esc(r.avatar) + '" alt="">' : esc(initials(r.reporter));
+    var avatar = window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar;
+    return r.avatar ? '<img src="' + esc(avatar) + '" alt="">' : esc(initials(r.reporter));
   }
   function infoRow(label, value) {
     return '<div class="info-row"><div><p class="info-row-label">' + esc(label) + '</p><p class="info-row-value">' + esc(value) + '</p></div></div>';
@@ -54,10 +55,12 @@
     return '#CASE-' + String(r.id || 0);
   }
   function structuredDrawerHtml(r, prefix) {
+    var photoUrl = window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.photo) : r.photo;
+    var videoUrl = window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.video) : r.video;
     var photoHtml = (r.photo || r.video)
       ? '<div class="rpt-photo-box">' +
-        (r.photo ? '<div class="rpt-photo-thumb" onclick="' + prefix + 'ViewPhoto(\'' + esc(r.photo) + '\')"><img src="' + esc(r.photo) + '" alt="Report attachment"></div>' : '') +
-        (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + esc(r.video) + '" controls playsinline preload="metadata"></video></div>' : '') +
+        (r.photo ? '<div class="rpt-photo-thumb" onclick="' + prefix + 'ViewPhoto(\'' + esc(photoUrl) + '\')"><img src="' + esc(photoUrl) + '" alt="Report attachment"></div>' : '') +
+        (r.video ? '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + esc(videoUrl) + '" controls playsinline preload="metadata"></video></div>' : '') +
         '</div>'
       : '<p class="rpt-photo-none">No attachments.</p>';
     var history = [
@@ -172,7 +175,7 @@
       }
       if (state.type) rows = rows.filter(function (r) { return r.type === state.type; });
       if (state.brgy) rows = rows.filter(function (r) { return r.brgy === state.brgy; });
-      if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom).getTime(); });
+      if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom + 'T00:00:00').getTime(); });
       if (state.dateTo) rows = rows.filter(function (r) { return r.ts <= new Date(state.dateTo + 'T23:59:59').getTime(); });
       rows.sort(function (a, b) {
         if (state.sort === 'oldest') return a.ts - b.ts;
@@ -389,7 +392,13 @@
         b.classList.toggle('active', b.getAttribute('data-tab') === detailTab);
       });
       box.querySelectorAll('.rpt-detail-body').forEach(function (b) {
-        b.style.display = b.getAttribute('data-tab') === detailTab ? '' : 'none';
+        var isActiveTab = b.getAttribute('data-tab') === detailTab;
+        b.hidden = !isActiveTab;
+        b.style.setProperty(
+          'display',
+          isActiveTab ? (detailTab === 'details' ? 'flex' : 'block') : 'none',
+          'important'
+        );
       });
     }
     window[p + 'Actions'] = function (ev, id) {

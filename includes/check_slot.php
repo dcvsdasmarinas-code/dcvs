@@ -30,14 +30,15 @@ $weeklyTemplate = dcvsWeeklyTemplate($conn);
 $firstDay = $date;
 $lastDay = date('Y-m-d', strtotime($date . ' +90 days'));
 $staffCount = dcvsActiveStaffCount($conn);
-$programStaffing = dcvsProgramStaffingMap($conn, $firstDay, $lastDay);
 $counts = [];
-$countStmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level, COUNT(*) AS appointment_count
+$countStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+        COALESCE(scheduled_time, preferred_time) AS slot_time, urgency_level, COUNT(*) AS appointment_count
     FROM appointments
-    WHERE preferred_date BETWEEN ? AND ?
-      AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+    WHERE COALESCE(scheduled_date, preferred_date) BETWEEN ? AND ?
+      AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
       AND archived_at IS NULL" . ($excludeId ? " AND appointment_id != ?" : "") . "
-    GROUP BY preferred_date, preferred_time, urgency_level");
+    GROUP BY COALESCE(scheduled_date, preferred_date),
+        COALESCE(scheduled_time, preferred_time), urgency_level");
 if (!$countStmt) {
     error_log('Failed to prepare slot availability count: ' . $conn->error);
     http_response_code(500);
@@ -56,8 +57,8 @@ if (!$countStmt->execute()) {
 $countResult = $countStmt->get_result();
 $dayCounts = [];
 while ($row = $countResult->fetch_assoc()) {
-    $slotDate = $row['preferred_date'];
-    $slotTime = substr($row['preferred_time'], 0, 5);
+    $slotDate = $row['slot_date'];
+    $slotTime = substr($row['slot_time'], 0, 5);
     $level = $row['urgency_level'] ?? 'routine';
     $count = (int)$row['appointment_count'];
     $counts[$slotDate][$slotTime][$level] = $count;
@@ -88,9 +89,9 @@ while ($row = $overrideResult->fetch_assoc()) {
 $overrideStmt->close();
 
 $maxPerDay = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-$slotCapacity = static function ($slotDate, $slotTime) use ($urgency, $staffCount, $programStaffing) {
+$slotCapacity = static function ($slotDate, $slotTime) use ($urgency, $staffCount) {
     if ($urgency === 'urgent') return $staffCount > 0 ? 1 : 0;
-    return max(0, $staffCount - (int)($programStaffing[$slotDate][$slotTime] ?? 0));
+    return max(0, $staffCount);
 };
 $slotIsOpen = static function ($slotDate, $slotTime) use ($conn, $weeklyTemplate, $overrides, $slotCapacity, $counts, $dayCounts, $urgency, $maxPerDay) {
     if (!dcvsClinicSlotAvailable($conn, $slotDate, $slotTime, $weeklyTemplate, $overrides[$slotDate] ?? [])) return false;
@@ -105,7 +106,7 @@ $capacity = $time === '' ? 0 : $slotCapacity($date, $time);
 $slotCount = $time === '' ? 0 : (int)($counts[$date][$time][$urgency] ?? 0);
 $dayCount = (int)($dayCounts[$date][$urgency] ?? 0);
 $clinicBlocked = !$clinicOpen;
-$programBlocked = $time !== '' && $urgency === 'routine' && $clinicOpen && $capacity === 0;
+$programBlocked = false;
 $blocked = $clinicBlocked || $programBlocked;
 $held = $time !== '' && $capacity > 0 && $slotCount >= $capacity;
 $available = $time === ''

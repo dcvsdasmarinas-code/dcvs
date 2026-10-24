@@ -179,7 +179,6 @@ $sbModules = [
     ],
 ];
 ?>
-<link rel="stylesheet" href="assets/css/sb2.css" />
 <style>
   .sb2-menu-item.sb2-conditional { display:none; }
   .sb2-menu-item.sb2-conditional.visible { display:block; }

@@ -46,8 +46,8 @@ $pageTitle = 'Submit Report';
 
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/dashboard.css'); ?>" />
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/responsive.css'); ?>" />
   <?php if ($reportPinEnabled): ?>
   <link rel="stylesheet" href="dist/mapcn.css" />
   <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/geo-map/map.css'); ?>" />
@@ -729,8 +729,9 @@ $pageTitle = 'Submit Report';
 
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
+  <link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/sb2.css'); ?>" />
 </head>
-<body class="resident-portal">
+<body class="resident-portal sb2-active">
 
 <?php include 'includes/resident-sidebar.php'; ?>
 
@@ -1219,7 +1220,7 @@ $pageTitle = 'Submit Report';
 
     reportMapLoadPromise = new Promise(function(resolve, reject) {
       var script = document.createElement('script');
-      script.src = 'dist/mapcn.umd.cjs';
+      script.src = 'dist/mapcn.umd.cjs?v=<?php echo (int)filemtime(__DIR__ . '/dist/mapcn.umd.cjs'); ?>';
       script.onload = function() {
         if (window.MapCN && typeof window.MapCN.init === 'function') resolve();
         else reject(new Error('The report map library did not initialize.'));

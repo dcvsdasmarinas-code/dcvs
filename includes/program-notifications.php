@@ -9,8 +9,8 @@ function dcvsNotifyProgramAffectedAppointments($conn, $appointments, $programNam
         if (isset($notifiedUsers[$userId])) continue;
         $notifiedUsers[$userId] = true;
 
-        $date = date('F j, Y', strtotime($appointment['preferred_date']));
-        $time = date('g:i A', strtotime($appointment['preferred_time']));
+        $date = date('F j, Y', strtotime($appointment['schedule_date'] ?? $appointment['preferred_date']));
+        $time = date('g:i A', strtotime($appointment['schedule_time'] ?? $appointment['preferred_time']));
         $message = 'A DCVS program (' . $programName . ') requires staff during your appointment time on ' . $date . ' at ' . $time . '. Your appointment has not been cancelled. Please contact DCVS at (046) 432-1234 or sign in to review/reschedule your appointment.';
         createNotification($conn, $userId, 'appointment_update', 'Program May Affect Your Appointment', $message, 'appointments', (int)$appointment['appointment_id']);
 

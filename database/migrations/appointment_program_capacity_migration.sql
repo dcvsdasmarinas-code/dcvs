@@ -2,7 +2,7 @@
 ALTER TABLE `programs`
     ADD COLUMN IF NOT EXISTS `program_start_time` TIME DEFAULT NULL AFTER `end_date`,
     ADD COLUMN IF NOT EXISTS `program_end_time` TIME DEFAULT NULL AFTER `program_start_time`,
-    ADD COLUMN IF NOT EXISTS `staff_required_count` INT NOT NULL DEFAULT 1 AFTER `program_end_time`,
+    ADD COLUMN IF NOT EXISTS `staff_required_count` INT NOT NULL DEFAULT 0 AFTER `program_end_time`,
     MODIFY `status` ENUM('scheduled', 'live', 'paused', 'completed', 'ended', 'cancelled', 'archived') NOT NULL DEFAULT 'scheduled';
 
 ALTER TABLE `appointments`

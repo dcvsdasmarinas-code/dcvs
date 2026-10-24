@@ -8,8 +8,10 @@ $calYear = (int)date('Y');
 $calAppointments = [];
 if (isset($conn) && !$conn->connect_error) {
     $calStmt = $conn->prepare("
-        SELECT a.appointment_id, a.reference_id, a.pet_id, a.preferred_date, a.preferred_time,
-               a.status, a.appointment_type, a.notes, a.created_at,
+        SELECT a.appointment_id, a.reference_id, a.pet_id,
+               COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+               COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
+               a.status, a.appointment_type, a.urgency_level, a.notes, a.created_at,
                COALESCE(NULLIF(a.pet_name,''), p.pet_name) AS pet_name,
                p.pet_type, p.breed, p.photo_url AS pet_photo, p.reference_id AS pet_ref,
                u.full_name, u.phone, u.address, b.barangay_name
@@ -18,9 +20,9 @@ if (isset($conn) && !$conn->connect_error) {
         LEFT JOIN pets p ON a.pet_id = p.pet_id
         LEFT JOIN barangays b ON u.barangay_id = b.barangay_id
         WHERE a.archived_at IS NULL
-          AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
-          AND YEAR(a.preferred_date) = ?
-        ORDER BY a.preferred_date, a.preferred_time
+          AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+          AND YEAR(COALESCE(a.scheduled_date, a.preferred_date)) = ?
+        ORDER BY COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)
     ");
     if ($calStmt) {
         $calStmt->bind_param('i', $calYear);
@@ -30,10 +32,10 @@ if (isset($conn) && !$conn->connect_error) {
         $calStmt->close();
     }
     $calAnnouncements = [];
-    $annRes = $conn->query("SELECT a.announcement_id, a.title, a.content, a.category, a.priority, a.status, a.publish_at, a.updated_at, a.expiry_date, a.photo_url, a.barangay_id, b.barangay_name FROM announcements a LEFT JOIN barangays b ON a.barangay_id = b.barangay_id WHERE a.status IN ('published','scheduled') AND a.archived_at IS NULL AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE()) ORDER BY a.publish_at");
+    $annRes = $conn->query("SELECT a.announcement_id, a.title, a.content, a.category, a.priority, a.status, a.publish_at, a.created_at, a.updated_at, a.expiry_date, a.photo_url, a.barangay_id, a.is_event, a.event_date, a.event_end_date, a.event_start_time, a.event_end_time, a.venue_name, b.barangay_name FROM announcements a LEFT JOIN barangays b ON a.barangay_id = b.barangay_id WHERE a.status IN ('published','scheduled') AND a.archived_at IS NULL AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE()) ORDER BY COALESCE(a.publish_at, a.created_at)");
     if ($annRes) { while ($row = $annRes->fetch_assoc()) { $calAnnouncements[] = $row; } }
     $calPrograms = [];
-    $progStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_type, p.description, p.status, p.start_date, p.end_date, p.operating_time, p.location_mode, p.venue, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY b.barangay_name SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON p.program_id = pb.program_id LEFT JOIN barangays b ON pb.barangay_id = b.barangay_id WHERE p.status IN ('scheduled','live','paused') AND p.end_date >= CURDATE() AND p.end_date >= ? AND p.start_date <= ? GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
+    $progStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_type, p.description, p.status, p.start_date, p.end_date, p.operating_time, p.location_mode, p.venue, (SELECT MAX(a.announcement_id) FROM announcements a WHERE a.program_id = p.program_id) AS announcement_id, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY b.barangay_name SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON p.program_id = pb.program_id LEFT JOIN barangays b ON pb.barangay_id = b.barangay_id WHERE p.status IN ('scheduled','live','paused') AND p.end_date >= CURDATE() AND p.end_date >= ? AND p.start_date <= ? GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
     if ($progStmt) {
       $yearStart = $calYear . '-01-01';
       $yearEnd = $calYear . '-12-31';
@@ -44,8 +46,9 @@ if (isset($conn) && !$conn->connect_error) {
       $progStmt->close();
     }
     $calReports = [];
-    $reportStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.description, r.location_address, r.urgency_level, r.status, r.created_at, COALESCE(r.incident_at, r.created_at) AS incident_at, b.barangay_name, u.full_name AS reporter_name
+    $reportStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.description, r.location_address, r.urgency_level, r.status, rw.state AS response_state, r.created_at, COALESCE(r.incident_at, r.created_at) AS incident_at, b.barangay_name, u.full_name AS reporter_name
         FROM reports r
+        LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
         LEFT JOIN barangays b ON b.barangay_id = r.barangay_id
         LEFT JOIN users u ON u.user_id = r.reporter_id
       WHERE r.archived_at IS NULL AND r.status <> 'resolved' AND YEAR(COALESCE(r.incident_at, r.created_at)) = ?
@@ -189,6 +192,7 @@ if (isset($conn) && !$conn->connect_error) {
   border-bottom:1px solid var(--ec-border);
 }
 #dcvsEventsCalendar .ec-weekday{ padding:8px; text-align:center; font-size:14px; font-weight:500; }
+#dcvsEventsCalendar .ec-weekday-short{ display:none; }
 
 /* Main / months */
 #dcvsEventsCalendar .ec-main{ padding:32px 24px; }
@@ -205,7 +209,9 @@ if (isset($conn) && !$conn->connect_error) {
   background:var(--ec-bg); padding:8px; min-height:120px; transition:background .15s;
 }
 #dcvsEventsCalendar .ec-day:hover{ background:var(--ec-accent); }
-#dcvsEventsCalendar .ec-day.today{ box-shadow:inset 0 0 0 2px var(--ec-primary); }
+#dcvsEventsCalendar .ec-day.today,
+#dcvsEventsCalendar .ec-day.today:hover{ background:#0e8131; }
+#dcvsEventsCalendar .ec-day.selected{ box-shadow:inset 0 0 0 2px #0e8131; }
 #dcvsEventsCalendar .ec-day.ec-day-capacity-full .ec-events{ filter:blur(1.5px); opacity:.72; transition:filter .15s,opacity .15s; }
 #dcvsEventsCalendar .ec-day.ec-day-capacity-full:hover .ec-events,
 #dcvsEventsCalendar .ec-day.ec-day-capacity-full:focus-within .ec-events{ filter:none; opacity:1; }
@@ -214,7 +220,9 @@ if (isset($conn) && !$conn->connect_error) {
   font-family:'Geist Mono','SFMono-Regular',Consolas,monospace; font-weight:300;
   font-size:4.5rem; line-height:1; margin:0 0 8px;
 }
-#dcvsEventsCalendar .ec-day.today .ec-day-num{ color:var(--ec-primary); }
+#dcvsEventsCalendar .ec-day.today .ec-day-num,
+#dcvsEventsCalendar .ec-day.today.selected .ec-day-num{ color:#fff; }
+#dcvsEventsCalendar .ec-day.selected:not(.today) .ec-day-num{ color:#0e8131; }
 
 /* Event blocks */
 #dcvsEventsCalendar .ec-events{ display:flex; flex-direction:column; gap:8px; }
@@ -231,6 +239,13 @@ if (isset($conn) && !$conn->connect_error) {
   display:inline-block; margin-top:4px; font-size:10px; background:var(--ec-bg);
   padding:2px 4px; border-radius:4px;
 }
+#dcvsEventsCalendar .ec-event-badges{ display:flex; flex-wrap:wrap; align-items:center; gap:3px; }
+#dcvsEventsCalendar .ec-urgency-badge{ display:inline-block; padding:2px 4px; border-radius:4px; background:#f4f4f5; color:#52525b; font-size:9px; line-height:1.25; text-transform:capitalize; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-urgent{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-routine{ background:#dbeafe; color:#1e40af; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-high{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-medium{ background:#fef3c7; color:#92400e; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-low{ background:#dcfce7; color:#166534; }
 /* Appointment status colors */
 #dcvsEventsCalendar .ec-st-pending{ border-left-color:#f59e0b; }
 #dcvsEventsCalendar .ec-st-published{ border-left-color:#10b981; }
@@ -250,6 +265,16 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-event-edition.ec-st-no-show{ background:#f1f5f9; color:#475569; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-live{ background:#ecfdf5; color:#047857; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-paused{ background:#fffbeb; color:#92400e; }
+#dcvsEventsCalendar .ec-st-approved{ border-left-color:#16a34a; }
+#dcvsEventsCalendar .ec-st-action-needed{ border-left-color:#f97316; }
+#dcvsEventsCalendar .ec-st-in-progress{ border-left-color:#2563eb; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-approved{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-action-needed{ background:#ffedd5; color:#9a3412; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-in-progress{ background:#dbeafe; color:#1e40af; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-validated{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-active{ background:#eff6ff; color:#1e40af; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-resolved{ background:#0e8131; color:#fff; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-rejected{ background:#fee2e2; color:#991b1b; }
 #dcvsEventsCalendar .ec-dialog-ref{ font-size:13px; color:var(--ec-muted-fg); margin:0 0 8px; }
 
 /* Calendar dialogs use the dashboard's shadcn (sd-dialog) design */
@@ -317,6 +342,9 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-status-pill.ec-st-rejected{ background:#fef2f2; color:#b91c1c; }
 #dcvsEventsCalendar .ec-status-pill.ec-st-rescheduled{ background:#f5f3ff; color:#6d28d9; }
 #dcvsEventsCalendar .ec-status-pill.ec-st-no-show{ background:#f1f5f9; color:#475569; }
+#dcvsEventsCalendar .ec-status-pill.ec-st-validated{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-status-pill.ec-st-active{ background:#eff6ff; color:#1e40af; }
+#dcvsEventsCalendar .ec-status-pill.ec-st-resolved{ background:#0e8131; color:#fff; }
 #dcvsEventsCalendar .ec-event-time{ color:var(--ec-muted-fg); margin-top:4px; }
 #dcvsEventsCalendar .ec-event-loc{ color:var(--ec-muted-fg); }
 #dcvsEventsCalendar .ec-grid{ display:block; }
@@ -331,8 +359,10 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-seminar{ --event-color:#7c3aed; border-left-color:#7c3aed; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-other{ --event-color:#64748b; border-left-color:#64748b; }
 #dcvsEventsCalendar .ec-event-card-head{ display:flex; align-items:center; justify-content:space-between; gap:4px; }
+#dcvsEventsCalendar .ec-event-card-head.ec-report-event-head{ flex-wrap:wrap; justify-content:flex-start; }
 #dcvsEventsCalendar .ec-event-card-head .ec-event-name{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 #dcvsEventsCalendar .ec-event-card-head .ec-event-edition{ flex:0 0 auto; margin:0; text-transform:capitalize; }
+#dcvsEventsCalendar .ec-report-event-head .ec-event-edition{ max-width:100%; white-space:normal; overflow-wrap:anywhere; text-transform:none; }
 #dcvsEventsCalendar .ec-cell-more{ display:block; width:100%; padding:2px 0; border:0; background:transparent; color:#0e8131; font:inherit; font-size:11px; font-weight:600; text-align:left; text-decoration:underline; cursor:pointer; }
 #dcvsEventsCalendar .ec-week-row .ec-event-time,
 #dcvsEventsCalendar .ec-week-row .ec-event-loc{ display:flex; align-items:center; gap:4px; margin-top:4px; overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
@@ -363,20 +393,39 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day-popover-item{ padding:9px 10px; border:1px solid transparent; border-bottom-color:#e4e4e7; border-left:3px solid var(--event-color); border-radius:4px; }
 #dcvsEventsCalendar .ec-day-popover-item.highlighted{ border-color:var(--event-color); background:color-mix(in srgb,var(--event-color) 8%,#fff); }
 #dcvsEventsCalendar .ec-day-popover-item-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+#dcvsEventsCalendar .ec-day-popover-badges{ display:flex; flex:0 0 auto; align-items:center; gap:4px; }
 #dcvsEventsCalendar .ec-day-popover-item-title{ min-width:0; margin:0; font-size:13px; font-weight:600; }
 #dcvsEventsCalendar .ec-day-popover-status{ flex:0 0 auto; padding:2px 7px; border-radius:10px; background:#f4f4f5; color:#52525b; font-size:10px; font-weight:600; text-transform:capitalize; }
 #dcvsEventsCalendar .ec-day-popover-status[data-status="live"]{ background:#dcfce7; color:#166534; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-pending{ background:#fef3c7; color:#92400e; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-validated{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-active{ background:#eff6ff; color:#1e40af; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-resolved{ background:#0e8131; color:#fff; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-rejected{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-approved{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-action-needed{ background:#ffedd5; color:#9a3412; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-in-progress{ background:#dbeafe; color:#1e40af; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-scheduled{ background:#0e8131; color:#fff; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-rescheduled{ background:#ede9fe; color:#6d28d9; }
 #dcvsEventsCalendar .ec-day-popover-meta{ display:flex; align-items:flex-start; gap:6px; margin-top:4px; color:#52525b; font-size:12px; line-height:1.4; }
 #dcvsEventsCalendar .ec-day-popover-meta svg{ width:14px; height:14px; flex:0 0 14px; margin-top:1px; color:#71717a; }
 #dcvsEventsCalendar .ec-day-popover-empty{ margin:10px 2px; color:#71717a; font-size:13px; }
 #dcvsEventsCalendar :focus-visible{ outline:2px solid #0e8131; outline-offset:2px; }
-@media(max-width:700px){
+@media(max-width:1024px){
   #dcvsEventsCalendar{ margin:0; }
   #dcvsEventsCalendar .ec-header-inner{ padding:12px; }
   #dcvsEventsCalendar .ec-controls-row,
   #dcvsEventsCalendar .ec-controls-left,
   #dcvsEventsCalendar .ec-controls-right{ flex-wrap:wrap; }
-  #dcvsEventsCalendar .ec-search{ width:min(220px,100%); }
+  #dcvsEventsCalendar .ec-controls-row{ align-items:stretch; gap:10px; }
+  #dcvsEventsCalendar .ec-controls-left,
+  #dcvsEventsCalendar .ec-controls-right{ min-width:0; width:100%; gap:8px; }
+  #dcvsEventsCalendar .ec-controls-right{ justify-content:flex-start; }
+  #dcvsEventsCalendar .ec-search-wrap{ flex:1 1 100%; min-width:0; }
+  #dcvsEventsCalendar .ec-search{ width:100%; max-width:100%; }
+  #dcvsEventsCalendar .ec-dropdown{ min-width:0; max-width:100%; }
+  #dcvsEventsCalendar .ec-btn{ max-width:100%; padding-inline:10px; }
+  #dcvsEventsCalendar .ec-mode-btn{ white-space:normal; text-align:left; }
   #dcvsEventsCalendar .ec-month-nav{ width:auto; }
   #dcvsEventsCalendar .ec-weekday-row .ec-weekdays{ display:none; }
   #dcvsEventsCalendar .ec-main{ padding:14px 8px 24px; }
@@ -393,6 +442,103 @@ if (isset($conn) && !$conn->connect_error) {
   #dcvsEventsCalendar .ec-week-event{ gap:3px; padding:0 3px; }
   #dcvsEventsCalendar .ec-week-event-time{ font-size:9px; }
   #dcvsEventsCalendar .ec-week-event-name{ font-size:10px; }
+}
+@media(max-width:1024px){
+  #dcvsEventsCalendar .ec-weekday-row{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  #dcvsEventsCalendar .ec-month-nav{
+    justify-content:center;
+    width:100%;
+  }
+  #dcvsEventsCalendar .ec-nav-label{ flex:0 0 auto; }
+  #dcvsEventsCalendar .ec-weekday-row .ec-weekdays{
+    display:grid;
+    width:100%;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+  }
+  #dcvsEventsCalendar .ec-weekday{
+    min-width:0;
+    padding:5px 0;
+    font-size:clamp(9px,1.2vw,12px);
+    white-space:nowrap;
+  }
+  #dcvsEventsCalendar .ec-month-row{ display:block; }
+  #dcvsEventsCalendar .ec-month-label{ margin-bottom:8px; }
+  #dcvsEventsCalendar .ec-month-label h2{ font-size:24px; }
+  #dcvsEventsCalendar .ec-grid{
+    display:block;
+    overflow-x:hidden;
+  }
+  #dcvsEventsCalendar .ec-week-row{
+    min-width:0;
+    grid-template-columns:repeat(7,minmax(0,1fr));
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-day-num{
+    font-size:clamp(16px,2vw,24px);
+    line-height:1.2;
+    margin-bottom:6px;
+  }
+}
+@media(max-width:700px){
+  #dcvsEventsCalendar .ec-weekday-full{ display:none; }
+  #dcvsEventsCalendar .ec-weekday-short{ display:inline; }
+  #dcvsEventsCalendar .ec-week-row .ec-day{
+    min-width:0;
+    min-height:78px;
+    padding:5px 3px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-day-num{
+    font-size:1rem;
+    line-height:1.2;
+    margin-bottom:5px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-events{
+    flex-direction:row;
+    flex-wrap:wrap;
+    gap:3px;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-event{
+    width:8px;
+    height:8px;
+    flex:0 0 8px;
+    overflow:hidden;
+    padding:0;
+    border:0;
+    border-radius:50%;
+    background:var(--event-color,#64748b);
+    font-size:0;
+  }
+  #dcvsEventsCalendar .ec-week-row .ec-event-card-head,
+  #dcvsEventsCalendar .ec-week-row .ec-event-time,
+  #dcvsEventsCalendar .ec-week-row .ec-event-loc{
+    display:none;
+  }
+}
+@media(max-width:640px){
+  #ecEventDialog.modal{
+    align-items:stretch;
+    justify-content:stretch;
+    padding:0;
+  }
+  #ecEventDialog .sd-dialog{
+    width:100%;
+    height:100%;
+    max-width:none;
+  }
+  #ecEventDialog .sd-dialog-content{
+    box-sizing:border-box;
+    width:100%;
+    max-width:100%;
+    height:100dvh;
+    max-height:100dvh;
+    min-width:0;
+    border:0;
+    border-radius:0;
+    padding:20px 16px calc(16px + env(safe-area-inset-bottom));
+  }
 }
 @media(prefers-reduced-motion:reduce){
   #dcvsEventsCalendar .ec-week-event, #dcvsEventsCalendar .ec-day-popover{ transition:none; }
@@ -499,7 +645,6 @@ if (isset($conn) && !$conn->connect_error) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           <input type="text" id="ecSearch" class="ec-search" placeholder="Search events..." oninput="ecSetSearch(this.value)">
         </div>
-
         <div class="ec-dropdown">
           <button type="button" class="ec-btn" onclick="ecToggleMenu(this,'ecMonthMenu')">Choose a month<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="ec-menu" id="ecMonthMenu"></div>
@@ -513,6 +658,13 @@ if (isset($conn) && !$conn->connect_error) {
         <div class="ec-dropdown">
           <button type="button" class="ec-btn" onclick="ecToggleMenu(this,'ecTypeMenu')"><span id="ecTypeLabel">Schedule Type</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
           <div class="ec-menu" id="ecTypeMenu"></div>
+        </div>
+        <div class="staff-date-filter" data-date-filter="ec">
+          <button class="staff-date-filter-button" type="button" aria-label="Filter calendar schedule by date" title="Filter by date" aria-expanded="false">
+            <i class="fas fa-filter" aria-hidden="true"></i>
+          </button>
+          <input type="hidden" id="ecDateFrom" value="">
+          <input type="hidden" id="ecDateTo" value="">
         </div>
 
       </div>
@@ -536,13 +688,13 @@ if (isset($conn) && !$conn->connect_error) {
         <button type="button" class="ec-nav-btn" onclick="ecNextMonth()" aria-label="Next month" title="Next month"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
       </div>
       <div class="ec-weekdays">
-        <div class="ec-weekday">Monday</div>
-        <div class="ec-weekday">Tuesday</div>
-        <div class="ec-weekday">Wednesday</div>
-        <div class="ec-weekday">Thursday</div>
-        <div class="ec-weekday">Friday</div>
-        <div class="ec-weekday">Saturday</div>
-        <div class="ec-weekday">Sunday</div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Monday</span><span class="ec-weekday-short">Mon</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Tuesday</span><span class="ec-weekday-short">Tue</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Wednesday</span><span class="ec-weekday-short">Wed</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Thursday</span><span class="ec-weekday-short">Thu</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Friday</span><span class="ec-weekday-short">Fri</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Saturday</span><span class="ec-weekday-short">Sat</span></div>
+        <div class="ec-weekday"><span class="ec-weekday-full">Sunday</span><span class="ec-weekday-short">Sun</span></div>
       </div>
     </div>
   </div>
@@ -658,6 +810,7 @@ var EVENTS = RAW_APPT.map(function(a){
     endDay: d.getDate(),
     eventType: type,
     status: st,
+    urgency: String(a.urgency_level || 'routine'),
     description: a.notes || '',
     resident: a.full_name || '',
     contact: a.phone || '',
@@ -677,21 +830,25 @@ function calDateToTime(dt){
   return h + ':' + String(m).padStart(2,'0') + ' ' + ap;
 }
 var ANNOUNCEMENT_EVENTS = CAL_ANNOUNCEMENTS.filter(function(a){
-  return new Date(String(a.publish_at||a.created_at).replace(/-/g,'/')).getFullYear() === YEAR;
+  var date = a.is_event && a.event_date ? a.event_date : (a.publish_at || a.created_at);
+  return new Date(String(date).replace(/-/g,'/')).getFullYear() === YEAR;
 }).map(function(a){
-  var dt = new Date(String(a.publish_at||a.created_at).replace(/-/g,'/'));
+  var date = a.is_event && a.event_date ? a.event_date : (a.publish_at || a.created_at);
+  var dt = new Date(String(date).replace(/-/g,'/'));
+  var endDate = a.is_event && a.event_end_date ? new Date(String(a.event_end_date).replace(/-/g,'/')) : dt;
   return {
     kind: 'announcement',
     name: a.title || 'Announcement',
     reference: '',
-    time: calDateToTime(dt),
-    location: a.barangay_name || 'City-wide',
+    time: a.is_event && a.event_start_time ? calTime(a.event_start_time) : calDateToTime(dt),
+    location: a.venue_name || a.barangay_name || 'City-wide',
     flag: '',
     url: '',
     continent: a.priority || 'medium',
     month: MONTHS[dt.getMonth()],
     startDay: dt.getDate(),
-    endDay: dt.getDate(),
+    endMonth: MONTHS[endDate.getMonth()],
+    endDay: endDate.getDate(),
     eventType: a.category || 'announcement',
     status: String(a.status||'published'),
     description: a.content || '',
@@ -701,6 +858,8 @@ var ANNOUNCEMENT_EVENTS = CAL_ANNOUNCEMENTS.filter(function(a){
     category: a.category || '',
     priority: a.priority || '',
     publishAt: a.publish_at || '',
+    eventDate: a.event_date || '',
+    eventEndDate: a.event_end_date || '',
     updatedAt: a.updated_at || '',
     photoUrl: a.photo_url || '',
     announcementId: a.announcement_id || ''
@@ -728,6 +887,7 @@ var PROGRAM_EVENTS = CAL_PROGRAMS.map(function(p){
     eventType: p.program_type || 'other',
     status: p.status || 'scheduled',
     description: p.description || '',
+    announcementId: p.announcement_id || '',
     venue: p.venue || '',
     barangays: p.barangay_names || '',
     programStart: p.start_date || '',
@@ -754,6 +914,7 @@ var REPORT_EVENTS = CAL_REPORTS.map(function(r){
     endDay: dt.getDate(),
     eventType: type,
     status: String(r.status || 'pending'),
+    responseState: String(r.response_state || ''),
     urgency: String(r.urgency_level || 'medium'),
     description: r.description || '',
     resident: r.reporter_name || '',
@@ -799,7 +960,7 @@ window.addEventListener('dcvs:calendar-appointments-rescheduled', function(event
   });
   ecRender();
 });
-var state = { mode:'appointment', continent:null, type:null, search:'', loggedIn:false, userEmail:'', saved:[], onlySaved:false, selected:null, authMode:'signin', month:MONTHS[(new Date()).getMonth()] };
+var state = { mode:'appointment', continent:null, type:null, search:'', date:'', loggedIn:false, userEmail:'', saved:[], onlySaved:false, selected:null, authMode:'signin', month:MONTHS[(new Date()).getMonth()] };
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -832,6 +993,10 @@ function filteredEvents(){
       if (state.mode === 'event' ? ev.continent !== state.continent : eventLocations.indexOf(state.continent) === -1) return false;
     }
     if (state.type && (state.mode === 'schedule' ? ev.kind !== state.type : ev.eventType !== state.type)) return false;
+    if (state.date) {
+      var bounds = eventBounds(ev);
+      if (state.date < bounds.start || state.date > bounds.end) return false;
+    }
     if (q && ev.name.toLowerCase().indexOf(q) === -1 && ev.location.toLowerCase().indexOf(q) === -1 && (ev.resident||'').toLowerCase().indexOf(q) === -1 && (ev.status||'').toLowerCase().indexOf(q) === -1) return false;
     if (state.onlySaved && !isSaved(ev)) return false;
     return true;
@@ -839,6 +1004,11 @@ function filteredEvents(){
 }
 
 window.ecSetSearch = function(v){ state.search = v; ecRender(); };
+window.ecSetDate = function(){
+  state.date = $('ecDateFrom').value;
+  if (state.date) state.month = MONTHS[isoDate(state.date).getMonth()];
+  ecRender();
+};
 
 window.ecToggleMenu = function(btn, menuId){
   var all = document.querySelectorAll('#dcvsEventsCalendar .ec-menu');
@@ -1017,6 +1187,51 @@ function statusDot(ev){
   var status = String(ev.status||'').toLowerCase();
   return ['live','published','active','confirmed'].indexOf(status) !== -1 ? 'live' : 'scheduled';
 }
+function appointmentStatusDisplay(ev){
+  var status = String(ev.status || 'pending').toLowerCase().replace(/ /g,'_');
+  var labels = {
+    pending:'Pending',
+    approved:'Approved',
+    scheduled:'Scheduled',
+    in_progress:'In Progress',
+    rescheduled:'Rescheduled',
+    action_needed:'Action Needed'
+  };
+  return {
+    label:labels[status] || cap(status.replace(/_/g,' ')),
+    statusClass:status.replace(/_/g,'-')
+  };
+}
+function reportStatusDisplay(ev){
+  var status = String(ev.status || 'pending').toLowerCase();
+  var responseState = String(ev.responseState || '').toLowerCase();
+  var responseLabels = {
+    barangay_response_approved:'Accepted by Barangay',
+    barangay_responding:'Barangay Responding',
+    animal_secured:'Animal Secured',
+    returned_to_barangay:'Returned to Barangay',
+    dcvs_dispatch:'DCVS Dispatch',
+    dcvs_processing:'DCVS Processing',
+    escalated_to_dcvs:'Escalated to DCVS',
+    unable_to_locate:'Unable to Locate',
+    turned_over:'Turned over to DCVS'
+  };
+  var label = responseState === 'barangay_responding' && status !== 'validated'
+    ? ''
+    : responseLabels[responseState];
+  if (!label) {
+    if (status === 'pending' || status === 'validated') label = 'Pending Barangay Review';
+    else if (status === 'confirmed' || status === 'scheduled') label = 'Active';
+    else if (status === 'resolved') label = 'Resolved';
+    else label = 'Pending Validation';
+  }
+  var statusClass = /^pending(?:\s|$)/i.test(label) ? 'pending'
+    : status === 'validated' ? 'validated'
+    : status === 'confirmed' || status === 'scheduled' ? 'active'
+    : status === 'resolved' ? 'resolved'
+    : 'pending';
+  return {label:label, statusClass:statusClass};
+}
 function dayLabel(value){ return isoDate(value).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'}).replace(/,/g,''); }
 function eventDateRange(ev){
   var bounds = eventBounds(ev);
@@ -1033,6 +1248,18 @@ function eventCategoryLabel(ev){
   if(ev.kind==='announcement') return 'Event';
   return 'Schedule';
 }
+function eventUrgencyLabel(ev){
+  if (ev.kind !== 'appointment' && ev.kind !== 'report') return '';
+  var urgency = String(ev.urgency || (ev.kind === 'report' ? 'medium' : 'routine')).toLowerCase();
+  return cap(urgency.replace(/_/g,' '));
+}
+function eventUrgencyClass(ev){
+  return 'ec-urgency-' + String(ev.urgency || (ev.kind === 'report' ? 'medium' : 'routine')).toLowerCase().replace(/[^a-z0-9_-]/g,'-');
+}
+function eventUrgencyBadge(ev){
+  var label = eventUrgencyLabel(ev);
+  return label ? '<span class="ec-urgency-badge '+eventUrgencyClass(ev)+'">'+esc(label)+'</span>' : '';
+}
 function eventPopoverTitle(ev){
   if(ev.kind==='report'){
     var reportLabels = {stray:'Stray Animal',rabies:'Rabies Case',injured:'Injured Animal',dead:'Dead Animal'};
@@ -1044,10 +1271,12 @@ function eventPopoverTitle(ev){
 function eventBlock(ev, date){
   var id = eventId(ev);
   var typeClass = eventTypeClass(ev);
-  var status = statusDot(ev);
-  var statusClass = 'ec-st-'+status;
-  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(ev.name+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
-    '<div class="ec-event-card-head"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></div></button>';
+  var reportStatus = ev.kind === 'report' ? reportStatusDisplay(ev) : null;
+  var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
+  var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : statusDot(ev));
+  var statusClass = 'ec-st-'+(reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : status));
+  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(eventCategoryLabel(ev)+', '+eventUrgencyLabel(ev)+', '+status+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
+    '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-badges">'+eventUrgencyBadge(ev)+'<span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></span></div></button>';
 }
 
 var dayPopover = null;
@@ -1057,11 +1286,14 @@ var eventLaneMedia = window.matchMedia('(max-width:700px)');
 function dayPopoverMarkup(ev){
   var bounds = eventBounds(ev);
   var typeClass = eventTypeClass(ev);
-  var status = statusDot(ev);
+  var reportStatus = ev.kind === 'report' ? reportStatusDisplay(ev) : null;
+  var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
+  var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : String(ev.status||'scheduled').replace(/_/g,' '));
+  var statusClass = reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : statusDot(ev));
   var range = bounds.start !== bounds.end ? '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>'+esc(eventDateRange(ev))+'</span></div>' : '';
   var color = typeClass === 'ec-type-kapon' ? '#15803d' : typeClass === 'ec-type-checkup' ? '#2563eb' : typeClass === 'ec-type-rabies' ? '#d97706' : typeClass === 'ec-type-seminar' ? '#7c3aed' : '#64748b';
   return '<article class="ec-day-popover-item'+(eventId(ev)===highlightedEventId?' highlighted':'')+'" style="--event-color:'+color+'">'+
-    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-status" data-status="'+status+'">'+esc(ev.status||'scheduled')+'</span></div>'+
+    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-badges">'+eventUrgencyBadge(ev)+'<span class="ec-day-popover-status '+((reportStatus||appointmentStatus)?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>'+esc(ev.time||'Time not specified')+'</span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>'+esc(ev.location||'Location not specified')+'</span></div>'+range+'</article>';
 }
@@ -1130,13 +1362,14 @@ function weekMarkup(weekCells, capacityEvents, month){
     if(cell.date===null) return '<div class="ec-day"></div>';
     var date = dateIso(new Date(YEAR,MONTHS.indexOf(month),cell.date));
     var isToday = month===currentMonth && cell.date===currentDay;
+    var isSelected = date===state.date;
     var activeStatuses = ['pending','approved','scheduled','rescheduled','in progress','completed','no show'];
     var apptCount = capacityEvents.filter(function(ev){return ev.kind==='appointment'&&eventOccursOn(ev,month,cell.date)&&activeStatuses.indexOf(ev.status)!==-1;}).length;
     var isFull = apptCount>=3;
     var dayEvents = cell.events||[];
     var evHtml = dayEvents.slice(0,visibleLimit).map(function(ev){return eventBlock(ev,date);}).join('');
     if(dayEvents.length>visibleLimit) evHtml += '<button type="button" class="ec-cell-more ec-calendar-trigger" data-date="'+date+'" aria-label="'+(dayEvents.length-visibleLimit)+' more events on '+dayLabel(date)+'">+'+(dayEvents.length-visibleLimit)+' more</button>';
-    return '<div class="ec-day'+(isToday?' today':'')+(isFull?' ec-day-capacity-full':'')+'"><button type="button" class="ec-day-num ec-calendar-trigger" data-date="'+date+'" aria-label="Open schedules for '+dayLabel(date)+'">'+cell.date+'</button><div class="ec-events">'+evHtml+'</div></div>';
+    return '<div class="ec-day'+(isToday?' today':'')+(isSelected?' selected':'')+(isFull?' ec-day-capacity-full':'')+'"><button type="button" class="ec-day-num ec-calendar-trigger" data-date="'+date+'" aria-label="Open schedules for '+dayLabel(date)+'">'+cell.date+'</button><div class="ec-events">'+evHtml+'</div></div>';
   }).join('');
   return '<div class="ec-week-row">'+cells+'</div>';
 }
@@ -1189,6 +1422,11 @@ window.ecRender = function(){
   }
 };
 
+window.ecCreateAnnouncement = function(programId){
+  closeModal('ecEventDialog');
+  window.location.href = 'staff-announcements.php?create_from_program=' + encodeURIComponent(programId);
+};
+
 window.ecOpenEvent = function(id){
   var ev = getEvents().filter(function(e){ return eventId(e) === id; })[0];
   if (!ev) return;
@@ -1214,7 +1452,15 @@ window.ecOpenEvent = function(id){
           '<div class="ec-field-row"><span class="ec-field-label">Barangay / Location</span><span class="ec-field-value">'+esc(ev.location || '-')+'</span></div>'+
         (ev.description ? '<div class="ec-notes-section"><div class="ec-sec-title">Description / Notes</div><div class="ec-notes-box">'+esc(ev.description)+'</div></div>' : '')+
       '</div>'+
-      '<div class="sd-dialog-footer"><a class="sd-btn sd-btn-outline" href="dashboard-staff.php#analytics" target="_blank" rel="noopener noreferrer">View Program</a><button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button></div>';
+      '<div class="sd-dialog-footer">'+
+        (ev.announcementId
+          ? '<a class="sd-btn sd-btn-default" href="staff-announcements.php?view_announcement='+encodeURIComponent(ev.announcementId)+'">View announcement</a>'
+          : (programStatus === 'scheduled' || programStatus === 'live'
+            ? '<button type="button" class="sd-btn sd-btn-default" onclick="ecCreateAnnouncement('+Number(ev.programId)+')">Create Announcement</button>'
+            : ''))+
+        '<a class="sd-btn sd-btn-outline" href="dashboard-staff.php#analytics" target="_blank" rel="noopener noreferrer">View Program</a>'+
+        '<button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button>'+
+      '</div>';
   } else if (ev.announcementId){
     var evStatus = ev.status || 'published';
     var evStatusColors = { published:['#dcfce7','#166534','#bbf7d0'], scheduled:['#FEF3C7','#92400e','#FDE68A'] };
@@ -1241,7 +1487,7 @@ window.ecOpenEvent = function(id){
         '<button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button>'+
       '</div>';
   } else if (ev.reportId) {
-    var reportStatus = String(ev.status || 'pending').replace(/_/g, ' ');
+    var reportStatus = reportStatusDisplay(ev);
     var reportUrgency = cap(ev.urgency || 'medium');
     body.innerHTML =
       '<div class="sd-dialog-header">'+
@@ -1254,7 +1500,7 @@ window.ecOpenEvent = function(id){
         '<div class="ec-detail-row"><span class="sd-label">Incident date/time</span><span class="sd-value">'+esc(ev.date ? new Date(String(ev.date).replace(/-/g,'/')).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '-')+'</span></div>'+
         '<div class="ec-detail-row"><span class="sd-label">Submitted</span><span class="sd-value">'+esc(ev.submittedAt ? new Date(String(ev.submittedAt).replace(/-/g,'/')).toLocaleString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'}) : '-')+'</span></div>'+
         '<div class="ec-detail-row"><span class="sd-label">Urgency</span><span class="sd-value">'+esc(reportUrgency)+'</span></div>'+
-        '<div class="ec-detail-row"><span class="sd-label">Status</span><span class="sd-value">'+esc(reportStatus)+'</span></div>'+
+        '<div class="ec-detail-row"><span class="sd-label">Status</span><span class="sd-value"><span class="ec-status-pill ec-st-'+reportStatus.statusClass+'">'+esc(reportStatus.label)+'</span></span></div>'+
         '<div class="ec-detail-row"><span class="sd-label">Barangay / Location</span><span class="sd-value">'+esc(ev.location || '-')+'</span></div>'+
         '<div class="ec-detail-row"><span class="sd-label">Reporter</span><span class="sd-value">'+esc(ev.resident || '-')+'</span></div>'+
         (ev.address ? '<div class="ec-detail-row"><span class="sd-label">Incident address</span><span class="sd-value">'+esc(ev.address)+'</span></div>' : '')+
@@ -1262,10 +1508,18 @@ window.ecOpenEvent = function(id){
       (ev.description ? '<div><div class="ec-sec-title">Description</div><div class="ec-notes-box">'+esc(ev.description)+'</div></div>' : '')+
       '<div class="sd-dialog-footer"><a class="sd-btn sd-btn-outline" href="dashboard-staff.php#reports-pending" target="_blank" rel="noopener noreferrer">Open Reports</a><button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button></div>';
   } else {
-    var statusPillCls = 'ec-st-' + String(ev.status||'pending').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-    var statusLabel = (ev.status||'pending').replace(/_/g,' ');
-    var statusColors = { pending:['#FEF3C7','#92400e','#FDE68A'], scheduled:['#dbeafe','#1e40af','#bfdbfe'], active:['#dbeafe','#1e40af','#bfdbfe'], confirmed:['#dcfce7','#166534','#bbf7d0'], rescheduled:['#f3e8ff','#7e22ce','#e9d5ff'], rejected:['#fee2e2','#991b1b','#fecaca'], completed:['#dcfce7','#166534','#bbf7d0'] };
-    var sc = statusColors[ev.status] || statusColors.pending;
+    var appointmentStatus = appointmentStatusDisplay(ev);
+    var statusPillCls = 'ec-st-' + appointmentStatus.statusClass;
+    var statusLabel = appointmentStatus.label;
+    var statusColors = {
+      pending:['#FEF3C7','#92400e','#FDE68A'],
+      approved:['#dcebe0','#045e1f','#bbf7d0'],
+      scheduled:['#0E8131','#ffffff','#0E8131'],
+      in_progress:['#dbeafe','#1e40af','#bfdbfe'],
+      action_needed:['#ffedd5','#9a3412','#fed7aa'],
+      rescheduled:['#ede9fe','#6d28d9','#ddd6fe']
+    };
+    var sc = statusColors[appointmentStatus.statusClass.replace(/-/g,'_')] || statusColors.pending;
     var petInitial = (ev.name||'P').charAt(0).toUpperCase();
     var petPhotoHtml = ev.petPhoto
       ? '<img src="'+esc(ev.petPhoto)+'" alt="">'
@@ -1293,6 +1547,7 @@ window.ecOpenEvent = function(id){
         '<div class="ec-info-grid">'+
           '<div class="ec-sec-title">Appointment Details</div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Service</span><span class="ec-field-value">'+esc(cap(ev.eventType))+'</span></div>'+
+          '<div class="ec-field-row"><span class="ec-field-label">Urgency</span><span class="ec-field-value"><span class="ec-urgency-badge '+eventUrgencyClass(ev)+'">'+esc(eventUrgencyLabel(ev))+'</span></span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Date</span><span class="ec-field-value">'+esc(apptDate)+'</span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Time</span><span class="ec-field-value">'+esc(ev.time||'-')+'</span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Status</span><span class="ec-field-value"><span class="ec-status-pill '+statusPillCls+'" style="background:'+sc[0]+';color:'+sc[1]+';border-color:'+sc[2]+';">'+esc(statusLabel)+'</span></span></div>'+
@@ -1378,8 +1633,9 @@ window.ecDoApprove = function(id){
     .then(function(r){ return r.json().catch(function(){ return {success:false,message:'Invalid response'}; }); })
     .then(function(res){
       if (res && res.success){
-        ev.status = 'scheduled';
-        ecToast('Appointment Approved', esc(ev.resident||'')+'\'s appointment has been approved and scheduled.');
+        ev.status = res.status || 'scheduled';
+        ecToast(ev.status === 'waitlisted' ? 'Appointment Waitlisted' : 'Appointment Scheduled',
+          ev.message || (esc(ev.resident||'') + '\'s appointment has been updated.'));
         ecRender();
       } else {
         ecToast('Approval Failed', (res&&res.message)||'Could not approve this appointment.', true);

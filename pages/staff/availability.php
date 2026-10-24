@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -32,8 +34,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     :root {
       --av-border: #e4e4e7;
@@ -364,11 +366,13 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-cal-day.other { color: var(--av-muted-fg); opacity: 0.5; pointer-events: none; }
     .ov-cal-day.has-override::after { content: ''; position: absolute; bottom: 3px; width: 4px; height: 4px; border-radius: 50%; background: var(--av-green); }
     .ov-cal-day.selected.has-override::after { background: #fff; }
+    .ov-cal-day.has-activity::before { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: #2563eb; }
     .ov-cal-legend { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.8125rem; color: var(--av-muted-fg); }
     .ov-cal-legend span { display: flex; align-items: center; gap: 0.25rem; }
     .ov-cal-legend .ov-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .ov-cal-legend .ov-dot.green { background: var(--av-green); }
     .ov-cal-legend .ov-dot.gray { background: var(--av-muted-fg); }
+    .ov-cal-legend .ov-dot.activity { background: #2563eb; }
 
     /* Editor right side */
     .ov-editor { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); min-height: 20rem; }
@@ -519,15 +523,17 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-cal-day.selected { background: #f0fdf4; color: #166534; font-weight: 600; box-shadow: inset 0 0 0 2px var(--av-green); }
     .pv-cal-day.available { background: #f0fdf4; }
     .pv-cal-day.closed { color: var(--av-muted-fg); opacity: 0.6; }
-    .pv-cal-day.resident-closed { background: #f1f1f2; color: #a1a1aa; opacity: 1; cursor: not-allowed; }
+    .pv-cal-day.resident-closed { background: #f1f1f2; color: #71717a; opacity: 1; cursor: pointer; }
     .pv-cal-day.has-override::after { content: ''; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--av-green); }
     .pv-cal-day.selected.has-override::after { background: #166534; }
+    .pv-cal-day.has-activity::before { content: ''; position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: #2563eb; }
     .pv-cal-legend { display: flex; gap: 1rem; padding: 0.75rem 1.25rem; border-top: 1px solid var(--av-border); font-size: 0.8125rem; color: var(--av-muted-fg); }
     .pv-cal-legend span { display: flex; align-items: center; gap: 0.25rem; }
     .pv-cal-legend .pv-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .pv-cal-legend .pv-dot.avail { background: #166534; }
     .pv-cal-legend .pv-dot.closed { background: var(--av-muted-fg); }
     .pv-cal-legend .pv-dot.custom { background: var(--av-green); }
+    .pv-cal-legend .pv-dot.activity { background: #2563eb; }
 
     /* Detail panel */
     .pv-detail { min-height: 20rem; }
@@ -556,6 +562,10 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-slot-status.open { color: #166534; }
     .pv-slot-status.closed { color: var(--av-muted-fg); }
     .pv-slot-count { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.75rem; text-align: right; }
+    .av-date-context { margin-top: 1rem; padding: 0.875rem 1rem; border: 1px solid #bfdbfe; border-radius: 0.5rem; background: #eff6ff; color: #1e3a8a; font-size: 0.875rem; line-height: 1.5; }
+    .av-date-context p { margin: 0; }
+    .av-date-context p + p { margin-top: 0.4rem; }
+    .av-date-context strong { font-weight: 600; }
 
     /* Closed state */
     .pv-closed { display: flex; flex-direction: column; align-items: center; padding: 2.5rem 1.5rem; text-align: center; }
@@ -580,12 +590,52 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     @media (max-width: 1024px) {
       .av-columns { flex-direction: column; }
       .av-col-left, .av-col-right { flex: 0 0 100%; max-width: 100%; border-left: none; padding-left: 0; }
+      .bulk-layout { flex-direction: column; }
+      .bulk-summary { flex: 0 0 auto; }
     }
     @media (max-width: 640px) {
       .av-page { padding: 1rem; }
-      .av-day-label { width: 8rem; min-width: 8rem; }
-      .av-time-select { width: 110px; }
-      .av-footer { padding: 0.75rem 1rem; }
+      .av-tip-box { display: none; }
+      .av-day-row { align-items: flex-start; flex-wrap: wrap; gap: 0.5rem; }
+      .av-day-label { width: 100%; min-width: 0; }
+      .av-time-blocks { flex: 1 1 100%; min-width: 0; }
+      .av-time-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) repeat(3, 1.75rem);
+        gap: 0.25rem;
+      }
+      .av-time-select, .av-time-select select { width: 100%; min-width: 0; }
+      .av-time-select select { padding: 0 1.25rem 0 0.375rem; font-size: 0.8125rem; }
+      .av-icon-btn { width: 1.75rem; min-width: 1.75rem; }
+      .ov-time-range-row { flex-wrap: wrap; }
+      .ov-time-select { flex: 1 1 0; min-width: 0; }
+      .ov-time-select select { width: 100%; min-width: 0; padding-right: 1.5rem; }
+      .ov-range-actions { flex-shrink: 0; }
+      .ov-editor-actions { flex-wrap: wrap; padding-right: 1rem; padding-left: 1rem; }
+      .ov-editor-foot { flex-wrap: wrap; gap: 0.5rem; padding-right: 1rem; padding-left: 1rem; }
+      .ov-editor-foot-text { flex: 1 1 100%; }
+      .ov-editor-foot-btns { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
+      .bulk-card { padding: 1rem; }
+      .bulk-date-row { gap: 0.375rem; }
+      .bulk-date-row input[type="date"] { width: 0; min-width: 0; flex: 1 1 0; padding: 0 0.25rem; font-size: 0.8125rem; }
+      .bulk-date-arrow { flex: 0 0 auto; }
+      .bulk-segmented button { min-width: 0; padding: 0.5rem 0.25rem; font-size: 0.8125rem; line-height: 1.2; }
+      .bulk-sum-card { position: static; padding: 1rem; }
+      .pv-cal { padding: 0.875rem; }
+      .pv-cal-legend { flex-wrap: wrap; gap: 0.5rem 0.75rem; }
+      .pv-detail-head, .pv-detail-body, .pv-detail-nav { padding-right: 1rem; padding-left: 1rem; }
+      .pv-detail-badge { margin-left: 0.25rem; }
+      .av-footer { left: 0; right: 0; padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom)); gap: 0.5rem; }
+      .av-footer-text { min-width: 0; font-size: 0.8125rem; }
+      .av-footer-actions { gap: 0.375rem; }
+      .av-footer-actions .sd-btn { padding: 0 0.625rem; font-size: 0.8125rem; }
+      .av-toast-container { left: 1rem; right: 1rem; bottom: 1rem; }
+      .av-toast { min-width: 0; max-width: none; }
+      .av-modal-overlay { padding: 0.75rem; }
+      .av-modal { max-width: 100%; max-height: calc(100vh - 1.5rem); padding: 1.25rem; }
+      .av-modal-actions { flex-wrap: wrap; }
+      .bulk-modal { max-width: calc(100vw - 1.5rem); max-height: calc(100vh - 1.5rem); }
+      .bulk-modal-foot { flex-wrap: wrap; }
     }
   </style>
 </head>
@@ -673,6 +723,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
             <div class="ov-cal-legend">
               <span><span class="ov-dot green"></span> Custom schedule</span>
               <span><span class="ov-dot gray"></span> Weekly schedule</span>
+              <span><span class="ov-dot activity"></span> Appointments or program</span>
             </div>
           </div>
 
@@ -698,6 +749,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
                 <div class="ov-editor-label">Date-specific availability</div>
                 <div class="ov-hours-display" id="ovViewHours"></div>
                 <div class="ov-hours-info">This date has a custom schedule that overrides the weekly schedule.</div>
+                <div id="ovViewContext"></div>
               </div>
               <div class="ov-editor-actions">
                 <button class="av-btn av-btn-ghost" type="button" id="ovEditBtn">
@@ -725,6 +777,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
                 <div class="ov-editor-label">Current availability</div>
                 <div class="ov-hours-display" id="ovNoOvHours"></div>
                 <div class="ov-hours-info">This date currently follows the weekly schedule.</div>
+                <div id="ovNoOvContext"></div>
               </div>
               <div class="ov-editor-actions">
                 <button class="av-btn av-btn-primary" type="button" id="ovCreateBtn">
@@ -758,6 +811,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
                     Add time range
                   </button>
                 </div>
+                <div id="ovEditContext"></div>
               </div>
               <div class="ov-editor-foot">
                 <span class="ov-editor-foot-text" id="ovEditFootText"></span>
@@ -907,6 +961,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
               <span><span class="pv-dot avail"></span> Available</span>
               <span><span class="pv-dot closed"></span> Closed</span>
               <span><span class="pv-dot custom"></span> Custom</span>
+              <span><span class="pv-dot activity"></span> Appointments or program</span>
             </div>
           </div>
         </div>
@@ -961,7 +1016,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
   <!-- Toast container -->
   <div class="av-toast-container" id="avToastContainer"></div>
-  <script src="assets/js/availability-utils.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/availability-utils.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
   <script>
   (function() {
     'use strict';
@@ -986,6 +1041,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     var openCopyPopover = null;
     var serverAvState = null;
     var serverOverridesCount = 0;
+    var avProgramEvents = {};
+    var avAppointmentCounts = {};
 
     var timeValToLabel = function(value) { return AV_UTILS.timeValToLabel(value, TIME_OPTIONS); };
     var format12To24 = AV_UTILS.format12To24;
@@ -1440,12 +1497,15 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var panel = new URLSearchParams(window.location.search).get('panel') || '';
       var y = year || (panel === 'overrides' && typeof ovCalYear === 'number' ? ovCalYear : panel === 'preview' && typeof pvCalYear === 'number' ? pvCalYear : now.getFullYear());
       var m = month || (panel === 'overrides' && typeof ovCalMonth === 'number' ? ovCalMonth + 1 : panel === 'preview' && typeof pvCalMonth === 'number' ? pvCalMonth + 1 : now.getMonth() + 1);
-      fetch('appointment-availability.php?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
+      fetch(<?php echo json_encode($appBaseUrl . '/api/shared/appointment-availability.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> + '?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
         .then(function(r) { return r.json(); })
         .then(function(data) {
           if (!data.ok) return;
+          avProgramEvents = data.programs || {};
+          avAppointmentCounts = data.slots || {};
           if (panel === 'preview') {
             pvAppointmentCounts = data.routineSlots || {};
+            pvAllAppointmentCounts = data.slots || {};
             pvHeldSlots = data.held || {};
             pvBlockedSlots = data.blocked || {};
             pvSlotCapacity = data.routineCapacity || {};
@@ -1622,6 +1682,13 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         if (ds === ovSelectedDate) el.classList.add('selected');
         var ov = ovFindOverride(ds);
         if (ov) el.classList.add('has-override');
+        var booked = avAppointmentCounts[ds] || {};
+        var hasBookings = Object.keys(booked).some(function(time) { return (parseInt(booked[time], 10) || 0) > 0; });
+        var hasPrograms = (avProgramEvents[ds] || []).length > 0;
+        if (hasBookings || hasPrograms) {
+          el.classList.add('has-activity');
+          el.title = (hasBookings ? 'Appointments are booked. ' : '') + (hasPrograms ? 'A program is scheduled. ' : '') + 'Select for details.';
+        }
         el.dataset.date = ds;
         el.addEventListener('click', function() { ovSelectDate(this.dataset.date); });
         grid.appendChild(el);
@@ -1642,6 +1709,42 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       ovEditing = false;
       ovRenderCal();
       ovRenderEditor();
+    }
+
+    function appendDateContext(container, dateStr) {
+      if (!container) return;
+      container.innerHTML = '';
+      var context = document.createElement('div');
+      context.className = 'av-date-context';
+      var counts = avAppointmentCounts[dateStr] || {};
+      var appointmentCount = Object.keys(counts).reduce(function(total, time) {
+        return total + (parseInt(counts[time], 10) || 0);
+      }, 0);
+      var appointmentNote = document.createElement('p');
+      appointmentNote.textContent = appointmentCount === 0
+        ? 'No appointments are currently booked for this date.'
+        : appointmentCount + ' appointment' + (appointmentCount === 1 ? ' is' : 's are') + ' currently booked for this date. Remaining booking availability may be limited.';
+      context.appendChild(appointmentNote);
+
+      var programs = avProgramEvents[dateStr] || [];
+      if (programs.length) {
+        var intro = document.createElement('p');
+        intro.textContent = 'Program schedule:';
+        context.appendChild(intro);
+        programs.forEach(function(program) {
+          var line = document.createElement('p');
+          var time = program.start_time && program.end_time
+            ? ' (' + timeValToLabel(program.start_time) + '–' + timeValToLabel(program.end_time) + ')'
+            : '';
+          var location = program.venue || program.barangay_names || '';
+          line.textContent = program.program_name + time + (location ? ' at ' + location : '') + '.';
+          context.appendChild(line);
+        });
+        var note = document.createElement('p');
+        note.textContent = 'Some staff may also be supporting this program, but that does not mean the whole clinic is assigned to it. The program does not automatically close appointment times; availability is determined by the clinic schedule and booking capacity.';
+        context.appendChild(note);
+      }
+      container.appendChild(context);
     }
 
     function ovRenderEditor() {
@@ -1668,6 +1771,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         viewOv.style.display = 'none';
         viewNoOv.style.display = 'none';
         editEl.style.display = '';
+        appendDateContext(document.getElementById('ovEditContext'), ovSelectedDate);
         document.getElementById('ovEditDate').textContent = dateLabel;
         var radios = document.querySelectorAll('input[name="ovMode"]');
         if (ov) {
@@ -1702,6 +1806,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           });
           document.getElementById('ovViewHours').innerHTML = html;
         }
+        appendDateContext(document.getElementById('ovViewContext'), ovSelectedDate);
         document.getElementById('ovEditBtn').onclick = function() { ovEditing = true; ovRenderEditor(); };
         document.getElementById('ovRemoveBtn').onclick = function() {
           var removedDate = ovSelectedDate;
@@ -1739,6 +1844,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           });
           hoursEl.innerHTML = html;
         }
+        appendDateContext(document.getElementById('ovNoOvContext'), ovSelectedDate);
         document.getElementById('ovCreateBtn').onclick = function() { ovEditing = true; ovRenderEditor(); };
       }
     }
@@ -2237,7 +2343,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* ===== SCHEDULE PREVIEW PANEL ===== */
     var pvCalYear, pvCalMonth, pvSelectedDate = null, pvViewMode = 'resident';
-    var pvAppointmentCounts = {}, pvHeldSlots = {}, pvBlockedSlots = {}, pvSlotCapacity = {}, pvMaxPerDay = 3;
+    var pvAppointmentCounts = {}, pvAllAppointmentCounts = {}, pvHeldSlots = {}, pvBlockedSlots = {}, pvSlotCapacity = {}, pvMaxPerDay = 3;
 
     function pvDateStr(y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
     function pvGetMonthDays(y, m) { return new Date(y, m + 1, 0).getDate(); }
@@ -2330,7 +2436,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           else {
             el.classList.add('closed');
             el.classList.add('resident-closed');
-            el.setAttribute('aria-disabled', 'true');
           }
         } else if (state.closed) {
           el.classList.add('closed');
@@ -2338,17 +2443,28 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           el.classList.add('available');
         }
         el.dataset.date = ds;
-        if (pvViewMode === 'admin' || residentOpen) {
-          el.setAttribute('role', 'button');
-          el.setAttribute('tabindex', '0');
-          el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
-          el.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              pvSelectDate(this.dataset.date);
-            }
-          });
+        var booked = pvAllAppointmentCounts[ds] || {};
+        var bookedCount = Object.keys(booked).reduce(function(total, time) {
+          return total + (parseInt(booked[time], 10) || 0);
+        }, 0);
+        var hasPrograms = (avProgramEvents[ds] || []).length > 0;
+        if (hasPrograms || bookedCount > 0) {
+          el.classList.add('has-activity');
+          el.title = (hasPrograms ? 'Program scheduled. ' : '') + (bookedCount ? bookedCount + ' appointment(s) booked. ' : '') + 'Select to view date details.';
+        } else if (!residentOpen) {
+          el.title = 'No appointment times are currently available. Select to view details.';
+        } else {
+          el.title = 'Select to view date details.';
         }
+        el.setAttribute('role', 'button');
+        el.setAttribute('tabindex', '0');
+        el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
+        el.addEventListener('keydown', function(event) {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            pvSelectDate(this.dataset.date);
+          }
+        });
         grid.appendChild(el);
       }
       var totalCells = first + total;
@@ -2415,7 +2531,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       if (state.type === 'override') {
         html += 'Custom schedule &middot; Source: Date override';
       } else if (isClosed) {
-        html += 'Source: Weekly schedule';
+        html += state.type === 'override' ? 'Source: Date override' : 'Source: Weekly schedule';
       } else {
         html += 'Source: Weekly schedule';
       }
@@ -2432,7 +2548,18 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         html += '<div class="pv-closed">';
         html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
         html += '<h4>No appointments available</h4>';
-        html += '<p>There are no available appointment times for this date.</p>';
+        var dailyBooked = pvAppointmentCounts[pvSelectedDate] || {};
+        var dailyRoutineCount = Object.keys(dailyBooked).reduce(function(total, time) {
+          return total + (parseInt(dailyBooked[time], 10) || 0);
+        }, 0);
+        var unavailableReason = pvIsPastDate(pvSelectedDate)
+          ? 'This date has already passed.'
+          : state.closed
+            ? (state.type === 'override' ? 'A date-specific override closes the clinic for appointments.' : 'The weekly schedule has no appointment hours on this date.')
+            : dailyRoutineCount >= pvMaxPerDay
+              ? 'The daily routine appointment limit has been reached.'
+              : 'All currently available times are booked or have no remaining capacity.';
+        html += '<p>' + unavailableReason + '</p>';
         html += '<div class="pv-closed-status">Date status: <strong>Closed</strong></div>';
         html += '</div>';
       } else if (pvViewMode === 'resident') {
@@ -2455,6 +2582,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       }
       html += '</div>';
       content.innerHTML = html;
+      appendDateContext(content.querySelector('.pv-detail-body'), pvSelectedDate);
 
       var prevBtn = document.getElementById('pvPrevDay');
       var nextBtn = document.getElementById('pvNextDay');

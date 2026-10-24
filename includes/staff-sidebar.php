@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/staff-app-base.php';
+
 // ── Self-contained user data (no dependency on page-defined variables) ──
 if (!isset($fullName)) {
     $fullName = $_SESSION['full_name'] ?? 'Staff Member';
@@ -24,12 +26,12 @@ if (!isset($staffAvatar)) {
 }
 if (!isset($activePage)) $activePage = '';
 if (!isset($pageTitle)) $pageTitle = 'Staff Portal';
-$appRootPath = realpath(__DIR__ . DIRECTORY_SEPARATOR . '..');
-$documentRootPath = realpath($_SERVER['DOCUMENT_ROOT'] ?? '');
-$appBaseUrl = '';
-if ($appRootPath !== false && $documentRootPath !== false
-    && strncasecmp($appRootPath, $documentRootPath, strlen($documentRootPath)) === 0) {
-    $appBaseUrl = '/' . trim(str_replace(DIRECTORY_SEPARATOR, '/', substr($appRootPath, strlen($documentRootPath))), '/');
+$appBaseUrl = dcvsStaffAppBaseUrl();
+$staffAvatarUrl = trim((string)$staffAvatar);
+if ($staffAvatarUrl !== '' && !preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $staffAvatarUrl)) {
+    if ($appBaseUrl === '' || ($staffAvatarUrl !== $appBaseUrl && strpos($staffAvatarUrl, $appBaseUrl . '/') !== 0)) {
+        $staffAvatarUrl = $appBaseUrl . '/' . ltrim($staffAvatarUrl, '/');
+    }
 }
 require_once __DIR__ . '/waitlist.php';
 dcvsExpireWaitlistClaims($conn);
@@ -180,8 +182,10 @@ $sbModules = [
                 'items' => [
                     sbItem('All Reports', 'fa-list', ['section' => 'reports-all', 'href' => 'dashboard-staff.php#reports-all']),
                     sbItem('Pending Validation', 'fa-hourglass-half', ['section' => 'reports-pending', 'href' => 'dashboard-staff.php#reports-pending']),
+                    sbItem('Accepted by Barangay', 'fa-building', ['section' => 'reports-accepted', 'href' => 'dashboard-staff.php#reports-accepted']),
                     sbItem('Active Cases', 'fa-clipboard-check', ['section' => 'reports-active', 'href' => 'dashboard-staff.php#reports-active']),
                     sbItem('Resolved Cases', 'fa-check-circle', ['section' => 'reports-resolved', 'href' => 'dashboard-staff.php#reports-resolved']),
+                    sbItem('Turnover', 'fa-exchange-alt', ['href' => 'staff-turnover.php', 'initialActive' => $activePage === 'turnover']),
                 ],
             ],
             [
@@ -205,6 +209,7 @@ $sbModules = [
                 'title' => 'Clients & Pets', 'icon' => 'fa-database',
                 'items' => [
                     sbItem('All Clients', 'fa-users', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'all']),
+                    sbItem('Registered Pets', 'fa-paw', ['href' => 'registered-pets.php', 'initialActive' => $activePage === 'registered-pets']),
                     sbItem('With Pets', 'fa-paw', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'with']),
                     sbItem('No Pets', 'fa-user-slash', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'none']),
                 ],
@@ -289,16 +294,24 @@ $sbRail = [
     'system'        => ['icon' => 'fa-cog',            'label' => 'System',        'section' => 'account-settings', 'href' => 'dashboard-staff.php#account-settings'],
 ];
 ?>
-<link rel="stylesheet" href="assets/css/sb2.css" />
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 <script>
 window.SB2_CONFIG = {
   activeModule: <?php echo json_encode($sbActiveModule); ?>,
   activePage: <?php echo json_encode($activePage); ?>
 };
+window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl); ?>;
+window.dcvsStaffMediaUrl = function (path) {
+  path = String(path || '').trim();
+  if (!path || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path)) return path;
+  var base = window.DCVS_APP_BASE_URL || '';
+  if (base && (path === base || path.indexOf(base + '/') === 0)) return path;
+  return base + '/' + path.replace(/^(?:\/|\.{1,2}\/)+/, '');
+};
 window.DCVS_PORTAL_ROLE = 'staff';
 window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
 </script>
-<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/portal-form-drafts.js', ENT_QUOTES, 'UTF-8'); ?>?v=20261007-2"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/portal-form-drafts.js', ENT_QUOTES, 'UTF-8'); ?>?v=20261012-1"></script>
 
 <aside class="sb2" id="sidebar" data-state="expanded" data-collapsible="icon">
   <div class="sb2-inner">
@@ -307,7 +320,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     <div class="sb2-header">
       <div class="sb2-brand">
         <div class="sb2-brand-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS" />
+          <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS" />
         </div>
         <div class="sb2-brand-text">
           <span class="sb2-brand-name">DCVS</span>
@@ -412,7 +425,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
 <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
 <header class="topbar" id="topbar">
-  <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar">
+  <button class="topbar-toggle" id="sidebarToggle" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="false">
     <i class="fas fa-bars"></i>
   </button>
   <div class="topbar-breadcrumb">
@@ -422,12 +435,16 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
       $breadcrumbMap = [
         'overview' => 'Dashboard', 'analytics' => 'Cases Analytics', 'adoption' => 'Adoption Insights',
         'reports-all' => 'All Reports', 'reports-pending' => 'Pending Validation',
-        'reports-active' => 'Active Cases', 'reports-resolved' => 'Resolved Cases',
+        'reports-accepted' => 'Accepted by Barangay', 'reports-active' => 'Active Cases', 'reports-resolved' => 'Resolved Cases',
         'appointments' => 'Appointment Requests', 'calendar-schedule' => 'Calendar Schedule',
-        'client-pets' => 'All Clients', 'communication' => 'Communication',
-        'adoption-pool' => 'Adoption Pool', 'announcements' => 'Announcements',
+        'client-pets' => 'All Clients', 'registered-pets' => 'Registered Pets', 'communication' => 'Communication',
+        'adoption-pool' => 'Adoption Pool', 'announcements' => 'Announcements', 'turnover' => 'Turnover',
+        'availability' => empty($_GET['panel']) ? 'Weekly Schedule' : (($_GET['panel'] ?? '') === 'overrides' ? 'Date Overrides' : (($_GET['panel'] ?? '') === 'bulk' ? 'Bulk Schedule' : 'Schedule Preview')),
+        'waitlist' => 'Waitlist', 'geo' => 'Geo-Mapping', 'activity-logs' => 'Activity Logs',
+        'pet-listings' => 'Pet Listings',
+        'archive' => $pageTitleShort ?? $pageTitle,
       ];
-      echo htmlspecialchars($breadcrumbMap[$activePage] ?? 'Dashboard');
+      echo htmlspecialchars($breadcrumbMap[$activePage] ?? ($pageTitleShort ?? $pageTitle ?? 'Staff Portal'));
     ?></span>
   </div>
   <div class="topbar-right">
@@ -485,8 +502,10 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
                 if (count($nameParts) > 1) $activityInitials .= strtoupper(substr($nameParts[count($nameParts) - 1], 0, 1));
               }
               $activityAvatar = trim((string)($n['activity_avatar_url'] ?? ''));
-              if ($activityAvatar !== '' && !preg_match('#^https?://#i', $activityAvatar) && $activityAvatar[0] !== '/') {
-                $activityAvatar = $appBaseUrl . '/' . ltrim($activityAvatar, '/');
+              if ($activityAvatar !== '' && !preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $activityAvatar)) {
+                if ($appBaseUrl === '' || ($activityAvatar !== $appBaseUrl && strpos($activityAvatar, $appBaseUrl . '/') !== 0)) {
+                  $activityAvatar = $appBaseUrl . '/' . ltrim($activityAvatar, '/');
+                }
               }
             ?>
             <article class="notif-item <?php echo empty($n['is_read']) ? 'unread' : ''; ?>"
@@ -536,8 +555,8 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     <!-- User Profile Pill -->
     <div class="user-profile" id="user-profile-btn" title="View Profile">
       <div class="user-avatar">
-        <?php if (!empty($staffAvatar)): ?>
-          <img src="<?php echo htmlspecialchars($staffAvatar); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
+        <?php if ($staffAvatarUrl !== ''): ?>
+          <img src="<?php echo htmlspecialchars($staffAvatarUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
         <?php else: ?>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/>
@@ -633,6 +652,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     if (window.innerWidth > 768) {
       sidebar.classList.remove('collapsed');
       if (overlay) overlay.classList.remove('active');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
     } else {
       sidebar.setAttribute('data-state', 'expanded');
     }
@@ -642,6 +662,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     toggle.addEventListener('click', function() {
       sidebar.classList.toggle('collapsed');
       if (overlay) overlay.classList.toggle('active');
+      toggle.setAttribute('aria-expanded', sidebar.classList.contains('collapsed') ? 'true' : 'false');
     });
   }
   if (rail) {
@@ -653,8 +674,17 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     overlay.addEventListener('click', function() {
       sidebar.classList.remove('collapsed');
       overlay.classList.remove('active');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
     });
   }
+  sidebar.addEventListener('click', function(event) {
+    var link = event.target.closest('a');
+    if (link && window.innerWidth <= 768) {
+      sidebar.classList.remove('collapsed');
+      if (overlay) overlay.classList.remove('active');
+      if (toggle) toggle.setAttribute('aria-expanded', 'false');
+    }
+  });
 
   // Keyboard shortcut (ctrl/cmd + b) to toggle the sidebar
   document.addEventListener('keydown', function(e) {
@@ -677,6 +707,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     'client-pets': 'operations',
     'adoption': 'operations',
     'reports-all': 'operations', 'reports-pending': 'operations',
+    'reports-accepted': 'operations',
     'reports-active': 'operations', 'reports-resolved': 'operations',
     'geomapping': 'monitoring',
     'account-settings': 'system'
@@ -742,6 +773,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     var bcLabels = {
       'overview':'Dashboard','analytics':'Cases Analytics','adoption':'Adoption Insights',
       'reports-all':'All Reports','reports-pending':'Pending Validation',
+      'reports-accepted':'Accepted by Barangay',
       'reports-active':'Active Cases','reports-resolved':'Resolved Cases',
       'appointments':'Appointment Requests','calendar-schedule':'Calendar Schedule',
       'client-pets':'All Clients','client-pets-with':'With Pets','client-pets-none':'No Pets'

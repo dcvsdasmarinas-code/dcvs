@@ -75,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             FROM appointments a
             LEFT JOIN pets p ON p.pet_id = a.pet_id AND p.owner_id = a.user_id
             WHERE a.user_id = ? AND a.preferred_date = ? AND a.preferred_time = ?
-              AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
+              AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
               AND a.archived_at IS NULL
             ORDER BY a.appointment_id DESC LIMIT 1");
         $existingStmt->bind_param("iss", $_SESSION['user_id'], $preferredDate, $preferredTime);

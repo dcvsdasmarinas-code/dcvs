@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var STREET_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
   var SATELLITE_STYLE = 'https://api.maptiler.com/maps/hybrid/style.json?key=';
   var CUSTOM_SOURCE_IDS = [
@@ -8,6 +16,7 @@
     'brgy-labels',
     'report-pins',
     'report-pin-accuracy',
+    'public-report-pins',
     'dcvs-landmarks',
     'dcvs-city-perimeter',
     'dcvs-city-mask',
@@ -31,6 +40,9 @@
     'report-pins-clusters',
     'report-pins-cluster-count',
     'report-pins-points',
+    'public-report-pins-clusters',
+    'public-report-pins-cluster-count',
+    'public-report-pins-points',
     'dcvs-landmark-points',
     'dcvs-landmark-codes',
     'dcvs-landmark-labels',
@@ -76,6 +88,7 @@
     var hasRiskOverlay = mapElement.getAttribute('data-map-risk-overlay') === 'true';
     var hasCityBoundary = mapElement.getAttribute('data-city-boundary') === 'true';
     var scopedBarangayFeature = null;
+    var searchedBarangayId = null;
     var initialMaxBounds = null;
     var streetButton = null;
     var satelliteButton = null;
@@ -175,21 +188,46 @@
     function applyRiskMapStyle() {
       if (!map) return;
       if (hasRiskOverlay && map.getLayer('barangay-fill')) {
-        setPaintPropertyIfChanged('barangay-fill', 'fill-color', [
+        var riskFillColor = [
           'match', ['get', 'risk'],
           'Green', '#22c55e',
           'Yellow', '#eab308',
           'Orange', '#f97316',
           'Red', '#ef4444',
           '#22c55e'
-        ]);
-        setPaintPropertyIfChanged('barangay-fill', 'fill-opacity', selectedStyle === 'satellite' ? 0.3 : 0.4);
+        ];
+        var fillColor = searchedBarangayId === null
+          ? riskFillColor
+          : [
+              'case',
+              ['==', ['to-number', ['get', 'id']], searchedBarangayId],
+              riskFillColor,
+              '#cbd5e1'
+            ];
+        var fillOpacity = searchedBarangayId === null
+          ? (selectedStyle === 'satellite' ? 0.3 : 0.4)
+          : [
+              'case',
+              ['==', ['to-number', ['get', 'id']], searchedBarangayId],
+              selectedStyle === 'satellite' ? 0.48 : 0.72,
+              0.42
+            ];
+        setPaintPropertyIfChanged('barangay-fill', 'fill-color', fillColor);
+        setPaintPropertyIfChanged('barangay-fill', 'fill-opacity', fillOpacity);
       }
       if (map.getLayer('barangay-outline')) {
-        setPaintPropertyIfChanged('barangay-outline', 'line-color',
-          selectedStyle === 'satellite' ? '#ffffff' : PRIMARY_GREEN);
-        setPaintPropertyIfChanged('barangay-outline', 'line-width', 1.5);
-        setPaintPropertyIfChanged('barangay-outline', 'line-opacity', 0.95);
+        var lineColor = selectedStyle === 'satellite' ? '#ffffff' : PRIMARY_GREEN;
+        var lineWidth = 1.5;
+        var lineOpacity = 0.95;
+        if (searchedBarangayId !== null) {
+          var isSearchedFeature = ['==', ['to-number', ['get', 'id']], searchedBarangayId];
+          lineColor = ['case', isSearchedFeature, PRIMARY_GREEN, '#ffffff'];
+          lineWidth = ['case', isSearchedFeature, 4, 1];
+          lineOpacity = ['case', isSearchedFeature, 1, 0.55];
+        }
+        setPaintPropertyIfChanged('barangay-outline', 'line-color', lineColor);
+        setPaintPropertyIfChanged('barangay-outline', 'line-width', lineWidth);
+        setPaintPropertyIfChanged('barangay-outline', 'line-opacity', lineOpacity);
       }
     }
 
@@ -242,7 +280,7 @@
 
     function loadCityBoundaryOutline() {
       if (!hasCityBoundary) return Promise.resolve();
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();
@@ -482,7 +520,7 @@
     function addSatelliteContext() {
       if (isBarangayMap) return addBarangaySatelliteContext(scopedBarangayFeature);
 
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();
@@ -757,6 +795,11 @@
           map.fitBounds(featureBounds(feature), { padding: 64, maxZoom: 17, duration: 650 });
         }
         updateSatelliteAvailability();
+      });
+      mapElement.addEventListener('dcvs:barangaysearch', function(event) {
+        var detail = event.detail || {};
+        searchedBarangayId = detail.active ? Number(detail.id) : null;
+        applyRiskMapStyle();
       });
 
       var initialStyle = map.getStyle();
