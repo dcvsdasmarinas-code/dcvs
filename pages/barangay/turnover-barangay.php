@@ -341,6 +341,7 @@ $escape = static function ($value): string {
     @media(max-width:900px){.turnover-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.turnover-main{padding:16px}}
     @media(max-width:600px){.turnover-topbar{height:58px;gap:10px;padding:0 12px}.turnover-topbar-toggle{display:inline-flex}.turnover-breadcrumb{min-width:0;flex:1;overflow:hidden;font-size:13px;white-space:nowrap}.turnover-breadcrumb a{overflow:hidden;text-overflow:ellipsis}.turnover-user{flex:0 0 auto}.turnover-user>span:nth-child(2){display:none}.turnover-main{padding:14px 12px}.turnover-kpis{gap:10px}.turnover-kpi{padding:14px 10px}.turnover-kpi-label{font-size:12px}.turnover-kpi-value{font-size:23px}.turnover-toolbar{align-items:stretch}.turnover-filters,.turnover-controls{width:100%;min-width:0}.turnover-input{flex:1;min-width:0}.turnover-controls{justify-content:space-between}.turnover-tabs{min-width:0;flex:1}.turnover-tab{min-width:0;padding:0 8px}.turnover-button{flex:0 0 auto}.turnover-pagination-inner{justify-content:flex-end;gap:10px}.turnover-rows span{display:none}.turnover-drawer-panel{width:100%;padding:20px}#responseWorkflowModal .response-workflow-dialog.is-handover{padding:18px}#responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer{margin:16px -18px -18px;padding:12px 18px 14px}}
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 <?php $barangaySidebarStylesheetInHead = true; include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
@@ -362,21 +363,25 @@ $escape = static function ($value): string {
     </section>
     <?php if ($loadError !== ''): ?><div class="turnover-error" role="alert"><?php echo $escape($loadError); ?></div><?php endif; ?>
     <?php if (!$workflowEnabled && $loadError === ''): ?><div class="turnover-error" role="status">Barangay turnover workflow is currently unavailable.</div><?php endif; ?>
-    <div class="turnover-toolbar">
-      <div class="turnover-filters">
+    <div class="turnover-toolbar portal-mobile-toolbar">
+      <div class="turnover-filters portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <input class="turnover-input" id="turnoverSearch" type="search" placeholder="Search by report, animal, or method..." aria-label="Search turnover records">
-        <select class="turnover-select" id="turnoverMethodFilter" aria-label="Filter by handover method">
+        </div>
+        <div class="portal-toolbar-filter-grid">
+        <select class="turnover-select portal-toolbar-last-filter" id="turnoverMethodFilter" aria-label="Filter by handover method">
           <option value="">All methods</option>
           <option value="barangay_delivery">Barangay delivers</option>
           <option value="dcvs_pickup">DCVS pickup</option>
         </select>
+        </div>
       </div>
-      <div class="turnover-controls">
+      <div class="turnover-controls portal-toolbar-controls">
         <div class="turnover-tabs" role="tablist" aria-label="Turnover record status">
           <button class="turnover-tab" id="tabPending" type="button" role="tab" aria-selected="true" data-tab="pending">For Turnover <span class="turnover-tab-count"><?php echo $pendingCount; ?></span></button>
           <button class="turnover-tab" id="tabReceived" type="button" role="tab" aria-selected="false" data-tab="received">Turned Over <span class="turnover-tab-count"><?php echo $turnedOverCount; ?></span></button>
         </div>
-        <button class="turnover-button" id="exportTurnover" type="button"><i class="fas fa-download" aria-hidden="true"></i> Export CSV</button>
+        <button class="turnover-button portal-toolbar-primary" id="exportTurnover" type="button"><i class="fas fa-download" aria-hidden="true"></i> Export CSV</button>
       </div>
     </div>
     <div class="turnover-table-wrap">

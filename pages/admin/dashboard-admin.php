@@ -814,12 +814,15 @@ $activePage = 'overview';
       </a>
     </div>
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="adminUserSearch" class="appt-search-input" placeholder="Search by name, email, or role...">
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select id="adminRoleFilter" class="appt-status-select">
           <option value="all">All Roles</option>
           <option value="admin">Admin</option>
@@ -832,6 +835,7 @@ $activePage = 'overview';
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
+        </div>
       </div>
     </div>
 
@@ -880,12 +884,15 @@ $activePage = 'overview';
 
   <!-- ── ACTIVITY LOGS ── -->
   <section id="activity" class="content-section" style="display:none;">
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="adminActSearch" class="appt-search-input" placeholder="Search activity, user, or details..." value="<?php echo htmlspecialchars($actSearch); ?>">
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select class="appt-status-select" id="actActionFilter">
           <option value="">All Actions</option>
           <option value="Login" <?php echo $actAction==='Login'?'selected':''; ?>>Login</option>
@@ -916,7 +923,7 @@ $activePage = 'overview';
           <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
-        <div style="position:relative;display:inline-block;">
+        <div class="portal-toolbar-icon-filter" style="position:relative;display:inline-block;">
           <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -940,7 +947,10 @@ $activePage = 'overview';
           </div>
         </div>
         <input type="hidden" id="actDateFilterHidden" value="<?php echo htmlspecialchars($actDateFrom ?: $actDateTo); ?>">
-        <button class="pet-action-btn" id="actClearBtn" style="display:<?php echo ($actSearch||$actAction||$actUser||$actSource||$actDateFrom||$actDateTo)?'inline-flex':'none'; ?>;" onclick="clearActFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+        </div>
+        <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+          <button class="pet-action-btn portal-toolbar-secondary" id="actClearBtn" style="display:<?php echo ($actSearch||$actAction||$actUser||$actSource||$actDateFrom||$actDateTo)?'inline-flex':'none'; ?>;" onclick="clearActFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+        </div>
       </div>
     </div>
 
@@ -1025,6 +1035,7 @@ $activePage = 'overview';
               <div class="dropdown-item" onclick="event.stopPropagation();document.getElementById('avatarInput').click()">
                 <i class="fas fa-camera"></i> <span>Change Profile</span>
               </div>
+            </div>
             </div>
           </div>
           <div>

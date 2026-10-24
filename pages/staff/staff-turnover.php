@@ -441,16 +441,18 @@ $turnoverKpis = [
   <?php if ($loadError !== ''): ?><div class="turnover-error" role="alert"><?php echo $escape($loadError); ?></div><?php endif; ?>
   <?php if (!$workflowEnabled && $loadError === ''): ?><div class="turnover-error" role="status">The turnover workflow is currently unavailable.</div><?php endif; ?>
 
-  <div class="turnover-toolbar">
-    <div class="turnover-filters">
-      <input class="turnover-input" id="turnoverSearch" type="search" placeholder="Search by report, animal, or method..." aria-label="Search turnover records">
-      <select class="turnover-select" id="turnoverBarangayFilter" aria-label="Filter by barangay">
+  <div class="turnover-toolbar staff-mobile-toolbar staff-toolbar-search-only">
+    <div class="turnover-filters staff-toolbar-filters">
+      <div class="staff-toolbar-search-row staff-toolbar-no-filter">
+      <input class="turnover-input staff-toolbar-search" id="turnoverSearch" type="search" placeholder="Search..." aria-label="Search turnover records">
+      </div>
+      <select class="turnover-select staff-toolbar-select" id="turnoverBarangayFilter" aria-label="Filter by barangay">
         <option value="">All Barangays</option>
         <?php foreach ($barangayOptions as $barangayOption): ?>
           <option value="<?php echo (int)$barangayOption['id']; ?>"><?php echo $escape($barangayOption['name']); ?></option>
         <?php endforeach; ?>
       </select>
-      <select class="turnover-select" id="turnoverMethodFilter" aria-label="Filter by handover method">
+      <select class="turnover-select staff-toolbar-select staff-toolbar-last-filter" id="turnoverMethodFilter" aria-label="Filter by handover method">
         <option value="">All methods</option>
         <option value="barangay_delivery">Barangay delivers</option>
         <option value="dcvs_pickup">DCVS pickup</option>

@@ -344,12 +344,15 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
   <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
   <main class="main-content activity-cms">
     <div class="al-wrap">
-      <div class="al-filters">
-        <div class="appt-search-wrap">
+      <div class="al-filters staff-mobile-toolbar">
+        <div class="staff-toolbar-search-row">
+        <div class="appt-search-wrap staff-toolbar-search">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="actSearch" class="appt-search-input" placeholder="Search activity, user, or details..." value="<?php echo htmlspecialchars($actSearch); ?>">
         </div>
-        <select class="appt-status-select" id="actActionFilter">
+        </div>
+        <div class="staff-toolbar-filters">
+        <select class="appt-status-select staff-toolbar-select" id="actActionFilter">
           <option value="">All Actions</option>
           <option value="Login" <?php echo $actAction==='Login'?'selected':''; ?>>Login</option>
           <option value="Logout" <?php echo $actAction==='Logout'?'selected':''; ?>>Logout</option>
@@ -362,13 +365,13 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
           <option value="Status Changed" <?php echo $actAction==='Status Changed'?'selected':''; ?>>Status Changed</option>
           <option value="Password Reset" <?php echo $actAction==='Password Reset'?'selected':''; ?>>Password Reset</option>
         </select>
-        <select class="appt-status-select" id="actUserFilter">
+        <select class="appt-status-select staff-toolbar-select" id="actUserFilter">
           <option value="">All Users</option>
           <?php foreach ($allActUsers as $au): ?>
             <option value="<?php echo $au['user_id']; ?>" <?php echo $actUser==$au['user_id']?'selected':''; ?>><?php echo htmlspecialchars($au['full_name']); ?></option>
           <?php endforeach; ?>
         </select>
-        <select class="appt-status-select" id="actSourceFilter">
+        <select class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" id="actSourceFilter">
           <option value="">All Sources</option>
           <option value="authentication" <?php echo $actSource==='authentication'?'selected':''; ?>>Authentication</option>
           <option value="user_management" <?php echo $actSource==='user_management'?'selected':''; ?>>User Management</option>
@@ -379,7 +382,8 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
           <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
-        <div class="act-date-filter-wrap" style="position:relative;display:inline-block;">
+        </div>
+        <div class="act-date-filter-wrap staff-toolbar-filter" style="position:relative;display:inline-block;">
           <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">

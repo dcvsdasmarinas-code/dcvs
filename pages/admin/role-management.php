@@ -1080,11 +1080,14 @@ body { background:#ffffff; }
     <script>document.addEventListener('DOMContentLoaded',function(){showToast('<?php echo $_SESSION["flash_type"] === "error" ? "Error" : "Success"; ?>',{type:'<?php echo $_SESSION["flash_type"] === "error" ? "error" : "success"; ?>',description:'<?php echo addslashes($_SESSION["flash_msg"]); ?>'});});</script>
   <?php unset($_SESSION['flash_msg']); unset($_SESSION['flash_type']); endif; ?>
 
-  <div class="appt-card-header">
-    <div class="appt-header-right">
+  <div class="appt-card-header portal-mobile-toolbar portal-toolbar-has-primary">
+    <div class="appt-header-right portal-toolbar-controls">
+      <div class="portal-toolbar-search-row">
       <div class="appt-search-wrap">
         <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by name, email, or reference ID..." value="<?php echo htmlspecialchars($search); ?>" />
       </div>
+      </div>
+      <div class="portal-toolbar-filter-grid">
       <select class="appt-status-select" id="roleFilter">
         <option value="">All Roles</option>
         <option value="admin" <?php echo $roleFilter === 'admin' ? 'selected' : ''; ?>>Admin</option>
@@ -1098,15 +1101,18 @@ body { background:#ffffff; }
         <option value="inactive" <?php echo $statusFilter === 'inactive' ? 'selected' : ''; ?>>Inactive</option>
         <option value="archived" <?php echo $statusFilter === 'archived' ? 'selected' : ''; ?>>Archived <?php echo $archivedCount ? "($archivedCount)" : ''; ?></option>
       </select>
-      <select class="appt-status-select" id="barangayFilter">
+      <select class="appt-status-select portal-toolbar-last-filter" id="barangayFilter">
         <option value="">All Barangays</option>
         <?php foreach ($barangays as $b): ?>
           <option value="<?php echo $b['barangay_id']; ?>" <?php echo $barangayFilter == $b['barangay_id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($b['barangay_name']); ?></option>
         <?php endforeach; ?>
       </select>
-      <button class="pet-action-btn" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+      </div>
+      <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+        <button class="pet-action-btn portal-toolbar-secondary" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+      </div>
     </div>
-    <button class="pet-action-btn primary-btn" onclick="openAddModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg> Add User</button>
+    <button class="pet-action-btn primary-btn portal-toolbar-primary" onclick="openAddModal()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg> Add User</button>
   </div>
 
   <div class="bulk-bar" id="bulkBar">

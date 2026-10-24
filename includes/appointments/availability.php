@@ -90,53 +90,6 @@ function dcvsProgramTimeRange($program) {
     return [$start, $end];
 }
 
-/** Map program staffing reservations to each appointment slot in a date range. */
-function dcvsProgramStaffingMap($conn, $startDate, $endDate, $excludeProgramId = 0, $additionalProgram = null) {
-    $sql = "SELECT program_id, start_date, end_date, program_start_time, program_end_time, operating_time, staff_required_count
-            FROM programs
-            WHERE status IN ('scheduled','live') AND start_date <= ? AND end_date >= ?";
-    if ($excludeProgramId > 0) $sql .= " AND program_id <> " . (int)$excludeProgramId;
-    $stmt = $conn->prepare($sql);
-    if (!$stmt) {
-        error_log('Failed to prepare program staffing lookup: ' . $conn->error);
-        throw new RuntimeException('Could not load program staffing requirements.');
-    }
-    $stmt->bind_param('ss', $endDate, $startDate);
-    if (!$stmt->execute()) {
-        error_log('Failed to query program staffing: ' . $stmt->error);
-        $stmt->close();
-        throw new RuntimeException('Could not load program staffing requirements.');
-    }
-    $result = $stmt->get_result();
-    $programs = [];
-    while ($row = $result->fetch_assoc()) $programs[] = $row;
-    $stmt->close();
-
-    if ($additionalProgram) $programs[] = $additionalProgram;
-    $map = [];
-    foreach ($programs as $program) {
-        $programStart = max($startDate, (string)$program['start_date']);
-        $programEnd = min($endDate, (string)$program['end_date']);
-        if ($programStart > $programEnd) continue;
-        list($timeStart, $timeEnd) = dcvsProgramTimeRange($program);
-        $required = max(0, (int)($program['staff_required_count'] ?? 0));
-        if ($required === 0) continue;
-        for ($day = strtotime($programStart); $day <= strtotime($programEnd); $day = strtotime('+1 day', $day)) {
-            $date = date('Y-m-d', $day);
-            foreach (DCVS_STANDARD_TIMES as $slot) {
-                $slotStart = strtotime($date . ' ' . $slot . ':00');
-                $slotEnd = $slotStart + 3600;
-                $programSlotStart = strtotime($date . ' ' . $timeStart . ':00');
-                $programSlotEnd = strtotime($date . ' ' . $timeEnd . ':00');
-                if ($programSlotStart < $slotEnd && $programSlotEnd > $slotStart) {
-                    $map[$date][$slot] = ($map[$date][$slot] ?? 0) + $required;
-                }
-            }
-        }
-    }
-    return $map;
-}
-
 function dcvsActiveStaffCount($conn) {
     $result = $conn->query("SELECT COUNT(*) AS staff_count FROM users WHERE role = 'staff' AND status = 'active' AND archived_at IS NULL");
     if (!$result) {
@@ -148,15 +101,13 @@ function dcvsActiveStaffCount($conn) {
     return $count;
 }
 
-/** Number of routine appointments that can be handled in one time slot. */
-function dcvsRoutineSlotCapacity($conn, $date, $time, $staffCount = null, $programStaffing = null) {
-    $time = dcvsTimeKey($time);
+/** Number of routine appointments that can be handled in one time slot. Programs do not reserve clinic appointment capacity. */
+function dcvsRoutineSlotCapacity($conn, $date, $time, $staffCount = null) {
     if ($staffCount === null) $staffCount = dcvsActiveStaffCount($conn);
-    if ($programStaffing === null) $programStaffing = dcvsProgramStaffingMap($conn, $date, $date);
-    return max(0, (int)$staffCount - (int)($programStaffing[$date][$time] ?? 0));
+    return max(0, (int)$staffCount);
 }
 
-/** Routine appointments follow program staffing; urgent appointments use separately reserved capacity. */
+/** Routine appointments follow clinic availability; urgent appointments use separately reserved capacity. */
 function dcvsSlotAvailable($conn, $date, $time, $weeklyTemplate = null, $overrides = null, $programClosed = null) {
     if ($programClosed === true) return false;
     if (!dcvsClinicSlotAvailable($conn, $date, $time, $weeklyTemplate, $overrides)) return false;
@@ -180,7 +131,7 @@ function dcvsSlotUnavailableReason($conn, $date, $time) {
         return 'Cannot schedule: ' . date('l', strtotime($date)) . ' is closed in the clinic weekly availability schedule.';
     }
     if (dcvsRoutineSlotCapacity($conn, $date, substr($time, 0, 5)) === 0) {
-        return 'Cannot schedule a routine appointment: all clinic staff are assigned to a DCVS program during this time.';
+        return 'Cannot schedule a routine appointment: no active staff capacity is available.';
     }
 
     return 'Cannot schedule: the selected date and time are not available in the clinic schedule.';
@@ -191,11 +142,10 @@ function dcvsBlockedTimes($conn, $date, $weeklyTemplate = null, $overrides = nul
     if ($weeklyTemplate === null) $weeklyTemplate = dcvsWeeklyTemplate($conn);
     if ($overrides === null) $overrides = dcvsDateOverrides($conn, $date);
     $staffCount = dcvsActiveStaffCount($conn);
-    $programStaffing = dcvsProgramStaffingMap($conn, $date, $date);
     $blocked = [];
     foreach (DCVS_STANDARD_TIMES as $t) {
         if (!dcvsClinicSlotAvailable($conn, $date, $t, $weeklyTemplate, $overrides)
-            || max(0, $staffCount - (int)($programStaffing[$date][$t] ?? 0)) === 0) {
+            || $staffCount === 0) {
             $blocked[] = $t;
         }
     }

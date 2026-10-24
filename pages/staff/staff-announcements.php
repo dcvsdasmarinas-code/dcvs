@@ -489,7 +489,12 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
         max-width:100%;
         min-width:0;
       }
-      .announcements-cms #tableWrap{ contain:paint; }
+      .announcements-cms #tableWrap{
+        overflow-x:auto;
+        overflow-y:hidden;
+        overscroll-behavior-x:contain;
+        -webkit-overflow-scrolling:touch;
+      }
     }
     @media (max-width:1180px){
       .cpd .kpis{ grid-template-columns:repeat(2,1fr); }
@@ -697,7 +702,35 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
         width:100%;
         max-width:100%;
         min-width:0;
+      }
+      .announcements-cms #tableWrap{
+        overflow:hidden;
+      }
+      .announcements-cms #tableWrap > .announcement-table-scroll{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        overflow-x:auto;
+        overflow-y:hidden;
         contain:paint;
+        overscroll-behavior-x:contain;
+        -webkit-overflow-scrolling:touch;
+      }
+      .announcements-cms #tableWrap .sd-data-table{
+        width:960px !important;
+        min-width:960px !important;
+        table-layout:fixed;
+      }
+      .announcements-cms #tableWrap th,
+      .announcements-cms #tableWrap td{
+        box-sizing:border-box;
+        padding:5px 4px;
+        font-size:11px;
+        line-height:1.3;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        vertical-align:middle;
       }
       .announcements-cms .db-toolbar{ align-items:stretch; }
       .announcements-cms .toolbar-main-controls{
@@ -849,34 +882,36 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
           </div>
 
           <div class="db-table-area">
-            <div class="db-toolbar announcements-toolbar">
+            <div class="db-toolbar announcements-toolbar staff-mobile-toolbar">
               <div class="toolbar-main-controls">
-                <div class="search-grow-wrap">
+                <div class="staff-toolbar-search-row">
+                <div class="search-grow-wrap staff-toolbar-search">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <input type="text" id="mainSearch" placeholder="Search by title, category, keyword..." oninput="setSearch(this.value)">
+                  <input type="text" id="mainSearch" placeholder="Search announcements..." oninput="setSearch(this.value)">
                 </div>
-                <div class="toolbar-filters">
-                  <select class="select-input tf-select" id="annType" onchange="setPost(this.value)">
+                <div class="staff-date-filter staff-toolbar-filter" data-date-filter="ann">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter announcements by date" title="Filter by date" aria-expanded="false">
+                    <i class="fas fa-filter" aria-hidden="true"></i>
+                  </button>
+                  <input type="hidden" id="annDateFrom" value="">
+                  <input type="hidden" id="annDateTo" value="">
+                </div>
+                </div>
+                <div class="toolbar-filters staff-toolbar-filters">
+                  <select class="select-input tf-select staff-toolbar-select" id="annType" onchange="setPost(this.value)">
                     <option value="all">All Types</option>
                     <option value="announcement">Announcements</option>
                     <option value="advisory">Advisories</option>
                   </select>
-                  <select class="select-input tf-select" id="annBrgy" onchange="setBrgy(this.value)">
+                  <select class="select-input tf-select staff-toolbar-select" id="annBrgy" onchange="setBrgy(this.value)">
                     <option value="">All Barangays</option>
                     <?php foreach ($barangays as $b): ?>
                       <option value="<?php echo (int)$b['id']; ?>"><?php echo htmlspecialchars($b['name']); ?></option>
                     <?php endforeach; ?>
                   </select>
-                  <div class="staff-date-filter" data-date-filter="ann">
-                    <button class="staff-date-filter-button" type="button" aria-label="Filter announcements by date" title="Filter by date" aria-expanded="false">
-                      <i class="fas fa-filter" aria-hidden="true"></i>
-                    </button>
-                    <input type="hidden" id="annDateFrom" value="">
-                    <input type="hidden" id="annDateTo" value="">
-                  </div>
                 </div>
               </div>
-              <button type="button" class="sd-btn sd-btn-default" onclick="openCreate('announcement')">
+              <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openCreate('announcement')">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 New Announcement
               </button>
@@ -907,10 +942,12 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
               </div>
             </div>
             <div id="tableWrap" class="sd-data-table-wrap">
-              <table class="sd-data-table">
-                <thead id="tableHead"></thead>
-                <tbody id="dataRows"></tbody>
-              </table>
+              <div class="announcement-table-scroll">
+                <table class="sd-data-table">
+                  <thead id="tableHead"></thead>
+                  <tbody id="dataRows"></tbody>
+                </table>
+              </div>
             </div>
             <div id="cardsWrap" class="cards-grid rpt-cards" style="display:none;"></div>
           </div>

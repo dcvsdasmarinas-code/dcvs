@@ -2760,7 +2760,7 @@ $activePage = 'adoption-pool';
       </div>
 
       <!-- Tab Navigation -->
-      <div class="pool-tabs">
+      <div class="pool-tabs" role="tablist" aria-label="Adoption management sections">
         <button class="pool-tab active" data-tab="tab-pool">Adoption Pool</button>
         <button class="pool-tab" data-tab="tab-applications">Applications</button>
         <button class="pool-tab" data-tab="tab-batches">Rescue Batches</button>
@@ -2769,32 +2769,33 @@ $activePage = 'adoption-pool';
       <!-- TAB: Adoption Pool -->
       <div class="tab-panel active" id="tab-pool">
         <!-- Table Filter Bar -->
-        <div class="table-filter-bar">
-        <div class="filter-left-controls">
-          <!-- Search input -->
-          <div class="search-grow-wrap">
+        <div class="table-filter-bar staff-mobile-toolbar">
+          <div class="staff-toolbar-search-row">
+          <div class="search-grow-wrap staff-toolbar-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" id="table-search-input" class="table-search-input" placeholder="Search pet name, breed, ID...">
+            <input type="text" id="table-search-input" class="table-search-input" placeholder="Search pets...">
           </div>
-          <div class="staff-date-filter" data-date-filter="pool">
+          <div class="staff-date-filter staff-toolbar-filter" data-date-filter="pool">
             <button class="staff-date-filter-button" type="button" aria-label="Filter adoption pool by rescue date" title="Filter by rescue date" aria-expanded="false">
               <i class="fas fa-filter" aria-hidden="true"></i>
             </button>
             <input type="hidden" id="poolDateFrom" value="">
             <input type="hidden" id="poolDateTo" value="">
           </div>
+          </div>
 
+        <div class="filter-left-controls staff-toolbar-filters">
           <!-- Species Dropdown Filter -->
-          <select id="filter-species" class="table-filter-select">
+          <select id="filter-species" class="table-filter-select staff-toolbar-select">
             <option value="all">Species: All ▾</option>
             <option value="Dog">Dog</option>
             <option value="Cat">Cat</option>
           </select>
 
           <!-- Rescue Source Dropdown Filter -->
-          <select id="filter-source" class="table-filter-select">
+          <select id="filter-source" class="table-filter-select staff-toolbar-select">
             <option value="all">Rescue Source: All ▾</option>
             <option value="Barangay-Reported">Barangay-Reported</option>
             <option value="Resident Surrender">Resident Surrender</option>
@@ -2802,7 +2803,7 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Adoption Status Dropdown Filter -->
-          <select id="filter-adoption-status" class="table-filter-select">
+          <select id="filter-adoption-status" class="table-filter-select staff-toolbar-select">
             <option value="all">Adoption Status: All ▾</option>
             <option value="Pending Review">Pending Review</option>
             <option value="Available">Available</option>
@@ -2811,7 +2812,7 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Listing Status Dropdown Filter -->
-          <select id="filter-listing-status" class="table-filter-select">
+          <select id="filter-listing-status" class="table-filter-select staff-toolbar-select">
             <option value="all">Listing: All ▾</option>
             <option value="Not Listed">Not Listed</option>
             <option value="Published">Published</option>
@@ -2819,17 +2820,17 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Reset Button -->
-          <button class="btn-reset-filters" id="btn-reset-filters">Clear Filters</button>
+          <button class="btn-reset-filters staff-toolbar-reset" id="btn-reset-filters">Clear Filters</button>
         </div>
-        <div class="table-filter-actions">
-          <button class="btn-secondary-action" type="button" onclick="exportAdoptionPoolCSV()" title="Export filtered adoption pool as CSV">
+        <div class="table-filter-actions staff-toolbar-actions">
+          <button class="btn-secondary-action staff-toolbar-secondary" type="button" onclick="exportAdoptionPoolCSV()" title="Export filtered adoption pool as CSV">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             <span>Export CSV</span>
           </button>
           <!-- Record Rescue Dropdown -->
-          <div class="rescue-dropdown-wrap" id="rescue-dropdown-wrap">
+          <div class="rescue-dropdown-wrap staff-toolbar-secondary" id="rescue-dropdown-wrap">
             <button class="btn-secondary-action" id="header-record-rescue-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 0 0 7.75"/>
@@ -2859,7 +2860,7 @@ $activePage = 'adoption-pool';
           </div>
 
           <!-- Primary Action: + Add to Adoption Pool -->
-          <button class="btn-primary-action" id="open-add-pool-btn">
+          <button class="btn-primary-action staff-toolbar-primary" id="open-add-pool-btn">
             <span>+ Add to Adoption Pool</span>
           </button>
         </div>

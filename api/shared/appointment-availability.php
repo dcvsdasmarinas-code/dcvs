@@ -102,9 +102,6 @@ $ovrStmt->close();
 $staffCount = dcvsActiveStaffCount($conn);
 $today = date('Y-m-d');
 $availabilityStart = max($firstDay, $today);
-$programStaffing = $availabilityStart <= $lastDay
-    ? dcvsProgramStaffingMap($conn, $availabilityStart, $lastDay)
-    : [];
 $blocked = [];
 $urgentBlocked = [];
 $routineCapacity = [];
@@ -116,7 +113,7 @@ for ($d = 1; $d <= (int)date('j', strtotime($lastDay)); $d++) {
         $dateOverrides = $overrides[$dateKey] ?? [];
         $clinicOpen = dcvsClinicSlotAvailable($conn, $dateKey, $time, $weeklyTemplate, $dateOverrides);
         $routineCapacity[$dateKey][$time] = $clinicOpen
-            ? max(0, $staffCount - (int)($programStaffing[$dateKey][$time] ?? 0))
+            ? max(0, $staffCount)
             : 0;
         $urgentCapacity[$dateKey][$time] = $clinicOpen && $staffCount > 0 ? 1 : 0;
         if ($routineCapacity[$dateKey][$time] === 0) $blocked[$dateKey][$time] = true;
@@ -130,7 +127,6 @@ $programStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_ty
     LEFT JOIN program_barangays pb ON pb.program_id = p.program_id
     LEFT JOIN barangays b ON b.barangay_id = pb.barangay_id
     WHERE p.status IN ('scheduled','live') AND p.end_date >= ? AND p.start_date <= ?
-      AND p.program_type IN ('vaccination','rabies_prevention')
     GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
 $programsByDate = [];
 if ($programStmt) {
@@ -149,13 +145,15 @@ if ($programStmt) {
                     'program_type' => $program['program_type'],
                     'start_time' => $programStartTime,
                     'end_time' => $programEndTime,
+                    'start_date' => $program['start_date'],
+                    'end_date' => $program['end_date'],
                     'venue' => $program['venue'] ?? '',
                     'barangay_names' => $program['barangay_names'] ?? '',
                 ];
             }
         }
     } else {
-        error_log('Failed to load public vaccination programs: ' . $programStmt->error);
+        error_log('Failed to load scheduled programs: ' . $programStmt->error);
     }
     $programStmt->close();
 }

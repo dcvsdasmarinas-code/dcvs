@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS `programs` (
     `end_date` DATE NOT NULL,
     `program_start_time` TIME DEFAULT NULL,
     `program_end_time` TIME DEFAULT NULL,
-    `staff_required_count` INT NOT NULL DEFAULT 1,
+    `staff_required_count` INT NOT NULL DEFAULT 0,
     `operating_time` VARCHAR(100) DEFAULT NULL,
     `location_mode` ENUM('single', 'multiple') NOT NULL DEFAULT 'single',
     `venue` VARCHAR(255) DEFAULT NULL,

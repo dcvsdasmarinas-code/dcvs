@@ -138,24 +138,26 @@ function registeredPetVaccination($status) {
       <div class="rp-kpi"><p class="rp-kpi-label">Cats</p><div class="rp-kpi-value"><?php echo number_format($counts['cat']); ?></div><p class="rp-kpi-sub">Registered cats</p></div>
       <div class="rp-kpi"><p class="rp-kpi-label">Other Pets</p><div class="rp-kpi-value"><?php echo number_format($counts['other']); ?></div><p class="rp-kpi-sub">Other registered species</p></div>
     </div>
-    <div class="rp-toolbar">
-      <label class="rp-search">
+    <div class="rp-toolbar staff-mobile-toolbar staff-toolbar-search-only">
+      <div class="staff-toolbar-search-row staff-toolbar-no-filter">
+      <label class="rp-search staff-toolbar-search">
         <i class="fas fa-search" aria-hidden="true"></i>
-        <input type="search" id="registeredPetsSearch" placeholder="Search client or pet name, ID, email..." aria-label="Search registered pets" />
+        <input type="search" id="registeredPetsSearch" placeholder="Search pets..." aria-label="Search registered pets" />
       </label>
-      <div class="rp-filters">
-      <select id="registeredPetsType" aria-label="Filter by type">
+      </div>
+      <div class="rp-filters staff-toolbar-filters">
+      <select class="staff-toolbar-select" id="registeredPetsType" aria-label="Filter by type">
         <option value="">All Types</option>
         <option value="dog">Dog</option>
         <option value="cat">Cat</option>
         <option value="other">Other</option>
       </select>
-      <select id="registeredPetsQuickFilter" aria-label="Additional filters">
+      <select class="staff-toolbar-select" id="registeredPetsQuickFilter" aria-label="Additional filters">
         <option value="">All</option>
         <option value="recent">Recently Added</option>
         <option value="vaccinated">Vaccinated Pets</option>
       </select>
-      <select id="registeredPetsBarangay" aria-label="Filter by barangay">
+      <select class="staff-toolbar-select staff-toolbar-last-filter" id="registeredPetsBarangay" aria-label="Filter by barangay">
         <option value="">All Barangays</option>
         <?php foreach ($barangays as $barangay): ?>
           <option value="<?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?></option>

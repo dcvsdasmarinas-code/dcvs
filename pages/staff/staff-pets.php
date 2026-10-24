@@ -599,29 +599,35 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
           </div>
 
           <div class="db-table-area">
-            <div class="db-toolbar">
-              <div class="search-grow-wrap">
+            <div class="db-toolbar staff-mobile-toolbar staff-toolbar-search-only">
+              <div class="staff-toolbar-search-row staff-toolbar-no-filter">
+              <div class="search-grow-wrap staff-toolbar-search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="mainSearch" placeholder="Search pet name, ID, species, owner..." oninput="setSearch(this.value)">
+                <input type="text" id="mainSearch" placeholder="Search pets..." oninput="setSearch(this.value)">
+              </div>
               </div>
               <div class="toolbar-actions">
-                <select class="select-input" id="speciesSelect" onchange="setSpecies(this.value)">
+                <div class="staff-toolbar-filters" style="display:flex;align-items:center;gap:8px;">
+                <select class="select-input staff-toolbar-select" id="speciesSelect" onchange="setSpecies(this.value)">
                   <option value="all">All Species</option>
                   <option value="Dog">Dog</option>
                   <option value="Cat">Cat</option>
                 </select>
-                <select class="select-input" id="sexSelect" onchange="setSex(this.value)">
+                <select class="select-input staff-toolbar-select" id="sexSelect" onchange="setSex(this.value)">
                   <option value="all">All Sex</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
-                <select class="select-input" id="vaccSelect" onchange="setVacc(this.value)">
+                <select class="select-input staff-toolbar-select staff-toolbar-last-filter" id="vaccSelect" onchange="setVacc(this.value)">
                   <option value="all">Adoption Readiness</option>
                   <option value="vaccinated">Vaccinated</option>
                   <option value="not_vaccinated">Not Vaccinated</option>
                   <option value="needs_review">Medical Review Needed</option>
                 </select>
-                <button type="button" class="sd-btn sd-btn-default" onclick="openCreate()"><i class="fas fa-plus"></i> Add New Pet</button>
+                </div>
+                <div class="staff-toolbar-actions" style="display:flex;align-items:center;gap:8px;">
+                  <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openCreate()"><i class="fas fa-plus"></i> Add New Pet</button>
+                </div>
               </div>
             </div>
             <div id="tableWrap" class="dt-container">

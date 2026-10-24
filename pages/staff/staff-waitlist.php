@@ -203,10 +203,13 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
         min-width:0;
       }
       .waitlist-table-wrap {
+        width:100%;
         max-width:100%;
+        min-width:0;
         -webkit-overflow-scrolling:touch;
         overscroll-behavior-x:contain;
       }
+      .waitlist-table { width:max-content; min-width:100%; }
       .waitlist-table th:first-child,
       .waitlist-table td:first-child {
         position:sticky;
@@ -243,23 +246,27 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Notified</p><p class="waitlist-kpi-value"><?php echo $kpis['notified']; ?></p><p class="waitlist-kpi-sub">Awaiting resident claim</p></article>
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Highest Demand Date</p><p class="waitlist-kpi-value" style="font-size:20px;"><?php echo $demandDate ? date('M d, Y', strtotime($demandDate)) : '—'; ?></p><p class="waitlist-kpi-sub"><?php echo $demandCount; ?> waiting resident<?php echo $demandCount === 1 ? '' : 's'; ?></p></article>
     </section>
-    <form class="waitlist-toolbar" method="get" action="staff-waitlist.php" data-draft-ignore>
-      <input type="search" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search resident or pet" aria-label="Search resident or pet">
-      <span class="staff-date-filter waitlist-date-filter" data-date-filter="waitlist">
+    <form class="waitlist-toolbar staff-mobile-toolbar" method="get" action="staff-waitlist.php" data-draft-ignore>
+      <div class="staff-toolbar-search-row">
+      <input class="staff-toolbar-search" type="search" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search resident or pet" aria-label="Search resident or pet">
+      <span class="staff-date-filter waitlist-date-filter staff-toolbar-filter" data-date-filter="waitlist">
         <button type="button" class="waitlist-date-button staff-date-filter-button <?php echo $dateFilter !== '' ? 'has-date' : ''; ?>" id="waitlistDateButton" aria-label="Filter waitlist by preferred date" title="Filter by date" aria-expanded="false">
           <i class="fas fa-filter" aria-hidden="true"></i>
         </button>
         <input type="hidden" name="date" id="waitlistDateFrom" value="<?php echo htmlspecialchars($dateFilter); ?>">
         <input type="hidden" id="waitlistDateTo" value="<?php echo htmlspecialchars($dateFilter); ?>">
       </span>
-      <?php if ($dateFilter !== ''): ?><button type="button" class="waitlist-date-clear" id="clearWaitlistDate" aria-label="Clear date filter"><i class="fas fa-times"></i></button><?php endif; ?>
-      <select class="waitlist-service-filter" name="service" aria-label="Filter by service" onchange="this.form.submit()">
+      </div>
+      <div class="staff-toolbar-filters">
+      <?php if ($dateFilter !== ''): ?><button type="button" class="waitlist-date-clear staff-toolbar-reset" id="clearWaitlistDate" aria-label="Clear date filter"><i class="fas fa-times"></i></button><?php endif; ?>
+      <select class="waitlist-service-filter staff-toolbar-select" name="service" aria-label="Filter by service" onchange="this.form.submit()">
         <option value="">All services</option>
         <?php foreach ($services as $service): ?><option value="<?php echo $service; ?>" <?php echo $serviceFilter === $service ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($service)); ?></option><?php endforeach; ?>
       </select>
-      <select class="waitlist-status-filter" name="status" aria-label="Filter by status" onchange="this.form.submit()">
+      <select class="waitlist-status-filter staff-toolbar-select" name="status" aria-label="Filter by status" onchange="this.form.submit()">
         <?php foreach (array_merge(['all'], $statuses) as $status): ?><option value="<?php echo $status; ?>" <?php echo $statusFilter === $status ? 'selected' : ''; ?>><?php echo $status === 'all' ? 'All statuses' : ($status === 'waiting' ? 'Pending' : htmlspecialchars(ucfirst($status))); ?></option><?php endforeach; ?>
       </select>
+      </div>
     </form>
     <section class="waitlist-card">
       <div class="waitlist-table-wrap">

@@ -679,13 +679,22 @@ $composeBarangays = $barangays;
     <?php endif; ?>
 
     <!-- History toolbar (outside the table container) -->
-    <div class="comm-toolbar comm-toolbar-inner">
-      <div class="comm-search">
+    <div class="comm-toolbar comm-toolbar-inner staff-mobile-toolbar">
+      <div class="staff-toolbar-search-row">
+      <div class="comm-search staff-toolbar-search">
         <i class="fas fa-search search-icon"></i>
-        <input type="text" id="logSearch" placeholder="Search by recipient or subject..." oninput="logDebouncedSearch()" />
+        <input type="text" id="logSearch" placeholder="Search messages..." oninput="logDebouncedSearch()" />
       </div>
-      <div class="comm-filter">
-        <select id="logTypeFilter" onchange="renderLogPage(1)">
+      <div class="staff-date-filter staff-toolbar-filter" data-date-filter="message">
+        <button class="staff-date-filter-button" type="button" aria-label="Filter sent messages by date" title="Filter by date" aria-expanded="false">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+        </button>
+        <input type="hidden" id="messageDateFrom" value="">
+        <input type="hidden" id="messageDateTo" value="">
+      </div>
+      </div>
+      <div class="comm-filter staff-toolbar-filters">
+        <select class="staff-toolbar-select staff-toolbar-last-filter" id="logTypeFilter" onchange="renderLogPage(1)">
           <option value="">All Types</option>
           <option value="report">Report</option>
           <option value="adoption">Adoption</option>
@@ -695,15 +704,8 @@ $composeBarangays = $barangays;
           <option value="other">Other</option>
         </select>
       </div>
-      <div class="staff-date-filter" data-date-filter="message">
-        <button class="staff-date-filter-button" type="button" aria-label="Filter sent messages by date" title="Filter by date" aria-expanded="false">
-          <i class="fas fa-filter" aria-hidden="true"></i>
-        </button>
-        <input type="hidden" id="messageDateFrom" value="">
-        <input type="hidden" id="messageDateTo" value="">
-      </div>
-      <div class="comm-toolbar-actions">
-        <button type="button" class="sd-btn sd-btn-default btn-compose" onclick="openComposeDialog()">Compose Message</button>
+      <div class="comm-toolbar-actions staff-toolbar-actions staff-toolbar-single-secondary">
+        <button type="button" class="sd-btn sd-btn-default btn-compose staff-toolbar-primary" onclick="openComposeDialog()">Compose Message</button>
       </div>
     </div>
 

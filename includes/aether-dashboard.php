@@ -111,7 +111,6 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                     'operating_time' => $row['operating_time'] ?? '',
                     'program_start_time' => $row['program_start_time'] ?? '',
                     'program_end_time' => $row['program_end_time'] ?? '',
-                    'staff_required_count' => (int)($row['staff_required_count'] ?? 1),
                     'location_mode'  => $row['location_mode'],
                     'venue'          => $row['venue'] ?? '',
                     'barangay_ids'   => $brgyIds,
@@ -1951,7 +1950,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <input type="hidden" name="program_start_time" id="abProgramStartTime">
           <input type="hidden" name="program_end_time" id="abProgramEndTime">
         </div>
-        <input type="hidden" name="staff_required_count" id="abStaffRequiredCount" value="1">
         <div class="ab-field" style="margin-bottom:0;">
           <label class="ab-label">Coverage / Barangay <span style="color:#e53e3e;">*</span></label>
           <div style="display:flex;gap:12px;margin-bottom:8px;">
@@ -3080,7 +3078,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     form.querySelector('input[name="end_date"]').value = camp.end || '';
     if (camp.program_start_time) document.getElementById('abTimeStart').value = camp.program_start_time.slice(0, 5);
     if (camp.program_end_time) document.getElementById('abTimeEnd').value = camp.program_end_time.slice(0, 5);
-    form.querySelector('#abStaffRequiredCount').value = camp.staff_required_count || 1;
     form.querySelector('#abTargetReach').value = camp.target || '';
     form.querySelector('#abDogsTarget').value = camp.dogs || '';
     form.querySelector('#abCatsTarget').value = camp.cats || '';
@@ -3487,7 +3484,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var detailFields = ['program_name', 'program_description', 'start_date', 'end_date', 'venue'];
     if (detailFields.some(function(name) { return firstValue(name) !== ''; })) return true;
     if (firstValue('operating_time') && firstValue('operating_time') !== '08:00 AM \u2014 05:00 PM') return true;
-    if (firstValue('staff_required_count') && firstValue('staff_required_count') !== '1') return true;
     if (['target_reach', 'dogs_target', 'cats_target'].some(function(name) {
       var value = firstValue(name);
       return value !== '' && value !== '0';
@@ -3589,14 +3585,13 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var end = form.querySelector('input[name="end_date"]').value;
     var startTime = form.querySelector('input[name="program_start_time"]').value;
     var endTime = form.querySelector('input[name="program_end_time"]').value;
-    var staffRequired = form.querySelector('input[name="staff_required_count"]').value;
     var conflictChoices = document.getElementById('abProgramConflictChoices');
     var notifyInput = document.getElementById('abNotifyAffectedInput');
     var keepChoice = document.getElementById('abKeepAppointmentsChoice');
     var hoursChoice = document.getElementById('abChangeProgramHoursChoice');
     var rescheduleChoice = document.getElementById('abRescheduleAppointmentsChoice');
     var offersInput = document.getElementById('abRescheduleOffersJson');
-    if (!start || !end || !startTime || !endTime || !staffRequired) {
+    if (!start || !end || !startTime || !endTime) {
       summary.hidden = true;
       if (conflictChoices) conflictChoices.hidden = true;
       if (notifyInput) notifyInput.checked = false;
@@ -3622,8 +3617,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       start_date: start,
       end_date: end,
       start_time: startTime,
-      end_time: endTime,
-      staff_required_count: staffRequired
+      end_time: endTime
     });
     if (programId && programId.value) params.set('program_id', programId.value);
 
@@ -3887,7 +3881,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     if (endDateInput) {
       endDateInput.addEventListener('focus', function() { aethSetProgramDateLimits(!!programForm.querySelector('input[name="create_program"]')); });
     }
-    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], input[name="staff_required_count"], #abTimeStart, #abTimeEnd').forEach(function(input) {
+    programForm.querySelectorAll('input[name="start_date"], input[name="end_date"], #abTimeStart, #abTimeEnd').forEach(function(input) {
       input.addEventListener('change', aethCheckProgramConflicts);
     });
   }

@@ -11,7 +11,7 @@ if (isset($conn) && !$conn->connect_error) {
         SELECT a.appointment_id, a.reference_id, a.pet_id,
                COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
                COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
-               a.status, a.appointment_type, a.notes, a.created_at,
+               a.status, a.appointment_type, a.urgency_level, a.notes, a.created_at,
                COALESCE(NULLIF(a.pet_name,''), p.pet_name) AS pet_name,
                p.pet_type, p.breed, p.photo_url AS pet_photo, p.reference_id AS pet_ref,
                u.full_name, u.phone, u.address, b.barangay_name
@@ -239,6 +239,13 @@ if (isset($conn) && !$conn->connect_error) {
   display:inline-block; margin-top:4px; font-size:10px; background:var(--ec-bg);
   padding:2px 4px; border-radius:4px;
 }
+#dcvsEventsCalendar .ec-event-badges{ display:flex; flex-wrap:wrap; align-items:center; gap:3px; }
+#dcvsEventsCalendar .ec-urgency-badge{ display:inline-block; padding:2px 4px; border-radius:4px; background:#f4f4f5; color:#52525b; font-size:9px; line-height:1.25; text-transform:capitalize; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-urgent{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-routine{ background:#dbeafe; color:#1e40af; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-high{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-medium{ background:#fef3c7; color:#92400e; }
+#dcvsEventsCalendar .ec-urgency-badge.ec-urgency-low{ background:#dcfce7; color:#166534; }
 /* Appointment status colors */
 #dcvsEventsCalendar .ec-st-pending{ border-left-color:#f59e0b; }
 #dcvsEventsCalendar .ec-st-published{ border-left-color:#10b981; }
@@ -386,6 +393,7 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day-popover-item{ padding:9px 10px; border:1px solid transparent; border-bottom-color:#e4e4e7; border-left:3px solid var(--event-color); border-radius:4px; }
 #dcvsEventsCalendar .ec-day-popover-item.highlighted{ border-color:var(--event-color); background:color-mix(in srgb,var(--event-color) 8%,#fff); }
 #dcvsEventsCalendar .ec-day-popover-item-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+#dcvsEventsCalendar .ec-day-popover-badges{ display:flex; flex:0 0 auto; align-items:center; gap:4px; }
 #dcvsEventsCalendar .ec-day-popover-item-title{ min-width:0; margin:0; font-size:13px; font-weight:600; }
 #dcvsEventsCalendar .ec-day-popover-status{ flex:0 0 auto; padding:2px 7px; border-radius:10px; background:#f4f4f5; color:#52525b; font-size:10px; font-weight:600; text-transform:capitalize; }
 #dcvsEventsCalendar .ec-day-popover-status[data-status="live"]{ background:#dcfce7; color:#166534; }
@@ -802,6 +810,7 @@ var EVENTS = RAW_APPT.map(function(a){
     endDay: d.getDate(),
     eventType: type,
     status: st,
+    urgency: String(a.urgency_level || 'routine'),
     description: a.notes || '',
     resident: a.full_name || '',
     contact: a.phone || '',
@@ -1239,6 +1248,18 @@ function eventCategoryLabel(ev){
   if(ev.kind==='announcement') return 'Event';
   return 'Schedule';
 }
+function eventUrgencyLabel(ev){
+  if (ev.kind !== 'appointment' && ev.kind !== 'report') return '';
+  var urgency = String(ev.urgency || (ev.kind === 'report' ? 'medium' : 'routine')).toLowerCase();
+  return cap(urgency.replace(/_/g,' '));
+}
+function eventUrgencyClass(ev){
+  return 'ec-urgency-' + String(ev.urgency || (ev.kind === 'report' ? 'medium' : 'routine')).toLowerCase().replace(/[^a-z0-9_-]/g,'-');
+}
+function eventUrgencyBadge(ev){
+  var label = eventUrgencyLabel(ev);
+  return label ? '<span class="ec-urgency-badge '+eventUrgencyClass(ev)+'">'+esc(label)+'</span>' : '';
+}
 function eventPopoverTitle(ev){
   if(ev.kind==='report'){
     var reportLabels = {stray:'Stray Animal',rabies:'Rabies Case',injured:'Injured Animal',dead:'Dead Animal'};
@@ -1254,8 +1275,8 @@ function eventBlock(ev, date){
   var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
   var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : statusDot(ev));
   var statusClass = 'ec-st-'+(reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : status));
-  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(ev.name+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
-    '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></div></button>';
+  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(eventCategoryLabel(ev)+', '+eventUrgencyLabel(ev)+', '+status+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
+    '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-badges">'+eventUrgencyBadge(ev)+'<span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></span></div></button>';
 }
 
 var dayPopover = null;
@@ -1272,7 +1293,7 @@ function dayPopoverMarkup(ev){
   var range = bounds.start !== bounds.end ? '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>'+esc(eventDateRange(ev))+'</span></div>' : '';
   var color = typeClass === 'ec-type-kapon' ? '#15803d' : typeClass === 'ec-type-checkup' ? '#2563eb' : typeClass === 'ec-type-rabies' ? '#d97706' : typeClass === 'ec-type-seminar' ? '#7c3aed' : '#64748b';
   return '<article class="ec-day-popover-item'+(eventId(ev)===highlightedEventId?' highlighted':'')+'" style="--event-color:'+color+'">'+
-    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-status '+((reportStatus||appointmentStatus)?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></div>'+
+    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-badges">'+eventUrgencyBadge(ev)+'<span class="ec-day-popover-status '+((reportStatus||appointmentStatus)?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>'+esc(ev.time||'Time not specified')+'</span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>'+esc(ev.location||'Location not specified')+'</span></div>'+range+'</article>';
 }
@@ -1526,6 +1547,7 @@ window.ecOpenEvent = function(id){
         '<div class="ec-info-grid">'+
           '<div class="ec-sec-title">Appointment Details</div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Service</span><span class="ec-field-value">'+esc(cap(ev.eventType))+'</span></div>'+
+          '<div class="ec-field-row"><span class="ec-field-label">Urgency</span><span class="ec-field-value"><span class="ec-urgency-badge '+eventUrgencyClass(ev)+'">'+esc(eventUrgencyLabel(ev))+'</span></span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Date</span><span class="ec-field-value">'+esc(apptDate)+'</span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Time</span><span class="ec-field-value">'+esc(ev.time||'-')+'</span></div>'+
           '<div class="ec-field-row"><span class="ec-field-label">Status</span><span class="ec-field-value"><span class="ec-status-pill '+statusPillCls+'" style="background:'+sc[0]+';color:'+sc[1]+';border-color:'+sc[2]+';">'+esc(statusLabel)+'</span></span></div>'+

@@ -231,6 +231,7 @@ function barangayAnnouncementCalendarDate(array $announcement): DateTimeImmutabl
       .notif-panel { position:fixed; top:60px; right:8px; width:min(380px,calc(100vw - 16px)); }
     }
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 <?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
@@ -277,14 +278,17 @@ function barangayAnnouncementCalendarDate(array $announcement): DateTimeImmutabl
   </header>
 
   <main class="dashboard-content">
-    <div class="announcement-toolbar" aria-label="Announcement search and filters">
-      <div class="announcement-search-controls">
+    <div class="announcement-toolbar portal-mobile-toolbar" aria-label="Announcement search and filters">
+      <div class="announcement-search-controls portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <label class="announcement-search-wrap">
           <svg class="announcement-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
           <input class="announcement-search" type="search" id="announcementSearch" placeholder="Search announcements..." aria-label="Search announcements">
         </label>
-        <label class="announcement-filter-wrap">
-          <select class="announcement-filter" id="announcementCategoryFilter" aria-label="Filter announcements by category">
+        </div>
+        <div class="portal-toolbar-filter-grid">
+        <label class="announcement-filter-wrap portal-toolbar-last-filter">
+          <select class="announcement-filter portal-toolbar-last-filter" id="announcementCategoryFilter" aria-label="Filter announcements by category">
             <option value="all">All categories</option>
             <option value="vaccination">Vaccination</option>
             <option value="kapon">Kapon</option>
@@ -294,8 +298,9 @@ function barangayAnnouncementCalendarDate(array $announcement): DateTimeImmutabl
           </select>
           <svg class="announcement-filter-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
         </label>
+        </div>
       </div>
-      <div class="category-filters" role="group" aria-label="Filter announcement category">
+      <div class="category-filters portal-toolbar-filter-tabs" role="group" aria-label="Filter announcement category">
         <button class="category-filter" type="button" data-category="all" aria-pressed="true">All</button>
         <button class="category-filter" type="button" data-category="announcement" aria-pressed="false">Announcements</button>
         <button class="category-filter" type="button" data-category="advisory" aria-pressed="false">Advisories</button>

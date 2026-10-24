@@ -918,6 +918,10 @@ $annResult = $annStmt->get_result();
 /* Available Time section */
 .bk-slots-wrap{display:flex;flex-direction:column;gap:0;margin-top:4px;}
 .bk-slots-title{font-family:inherit;font-size:15px;font-weight:600;color:var(--bk-fg);margin-bottom:4px;}
+.bk-program-notice{margin:0 0 10px;color:#09090b;font-family:inherit;font-size:0.875rem;font-weight:400;line-height:1.5;}
+.bk-program-notice-heading{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 10px;border-radius:4px;background:#333;color:#fff;font-size:13px;font-weight:600;line-height:1.3;}
+.bk-program-notice-heading svg{width:14px;height:14px;flex:none;}
+.bk-program-notice-message{margin:0;}
 .bk-slots-hint{font-size:13px;color:var(--bk-muted);margin-bottom:12px;line-height:1.4;}
 .bk-cal-hint{font-size:14px;color:var(--bk-muted);margin-top:2px;line-height:1.4;}
 .bk-slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
@@ -2531,19 +2535,23 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')"><i class="fas fa-plus"></i> Register a Pet</button>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="petSearchInput" class="appt-search-input" placeholder="Search by name, breed, or ID">
         </div>
-        <select id="petStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="petStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Categories</option>
           <option value="owned">Owned</option>
           <option value="adopted">Adopted</option>
         </select>
+        </div>
       </div>
-      <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')" style="margin-left:auto;">
+      <button type="button" class="sd-btn sd-btn-default resident-toolbar-primary" onclick="openModal('addPetModal')" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Register a Pet
       </button>
     </div>
@@ -3137,21 +3145,25 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <a href="submit-report-page.php" class="sd-btn sd-btn-default"><i class="fas fa-plus"></i> Submit a Report</a>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="reportSearchInput" class="appt-search-input" placeholder="Search by ID, type, or location">
         </div>
-        <select id="reportStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="reportStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="review">Under Review</option>
           <option value="resolved">Resolved</option>
           <option value="rejected">Rejected</option>
         </select>
+        </div>
       </div>
-      <a href="submit-report-page.php" class="sd-btn sd-btn-default" style="margin-left:auto;">
+      <a href="submit-report-page.php" class="sd-btn sd-btn-default resident-toolbar-primary" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Submit a Report
       </a>
     </div>
@@ -3556,12 +3568,15 @@ include __DIR__ . '/../../includes/portal-toast.php';
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Notified</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['notified']; ?></p><p class="resident-waitlist-kpi-sub">Slot available to claim</p></article>
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Most Requested Date</p><p class="resident-waitlist-kpi-value" style="font-size:20px;"><?php echo $residentWaitlistDemandDate ? date('M d, Y', strtotime($residentWaitlistDemandDate)) : '--'; ?></p><p class="resident-waitlist-kpi-sub"><?php echo $residentWaitlistDemandCount; ?> of your waiting requests</p></article>
     </section>
-    <form class="resident-waitlist-toolbar" id="residentWaitlistToolbar" onsubmit="return false;">
-      <input type="search" id="residentWaitlistSearch" placeholder="Search by pet or service" aria-label="Search waitlist">
+    <form class="resident-waitlist-toolbar resident-list-toolbar" id="residentWaitlistToolbar" onsubmit="return false;">
+      <div class="resident-toolbar-search-row resident-toolbar-has-filter">
+      <input type="search" id="residentWaitlistSearch" placeholder="Search..." aria-label="Search waitlist">
       <span class="resident-waitlist-date-filter">
         <button type="button" class="resident-waitlist-date-button" id="residentWaitlistDateButton" aria-label="Filter by date" title="Filter by date"><i class="fas fa-filter" aria-hidden="true"></i></button>
         <input type="date" id="residentWaitlistDate" aria-label="Filter by preferred date">
       </span>
+      </div>
+      <div class="resident-toolbar-filters">
       <button type="button" class="resident-waitlist-date-clear" id="residentWaitlistClearDate" aria-label="Clear date filter" hidden><i class="fas fa-times"></i></button>
       <select id="residentWaitlistService" aria-label="Filter by service">
         <option value="">All services</option>
@@ -3577,6 +3592,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <option value="expired">Expired</option>
         <option value="cancelled">Cancelled</option>
       </select>
+      </div>
     </form>
     <section class="resident-waitlist-card">
       <div class="resident-waitlist-table-wrap">
@@ -3688,13 +3704,16 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()"><i class="fas fa-plus"></i> Request Appointment</button>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search by ID, service, or pet">
         </div>
-        <select id="apptStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="apptStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="action_needed">Action needed</option>
@@ -3706,8 +3725,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
           <option value="no_show">No Show</option>
           <option value="rejected">Rejected</option>
         </select>
+        </div>
       </div>
-      <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()" style="margin-left:auto;">
+      <button type="button" class="sd-btn sd-btn-default resident-toolbar-primary" onclick="openBookApptModal()" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Request Appointment
       </button>
     </div>
@@ -3811,6 +3831,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
               </div>
             </div>
             <div class="bk-cal-hint" id="bkSlotsHint">Select your preferred appointment date.</div>
+            <div id="bkNearestSlotNotice" hidden role="status" aria-live="polite" style="margin-top:6px;font-size:13px;color:#52525b;"></div>
           </div>
 
           <!-- RIGHT column: pet, service, available time -->
@@ -3878,9 +3899,14 @@ include __DIR__ . '/../../includes/portal-toast.php';
             <!-- Available Time -->
             <div class="bk-slots-wrap">
               <div class="bk-slots-title">Available Time</div>
-              <div id="bkProgramNotice" hidden style="margin:0 0 10px;padding:11px 13px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5;"></div>
+              <div id="bkProgramNotice" class="bk-program-notice" hidden>
+                <div class="bk-program-notice-heading">
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.25v3.5M8 5.25h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  <span id="bkProgramNoticeTitle"></span>
+                </div>
+                <p class="bk-program-notice-message" id="bkProgramNoticeMessage"></p>
+              </div>
               <div class="bk-slot-grid" id="bkSlots"></div>
-              <div id="bkNearestSlotNotice" hidden role="status" aria-live="polite" style="margin-top:10px;font-size:13px;color:#52525b;"></div>
               <div id="bkWaitlistWrap" hidden style="margin-top:10px;">
                 <button type="button" class="sd-btn sd-btn-outline" id="bkJoinWaitlist">Notify me if a slot opens</button>
                 <div id="bkWaitlistStatus" role="status" aria-live="polite" style="margin-top:6px;font-size:13px;"></div>
@@ -3958,14 +3984,18 @@ include __DIR__ . '/../../includes/portal-toast.php';
   <section id="archive" class="content-section">
 <!-- Archived Pets -->
     <div class="archive-header">
-      <div class="archive-toolbar">
+      <div class="archive-toolbar resident-list-toolbar">
+        <div class="resident-toolbar-search-row">
         <div class="search-grow-wrap">
           <svg class="archive-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input type="text" id="archiveSearch" class="archive-search-input" placeholder="Search archived items..." onkeyup="filterArchive()">
         </div>
-        <select class="archive-filter-select archive-detail-filter" id="archiveDetailFilter" onchange="archiveDetailChanged()" aria-label="Archive type filter"></select>
+        </div>
+        <div class="resident-toolbar-filters">
+        <select class="archive-filter-select archive-detail-filter resident-toolbar-last-filter" id="archiveDetailFilter" onchange="archiveDetailChanged()" aria-label="Archive type filter"></select>
+        </div>
       </div>
     </div>
 
@@ -4553,12 +4583,15 @@ foreach ($residentAdoptionApplications as $application) {
 <!-- adoption table -->
 <section id="adoption" class="content-section">
 
-  <div class="appt-card-header">
-    <div class="appt-header-right">
+  <div class="appt-card-header resident-list-toolbar">
+    <div class="appt-header-right resident-toolbar-controls">
+      <div class="resident-toolbar-search-row">
       <div class="appt-search-wrap">
         <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input type="text" id="cvSearch" class="appt-search-input" placeholder="Search by name, ID, species...">
       </div>
+      </div>
+      <div class="resident-toolbar-filters">
       <select id="cvStatusFilter" class="appt-status-select">
         <option value="all">All Status</option>
         <option value="available">Available</option>
@@ -4576,13 +4609,14 @@ foreach ($residentAdoptionApplications as $application) {
         <option value="Dog">Dog</option>
         <option value="Cat">Cat</option>
       </select>
-      <select id="cvSort" class="appt-status-select">
+      <select id="cvSort" class="appt-status-select resident-toolbar-last-filter">
         <option value="recent">Recently Added</option>
         <option value="az">Name A&ndash;Z</option>
         <option value="za">Name Z&ndash;A</option>
         <option value="age">Age</option>
         <option value="status">Status</option>
       </select>
+      </div>
     </div>
   </div>
 
@@ -8097,10 +8131,9 @@ function checkSlot() {
             } else {
                 status.style.background = '#fef2f2';
                 status.style.color = '#991b1b';
-                var msg = d.program_blocked ? 'All clinic staff are assigned to a program during this time.'
-                                    : (d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
+                var msg = d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
                                     : (d.held ? 'This time slot is already in use.'
-                                              : 'This slot is no longer available.'));
+                                              : 'This slot is no longer available.');
                 if (d.nearest_slot) {
                     var nearest = d.nearest_slot.split(' ');
                     var nearDate = new Date(nearest[0] + 'T00:00:00');
@@ -8460,7 +8493,7 @@ document.addEventListener('DOMContentLoaded', function() {
             none.textContent = 'No ' + selectedUrgency() + ' slots are available on this day.';
             bkSlots.appendChild(none);
             var requestId = ++nearestRequestId;
-            fetch('includes/check_slot.php?date=' + encodeURIComponent(selStart) + '&time=15%3A00&urgency=' + encodeURIComponent(selectedUrgency()))
+            fetch('includes/check_slot.php?date=' + encodeURIComponent(selStart) + '&time=09%3A00&urgency=' + encodeURIComponent(selectedUrgency()))
                 .then(function(response) {
                     if (!response.ok) throw new Error('Could not find the nearest available appointment.');
                     return response.json();
@@ -8484,12 +8517,26 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         }
         var events = programEvents[selStart] || [];
-        if (events.length && typeSelect && typeSelect.value === 'vaccination') {
+        if (events.length) {
             var notice = document.getElementById('bkProgramNotice');
-            notice.textContent = events.map(function(event) {
-                var location = event.venue || event.barangay_names || 'Location to be announced';
-                return 'Free Vaccination Drive: ' + event.program_name + ' at ' + location + ', ' + fmtTime(event.start_time) + '–' + fmtTime(event.end_time) + '. Walk-in; no appointment is needed for the drive.';
-            }).join(' ');
+            var programDescriptions = events.map(function(event) {
+                var programName = String(event.program_name || 'Program')
+                    .toLowerCase()
+                    .replace(/\b[a-z]/g, function(letter) { return letter.toUpperCase(); });
+                var location = event.barangay_names || event.venue || 'Location to be announced';
+                var time = event.start_time && event.end_time
+                    ? fmtTime(event.start_time) + ' to ' + fmtTime(event.end_time)
+                    : '';
+                var description = 'A ' + programName + ' is scheduled in ' + location + (time ? ', from ' + time : '') + '.';
+                return description;
+            });
+            programDescriptions.push('You can still book an available appointment slot. If the program is held at the clinic, just check in with the staff when you arrive.');
+            var noticeProgramName = events.length === 1
+                ? String(events[0].program_name || 'Program').toLowerCase().replace(/\b[a-z]/g, function(letter) { return letter.toUpperCase(); })
+                : 'Program';
+            document.getElementById('bkProgramNoticeTitle').textContent =
+                noticeProgramName + ' Notice';
+            document.getElementById('bkProgramNoticeMessage').textContent = programDescriptions.join(' ');
             notice.hidden = false;
         }
         if (!anyOpen && typeSelect && typeSelect.value && document.getElementById('petSelect').value

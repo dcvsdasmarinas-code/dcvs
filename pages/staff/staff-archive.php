@@ -342,13 +342,13 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 
 <main class="main-content">
 
-<div class="page-header archive-toolbar">
-  <div class="appt-search-wrap">
+<div class="page-header archive-toolbar staff-mobile-toolbar staff-toolbar-search-only">
+  <div class="appt-search-wrap staff-toolbar-search">
     <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
     <input type="text" id="searchInput" class="appt-search-input" placeholder="Search..." value="<?php echo htmlspecialchars($search); ?>" />
   </div>
   <?php if ($type === 'reports'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Types</option>
       <option value="stray" <?php echo ($_GET['filter'] ?? '')==='stray'?'selected':''; ?>>Stray Animal</option>
       <option value="cruelty" <?php echo ($_GET['filter'] ?? '')==='cruelty'?'selected':''; ?>>Animal Cruelty</option>
@@ -356,14 +356,14 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
       <option value="rabies" <?php echo ($_GET['filter'] ?? '')==='rabies'?'selected':''; ?>>Rabies Suspect</option>
     </select>
   <?php elseif ($type === 'appointments'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Types</option>
       <option value="vaccination" <?php echo ($_GET['filter'] ?? '')==='vaccination'?'selected':''; ?>>Vaccination</option>
       <option value="checkup" <?php echo ($_GET['filter'] ?? '')==='checkup'?'selected':''; ?>>Check-up</option>
       <option value="sterilization" <?php echo ($_GET['filter'] ?? '')==='sterilization'?'selected':''; ?>>Sterilization</option>
     </select>
   <?php elseif ($type === 'clients'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Barangays</option>
       <?php
       $brgyQ = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name");
@@ -373,7 +373,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
       <?php endwhile; ?>
     </select>
   <?php elseif ($type === 'pets'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Species</option>
       <option value="dog" <?php echo ($_GET['filter'] ?? '')==='dog'?'selected':''; ?>>Dog</option>
       <option value="cat" <?php echo ($_GET['filter'] ?? '')==='cat'?'selected':''; ?>>Cat</option>
@@ -381,17 +381,17 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
       <option value="other" <?php echo ($_GET['filter'] ?? '')==='other'?'selected':''; ?>>Other</option>
     </select>
   <?php elseif ($type === 'rescued'): ?>
-    <select id="filterSelect" class="appt-status-select" disabled>
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" disabled>
       <option>Rescued Animals</option>
     </select>
   <?php elseif ($type === 'announcements'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Categories</option>
       <option value="advisory" <?php echo ($_GET['filter'] ?? '')==='advisory'?'selected':''; ?>>Advisory</option>
       <option value="announcement" <?php echo ($_GET['filter'] ?? '')==='announcement'?'selected':''; ?>>Announcement</option>
     </select>
   <?php elseif ($type === 'programs'): ?>
-    <select id="filterSelect" class="appt-status-select" onchange="applyFilter()">
+    <select id="filterSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="applyFilter()">
       <option value="">All Types</option>
       <option value="kapon" <?php echo ($_GET['filter'] ?? '')==='kapon'?'selected':''; ?>>Kapon</option>
       <option value="vaccination" <?php echo ($_GET['filter'] ?? '')==='vaccination'?'selected':''; ?>>Vaccination</option>
@@ -404,7 +404,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
     </select>
   <?php endif; ?>
   <?php if ($search || ($_GET['filter'] ?? '')): ?>
-    <button class="pet-action-btn" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear</button>
+    <button class="pet-action-btn staff-toolbar-reset" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear</button>
   <?php endif; ?>
 </div>
 

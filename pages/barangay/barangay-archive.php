@@ -233,6 +233,7 @@ $activePage = 'archive';
     @media(max-width:768px){.topbar{gap:12px;padding:0 16px;}.topbar-left{min-width:0;}.topbar-breadcrumb{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}.breadcrumb-root,.breadcrumb-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.topbar-right{flex:0 0 auto;gap:8px;}.user-meta{display:none;}.main-content{min-width:0;padding:1rem;}.appt-card-header{flex-direction:column;align-items:stretch;}.appt-header-right{width:100%;flex-wrap:wrap;}.appt-search-wrap{min-width:0;flex:1;}.appt-search-input{width:100%;min-width:0;}.appt-status-select{min-width:0;max-width:100%;}}
     @media(max-width:480px){.topbar{padding:0 10px;}.main-content{padding:12px;}.appt-header-right>*{max-width:100%;}}
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
@@ -297,15 +298,17 @@ $activePage = 'archive';
 
   <main class="main-content">
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
-        <select class="appt-status-select" id="categoryFilter">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-filter-grid">
+        <select class="appt-status-select portal-toolbar-last-filter" id="categoryFilter">
           <option value="">All Categories</option>
           <option value="stray">Stray</option>
           <option value="rabies">Rabies</option>
           <option value="injured">Injured</option>
           <option value="dead">Dead</option>
         </select>
+        </div>
       </div>
     </div>
 

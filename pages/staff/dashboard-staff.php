@@ -954,7 +954,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     $endDate     = $_POST['end_date'] ?? '';
     $programStartTime = $_POST['program_start_time'] ?? '';
     $programEndTime = $_POST['program_end_time'] ?? '';
-    $staffRequired = (int)($_POST['staff_required_count'] ?? 0);
+    $staffRequired = 0;
     $notifyAffected = ($_POST['notify_affected'] ?? '') === '1';
     $conflictChoice = (string)($_POST['program_conflict_choice'] ?? '');
     $rescheduleOffersJson = (string)($_POST['reschedule_offers_json'] ?? '[]');
@@ -966,10 +966,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     $dogsTarget  = intval($_POST['dogs_target'] ?? 0);
     $catsTarget  = intval($_POST['cats_target'] ?? 0);
     $appointmentConflicts = (!empty($startDate) && !empty($endDate) && !empty($programStartTime) && !empty($programEndTime))
-        ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, 0, $programStartTime, $programEndTime, $staffRequired)
+        ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, 0, $programStartTime, $programEndTime)
         : [];
     $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
-    $activeStaffCount = dcvsActiveStaffCount($conn);
     $rescheduleOffers = null;
     $rescheduleOffersError = '';
     if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -987,8 +986,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
       $_SESSION['program_error'] = "The program end date cannot be before its start date.";
     } elseif (!preg_match('/^\d{2}:\d{2}$/', $programStartTime) || !preg_match('/^\d{2}:\d{2}$/', $programEndTime) || $programStartTime >= $programEndTime) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
-    } elseif ($staffRequired < 1 || $staffRequired > $activeStaffCount) {
-      $_SESSION['program_error'] = "The required program staff count must be between 1 and the " . $activeStaffCount . " active staff account(s).";
     } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
       $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
     } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -1085,7 +1082,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     $endDate     = $_POST['end_date'] ?? '';
     $programStartTime = $_POST['program_start_time'] ?? '';
     $programEndTime = $_POST['program_end_time'] ?? '';
-    $staffRequired = (int)($_POST['staff_required_count'] ?? 0);
+    $staffRequired = 0;
     $notifyAffected = ($_POST['notify_affected'] ?? '') === '1';
     $conflictChoice = (string)($_POST['program_conflict_choice'] ?? '');
     $rescheduleOffersJson = (string)($_POST['reschedule_offers_json'] ?? '[]');
@@ -1098,17 +1095,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     $catsTarget  = intval($_POST['cats_target'] ?? 0);
     $existingProgram = null;
     if ($progId > 0) {
-      $existingProgramStmt = $conn->prepare("SELECT start_date, end_date, program_start_time, program_end_time, staff_required_count, operating_time FROM programs WHERE program_id = ?");
+      $existingProgramStmt = $conn->prepare("SELECT start_date, end_date, program_start_time, program_end_time, operating_time FROM programs WHERE program_id = ?");
       $existingProgramStmt->bind_param('i', $progId);
       $existingProgramStmt->execute();
       $existingProgram = $existingProgramStmt->get_result()->fetch_assoc();
       $existingProgramStmt->close();
     }
     $appointmentConflicts = ($existingProgram && !empty($startDate) && !empty($endDate) && !empty($programStartTime) && !empty($programEndTime))
-        ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $progId, $programStartTime, $programEndTime, $staffRequired)
+        ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $progId, $programStartTime, $programEndTime)
         : [];
     $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
-    $activeStaffCount = dcvsActiveStaffCount($conn);
     $rescheduleOffers = null;
     $rescheduleOffersError = '';
     if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -1127,8 +1123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
       $_SESSION['program_error'] = "The program end date cannot be before its start date.";
     } elseif (!preg_match('/^\d{2}:\d{2}$/', $programStartTime) || !preg_match('/^\d{2}:\d{2}$/', $programEndTime) || $programStartTime >= $programEndTime) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
-    } elseif ($staffRequired < 1 || $staffRequired > $activeStaffCount) {
-      $_SESSION['program_error'] = "The required program staff count must be between 1 and the " . $activeStaffCount . " active staff account(s).";
     } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
       $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
     } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -2586,20 +2580,23 @@ if (!empty($_GET['waitlist_booking'])) {
         <div class="toast toast-success" style="background:#eef6f0;border:1px solid #b8d1c0;color:#045e1f;padding:10px 14px;border-radius:6px;margin-bottom:1rem;"><?php echo htmlspecialchars($_SESSION['appointment_success']); unset($_SESSION['appointment_success']); ?></div>
         <?php endif; ?>
 
-        <div class="appt-card-header">
+        <div class="appt-card-header staff-mobile-toolbar">
             <div class="appt-header-right">
-              <div class="appt-search-wrap">
+              <div class="staff-toolbar-search-row">
+              <div class="appt-search-wrap staff-toolbar-search">
                 <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search by ID, Resident Name, or Pet�?�">
+                <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search appointments...">
               </div>
-              <div class="staff-date-filter" data-date-filter="appt">
+              <div class="staff-date-filter staff-toolbar-filter" data-date-filter="appt">
                 <button class="staff-date-filter-button" type="button" aria-label="Filter appointment requests by date" title="Filter by date" aria-expanded="false">
                   <i class="fas fa-filter" aria-hidden="true"></i>
                 </button>
                 <input type="hidden" id="apptDateFrom" value="">
                 <input type="hidden" id="apptDateTo" value="">
               </div>
-              <select id="apptStatusSelect" class="appt-status-select">
+              </div>
+              <div class="staff-toolbar-filters">
+              <select id="apptStatusSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
                 <option value="scheduled">Scheduled</option>
@@ -2608,14 +2605,15 @@ if (!empty($_GET['waitlist_booking'])) {
                 <option value="rescheduled">Rescheduled</option>
                 <option value="no_show">No Show</option>
               </select>
+              </div>
             </div>
-            <div class="appt-primary-actions" style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
-              <a href="availability.php" class="sd-btn sd-btn-outline"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
-              <button type="button" class="sd-btn sd-btn-outline" onclick="exportAppointmentsCSV()" title="Export appointment requests as CSV">
+            <div class="appt-primary-actions staff-toolbar-actions" style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
+              <a href="availability.php" class="sd-btn sd-btn-outline staff-toolbar-secondary"><i class="fas fa-calendar-alt"></i> Manage Schedule</a>
+              <button type="button" class="sd-btn sd-btn-outline staff-toolbar-secondary" onclick="exportAppointmentsCSV()" title="Export appointment requests as CSV">
                 Export CSV
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               </button>
-              <button type="button" class="sd-btn sd-btn-default" onclick="openAddAppointmentModal()"><i class="fas fa-clipboard-list"></i> Review Requests</button>
+              <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openAddAppointmentModal()"><i class="fas fa-clipboard-list"></i> Review Requests</button>
             </div>
           </div>
 
@@ -2811,43 +2809,47 @@ if (!empty($_GET['waitlist_booking'])) {
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar">
-              <div class="search-grow-wrap">
+            <div class="db-toolbar staff-mobile-toolbar">
+              <div class="staff-toolbar-search-row">
+              <div class="search-grow-wrap staff-toolbar-search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="mainSearch" placeholder="Search client or pet name, ID, email..." oninput="setSearch(this.value)">
+                <input type="text" id="mainSearch" placeholder="Search clients..." oninput="setSearch(this.value)">
               </div>
-              <div class="toolbar-filters">
-                  <select class="select-input tf-select" id="typeFilter" onchange="setType(this.value)">
+              <div class="staff-toolbar-filter">
+                <div class="staff-date-filter" data-date-filter="cpd">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter clients and pets by registration date" title="Filter by registration date" aria-expanded="false">
+                    <i class="fas fa-filter" aria-hidden="true"></i>
+                  </button>
+                  <input type="hidden" id="cpdDateFrom" value="">
+                  <input type="hidden" id="cpdDateTo" value="">
+                </div>
+              </div>
+              </div>
+              <div class="toolbar-filters staff-toolbar-filters">
+                  <select class="select-input tf-select staff-toolbar-select" id="typeFilter" onchange="setType(this.value)">
                     <option value="">All Types</option>
                     <option value="dog">Dog</option>
                     <option value="cat">Cat</option>
                   </select>
-                  <select class="select-input tf-select" id="quickFilter" onchange="setQuick(this.value)">
+                  <select class="select-input tf-select staff-toolbar-select" id="quickFilter" onchange="setQuick(this.value)">
                     <option value="">All</option>
                     <option value="recent">Recently Added</option>
                     <option value="active">Active Clients</option>
                     <option value="vax">Vaccinated Pets</option>
                   </select>
-                  <div class="staff-date-filter" data-date-filter="cpd">
-                    <button class="staff-date-filter-button" type="button" aria-label="Filter clients and pets by registration date" title="Filter by registration date" aria-expanded="false">
-                      <i class="fas fa-filter" aria-hidden="true"></i>
-                    </button>
-                    <input type="hidden" id="cpdDateFrom" value="">
-                    <input type="hidden" id="cpdDateTo" value="">
-                  </div>
-                  <select class="select-input tf-select" id="brgyFilter" onchange="setBrgy(this.value)">
+                  <select class="select-input tf-select staff-toolbar-select staff-toolbar-last-filter" id="brgyFilter" onchange="setBrgy(this.value)">
                     <option value="">All Barangays</option>
                     <?php foreach ($cpdBarangays as $b): ?>
                       <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                     <?php endforeach; ?>
                   </select>
                 </div>
-                <div class="db-toolbar-actions">
-                <button type="button" class="sd-btn sd-btn-outline" id="cpdExportBtn" onclick="exportCSV()" title="Export CSV">
+                <div class="db-toolbar-actions staff-toolbar-actions">
+                <button type="button" class="sd-btn sd-btn-outline staff-toolbar-secondary" id="cpdExportBtn" onclick="exportCSV()" title="Export CSV">
                   Export CSV
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
-                <button type="button" class="sd-btn sd-btn-default" id="cpdAddBtn" onclick="openAddClient()">
+                <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" id="cpdAddBtn" onclick="openAddClient()">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                   Add New Client
                 </button>
@@ -3803,6 +3805,7 @@ if (!empty($_GET['waitlist_booking'])) {
         -webkit-overflow-scrolling:touch;
       }
       #appointments .appt-table {
+        width:max-content;
         min-width:70rem;
       }
     }
@@ -4339,13 +4342,22 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar staff-report-toolbar">
-              <div class="search-grow-wrap">
+            <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+              <div class="staff-toolbar-search-row">
+              <div class="search-grow-wrap staff-toolbar-search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="rptMainSearch" placeholder="Search reports by ref, reporter, description..." oninput="rptSetSearch(this.value)">
+                <input type="text" id="rptMainSearch" placeholder="Search reports..." oninput="rptSetSearch(this.value)">
               </div>
-              <div class="toolbar-filters staff-report-filters">
-                <select class="select-input tf-select" id="rptType" onchange="rptSetType(this.value)">
+              <div class="staff-date-filter staff-toolbar-filter" data-date-filter="rpt">
+                <button class="staff-date-filter-button" type="button" aria-label="Filter reports by date" title="Filter by date" aria-expanded="false">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                </button>
+                <input type="hidden" id="rptDateFrom" value="">
+                <input type="hidden" id="rptDateTo" value="">
+              </div>
+              </div>
+              <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
+                <select class="select-input tf-select staff-toolbar-select" id="rptType" onchange="rptSetType(this.value)">
                   <option value="">All Types</option>
                   <option value="stray">Stray Animal</option>
                   <option value="rabies">Rabies</option>
@@ -4353,13 +4365,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                   <option value="dead">Dead Animal</option>
                   <option value="rescue">Rescue</option>
                 </select>
-                <select class="select-input tf-select" id="rptBrgy" onchange="rptSetBrgy(this.value)">
+                <select class="select-input tf-select staff-toolbar-select" id="rptBrgy" onchange="rptSetBrgy(this.value)">
                   <option value="">All Barangays</option>
                   <?php foreach ($cpdBarangays as $b): ?>
                     <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                   <?php endforeach; ?>
                 </select>
-                <select class="select-input tf-select" id="rptStatus" onchange="rptSetStatus(this.value)">
+                <select class="select-input tf-select staff-toolbar-select" id="rptStatus" onchange="rptSetStatus(this.value)">
                   <option value="">All Statuses</option>
                   <option value="pending">Pending Barangay Review</option>
                   <option value="validated">Pending DCVS Review</option>
@@ -4367,20 +4379,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                   <option value="resolved">Resolved</option>
                   <option value="rejected">Rejected</option>
                 </select>
-                <select class="select-input tf-select" id="rptResidentStatus" aria-label="Resident account status" onchange="rptSetResidentStatus(this.value)">
+                <select class="select-input tf-select staff-toolbar-select" id="rptResidentStatus" aria-label="Resident account status" onchange="rptSetResidentStatus(this.value)">
                   <option value="active">Active Residents</option>
                   <option value="inactive">Inactive Resident History</option>
                 </select>
-                <div class="staff-date-filter" data-date-filter="rpt">
-                  <button class="staff-date-filter-button" type="button" aria-label="Filter reports by date" title="Filter by date" aria-expanded="false">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                  </button>
-                  <input type="hidden" id="rptDateFrom" value="">
-                  <input type="hidden" id="rptDateTo" value="">
-                </div>
               </div>
-              <div class="db-toolbar-actions">
-                <button type="button" class="sd-btn sd-btn-outline" onclick="rptExportCSV()" title="Export CSV">
+              <div class="db-toolbar-actions staff-toolbar-actions staff-toolbar-single-secondary">
+                <button type="button" class="sd-btn sd-btn-outline staff-toolbar-secondary" onclick="rptExportCSV()" title="Export CSV">
                   Export CSV
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
@@ -4679,12 +4684,21 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar staff-report-toolbar">
-                <div class="search-grow-wrap">
+            <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+                <div class="staff-toolbar-search-row">
+                <div class="search-grow-wrap staff-toolbar-search">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="penMainSearch" placeholder="Search pending reports..." oninput="penSetSearch(this.value)">
                 </div>
-                <div class="toolbar-filters staff-report-filters">
+                <div class="staff-date-filter staff-toolbar-filter" data-date-filter="pen">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter pending reports by date" title="Filter by date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="penDateFrom" value="">
+                  <input type="hidden" id="penDateTo" value="">
+                </div>
+                </div>
+                <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
                     <select class="select-input tf-select" id="penType" onchange="penSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -4699,13 +4713,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                    <div class="staff-date-filter" data-date-filter="pen">
-                      <button class="staff-date-filter-button" type="button" aria-label="Filter pending reports by date" title="Filter by date" aria-expanded="false">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                      </button>
-                      <input type="hidden" id="penDateFrom" value="">
-                      <input type="hidden" id="penDateTo" value="">
-                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -5268,12 +5275,21 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                 <p class="kpi-sub">In Barangay custody</p>
               </div>
             </div>
-            <div class="db-toolbar staff-report-toolbar">
-              <div class="search-grow-wrap">
+            <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+              <div class="staff-toolbar-search-row">
+              <div class="search-grow-wrap staff-toolbar-search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 <input type="text" id="brgMainSearch" placeholder="Search Barangay cases..." oninput="brgSetSearch(this.value)">
               </div>
-              <div class="toolbar-filters staff-report-filters">
+              <div class="staff-date-filter staff-toolbar-filter" data-date-filter="brg">
+                <button class="staff-date-filter-button" type="button" aria-label="Filter accepted cases by date" title="Filter by date" aria-expanded="false">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                </button>
+                <input type="hidden" id="brgDateFrom" value="">
+                <input type="hidden" id="brgDateTo" value="">
+              </div>
+              </div>
+              <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
                 <select class="select-input tf-select" id="brgType" onchange="brgSetType(this.value)">
                   <option value="">All Types</option>
                   <option value="stray">Stray Animal</option>
@@ -5288,13 +5304,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                     <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                   <?php endforeach; ?>
                 </select>
-                <div class="staff-date-filter" data-date-filter="brg">
-                  <button class="staff-date-filter-button" type="button" aria-label="Filter accepted cases by date" title="Filter by date" aria-expanded="false">
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                  </button>
-                  <input type="hidden" id="brgDateFrom" value="">
-                  <input type="hidden" id="brgDateTo" value="">
-                </div>
               </div>
             </div>
             <div class="db-table-area staff-report-table-area">
@@ -5375,12 +5384,21 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar staff-report-toolbar">
-                <div class="search-grow-wrap">
+            <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+                <div class="staff-toolbar-search-row">
+                <div class="search-grow-wrap staff-toolbar-search">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="actMainSearch" placeholder="Search active cases..." oninput="actSetSearch(this.value)">
                 </div>
-                <div class="toolbar-filters staff-report-filters">
+                <div class="staff-date-filter staff-toolbar-filter" data-date-filter="act">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter active cases by date" title="Filter by date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="actDateFrom" value="">
+                  <input type="hidden" id="actDateTo" value="">
+                </div>
+                </div>
+                <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
                     <select class="select-input tf-select" id="actType" onchange="actSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -5395,13 +5413,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                    <div class="staff-date-filter" data-date-filter="act">
-                      <button class="staff-date-filter-button" type="button" aria-label="Filter active cases by date" title="Filter by date" aria-expanded="false">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
-                      </button>
-                      <input type="hidden" id="actDateFrom" value="">
-                      <input type="hidden" id="actDateTo" value="">
-                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -5499,12 +5510,21 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
             </div>
 
             <!-- Toolbar -->
-            <div class="db-toolbar staff-report-toolbar">
-                <div class="search-grow-wrap">
+            <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+                <div class="staff-toolbar-search-row">
+                <div class="search-grow-wrap staff-toolbar-search">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   <input type="text" id="resMainSearch" placeholder="Search resolved cases..." oninput="resSetSearch(this.value)">
                 </div>
-                <div class="toolbar-filters staff-report-filters">
+                <div class="staff-date-filter staff-toolbar-filter" data-date-filter="res">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter resolved cases by date" title="Filter by date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46v6.54l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="resDateFrom" value="">
+                  <input type="hidden" id="resDateTo" value="">
+                </div>
+                </div>
+                <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
                     <select class="select-input tf-select" id="resType" onchange="resSetType(this.value)">
                       <option value="">All Types</option>
                       <option value="stray">Stray Animal</option>
@@ -5519,13 +5539,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
                         <option value="<?php echo htmlspecialchars($b['barangay_name']); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
                       <?php endforeach; ?>
                     </select>
-                    <div class="staff-date-filter" data-date-filter="res">
-                      <button class="staff-date-filter-button" type="button" aria-label="Filter resolved cases by date" title="Filter by date" aria-expanded="false">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46v6.54l4 2v-8.54L22 3z"/></svg>
-                      </button>
-                      <input type="hidden" id="resDateFrom" value="">
-                      <input type="hidden" id="resDateTo" value="">
-                    </div>
                 </div>
               </div>
               <div class="db-table-area staff-report-table-area">
@@ -8518,10 +8531,9 @@ function checkStaffSlot() {
             } else {
                 status.style.background = '#fef2f2';
                 status.style.color = '#991b1b';
-                var msg = d.program_blocked ? 'All clinic staff are assigned to a program during this time.'
-                                    : (d.clinic_blocked ? 'This time slot is closed by schedule.'
+                var msg = d.clinic_blocked ? 'This time slot is closed by schedule.'
                                     : (d.held ? 'This time slot is already reserved by another resident.'
-                                              : 'This slot is no longer available.'));
+                                              : 'This slot is no longer available.');
                 if (d.nearest_slot) {
                     var nearest = d.nearest_slot.split(' ');
                     var nearDate = new Date(nearest[0] + 'T00:00:00');
@@ -9146,10 +9158,9 @@ window.APP = window.APP || {};
         } else {
           st.style.background = '#fef2f2';
           st.style.color = '#991b1b';
-          var m = sd.program_blocked ? 'All clinic staff are assigned to a program during this time.'
-                            : (sd.clinic_blocked ? 'This time slot is closed by schedule (Availability page).'
+          var m = sd.clinic_blocked ? 'This time slot is closed by schedule (Availability page).'
                             : (sd.held ? 'This time slot is already reserved by another resident.'
-                                       : 'This preferred slot is no longer available.'));
+                                       : 'This preferred slot is no longer available.');
           if (sd.nearest_slot) {
             var nearest = sd.nearest_slot.split(' ');
             var nearDate = new Date(nearest[0] + 'T00:00:00');

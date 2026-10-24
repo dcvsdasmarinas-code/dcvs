@@ -859,6 +859,7 @@ $activePage = 'reports';
     @media(max-width:768px){.topbar,body.sb2-active .topbar{left:0!important;width:100%;margin-left:0;padding:0 16px;}.topbar-breadcrumb{min-width:0;overflow:hidden;white-space:nowrap;}.breadcrumb-root,.breadcrumb-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.topbar-right{flex:0 0 auto;gap:8px;}.main-content{width:100%;min-width:0;padding:1rem;}.appt-card-header{width:100%;min-width:0;flex-direction:column;align-items:stretch;}.appt-header-right{display:grid;width:100%;min-width:0;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;}.appt-search-wrap{grid-column:1/-1;min-width:0;}.appt-search-input{width:100%;min-width:0;}.appt-status-select{width:100%;min-width:0;max-width:100%;}.export-csv-btn{width:100%;}}
     @media(max-width:520px){.report-kpi-grid{gap:10px}.report-kpi-card{padding:14px 10px}.report-kpi-label{font-size:12px}.report-kpi-value{font-size:23px}}
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
@@ -941,11 +942,14 @@ $activePage = 'reports';
       <?php endforeach; ?>
     </section>
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header portal-mobile-toolbar portal-toolbar-has-primary">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by ID, category, location..." />
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select class="appt-status-select" id="statusFilter">
           <option value="">All Status</option>
           <option value="pending">Pending Barangay Review</option>
@@ -961,17 +965,20 @@ $activePage = 'reports';
           <option value="injured">Injured</option>
           <option value="dead">Dead</option>
         </select>
-        <select class="appt-status-select" id="priorityFilter">
+        <select class="appt-status-select portal-toolbar-last-filter" id="priorityFilter">
           <option value="">All Priority</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <button class="pet-action-btn" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters
-        </button>
+        </div>
+        <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+          <button class="pet-action-btn portal-toolbar-secondary" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters
+          </button>
+        </div>
       </div>
-      <button class="pet-action-btn export-csv-btn" type="button" onclick="exportAll()"><span>Export CSV</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+      <button class="pet-action-btn export-csv-btn portal-toolbar-primary" type="button" onclick="exportAll()"><span>Export CSV</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
     </div>
 
     <div class="bulk-bar" id="bulkBar">
