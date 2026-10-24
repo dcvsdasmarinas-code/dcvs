@@ -258,6 +258,12 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-event-edition.ec-st-no-show{ background:#f1f5f9; color:#475569; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-live{ background:#ecfdf5; color:#047857; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-paused{ background:#fffbeb; color:#92400e; }
+#dcvsEventsCalendar .ec-st-approved{ border-left-color:#16a34a; }
+#dcvsEventsCalendar .ec-st-action-needed{ border-left-color:#f97316; }
+#dcvsEventsCalendar .ec-st-in-progress{ border-left-color:#2563eb; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-approved{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-action-needed{ background:#ffedd5; color:#9a3412; }
+#dcvsEventsCalendar .ec-event-edition.ec-st-in-progress{ background:#dbeafe; color:#1e40af; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-validated{ background:#dcebe0; color:#045e1f; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-active{ background:#eff6ff; color:#1e40af; }
 #dcvsEventsCalendar .ec-event-edition.ec-st-resolved{ background:#0e8131; color:#fff; }
@@ -388,6 +394,11 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day-popover-status.ec-st-active{ background:#eff6ff; color:#1e40af; }
 #dcvsEventsCalendar .ec-day-popover-status.ec-st-resolved{ background:#0e8131; color:#fff; }
 #dcvsEventsCalendar .ec-day-popover-status.ec-st-rejected{ background:#fee2e2; color:#991b1b; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-approved{ background:#dcebe0; color:#045e1f; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-action-needed{ background:#ffedd5; color:#9a3412; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-in-progress{ background:#dbeafe; color:#1e40af; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-scheduled{ background:#0e8131; color:#fff; }
+#dcvsEventsCalendar .ec-day-popover-status.ec-st-rescheduled{ background:#ede9fe; color:#6d28d9; }
 #dcvsEventsCalendar .ec-day-popover-meta{ display:flex; align-items:flex-start; gap:6px; margin-top:4px; color:#52525b; font-size:12px; line-height:1.4; }
 #dcvsEventsCalendar .ec-day-popover-meta svg{ width:14px; height:14px; flex:0 0 14px; margin-top:1px; color:#71717a; }
 #dcvsEventsCalendar .ec-day-popover-empty{ margin:10px 2px; color:#71717a; font-size:13px; }
@@ -1167,6 +1178,21 @@ function statusDot(ev){
   var status = String(ev.status||'').toLowerCase();
   return ['live','published','active','confirmed'].indexOf(status) !== -1 ? 'live' : 'scheduled';
 }
+function appointmentStatusDisplay(ev){
+  var status = String(ev.status || 'pending').toLowerCase().replace(/ /g,'_');
+  var labels = {
+    pending:'Pending',
+    approved:'Approved',
+    scheduled:'Scheduled',
+    in_progress:'In Progress',
+    rescheduled:'Rescheduled',
+    action_needed:'Action Needed'
+  };
+  return {
+    label:labels[status] || cap(status.replace(/_/g,' ')),
+    statusClass:status.replace(/_/g,'-')
+  };
+}
 function reportStatusDisplay(ev){
   var status = String(ev.status || 'pending').toLowerCase();
   var responseState = String(ev.responseState || '').toLowerCase();
@@ -1225,10 +1251,11 @@ function eventBlock(ev, date){
   var id = eventId(ev);
   var typeClass = eventTypeClass(ev);
   var reportStatus = ev.kind === 'report' ? reportStatusDisplay(ev) : null;
-  var status = reportStatus ? reportStatus.label : statusDot(ev);
-  var statusClass = 'ec-st-'+(reportStatus ? reportStatus.statusClass : status);
+  var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
+  var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : statusDot(ev));
+  var statusClass = 'ec-st-'+(reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : status));
   return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(ev.name+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
-    '<div class="ec-event-card-head '+(reportStatus?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></div></button>';
+    '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></div></button>';
 }
 
 var dayPopover = null;
@@ -1239,12 +1266,13 @@ function dayPopoverMarkup(ev){
   var bounds = eventBounds(ev);
   var typeClass = eventTypeClass(ev);
   var reportStatus = ev.kind === 'report' ? reportStatusDisplay(ev) : null;
-  var status = reportStatus ? reportStatus.label : String(ev.status||'scheduled').replace(/_/g,' ');
-  var statusClass = reportStatus ? reportStatus.statusClass : statusDot(ev);
+  var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
+  var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : String(ev.status||'scheduled').replace(/_/g,' '));
+  var statusClass = reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : statusDot(ev));
   var range = bounds.start !== bounds.end ? '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg><span>'+esc(eventDateRange(ev))+'</span></div>' : '';
   var color = typeClass === 'ec-type-kapon' ? '#15803d' : typeClass === 'ec-type-checkup' ? '#2563eb' : typeClass === 'ec-type-rabies' ? '#d97706' : typeClass === 'ec-type-seminar' ? '#7c3aed' : '#64748b';
   return '<article class="ec-day-popover-item'+(eventId(ev)===highlightedEventId?' highlighted':'')+'" style="--event-color:'+color+'">'+
-    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-status '+(reportStatus?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></div>'+
+    '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-status '+((reportStatus||appointmentStatus)?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>'+esc(ev.time||'Time not specified')+'</span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>'+esc(ev.location||'Location not specified')+'</span></div>'+range+'</article>';
 }
@@ -1459,10 +1487,18 @@ window.ecOpenEvent = function(id){
       (ev.description ? '<div><div class="ec-sec-title">Description</div><div class="ec-notes-box">'+esc(ev.description)+'</div></div>' : '')+
       '<div class="sd-dialog-footer"><a class="sd-btn sd-btn-outline" href="dashboard-staff.php#reports-pending" target="_blank" rel="noopener noreferrer">Open Reports</a><button type="button" class="sd-btn sd-btn-outline" onclick="closeModal(\'ecEventDialog\')">Close</button></div>';
   } else {
-    var statusPillCls = 'ec-st-' + String(ev.status||'pending').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
-    var statusLabel = (ev.status||'pending').replace(/_/g,' ');
-    var statusColors = { pending:['#FEF3C7','#92400e','#FDE68A'], scheduled:['#dbeafe','#1e40af','#bfdbfe'], active:['#dbeafe','#1e40af','#bfdbfe'], confirmed:['#dcfce7','#166534','#bbf7d0'], rescheduled:['#f3e8ff','#7e22ce','#e9d5ff'], rejected:['#fee2e2','#991b1b','#fecaca'], completed:['#dcfce7','#166534','#bbf7d0'] };
-    var sc = statusColors[ev.status] || statusColors.pending;
+    var appointmentStatus = appointmentStatusDisplay(ev);
+    var statusPillCls = 'ec-st-' + appointmentStatus.statusClass;
+    var statusLabel = appointmentStatus.label;
+    var statusColors = {
+      pending:['#FEF3C7','#92400e','#FDE68A'],
+      approved:['#dcebe0','#045e1f','#bbf7d0'],
+      scheduled:['#0E8131','#ffffff','#0E8131'],
+      in_progress:['#dbeafe','#1e40af','#bfdbfe'],
+      action_needed:['#ffedd5','#9a3412','#fed7aa'],
+      rescheduled:['#ede9fe','#6d28d9','#ddd6fe']
+    };
+    var sc = statusColors[appointmentStatus.statusClass.replace(/-/g,'_')] || statusColors.pending;
     var petInitial = (ev.name||'P').charAt(0).toUpperCase();
     var petPhotoHtml = ev.petPhoto
       ? '<img src="'+esc(ev.petPhoto)+'" alt="">'
