@@ -4,8 +4,10 @@
  * Scoped under #dcvsEventsCalendar so it won't clash with the dashboard.
  */
 require_once __DIR__ . '/../db.php';
+require_once __DIR__ . '/../includes/appointments/availability.php';
 $calYear = (int)date('Y');
 $calAppointments = [];
+$calRescheduleRequests = [];
 if (isset($conn) && !$conn->connect_error) {
     $calStmt = $conn->prepare("
         SELECT a.appointment_id, a.reference_id, a.pet_id,
@@ -30,6 +32,27 @@ if (isset($conn) && !$conn->connect_error) {
         $calRes = $calStmt->get_result();
         while ($row = $calRes->fetch_assoc()) { $calAppointments[] = $row; }
         $calStmt->close();
+    }
+    $rescheduleStmt = $conn->prepare("
+        SELECT rr.requested_date, COUNT(*) AS request_count
+        FROM appointment_reschedule_requests rr
+        JOIN appointments a ON a.appointment_id = rr.appointment_id
+        WHERE rr.status IN ('pending','offered') AND a.archived_at IS NULL
+          AND a.status IN ('approved','scheduled','rescheduled')
+          AND YEAR(rr.requested_date) = ?
+        GROUP BY rr.requested_date
+    ");
+    if ($rescheduleStmt) {
+        $rescheduleStmt->bind_param('i', $calYear);
+        if ($rescheduleStmt->execute()) {
+            $rescheduleResult = $rescheduleStmt->get_result();
+            while ($row = $rescheduleResult->fetch_assoc()) $calRescheduleRequests[] = $row;
+        } else {
+            error_log('Could not load staff calendar reschedule request counts: ' . $rescheduleStmt->error);
+        }
+        $rescheduleStmt->close();
+    } else {
+        error_log('Could not prepare staff calendar reschedule request counts: ' . $conn->error);
     }
     $calAnnouncements = [];
     $annRes = $conn->query("SELECT a.announcement_id, a.title, a.content, a.category, a.priority, a.status, a.publish_at, a.created_at, a.updated_at, a.expiry_date, a.photo_url, a.barangay_id, a.is_event, a.event_date, a.event_end_date, a.event_start_time, a.event_end_time, a.venue_name, b.barangay_name FROM announcements a LEFT JOIN barangays b ON a.barangay_id = b.barangay_id WHERE a.status IN ('published','scheduled') AND a.archived_at IS NULL AND (a.expiry_date IS NULL OR a.expiry_date >= CURDATE()) ORDER BY COALESCE(a.publish_at, a.created_at)");
@@ -61,7 +84,9 @@ if (isset($conn) && !$conn->connect_error) {
       $reportStmt->close();
     }
 }
-?><!DOCTYPE html>
+?>
+<?php if (empty($isStaffDashboardCalendarEmbed)): ?>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -73,6 +98,7 @@ if (isset($conn) && !$conn->connect_error) {
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body style="margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#f5f5f5;">
+<?php endif; ?>
 <div class="ec-root" id="dcvsEventsCalendar">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800&family=Geist+Mono:wght@200;300;400;500&display=swap');
@@ -217,7 +243,7 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day.ec-day-capacity-full:focus-within .ec-events{ filter:none; opacity:1; }
 #dcvsEventsCalendar .ec-capacity-badge{ display:inline-block; margin:0 0 8px; padding:2px 6px; border-radius:4px; background:#fee2e2; color:#991b1b; font-size:10px; font-weight:700; }
 #dcvsEventsCalendar .ec-day-num{
-  font-family:'Geist Mono','SFMono-Regular',Consolas,monospace; font-weight:300;
+  font-family:inherit; font-weight:300;
   font-size:4.5rem; line-height:1; margin:0 0 8px;
 }
 #dcvsEventsCalendar .ec-day.today .ec-day-num,
@@ -353,11 +379,20 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-day-num.ec-calendar-trigger{ display:block; width:auto; padding:0; border:0; background:transparent; color:inherit; text-align:left; cursor:pointer; }
 #dcvsEventsCalendar .ec-week-row .ec-events{ gap:6px; }
 #dcvsEventsCalendar .ec-week-row .ec-event{ display:block; padding:6px; border-left-width:3px; border-radius:4px; background:color-mix(in srgb,var(--event-color) 10%,#fff); }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-appointment-cell{ display:flex; min-width:0; align-items:center; gap:5px; padding:2px 6px; border:0; border-radius:0; background:transparent; font-size:11px; line-height:1.25; }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-cell-last-event{ padding-bottom:6px; border-bottom:1px solid #e4e4e7; }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-appointment-cell:hover{ padding-left:6px; background:#f4f4f5; }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-program-cell{ border-left-color:#18181b; background:#f4f4f5; }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-program-cell .ec-event-card-head{ justify-content:flex-start; }
+#dcvsEventsCalendar .ec-week-row .ec-event.ec-program-cell .ec-event-badges{ display:none; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-kapon{ --event-color:#15803d; border-left-color:#15803d; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-checkup{ --event-color:#2563eb; border-left-color:#2563eb; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-rabies{ --event-color:#d97706; border-left-color:#d97706; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-seminar{ --event-color:#7c3aed; border-left-color:#7c3aed; }
 #dcvsEventsCalendar .ec-week-row .ec-event.ec-type-other{ --event-color:#64748b; border-left-color:#64748b; }
+#dcvsEventsCalendar .ec-cell-event-dot{ width:7px; height:7px; flex:0 0 7px; border-radius:50%; background:#15803d; }
+#dcvsEventsCalendar .ec-cell-event-time{ flex:0 0 auto; color:#18181b; font:inherit; font-size:10px; white-space:nowrap; }
+#dcvsEventsCalendar .ec-cell-event-label{ min-width:0; overflow:hidden; color:#18181b; font-size:11px; font-weight:400; text-overflow:ellipsis; white-space:nowrap; }
 #dcvsEventsCalendar .ec-event-card-head{ display:flex; align-items:center; justify-content:space-between; gap:4px; }
 #dcvsEventsCalendar .ec-event-card-head.ec-report-event-head{ flex-wrap:wrap; justify-content:flex-start; }
 #dcvsEventsCalendar .ec-event-card-head .ec-event-name{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -366,6 +401,10 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-cell-more{ display:block; width:100%; padding:2px 0; border:0; background:transparent; color:#0e8131; font:inherit; font-size:11px; font-weight:600; text-align:left; text-decoration:underline; cursor:pointer; }
 #dcvsEventsCalendar .ec-week-row .ec-event-time,
 #dcvsEventsCalendar .ec-week-row .ec-event-loc{ display:flex; align-items:center; gap:4px; margin-top:4px; overflow:hidden; font-size:10px; text-overflow:ellipsis; white-space:nowrap; }
+#dcvsEventsCalendar .ec-reschedule-request-count,
+#dcvsEventsCalendar .ec-reschedule-request-note{ margin-top:4px; padding:2px 5px; border:1px solid #a1a1aa; border-radius:4px; color:#52525b; background:#fafafa; font-size:10px; line-height:1.3; }
+#dcvsEventsCalendar .ec-reschedule-request-count{ border-style:dashed; white-space:nowrap; }
+#dcvsEventsCalendar .ec-reschedule-request-note{ display:inline-block; margin:8px 0; }
 #dcvsEventsCalendar .ec-week-row .ec-event-time svg,
 #dcvsEventsCalendar .ec-week-row .ec-event-loc svg{ width:12px; height:12px; flex:0 0 12px; }
 #dcvsEventsCalendar .ec-week-event{ position:absolute; z-index:2; display:flex; height:22px; align-items:center; gap:5px; overflow:hidden; padding:0 6px; border:0; border-left:3px solid var(--event-color); border-radius:3px; background:color-mix(in srgb,var(--event-color) 12%,#fff); color:var(--ec-fg); font-size:11px; text-align:left; white-space:nowrap; cursor:pointer; }
@@ -384,6 +423,42 @@ if (isset($conn) && !$conn->connect_error) {
 #dcvsEventsCalendar .ec-week-overflow{ position:absolute; z-index:3; padding:0 4px; border:0; background:transparent; color:#0e8131; font:inherit; font-size:11px; font-weight:600; white-space:nowrap; text-decoration:underline; cursor:pointer; }
 #dcvsEventsCalendar .ec-day-popover{ position:fixed; z-index:1001; display:none; width:320px; max-width:calc(100vw - 16px); max-height:min(70vh,560px); flex-direction:column; overflow:hidden; border:1px solid #d4d4d8; border-radius:8px; background:#fff; box-shadow:0 12px 32px rgba(24,24,27,.2); color:#18181b; }
 #dcvsEventsCalendar .ec-day-popover.open{ display:flex; }
+#dcvsEventsCalendar .ec-day-popover.ec-appointment-day-view{ width:320px; max-height:min(75vh,620px); border-color:#d4d4d8; border-radius:9px; box-shadow:0 10px 28px rgba(24,24,27,.18); }
+#dcvsEventsCalendar .ec-appointment-day-view .ec-day-popover-head{ flex:0 0 auto; align-items:center; padding:10px 14px 6px; border-bottom:0; }
+#dcvsEventsCalendar .ec-appointment-day-view .ec-day-popover-date{ font-size:16px; line-height:1.35; }
+#dcvsEventsCalendar .ec-appointment-day-view .ec-day-popover-count{ display:none; }
+#dcvsEventsCalendar .ec-appointment-day-view .ec-day-popover-close{ width:28px; height:28px; flex-basis:28px; border:1px solid #e4e4e7; border-radius:6px; }
+#dcvsEventsCalendar .ec-appointment-day-view .ec-day-popover-list{ padding:0 14px 10px; }
+#dcvsEventsCalendar .ec-appt-availability{ padding:0 0 9px; border-bottom:1px solid #e4e4e7; }
+#dcvsEventsCalendar .ec-appt-availability-line{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; font-size:13px; line-height:1.4; }
+#dcvsEventsCalendar .ec-appt-availability-dot{ width:8px; height:8px; flex:0 0 8px; border:2px solid #15803d; border-radius:50%; }
+#dcvsEventsCalendar .ec-appt-availability-dot.open{ background:#15803d; }
+#dcvsEventsCalendar .ec-appt-availability-dot.full,
+#dcvsEventsCalendar .ec-appt-availability-dot.closed{ border-color:#71717a; }
+#dcvsEventsCalendar .ec-appt-availability-label{ font-weight:600; }
+#dcvsEventsCalendar .ec-appt-availability-note{ color:#71717a; }
+#dcvsEventsCalendar .ec-appt-availability.program-day .ec-appt-availability-note{ flex-basis:100%; margin-left:14px; }
+#dcvsEventsCalendar .ec-appt-capacity-list{ display:grid; gap:6px; margin-top:8px; }
+#dcvsEventsCalendar .ec-appt-capacity-row{ display:grid; grid-template-columns:54px minmax(0,1fr) auto; align-items:center; gap:7px; color:#71717a; font-size:11px; line-height:1.2; }
+#dcvsEventsCalendar .ec-appt-capacity-bar{ display:flex; gap:3px; min-width:0; }
+#dcvsEventsCalendar .ec-appt-capacity-segment{ height:7px; flex:1 1 0; min-width:0; border-radius:2px; background:#e4e4e7; }
+#dcvsEventsCalendar .ec-appt-capacity-segment.filled{ background:#15803d; }
+#dcvsEventsCalendar .ec-appt-capacity-segment.full{ background:#18181b; }
+#dcvsEventsCalendar .ec-appt-program{ padding:9px 0; border-bottom:1px solid #e4e4e7; }
+#dcvsEventsCalendar .ec-appt-program-hours{ color:#18181b; font-size:12px; }
+#dcvsEventsCalendar .ec-appt-program-name{ margin-top:1px; font-size:14px; font-weight:600; line-height:1.35; }
+#dcvsEventsCalendar .ec-appt-program-location{ margin-top:2px; color:#71717a; font-size:12px; }
+#dcvsEventsCalendar .ec-appt-list-heading{ padding:9px 0 3px; color:#71717a; font-size:13px; }
+#dcvsEventsCalendar .ec-appt-item{ display:grid; grid-template-columns:64px minmax(0,1fr); gap:8px; padding:8px 2px; border-bottom:0; }
+#dcvsEventsCalendar .ec-appt-item-time{ padding-top:2px; color:#18181b; font-size:11px; white-space:nowrap; }
+#dcvsEventsCalendar .ec-appt-item-content{ position:relative; min-width:0; padding-left:13px; }
+#dcvsEventsCalendar .ec-appt-item-content::before{ position:absolute; top:4px; left:0; width:7px; height:7px; border:1.5px solid #15803d; border-radius:50%; content:''; }
+#dcvsEventsCalendar .ec-appt-item.confirmed .ec-appt-item-content::before{ background:#15803d; }
+#dcvsEventsCalendar .ec-appt-item-summary{ min-width:0; font-size:13px; font-weight:600; line-height:1.4; }
+#dcvsEventsCalendar .ec-appt-item-sub{ margin-top:1px; color:#71717a; font-size:12px; font-weight:400; line-height:1.35; }
+#dcvsEventsCalendar .ec-appt-no-items{ padding:8px 0; color:#71717a; font-size:12px; }
+#dcvsEventsCalendar .ec-appt-view-all{ display:block; padding:5px 0 8px; color:#0e8131; font-size:13px; text-decoration:underline; text-underline-offset:2px; }
+#dcvsEventsCalendar .ec-appt-open-preview{ display:block; padding:8px 0 0; border-top:1px solid #e4e4e7; color:#0e8131; font-size:13px; text-decoration:underline; text-underline-offset:2px; }
 #dcvsEventsCalendar .ec-day-popover-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:12px 14px; border-bottom:1px solid #e4e4e7; }
 #dcvsEventsCalendar .ec-day-popover-date{ margin:0; font-size:14px; font-weight:700; }
 #dcvsEventsCalendar .ec-day-popover-count{ margin:2px 0 0; color:#71717a; font-size:12px; }
@@ -438,7 +513,8 @@ if (isset($conn) && !$conn->connect_error) {
   #dcvsEventsCalendar .ec-week-row .ec-event-name{ font-size:10px; }
   #dcvsEventsCalendar .ec-week-row .ec-event-time,
   #dcvsEventsCalendar .ec-week-row .ec-event-loc{ font-size:9px; }
-  #dcvsEventsCalendar .ec-day-popover{ inset:auto 0 0; width:100%; max-width:none; max-height:65vh; border-radius:12px 12px 0 0; }
+  #dcvsEventsCalendar .ec-day-popover,
+  #dcvsEventsCalendar .ec-day-popover.ec-appointment-day-view{ inset:auto 0 0; width:100%; max-width:none; max-height:65vh; border-radius:12px 12px 0 0; }
   #dcvsEventsCalendar .ec-week-event{ gap:3px; padding:0 3px; }
   #dcvsEventsCalendar .ec-week-event-time{ font-size:9px; }
   #dcvsEventsCalendar .ec-week-event-name{ font-size:10px; }
@@ -774,6 +850,12 @@ var EVENT_TYPES = ["kapon","vaccination","checkup","adoption"];
 var PROGRAM_TYPES = ["kapon","vaccination","checkup","deworming","adoption","rabies_prevention","microchipping","other"];
 var REPORT_TYPES = ["stray","rabies","injured","dead"];
 var YEAR = <?php echo (int)$calYear; ?>;
+var APPOINTMENT_CAPACITY = {
+  perDay: <?php echo (int)DCVS_MAX_APPOINTMENTS_PER_DAY; ?>,
+  urgentPerProgramDay: <?php echo (int)DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY; ?>,
+  routinePerProgramDay: <?php echo (int)DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY; ?>
+};
+var CAL_BLOCKED_DAYS = <?php echo json_encode(isset($blockedDays) ? $blockedDays : []); ?>;
 
 var CAL_ANNOUNCEMENTS = <?php echo json_encode($calAnnouncements); ?>;
 var CAL_PROGRAMS = <?php echo json_encode($calPrograms); ?>;
@@ -788,6 +870,11 @@ function calTime(t){
   return h + ':' + String(m).padStart(2,'0') + ' ' + ap;
 }
 var RAW_APPT = <?php echo json_encode($calAppointments); ?>;
+var RESCHEDULE_REQUESTS = <?php echo json_encode($calRescheduleRequests); ?>;
+var RESCHEDULE_REQUEST_COUNTS = {};
+RESCHEDULE_REQUESTS.forEach(function(request) {
+  RESCHEDULE_REQUEST_COUNTS[request.requested_date] = Number(request.request_count || 0);
+});
 var EVENTS = RAW_APPT.map(function(a){
   var d = new Date(String(a.preferred_date||'').replace(/-/g,'/')+' 00:00:00');
   var type = String(a.appointment_type||'checkup').toLowerCase();
@@ -800,6 +887,7 @@ var EVENTS = RAW_APPT.map(function(a){
     reference: a.reference_id || '',
     appointment_id: a.appointment_id || '',
     time: calTime(a.preferred_time),
+    rawTime: String(a.preferred_time || '').substring(0, 5),
     date: a.preferred_date || '',
     location: brgy,
     flag: SERVICE_FLAGS[type] || '',
@@ -1241,6 +1329,37 @@ function eventDateRange(ev){
   return start+' - '+isoDate(bounds.end).toLocaleDateString('en-US',opts);
 }
 function eventTooltip(ev){ return [ev.name,ev.time,ev.location,eventDateRange(ev)].filter(Boolean).join(' | '); }
+function eventCellTime(ev){
+  var value = String(ev.rawTime || ev.time || '');
+  var match = value.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (!match) return '';
+  var hour = parseInt(match[1],10);
+  var minute = match[2];
+  var meridiem = match[3];
+  if (!meridiem) {
+    var rawMatch = String(ev.rawTime || '').match(/^(\d{1,2}):(\d{2})/);
+    if (rawMatch) {
+      hour = parseInt(rawMatch[1],10);
+      meridiem = hour >= 12 ? 'PM' : 'AM';
+      hour = hour % 12 || 12;
+      return String(hour).padStart(2,'0')+':'+minute+meridiem.toLowerCase()[0];
+    }
+    return value;
+  }
+  return String(hour).padStart(2,'0')+':'+minute+meridiem.toLowerCase()[0];
+}
+function eventCellLabel(ev){
+  if (ev.kind === 'appointment') {
+    var appointmentTypes = {checkup:'Check-up',kapon:'Kapon',vaccination:'Vaccination',deworming:'Deworming',adoption:'Adoption'};
+    var type = String(ev.eventType || '').toLowerCase().replace(/[\s_-]+/g,'');
+    return appointmentTypes[type] || cap(String(ev.eventType || 'Appointment').replace(/[_-]/g,' '));
+  }
+  if (ev.kind === 'report') {
+    var reportTypes = {stray:'Stray Animal',rabies:'Rabies',injured:'Injured Animal',dead:'Dead Animal'};
+    return reportTypes[String(ev.eventType || '').toLowerCase()] || cap(String(ev.eventType || 'Report').replace(/[_-]/g,' '));
+  }
+  return ev.name || eventCategoryLabel(ev);
+}
 function eventCategoryLabel(ev){
   if(ev.kind==='appointment') return 'Appointment';
   if(ev.kind==='report') return 'Report';
@@ -1268,15 +1387,23 @@ function eventPopoverTitle(ev){
   if(ev.kind==='appointment') return 'Appointment - '+cap(String(ev.eventType||'Appointment').replace(/_/g,' '))+ (ev.name ? ' · '+ev.name : '');
   return ev.name || eventCategoryLabel(ev);
 }
-function eventBlock(ev, date){
+function eventBlock(ev, date, isLastEvent){
   var id = eventId(ev);
   var typeClass = eventTypeClass(ev);
   var reportStatus = ev.kind === 'report' ? reportStatusDisplay(ev) : null;
   var appointmentStatus = ev.kind === 'appointment' ? appointmentStatusDisplay(ev) : null;
   var status = reportStatus ? reportStatus.label : (appointmentStatus ? appointmentStatus.label : statusDot(ev));
-  var statusClass = 'ec-st-'+(reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : status));
-  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+status+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(eventCategoryLabel(ev)+', '+eventUrgencyLabel(ev)+', '+status+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
-    '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(eventCategoryLabel(ev))+'</div><span class="ec-event-badges">'+eventUrgencyBadge(ev)+'<span class="ec-event-edition '+statusClass+'">'+esc(status)+'</span></span></div></button>';
+  var statusClass = reportStatus ? reportStatus.statusClass : (appointmentStatus ? appointmentStatus.statusClass : statusDot(ev));
+  var time = eventCellTime(ev);
+  var label = eventCellLabel(ev);
+  var isAppointment = ev.kind === 'appointment';
+  var content = isAppointment
+    ? '<span class="ec-cell-event-dot" aria-hidden="true"></span>'+
+      (time ? '<span class="ec-cell-event-time">'+esc(time)+'</span>' : '')+
+      '<span class="ec-cell-event-label">'+esc(label)+'</span>'
+    : '<div class="ec-event-card-head '+((reportStatus||appointmentStatus)?'ec-report-event-head':'')+'"><div class="ec-event-name">'+esc(ev.kind==='program'?(ev.name||eventCategoryLabel(ev)):eventCategoryLabel(ev))+'</div><span class="ec-event-badges">'+eventUrgencyBadge(ev)+'<span class="ec-event-edition ec-st-'+statusClass+'">'+esc(status)+'</span></span></div>';
+  return '<button type="button" class="ec-event ec-calendar-trigger '+typeClass+(isAppointment?' ec-appointment-cell':'')+(isLastEvent?' ec-cell-last-event':'')+(ev.kind==='program'?' ec-program-cell':'')+'" data-event-id="'+esc(id)+'" data-date="'+date+'" data-status="'+esc(statusClass)+'" title="'+esc(eventTooltip(ev))+'" aria-label="'+esc(label+(time?', '+time:'')+', '+eventCategoryLabel(ev)+', '+eventUrgencyLabel(ev)+', '+status+', '+eventDateRange(ev)+'. Open this day’s schedules.')+'">'+
+    content+'</button>';
 }
 
 var dayPopover = null;
@@ -1296,6 +1423,116 @@ function dayPopoverMarkup(ev){
     '<div class="ec-day-popover-item-head"><h3 class="ec-day-popover-item-title">'+esc(eventPopoverTitle(ev))+'</h3><span class="ec-day-popover-badges">'+eventUrgencyBadge(ev)+'<span class="ec-day-popover-status '+((reportStatus||appointmentStatus)?'ec-st-'+statusClass:'')+'" data-status="'+statusClass+'">'+esc(status)+'</span></span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>'+esc(ev.time||'Time not specified')+'</span></div>'+
     '<div class="ec-day-popover-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 5-8 12-8 12S4 15 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg><span>'+esc(ev.location||'Location not specified')+'</span></div>'+range+'</article>';
+}
+function appointmentEventsForDate(date, source){
+  return source.filter(function(ev){
+    var status = String(ev.status || '').toLowerCase().replace(/ /g, '_');
+    if (ev.kind !== 'appointment' || appointmentCapacityStatuses.indexOf(status) === -1) return false;
+    var bounds = eventBounds(ev);
+    return bounds.start <= date && bounds.end >= date;
+  }).sort(function(a,b){
+    return String(a.rawTime || '').localeCompare(String(b.rawTime || '')) || String(a.resident || '').localeCompare(String(b.resident || ''));
+  });
+}
+var appointmentCapacityStatuses = ['pending','approved','scheduled','rescheduled','in_progress','action_needed'];
+function appointmentProgramEventsForDate(date){
+  return PROGRAM_EVENTS.filter(function(ev){
+    return ['scheduled','live'].indexOf(String(ev.status || '').toLowerCase()) !== -1
+      && eventBounds(ev).start <= date && eventBounds(ev).end >= date;
+  });
+}
+function appointmentCapacityBar(label, remaining, maximum, fullyBooked, count, isProgramCapacity){
+  var segments = '';
+  for (var i = 0; i < maximum; i++) {
+    var filledSlots = isProgramCapacity ? count : remaining;
+    segments += '<span class="ec-appt-capacity-segment'+(fullyBooked ? ' full' : i < filledSlots ? ' filled' : '')+'"></span>';
+  }
+  var countLabel = isProgramCapacity
+    ? count+' of '+maximum+(count >= maximum ? ' (full)' : '')
+    : fullyBooked ? count+' of '+maximum+' slots taken' : remaining+' of '+maximum+' slots left';
+  return '<div class="ec-appt-capacity-row"><span>'+esc(label)+'</span><span class="ec-appt-capacity-bar">'+segments+'</span><span>'+countLabel+'</span></div>';
+}
+function appointmentPopoverMarkup(date, visibleAppointments){
+  var allAppointments = appointmentEventsForDate(date, EVENTS);
+  var routineCount = allAppointments.filter(function(ev){ return String(ev.urgency || 'routine').toLowerCase() !== 'urgent'; }).length;
+  var urgentCount = allAppointments.length - routineCount;
+  var programs = appointmentProgramEventsForDate(date);
+  var programDay = programs.length > 0;
+  var blocked = CAL_BLOCKED_DAYS.indexOf(date) !== -1;
+  var totalAtLimit = allAppointments.length >= APPOINTMENT_CAPACITY.perDay;
+  var urgentAtLimit = urgentCount >= APPOINTMENT_CAPACITY.urgentPerProgramDay;
+  var routineAtLimit = routineCount >= APPOINTMENT_CAPACITY.routinePerProgramDay;
+  var urgentRemaining = Math.max(0, APPOINTMENT_CAPACITY.urgentPerProgramDay - urgentCount);
+  var routineRemaining = Math.max(0, APPOINTMENT_CAPACITY.routinePerProgramDay - routineCount);
+  var full = programDay
+    ? totalAtLimit || (urgentAtLimit && routineAtLimit)
+    : allAppointments.length >= APPOINTMENT_CAPACITY.perDay;
+  var closed = blocked && !full;
+  var available = !closed && !full;
+  var status = closed ? 'Closed' : full ? 'Fully booked' : 'Open for booking';
+  var summary = '';
+  if (programDay) {
+    summary = full
+      ? urgentAtLimit && routineAtLimit
+        ? 'All '+APPOINTMENT_CAPACITY.urgentPerProgramDay+' urgent and '+APPOINTMENT_CAPACITY.routinePerProgramDay+' routine slots are taken'
+        : 'All appointments are taken'
+      : urgentRemaining+' urgent and '+routineRemaining+' routine slot'+(urgentRemaining+routineRemaining===1?'':'s')+' left';
+  } else if (full) {
+    summary = 'All times are taken';
+  } else if (closed) {
+    summary = 'No appointment times are available';
+  } else {
+    summary = Math.max(0, APPOINTMENT_CAPACITY.perDay - allAppointments.length)+' of '+APPOINTMENT_CAPACITY.perDay+' slots left';
+  }
+
+  var html = '<section class="ec-appt-availability'+(programDay?' program-day':'')+'">';
+  html += '<div class="ec-appt-availability-line"><span class="ec-appt-availability-dot '+(full?'full':closed?'closed':'open')+'"></span><strong class="ec-appt-availability-label">'+esc(status)+'</strong><span class="ec-appt-availability-note">'+esc(summary)+'</span></div>';
+  var rescheduleRequestCount = RESCHEDULE_REQUEST_COUNTS[date] || 0;
+  if (rescheduleRequestCount) {
+    html += '<div class="ec-reschedule-request-note">'+rescheduleRequestCount+' reschedule request'+(rescheduleRequestCount===1?'':'s')+' · not included in capacity</div>';
+  }
+  html += '<div class="ec-appt-capacity-list">';
+  if (programDay) {
+    html += appointmentCapacityBar('Urgent', urgentRemaining, APPOINTMENT_CAPACITY.urgentPerProgramDay, urgentAtLimit || totalAtLimit, urgentCount, true);
+    html += appointmentCapacityBar('Routine', routineRemaining, APPOINTMENT_CAPACITY.routinePerProgramDay, routineAtLimit || totalAtLimit, routineCount, true);
+  } else {
+    html += appointmentCapacityBar('Bookings', Math.max(0, APPOINTMENT_CAPACITY.perDay - allAppointments.length), APPOINTMENT_CAPACITY.perDay, full, allAppointments.length, false);
+  }
+  html += '</div></section>';
+
+  programs.forEach(function(program){
+    var programTime = String(program.time || '').replace(/\s*(?:to|–|-)\s*/i, ' to ');
+    html += '<section class="ec-appt-program">';
+    if (programTime) html += '<div class="ec-appt-program-hours">'+esc(programTime)+'</div>';
+    html += '<div class="ec-appt-program-name">'+esc(program.name)+'</div>';
+    if (program.location) html += '<div class="ec-appt-program-location">'+esc(program.location)+'</div>';
+    html += '</section>';
+  });
+
+  html += '<div class="ec-appt-list-heading">'+visibleAppointments.length+' appointment'+(visibleAppointments.length===1?'':'s')+'</div>';
+  if (visibleAppointments.length) {
+    visibleAppointments.slice(0, 4).forEach(function(ev){
+      var statusInfo = appointmentStatusDisplay(ev);
+      var isConfirmed = ['approved','scheduled','rescheduled','in-progress'].indexOf(statusInfo.statusClass) !== -1;
+      var urgency = String(ev.urgency || 'routine').toLowerCase() === 'urgent' ? 'Urgent' : 'Routine';
+      var typeLabels = {checkup:'Check-up', kapon:'Kapon', vaccination:'Vaccination', deworming:'Deworming', adoption:'Adoption'};
+      var appointmentType = typeLabels[String(ev.eventType || '').toLowerCase()] || cap(String(ev.eventType || 'Appointment').replace(/_/g, ' '));
+      var resident = ev.resident || 'Resident';
+      var pet = ev.name || 'pet';
+      var requestLabel = urgency+' request from '+(ev.location || 'location')+', '+statusInfo.label;
+      html += '<article class="ec-appt-item'+(isConfirmed?' confirmed':'')+'">';
+      html += '<time class="ec-appt-item-time">'+esc(ev.time || 'Time not specified')+'</time>';
+      html += '<div class="ec-appt-item-content"><div class="ec-appt-item-summary">'+esc(resident)+' booked '+esc(appointmentType)+' for '+esc(pet)+'</div>';
+      html += '<div class="ec-appt-item-sub">'+esc(requestLabel)+'</div></div></article>';
+    });
+  } else {
+    html += '<div class="ec-appt-no-items">No appointments match the current calendar filters.</div>';
+  }
+  if (visibleAppointments.length > 4) {
+    html += '<a class="ec-appt-view-all" href="dashboard-staff.php#appointments">View all '+visibleAppointments.length+' appointments</a>';
+  }
+  html += '<a class="ec-appt-open-preview" href="availability.php?panel=preview">Open in Schedule Preview</a>';
+  return html;
 }
 function ensureDayPopover(){
   if (dayPopover) return;
@@ -1339,8 +1576,16 @@ window.ecOpenDay = function(date, opener, highlightedId){
   dayPopoverOpener = opener || document.activeElement;
   highlightedEventId = highlightedId || '';
   dayPopover.querySelector('.ec-day-popover-date').textContent = isoDate(date).toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
+  var appointmentDayView = state.mode === 'appointment';
+  dayPopover.classList.toggle('ec-appointment-day-view', appointmentDayView);
   dayPopover.querySelector('.ec-day-popover-count').textContent = events.length+' schedule'+(events.length===1?'':'s');
-  dayPopover.querySelector('.ec-day-popover-list').innerHTML = events.length ? events.map(dayPopoverMarkup).join('') : '<p class="ec-day-popover-empty">No schedules for this day.</p>';
+  dayPopover.querySelector('.ec-day-popover-list').innerHTML = appointmentDayView
+    ? appointmentPopoverMarkup(date, events.filter(function(ev){ return ev.kind === 'appointment'; }))
+    : events.length ? events.map(dayPopoverMarkup).join('') : '<p class="ec-day-popover-empty">No schedules for this day.</p>';
+  if (!appointmentDayView && RESCHEDULE_REQUEST_COUNTS[date]) {
+    dayPopover.querySelector('.ec-day-popover-list').insertAdjacentHTML('afterbegin',
+      '<div class="ec-reschedule-request-note">'+RESCHEDULE_REQUEST_COUNTS[date]+' reschedule request'+(RESCHEDULE_REQUEST_COUNTS[date]===1?'':'s')+' · not included in capacity</div>');
+  }
   dayPopover.classList.add('open');
   dayPopover.setAttribute('aria-hidden','false');
   positionDayPopover(dayPopoverOpener);
@@ -1367,7 +1612,12 @@ function weekMarkup(weekCells, capacityEvents, month){
     var apptCount = capacityEvents.filter(function(ev){return ev.kind==='appointment'&&eventOccursOn(ev,month,cell.date)&&activeStatuses.indexOf(ev.status)!==-1;}).length;
     var isFull = apptCount>=3;
     var dayEvents = cell.events||[];
-    var evHtml = dayEvents.slice(0,visibleLimit).map(function(ev){return eventBlock(ev,date);}).join('');
+    var visibleEvents = dayEvents.slice(0,visibleLimit);
+    var evHtml = visibleEvents.map(function(ev,index){return eventBlock(ev,date,index===visibleEvents.length-1);}).join('');
+    var rescheduleRequestCount = RESCHEDULE_REQUEST_COUNTS[date] || 0;
+    if (rescheduleRequestCount) {
+      evHtml += '<div class="ec-reschedule-request-count" title="Not included in appointment capacity">'+rescheduleRequestCount+' reschedule request'+(rescheduleRequestCount===1?'':'s')+'</div>';
+    }
     if(dayEvents.length>visibleLimit) evHtml += '<button type="button" class="ec-cell-more ec-calendar-trigger" data-date="'+date+'" aria-label="'+(dayEvents.length-visibleLimit)+' more events on '+dayLabel(date)+'">+'+(dayEvents.length-visibleLimit)+' more</button>';
     return '<div class="ec-day'+(isToday?' today':'')+(isSelected?' selected':'')+(isFull?' ec-day-capacity-full':'')+'"><button type="button" class="ec-day-num ec-calendar-trigger" data-date="'+date+'" aria-label="Open schedules for '+dayLabel(date)+'">'+cell.date+'</button><div class="ec-events">'+evHtml+'</div></div>';
   }).join('');
@@ -1877,6 +2127,8 @@ document.addEventListener('DOMContentLoaded', init);
 if (document.readyState === 'complete' || document.readyState === 'interactive') setTimeout(init, 0);
 })();
 </script>
+<?php if (empty($isStaffDashboardCalendarEmbed)): ?>
 </body>
 </html>
+<?php endif; ?>
 </div>

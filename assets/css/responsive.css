@@ -84,6 +84,11 @@ body.dashboard { overflow-x: hidden; }
   /* Info pages - reduce oversize text */
   h1 { font-size: 2rem !important; }
   h2 { font-size: 1.6rem !important; }
+  .main-content .report-kpi-label { font-size: 14px !important; }
+}
+
+@media (max-width: 520px) {
+  .main-content .report-kpi-label { font-size: 12px !important; line-height: 1.35; }
 }
 
 /* ── Tablet Landscape intermediate (≤1024px) gallery fix ── */
@@ -3531,5 +3536,27 @@ body.dashboard.resident-portal {
   .turnover-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 12px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  body.resident-portal #rptDrawer,
+  body.resident-portal #apptDrawer {
+    inset: 0 !important;
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+  body.resident-portal #rptDrawer.open,
+  body.resident-portal #apptDrawer.open {
+    transform: translateX(0) !important;
+  }
+  body.resident-portal #rptDrawer:not(.open),
+  body.resident-portal #apptDrawer:not(.open) {
+    transform: translateX(100%) !important;
   }
 }

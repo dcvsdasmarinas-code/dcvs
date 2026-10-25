@@ -195,6 +195,14 @@
       drawer = null;
     }
 
+    function placeDrawer() {
+      if (!drawer) return;
+      var parent = window.matchMedia('(max-width: 540px)').matches
+        ? document.body
+        : map.getContainer();
+      if (drawer.parentNode !== parent) parent.appendChild(drawer);
+    }
+
     function loadGoogleMapsDirections(reportId, link) {
       var directionsUrl = appUrl('geo-map/report-directions.php?sess=' + encodeURIComponent(sessionName)
         + '&report_id=' + encodeURIComponent(reportId));
@@ -506,13 +514,13 @@
 
       element.appendChild(body);
       element.addEventListener('click', function(event) { event.stopPropagation(); });
-      map.getContainer().appendChild(element);
       drawer = element;
+      placeDrawer();
       closeButton.focus();
       map.easeTo({
         center: coordinates,
         zoom: Math.max(map.getZoom(), PIN_FOCUS_ZOOM),
-        offset: [element.offsetWidth / 2, 0],
+        offset: window.matchMedia('(max-width: 540px)').matches ? [0, 0] : [element.offsetWidth / 2, 0],
         duration: 500
       });
     }
@@ -773,6 +781,7 @@
     document.addEventListener('keydown', function(event) {
       if (event.key === 'Escape' && drawer) closeDrawer();
     });
+    window.addEventListener('resize', placeDrawer);
   }
 
   document.querySelectorAll('[data-report-pins-session]').forEach(initializePins);

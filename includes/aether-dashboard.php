@@ -788,6 +788,114 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     .aether-dash .ab-program-log-icon:hover { border-color:#18181b; background:#f4f4f5; }
 .aether-dash #abCampModal .sd-dialog-content { height:min(720px, calc(100vh - 3rem)); }
 .aether-dash #abCampModalBody { flex:1; min-height:0; overflow-y:auto; padding-right:4px; }
+@media (max-width: 768px) {
+  .aether-dash #abNewCampModal {
+    padding: 12px;
+  }
+  .aether-dash #abNewCampModal .sd-dialog {
+    width: 100%;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .aether-dash #abNewCampModal .sd-dialog-content {
+    width: 100%;
+    max-width: 560px;
+    max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 20px;
+  }
+  .aether-dash #abNewCampModal .sd-dialog-footer,
+  .aether-dash #abCampModal .sd-dialog-footer,
+  .aether-dash #abViewProgModal .sd-dialog-footer {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .aether-dash #abNewCampModal .sd-dialog-footer .sd-btn,
+  .aether-dash #abCampModal .sd-dialog-footer .sd-btn,
+  .aether-dash #abViewProgModal .sd-dialog-footer .sd-btn {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    min-height: 42px;
+    flex: 0 0 auto;
+    justify-content: center;
+    white-space: normal;
+  }
+  .aether-dash #abCampModal,
+  .aether-dash #abViewProgModal {
+    align-items: stretch;
+    justify-content: stretch;
+    padding: 0;
+  }
+  .aether-dash #abCampModal > .sd-dialog,
+  .aether-dash #abViewProgModal > .sd-dialog {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none;
+  }
+  .aether-dash #abCampModal .sd-dialog-content,
+  .aether-dash #abViewProgModal .sd-dialog-content {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    max-width: none !important;
+    max-height: none;
+    min-height: 0;
+    padding: 20px 16px;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+  }
+  .aether-dash #abCampModalBody,
+  .aether-dash #abViewProgBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+  .aether-dash #abCampModal .sd-dialog-footer,
+  .aether-dash #abViewProgModal .sd-dialog-footer {
+    flex: 0 0 auto;
+    padding-top: 12px !important;
+    border-top: 1px solid #e4e4e7;
+  }
+}
+@media (max-width: 480px) {
+  .aether-dash #abNewCampModal .sd-dialog-content {
+    padding: 18px 16px;
+  }
+  .aether-dash #abNewCampModal .ab-create-program-field-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 12px !important;
+  }
+  .aether-dash #abNewCampModal #abTargetReach,
+  .aether-dash #abNewCampModal #abDogsTarget,
+  .aether-dash #abNewCampModal #abCatsTarget {
+    min-width: 0;
+  }
+  .aether-dash #abNewCampModal .ab-create-program-target-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .aether-dash #abNewCampModal > .sd-dialog,
+  .aether-dash #abNewCampModal .sd-dialog-content {
+    max-width: none;
+  }
+  .aether-dash #abNewCampModal #abTimeStart,
+  .aether-dash #abNewCampModal #abTimeEnd {
+    width: auto !important;
+    min-width: 0;
+    flex: 1 1 0;
+  }
+  .aether-dash #abCampModalBody .ab-program-details-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 12px !important;
+  }
+}
 /* City Drives — table + KPI cards matching All Reports (#reports-all) */
 #ab-page-citydrives{ font-family:'Inter','Segoe UI',sans-serif; letter-spacing:normal; }
 #ab-page-citydrives .dt-container{ overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
@@ -800,6 +908,9 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 #ab-page-citydrives tbody td{ padding:17px 8px; vertical-align:middle; font-size:14px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; }
 #ab-page-citydrives .cd-name{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
 #ab-page-citydrives .cd-main{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#18181b; }
+#ab-page-citydrives .cd-status{ display:inline-flex; align-items:center; padding:3px 10px; border:1px solid #e4e4e7; border-radius:4px; background:#f1f5f9; color:#64748b; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+#ab-page-citydrives .cd-status.is-completed{ border-color:#0E8131; background:#0E8131; color:#fff; }
+#ab-page-citydrives .cd-status.is-ended{ border-color:#BFDBFE; background:#EFF6FF; color:#1E40AF; }
 #ab-page-citydrives .kpis{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
 #ab-page-citydrives .kpi-card{ display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:14px 16px; background:#fff; border:1px solid #E5E7EB; border-radius:14px; box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03); transition:all .2s cubic-bezier(.4,0,.2,1); font-family:'Inter','Segoe UI',sans-serif; }
 #ab-page-citydrives .kpi-card:hover{ border-color:#D1D5DB; box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03); }
@@ -1750,7 +1861,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         " FROM programs p" .
         " LEFT JOIN program_barangays pb ON p.program_id = pb.program_id" .
         " LEFT JOIN barangays b ON pb.barangay_id = b.barangay_id" .
-        " WHERE p.status = 'completed'" .
+        " WHERE p.status IN ('completed', 'ended')" .
         "    OR (p.status = 'archived' AND p.target_reach > 0" .
         "        AND (SELECT COALESCE(SUM(pp.dogs_served + pp.cats_served), 0) FROM program_progress pp WHERE pp.program_id = p.program_id) >= p.target_reach)" .
         " GROUP BY p.program_id" .
@@ -1765,9 +1876,9 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   ?>
   <div class="kpis">
     <div class="kpi-card">
-      <p class="kpi-label">Successful Programs</p>
+      <p class="kpi-label">Programs Included</p>
       <div class="kpi-value"><?php echo number_format($cdCount); ?></div>
-      <p class="kpi-sub">Completed city drives</p>
+      <p class="kpi-sub">Completed and ended city drives</p>
     </div>
     <div class="kpi-card">
       <p class="kpi-label">Animals Reached</p>
@@ -1789,7 +1900,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     <div style="text-align:center;padding:3rem 1.5rem;color:var(--ab-muted-fg);font-family:'Inter','Segoe UI',sans-serif;background:var(--ab-card);border:1px solid var(--ab-border);border-radius:8px;">
       <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin:0 auto 0.75rem;color:#a1a1aa;"><path d="M5 12l5 5L20 7"/></svg>
       <p style="font-size:14px;font-weight:500;margin:0 0 0.25rem;">No successful programs yet</p>
-      <p style="font-size:13px;margin:0;">Completed programs will appear here once they reach their target.</p>
+      <p style="font-size:13px;margin:0;">Completed and ended programs will appear here with their recorded progress.</p>
     </div>
   <?php else: ?>
     <div class="dt-container">
@@ -1798,6 +1909,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <tr class="sd-tr">
             <th class="sd-th">Program Name</th>
             <th class="sd-th">Program Type</th>
+            <th class="sd-th">Status</th>
             <th class="sd-th">Location</th>
             <th class="sd-th">Date</th>
             <th class="sd-th">Target</th>
@@ -1823,6 +1935,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
             <tr class="sd-tr">
               <td class="sd-td"><span class="cd-name"><?php echo htmlspecialchars($cd['program_name']); ?></span></td>
               <td class="sd-td"><span class="cd-main"><?php echo htmlspecialchars($cdType); ?></span></td>
+              <td class="sd-td"><span class="cd-status is-<?php echo htmlspecialchars($cd['status'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars(ucfirst((string)$cd['status'])); ?></span></td>
               <td class="sd-td"><span class="cd-name"><?php echo htmlspecialchars($cdWhere); ?></span></td>
               <td class="sd-td"><span class="cd-main"><?php echo $cdDates; ?></span></td>
               <td class="sd-td"><span class="cd-main"><?php echo $cdTarget > 0 ? $cdTarget : '—'; ?></span></td>
@@ -1908,7 +2021,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <label class="ab-label">Program Name <span style="color:#e53e3e;">*</span></label>
           <input class="ab-input" name="program_name" placeholder="e.g. Free Kapon Drive" required>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="ab-create-program-field-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
           <div class="ab-field" style="margin-bottom:0;">
             <label class="ab-label">Program Type <span style="color:#e53e3e;">*</span></label>
             <select class="ab-select" name="program_type" required>
@@ -1927,7 +2040,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           <label class="ab-label">Description</label>
           <textarea class="ab-input" name="program_description" rows="3" placeholder="Describe the program objectives and services..." style="resize:vertical;min-height:70px;background:var(--ab-bg);padding-top:10px;"></textarea>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div class="ab-create-program-field-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
           <div class="ab-field" style="margin-bottom:0;">
             <label class="ab-label">Start Date <span style="color:#e53e3e;">*</span></label>
             <input class="ab-input" type="date" name="start_date" required>
@@ -2006,7 +2119,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
             <input class="ab-input" name="venue" id="abVenueInput" placeholder="e.g. Covered court or community center" style="height:36px;">
           </div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div class="ab-create-program-field-grid ab-create-program-target-grid" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
           <div class="ab-field" style="margin-bottom:0;">
             <label class="ab-label">Target Reach</label>
             <input class="ab-input" type="number" name="target_reach" id="abTargetReach" min="0" placeholder="0" style="font-size:13px;">
@@ -2832,7 +2945,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         /* ── Section 2: Location & Description ── */
         '<div>' +
           '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;"><div style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:14px;font-weight:600;letter-spacing:0;color:#18181b;">Location &amp; Description</div><div style="display:flex;align-items:center;gap:6px;">' + logProgressButton + editProgramButton + '</div></div>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+          '<div class="ab-program-details-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
             '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Location</p><p class="info-row-value" style="' + val + '">' + (coverage || '\u2014') + '</p></div></div>' +
             '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Description</p><p class="info-row-value" style="' + val + '">' + (camp.description || '\u2014') + '</p></div></div>' +
           '</div>' +
@@ -2841,7 +2954,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         /* ── Section 3: Schedule ── */
         '<div>' +
           '<div style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:14px;font-weight:600;letter-spacing:0;color:#18181b;margin-bottom:10px;">Schedule</div>' +
-          '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
+          '<div class="ab-program-details-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
             '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Start Date</p><p class="info-row-value" style="' + val + '">' + formatDateFull(camp.start) + '</p></div></div>' +
             '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">End Date</p><p class="info-row-value" style="' + val + '">' + formatDateFull(camp.end) + '</p></div></div>' +
           '</div>' +
@@ -2853,7 +2966,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         '<div>' +
           '<div style="font-family:\'Inter\',\'Segoe UI\',sans-serif;font-size:14px;font-weight:600;letter-spacing:0;color:#18181b;margin-bottom:10px;">Program Progress</div>' +
           (camp.target > 0 ?
-            '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:14px;">' +
+            '<div class="ab-program-details-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">' +
               '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Target Reach</p><p class="info-row-value" style="' + val + '">' + camp.target + ' animals</p></div></div>' +
               '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Completed</p><p class="info-row-value" style="' + valGreen + '">' + (camp.completed || 0) + ' animals</p></div></div>' +
               '<div class="info-row"><div><p class="info-row-label" style="' + lbl + '">Remaining</p><p class="info-row-value" style="' + val + '">' + remaining + ' animals</p></div></div>' +

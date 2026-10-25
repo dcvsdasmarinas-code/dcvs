@@ -345,7 +345,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* Overrides full-page panel */
     .ov-layout { display: flex; gap: 2rem; margin-top: 1.5rem; }
-    .ov-layout > .ov-cal-col { flex: 0 0 320px; }
+    .ov-layout > .ov-cal-col { flex: 0 0 400px; }
     .ov-layout > .ov-editor-col { flex: 1; min-width: 0; }
 
     /* Calendar */
@@ -367,12 +367,28 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-cal-day.has-override::after { content: ''; position: absolute; bottom: 3px; width: 4px; height: 4px; border-radius: 50%; background: var(--av-green); }
     .ov-cal-day.selected.has-override::after { background: #fff; }
     .ov-cal-day.has-activity::before { content: ''; position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; border-radius: 50%; background: #2563eb; }
-    .ov-cal-legend { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.8125rem; color: var(--av-muted-fg); }
+    .ov-cal-legend { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 0.75rem; font-size: 0.8125rem; color: var(--av-muted-fg); }
     .ov-cal-legend span { display: flex; align-items: center; gap: 0.25rem; }
     .ov-cal-legend .ov-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .ov-cal-legend .ov-dot.green { background: var(--av-green); }
     .ov-cal-legend .ov-dot.gray { background: var(--av-muted-fg); }
     .ov-cal-legend .ov-dot.activity { background: #2563eb; }
+    @media (max-width: 540px) {
+      .ov-cal-legend {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+      .ov-cal-legend > span {
+        min-width: 0;
+        align-items: flex-start;
+        line-height: 1.35;
+      }
+      .ov-cal-legend > span:last-child { grid-column: 1 / -1; }
+      .ov-cal-legend .ov-dot {
+        margin-top: 0.35em;
+      }
+    }
 
     /* Editor right side */
     .ov-editor { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); min-height: 20rem; }
@@ -419,7 +435,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     @media (max-width: 768px) {
       .ov-layout { flex-direction: column; }
-      .ov-layout > .ov-cal-col { flex: 0 0 auto; }
+      .ov-layout > .ov-cal-col { flex: 0 0 auto; width: 100%; }
+      .ov-cal { width: 100%; }
     }
 
     /* Bulk panel */

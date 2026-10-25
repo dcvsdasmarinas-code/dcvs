@@ -39,7 +39,7 @@ if (ctype_alnum($id_input) && strlen($id_input) >= 6) {
     $refId = '#APT-' . strtoupper($id_input);
     $stmt = $conn->prepare("
         SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
-       a.scheduled_date, a.scheduled_time,
+       a.scheduled_date, a.scheduled_time, a.original_schedule_date, a.original_schedule_time,
        a.cancelled_by, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
@@ -61,7 +61,7 @@ if (!$row) {
     if ($appointment_id > 0) {
         $stmt = $conn->prepare("
             SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
-       a.scheduled_date, a.scheduled_time,
+       a.scheduled_date, a.scheduled_time, a.original_schedule_date, a.original_schedule_time,
        a.cancelled_by, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
@@ -92,7 +92,7 @@ if (!$row) {
             if (fallbackRefId('#APT-', $emptyRef['appointment_id']) === '#APT-' . $searchCode) {
                 $fullStmt = $conn->prepare("
                     SELECT a.appointment_id, a.reference_id, a.user_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
-       a.scheduled_date, a.scheduled_time,
+       a.scheduled_date, a.scheduled_time, a.original_schedule_date, a.original_schedule_time,
        a.cancelled_by, a.status, a.notes, u.full_name, u.reference_id AS user_reference_id, u.email, u.phone, u.address, u.avatar_url, b.barangay_name,
        COALESCE(a.pet_name, p.pet_name, '-') AS pet_name, a.pet_id, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status, p.photo_url
 FROM appointments a
@@ -114,10 +114,40 @@ LEFT JOIN barangays b ON u.barangay_id = b.barangay_id
 }
 
 if ($row) {
+    $rescheduleStmt = $conn->prepare("SELECT request_id, requested_date, requested_time, requested_urgency,
+            resident_reason, status AS reschedule_request_status, staff_message, offered_date,
+            offered_time, offered_urgency, requested_at
+        FROM appointment_reschedule_requests
+        WHERE appointment_id = ? AND status IN ('pending','offered')
+        ORDER BY request_id DESC LIMIT 1");
+    if ($rescheduleStmt) {
+        $rescheduleStmt->bind_param('i', $row['appointment_id']);
+        if ($rescheduleStmt->execute()) {
+            $rescheduleRequest = $rescheduleStmt->get_result()->fetch_assoc();
+            if ($rescheduleRequest) $row = array_merge($row, $rescheduleRequest);
+        } else {
+            error_log('Could not load appointment reschedule request: ' . $rescheduleStmt->error);
+            $rescheduleStmt->close();
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Could not load appointment reschedule details.']);
+            exit;
+        }
+        $rescheduleStmt->close();
+    } else {
+        error_log('Could not prepare appointment reschedule lookup: ' . $conn->error);
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => 'Could not load appointment reschedule details.']);
+        exit;
+    }
+
     $outcomeDate = $row['scheduled_date'] ?: $row['preferred_date'];
     $outcomeTime = $row['scheduled_time'] ?: $row['preferred_time'];
     $row['can_mark_outcome'] = in_array($row['status'], ['scheduled', 'rescheduled', 'in_progress'], true)
         && strtotime($outcomeDate . ' ' . $outcomeTime) <= time();
+    $rescheduleWindowStart = strtotime($outcomeDate . ' ' . $outcomeTime);
+    $row['reschedule_within_24h'] = $rescheduleWindowStart !== false
+        && $rescheduleWindowStart > time()
+        && $rescheduleWindowStart <= time() + 86400;
 
     $appointmentHistory = [];
     $historyError = false;

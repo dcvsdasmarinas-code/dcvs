@@ -77,6 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($gender)) {
         $errors[] = "Gender is required.";
     }
+    if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])
+        || ($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        $errors[] = "A pet photo is required.";
+    }
 
     if (!empty($errors)) {
         $_SESSION['pet_error'] = implode('<br>', $errors);
@@ -106,50 +110,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             break;
     }
 
-    // Handle photo upload (or use photo_url from adoption flow)
+    // Save the required resident-uploaded pet photo.
     $photoUrl = '';
-    if (!empty($_POST['photo_url'])) {
-        $photoUrl = $_POST['photo_url'];
-    } elseif (isset($_FILES['photo']) && $_FILES['photo']['error'] === UPLOAD_ERR_OK) {
-        $photo = $_FILES['photo'];
-        $allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'image/gif'];
-        $maxSize = 5 * 1024 * 1024; // 5MB
-
-        $finfo = finfo_open(FILEINFO_MIME_TYPE);
-        $detectedType = finfo_file($finfo, $photo['tmp_name']);
-        finfo_close($finfo);
-        if (!in_array($detectedType, $allowedTypes)) {
-            $conn->rollback();
-            $_SESSION['pet_error'] = "Invalid file type. Please upload a JPEG, PNG, or GIF image.";
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
-        }
-
-        if ($photo['size'] > $maxSize) {
-            $conn->rollback();
-            $_SESSION['pet_error'] = "File size exceeds 5MB limit.";
-            header('Location: dashboard-resident.php' . $sec);
-            exit;
-        }
-
-        // Create upload directory if it doesn't exist
-        $uploadDir = __DIR__ . '/../../uploads/pets/';
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0755, true);
-        }
-
-        // Generate unique filename
-        $extension = pathinfo($photo['name'], PATHINFO_EXTENSION);
-        $filename = uniqid('pet_') . '_' . time() . '.' . $extension;
-        $filepath = $uploadDir . $filename;
-
-        if (move_uploaded_file($photo['tmp_name'], $filepath)) {
-            $photoUrl = 'uploads/pets/' . $filename;
-            error_log("Photo uploaded successfully: $photoUrl");
-        } else {
-            error_log("Failed to move uploaded file");
-        }
+    $photo = $_FILES['photo'];
+    $allowedTypes = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/gif' => 'gif',
+    ];
+    $maxSize = 5 * 1024 * 1024;
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $detectedType = $finfo ? finfo_file($finfo, $photo['tmp_name']) : false;
+    if ($finfo) finfo_close($finfo);
+    if (!is_uploaded_file($photo['tmp_name']) || !isset($allowedTypes[$detectedType])) {
+        $conn->rollback();
+        $_SESSION['pet_error'] = "Invalid photo. Please upload a JPEG, PNG, or GIF image.";
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
     }
+    if ((int)$photo['size'] > $maxSize) {
+        $conn->rollback();
+        $_SESSION['pet_error'] = "File size exceeds 5MB limit.";
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+
+    $uploadDir = __DIR__ . '/../../uploads/pets/';
+    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+        $conn->rollback();
+        error_log('Failed to create pet photo upload directory: ' . $uploadDir);
+        $_SESSION['pet_error'] = "The pet photo could not be saved. Please try again.";
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $filename = bin2hex(random_bytes(16)) . '.' . $allowedTypes[$detectedType];
+    $filepath = $uploadDir . $filename;
+    if (!move_uploaded_file($photo['tmp_name'], $filepath)) {
+        $conn->rollback();
+        error_log('Failed to move uploaded pet photo.');
+        $_SESSION['pet_error'] = "The pet photo could not be saved. Please try again.";
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $photoUrl = 'uploads/pets/' . $filename;
 
     // Insert pet into database
     error_log("Attempting to insert pet into database");

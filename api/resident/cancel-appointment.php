@@ -49,7 +49,9 @@ $residentId = (int)$_SESSION['user_id'];
 $conn->begin_transaction();
 $stmt = $conn->prepare("SELECT appointment_type, urgency_level, COALESCE(scheduled_date, preferred_date) AS slot_date,
     COALESCE(scheduled_time, preferred_time) AS slot_time, status,
-    TIMESTAMP(COALESCE(scheduled_date, preferred_date), COALESCE(scheduled_time, preferred_time)) > DATE_ADD(NOW(), INTERVAL 24 HOUR) AS can_cancel
+    TIMESTAMP(COALESCE(scheduled_date, preferred_date), COALESCE(scheduled_time, preferred_time)) > DATE_ADD(NOW(), INTERVAL 24 HOUR) AS can_cancel,
+    EXISTS(SELECT 1 FROM appointment_reschedule_requests rr
+        WHERE rr.appointment_id = appointments.appointment_id AND rr.status IN ('pending','offered')) AS has_active_reschedule
     FROM appointments WHERE appointment_id = ? AND user_id = ? AND archived_at IS NULL FOR UPDATE");
 $stmt->bind_param('ii', $appointmentId, $residentId);
 $stmt->execute();
@@ -63,7 +65,7 @@ if (!$appointment || !in_array($appointment['status'], ['pending', 'approved', '
     exit;
 }
 if (in_array($appointment['status'], ['approved', 'scheduled', 'rescheduled'], true)
-    && !(bool)$appointment['can_cancel']) {
+    && !(bool)$appointment['can_cancel'] && !(bool)$appointment['has_active_reschedule']) {
     $conn->rollback();
     http_response_code(409);
     echo json_encode(['success' => false, 'message' => 'Appointments can only be cancelled at least 24 hours before the scheduled time. Please contact DCVS staff for help.']);
@@ -81,6 +83,24 @@ if (!$ok) {
     echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Refresh and try again.']);
     exit;
 }
+$closeRequest = $conn->prepare("UPDATE appointment_reschedule_requests
+    SET status = 'cancelled', responded_at = NOW()
+    WHERE appointment_id = ? AND status IN ('pending','offered')");
+if (!$closeRequest) {
+    $conn->rollback();
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+    exit;
+}
+$closeRequest->bind_param('i', $appointmentId);
+if (!$closeRequest->execute()) {
+    $closeRequest->close();
+    $conn->rollback();
+    http_response_code(500);
+    echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+    exit;
+}
+$closeRequest->close();
 $conn->commit();
 
 if (in_array($appointment['status'], dcvsHeldStatuses(), true)) {

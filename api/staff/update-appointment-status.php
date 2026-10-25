@@ -448,14 +448,39 @@ $tTypes = str_repeat('i', count($targetIds));
 $updateSql = $newStatus === 'cancelled'
     ? "UPDATE appointments SET status = 'cancelled', cancelled_by = 'staff' WHERE appointment_id IN ($tPlaceholders)"
     : "UPDATE appointments SET status = '$newStatus' WHERE appointment_id IN ($tPlaceholders)";
+if ($newStatus === 'cancelled') $conn->begin_transaction();
 $updStmt = $conn->prepare($updateSql);
 $updStmt->bind_param($tTypes, ...$targetIds);
 $ok = $updStmt->execute() && $updStmt->affected_rows > 0;
 $updStmt->close();
 
 if (!$ok) {
+    if ($newStatus === 'cancelled') $conn->rollback();
     echo json_encode(['success' => false, 'message' => 'Failed to update appointment status.']);
     exit;
+}
+if ($newStatus === 'cancelled') {
+    $closeRequests = $conn->prepare("UPDATE appointment_reschedule_requests
+        SET status = 'cancelled', responded_at = NOW()
+        WHERE appointment_id IN ($tPlaceholders) AND status IN ('pending','offered')");
+    if (!$closeRequests) {
+        $conn->rollback();
+        error_log('Could not prepare reschedule request closure after staff cancellation: ' . $conn->error);
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+        exit;
+    }
+    $closeRequests->bind_param($tTypes, ...$targetIds);
+    if (!$closeRequests->execute()) {
+        error_log('Could not close reschedule requests after staff cancellation: ' . $closeRequests->error);
+        $closeRequests->close();
+        $conn->rollback();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+        exit;
+    }
+    $closeRequests->close();
+    $conn->commit();
 }
 
 $actionLabel = $newStatus === 'completed' ? 'Completed' : ($newStatus === 'no_show' ? 'No-show' : 'Cancelled');

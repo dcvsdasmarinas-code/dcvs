@@ -210,9 +210,29 @@ $stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_t
     a.original_schedule_date, a.original_schedule_time, a.reschedule_response_deadline,
     a.cancelled_by, a.cancellation_reason, a.status,
     a.pet_id, a.notes, a.created_at,
+    rr.request_id AS reschedule_request_id, rr.status AS reschedule_request_status,
+    rr.requested_date, rr.requested_time, rr.requested_urgency, rr.resident_reason,
+    rr.staff_message AS reschedule_staff_message, rr.decline_reason AS reschedule_decline_reason,
+    rr.offered_date, rr.offered_time, rr.offered_urgency, rr.requested_at AS reschedule_requested_at,
+    cooldown.cooldown_until AS reschedule_cooldown_until,
+    COALESCE(cooldown.cooldown_until > NOW(), 0) AS reschedule_cooldown_active,
     TIMESTAMP(COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)) > DATE_ADD(NOW(), INTERVAL 24 HOUR) AS can_cancel,
     COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo
     FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id
+    LEFT JOIN (
+        SELECT approved.appointment_id,
+            DATE_ADD(COALESCE(approved.responded_at, approved.reviewed_at, approved.requested_at), INTERVAL 24 HOUR) AS cooldown_until
+        FROM appointment_reschedule_requests approved
+        JOIN (
+            SELECT appointment_id, MAX(request_id) AS request_id
+            FROM appointment_reschedule_requests
+            WHERE status = 'approved'
+            GROUP BY appointment_id
+        ) latest_approved ON latest_approved.request_id = approved.request_id
+    ) cooldown ON cooldown.appointment_id = a.appointment_id
+    LEFT JOIN appointment_reschedule_requests rr ON rr.request_id = (
+        SELECT MAX(r2.request_id) FROM appointment_reschedule_requests r2 WHERE r2.appointment_id = a.appointment_id
+    )
     WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
@@ -476,9 +496,9 @@ $uaResult = $uaStmt->get_result();
 while ($row = $uaResult->fetch_assoc()) $upcomingAppts[] = $row;
 $uaStmt->close();
 
-// Active treatments count (appointments with status scheduled/in_progress)
+// Active treatments count (appointments with an upcoming or active schedule)
 $activeTreatments = 0;
-$atStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND status IN ('scheduled','in_progress') AND archived_at IS NULL");
+$atStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND status IN ('scheduled','rescheduled','in_progress') AND archived_at IS NULL");
 $atStmt->bind_param("i", $_SESSION['user_id']);
 $atStmt->execute();
 $activeTreatments = (int)$atStmt->get_result()->fetch_row()[0];
@@ -2160,6 +2180,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
     currentPage = page;
     renderTable();
   };
+  window.APPT.viewCalendar = function() {
+    closeApptDrawer();
+    if (typeof window.switchSection === 'function') window.switchSection('calendar-booking');
+  };
   renderTable();
 })();
 </script>
@@ -2730,6 +2754,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .appt-search-input::placeholder{color:#a1a1aa;}
     .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
     .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+    .appt-reschedule-table-tag{display:inline-flex;margin-top:4px;padding:2px 7px;border:1px solid #d4d4d8;border-radius:4px;background:#f4f4f5;color:#52525b;font-size:11px;font-weight:500;line-height:1.3;}
+    .appt-reschedule-table-tag.reply-needed{border-color:#fbbf24;background:#fef3c7;color:#92400e;font-weight:700;}
 
     /* ?? HubSpot-style table ?? */
     .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
@@ -3301,6 +3327,16 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .response-step.is-current .response-step-dot { border-color:#16a34a;background:#fff; }
     #rptDrawer .response-step.is-overdue .response-step-dot { border-color:#ef4444;background:#fff; }
     #rptDrawer .response-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
+    #apptDrawer .appt-status-steps { display:flex;align-items:flex-start;padding:8px 28px 16px;font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-status-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
+    #apptDrawer .appt-status-step:not(:last-child)::after { position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
+    #apptDrawer .appt-status-step.is-complete:not(:last-child)::after { background:#22c55e; }
+    #apptDrawer .appt-status-step-dot { position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
+    #apptDrawer .appt-status-step.is-complete .appt-status-step-dot { border-color:#16a34a;background:#16a34a; }
+    #apptDrawer .appt-status-step.is-current { color:#18181b;font-weight:600; }
+    #apptDrawer .appt-status-step.is-current .appt-status-step-dot { border-color:#16a34a;background:#fff; }
+    #apptDrawer .appt-status-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
+    @media(max-width:480px) { #apptDrawer .appt-status-steps { padding-right:24px;padding-left:24px; } }
     #rptDrawer .rpt-updates-timeline { position:relative;margin:0 0 14px 3px;padding-left:14px;border-left:2px solid #e4e4e7;color:#09090b;font-family:'Inter','Segoe UI',sans-serif; }
     #rptDrawer .rpt-updates-entry { position:relative;padding:0 0 17px; }
     #rptDrawer .rpt-updates-entry:last-child { padding-bottom:0; }
@@ -3343,11 +3379,112 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .rpt-status-line { display:flex; align-items:center; gap:8px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
     .rpt-status-line i { color:#057b2d; }
     /* appointment drawer sections */
-    #apptDrawer .rpt-drawer-head { border-bottom:none; padding-bottom:0; }
-    #apptDrawer .rpt-drawer-body { padding-top:18px; }
-    #apptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
+    #apptDrawer .rpt-drawer-head { position:relative; top:auto; right:auto; z-index:2; padding:24px 24px 0; border:0; }
+    #apptDrawer .rpt-drawer-head > div { display:flex; flex-direction:column; gap:6px; }
+    #apptDrawer .rpt-drawer-head .rpt-drawer-close { width:24px; height:24px; border:0; border-radius:4px; background:transparent; }
+    #apptDrawer .rpt-drawer-head .rpt-drawer-close:hover { background:#f4f4f5; }
+    #apptDrawer .rpt-drawer-body { padding:24px 28px; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-summary-head { display:flex; align-items:center; gap:12px; margin:0 0 20px; }
+    #apptDrawer .appt-summary-avatar { display:flex; width:85px; height:85px; flex:0 0 85px; align-items:center; justify-content:center; overflow:hidden; border-radius:8px; background:#e4e4e7; color:#64748b; font-family:'Inter','Segoe UI',sans-serif; font-size:28px; font-weight:600; }
+    #apptDrawer .appt-summary-avatar img { width:100%; height:100%; object-fit:cover; }
+    #apptDrawer .appt-summary-pet { display:flex; min-width:0; flex-direction:column; gap:2px; }
+    #apptDrawer .appt-summary-label { color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; }
+    #apptDrawer .appt-summary-pet-name { overflow:hidden; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+    #apptDrawer .appt-summary-status { margin-left:auto; padding:4px 12px; border:1px solid #e4e4e7; border-radius:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:500; white-space:nowrap; }
+    #apptDrawer .appt-summary-date { display:flex; align-items:flex-start; gap:8px; margin:0 0 18px; padding-bottom:16px; border-bottom:1px solid #e4e4e7; color:#64748b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-summary-date-marker { flex:0 0 8px; width:8px; height:8px; margin-top:5px; border:2px solid #15803d; border-radius:50%; }
+    #apptDrawer .appt-summary-date-marker.is-confirmed { background:#15803d; }
+    #apptDrawer .appt-summary-date-marker.is-pending { border-color:#15803d; }
+    #apptDrawer .appt-summary-date-marker.is-completed { width:auto; height:auto; flex-basis:auto; margin-top:0; border:0; color:#15803d; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-summary-date-marker.is-cancelled { width:auto; height:auto; flex-basis:auto; margin-top:0; border:0; color:#64748b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-summary-at { margin:0 4px; color:#64748b; }
+    #apptDrawer .appt-detail-section { margin:0 0 16px; padding-bottom:14px; border-bottom:1px solid #e4e4e7; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-detail-title { margin:0 0 10px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-detail-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:4px 0; font-family:'Inter','Segoe UI',sans-serif; font-size:15px; line-height:1.4; }
+    #apptDrawer .appt-detail-label { flex:0 0 112px; color:#71717a; font-size:13px; font-weight:600; }
+    #apptDrawer .appt-detail-value { min-width:0; color:#18181b; font-size:15px; font-weight:400; text-align:right; overflow-wrap:anywhere; }
+    #apptDrawer .appt-note-section { margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid #e4e4e7; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-note-title { margin:0 0 10px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-note-content { margin:0; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:400; line-height:1.45; }
+    #apptDrawer .rpt-next.appt-next-section { margin:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .rpt-next.appt-next-section .rpt-next-title { margin:0 0 12px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-next-section ol { margin:0; padding:0; list-style:none; }
+    #apptDrawer .appt-next-section li { margin:0 0 8px; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; line-height:1.5; }
+    #apptDrawer .appt-next-section li:last-child { margin-bottom:0; }
+    #apptDrawer .appt-original-request[hidden] { display:none; }
+    #apptDrawer .appt-drawer-legacy { display:none; }
+    #apptDrawer .appt-footer-hint { margin:0; color:#64748b; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-footer-hint[hidden] { display:none; }
+    #apptDrawer .appt-footer-hint a { color:#18181b; text-decoration:underline; }
+    #apptDrawer [hidden] { display:none !important; }
+    #apptDrawer .appt-reschedule-reply { padding:14px 24px; border-bottom:1px solid #e4e4e7; background:#fffbeb; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-reply strong { display:block; margin-bottom:4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-reply p { margin:4px 0; color:#475569; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-reply > div { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    #apptDrawer .appt-reschedule-request-card { margin:0 0 16px; padding:12px 14px; border:1px solid #e4e4e7; border-radius:7px; background:#f8fafc; }
+    #apptDrawer .appt-reschedule-request-card strong { display:block; margin-bottom:4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-request-card p { margin:3px 0 0; color:#64748b; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-flow { font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-back { margin:0 0 8px; padding:0; border:0; background:transparent; color:#52525b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-current-schedule { display:flex; justify-content:space-between; gap:12px; margin:0 0 20px; padding:12px; border-radius:6px; background:#f4f4f5; color:#71717a; font-size:14px; }
+    #apptDrawer .appt-current-schedule strong { font-weight:600; }
+    #apptDrawer .appt-reschedule-step-title { margin:0 0 14px; color:#18181b; font-size:16px; font-weight:600; }
+    #apptDrawer .appt-reschedule-label { display:block; margin:14px 0 6px; color:#18181b; font-size:13px; font-weight:600; }
+    #apptDrawer .appt-reschedule-date,#apptDrawer #apptRescheduleReason { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-calendar { margin:8px 0 12px; border:1px solid #e4e4e7; border-radius:8px; padding:12px; }
+    #apptDrawer .appt-reschedule-calendar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    #apptDrawer .appt-reschedule-calendar-head strong { color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-calendar-head button { width:32px; height:32px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; cursor:pointer; }
+    #apptDrawer .appt-reschedule-calendar-head button:disabled { color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; }
+    #apptDrawer .appt-reschedule-calendar-weekday { padding:4px 0; color:#71717a; font-size:11px; font-weight:600; text-align:center; }
+    #apptDrawer .appt-reschedule-calendar-day { position:relative; min-width:0; min-height:42px; border:1px solid transparent; border-radius:6px; background:#fff; color:#18181b; font:13px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-calendar-day[aria-pressed="true"] { border-color:#15803d; background:#f0fdf4; color:#166534; font-weight:600; }
+    #apptDrawer .appt-reschedule-calendar-day:disabled { background:#f4f4f5; color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-calendar-day .day-weekday { display:none; }
+    #apptDrawer .appt-reschedule-calendar-day .day-marker { position:absolute; right:4px; bottom:4px; left:4px; height:3px; border-radius:3px; background:#15803d; }
+    #apptDrawer .appt-reschedule-calendar-day[data-program="true"] .day-marker { background:#7c3aed; }
+    #apptDrawer .appt-reschedule-calendar-day[data-full="true"] .day-marker { background:#dc2626; }
+    #apptDrawer .appt-reschedule-calendar-day[data-closed="true"] .day-marker { background:#a1a1aa; }
+    #apptDrawer .appt-reschedule-calendar-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; color:#71717a; font-size:11px; }
+    #apptDrawer .appt-reschedule-calendar-legend span { display:flex; align-items:center; gap:4px; }
+    #apptDrawer .appt-reschedule-calendar-legend i { width:7px; height:7px; border-radius:50%; background:#15803d; }
+    #apptDrawer .appt-reschedule-calendar-legend .program { background:#7c3aed; }
+    #apptDrawer .appt-reschedule-calendar-legend .full { background:#dc2626; }
+    #apptDrawer .appt-reschedule-calendar-legend .closed { background:#a1a1aa; }
+    @media (max-width:600px) {
+      #apptDrawer .appt-reschedule-calendar-grid { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; scroll-snap-type:x mandatory; }
+      #apptDrawer .appt-reschedule-calendar-weekday,
+      #apptDrawer .appt-reschedule-calendar-grid > span[aria-hidden="true"] { display:none; }
+      #apptDrawer .appt-reschedule-calendar-day { display:flex; flex:0 0 46px; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-height:54px; scroll-snap-align:start; }
+      #apptDrawer .appt-reschedule-calendar-day .day-weekday { display:block; color:#71717a; font-size:10px; line-height:1; }
+      #apptDrawer .appt-reschedule-calendar-day .day-number { font-size:13px; line-height:1; }
+      #apptDrawer .appt-reschedule-calendar-day .day-marker { right:8px; left:8px; }
+    }
+    #apptDrawer .appt-reschedule-day-note { min-height:20px; margin:8px 0; color:#64748b; font-size:13px; line-height:1.4; }
+    #apptDrawer .appt-reschedule-priorities { display:flex; gap:8px; }
+    #apptDrawer .appt-reschedule-priorities button { min-height:34px; padding:0 12px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-priorities button[aria-pressed="true"] { border-color:#18181b; background:#f4f4f5; font-weight:600; }
+    #apptDrawer .appt-reschedule-slots { display:flex; flex-wrap:wrap; gap:8px; min-height:34px; }
+    #apptDrawer .appt-reschedule-slots button { min-height:34px; padding:0 12px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:13px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-slots button[aria-pressed="true"] { border-color:#18181b; background:#18181b; color:#fff; }
+    #apptDrawer .appt-reschedule-slots button:disabled { background:#f4f4f5; color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-not-reserved { margin:12px 0; color:#64748b; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-error { margin:8px 0; color:#b91c1c; font-size:13px; }
+    #apptDrawer .appt-reschedule-flow > div > .sd-btn { margin-top:8px; }
+    #apptDrawer .appt-reschedule-comparison { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:12px; margin:12px 0 18px; }
+    #apptDrawer .appt-reschedule-comparison div { display:flex; flex-direction:column; gap:6px; }
+    #apptDrawer .appt-reschedule-comparison span { color:#71717a; font-size:13px; }
+    #apptDrawer .appt-reschedule-comparison strong { color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-review-reason { color:#475569; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-review-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+    #apptDrawer .appt-reschedule-alert { margin:0 0 16px; padding:11px 13px; border:1px solid #e4e4e7; border-radius:6px; background:#f8fafc; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-alert.approved { border-color:#bbf7d0; background:#f0fdf4; color:#166534; }
+    #apptDrawer .appt-reschedule-alert.declined { border-color:#fecaca; background:#fef2f2; color:#991b1b; }
+    #apptDrawer .appt-reschedule-alert[hidden] { display:none !important; }
     .rpt-divider { border:0; border-top:1px solid #e4e4e7; margin:20px 0; }
-    #apptDrawer .rpt-drawer-foot { justify-content:flex-end; }
+    #apptDrawer .rpt-drawer-foot { align-items:flex-start; flex-direction:column; gap:8px; }
+    #apptDrawer .appt-footer-actions { display:flex; align-items:center; justify-content:flex-start; gap:8px; width:100%; }
     #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 1 auto; min-width:0; white-space:nowrap; }
     /* drawer status badge + timeline */
     .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border:1px solid transparent; border-radius:20px; white-space:nowrap; }
@@ -3430,17 +3567,26 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #apptDrawer .rpt-next-title { font-size:14px; font-weight:600; color:#18181b; line-height:1.4; margin-bottom:8px; }
     #apptDrawer .rpt-next li { font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
     @media (max-width:560px){
-      .rpt-drawer-head, .rpt-drawer-body { padding-left:20px; padding-right:20px; }
-      .rpt-drawer-foot { padding-left:20px; padding-right:20px; }
+      .rpt-drawer-head, .rpt-drawer-body { padding-left:24px; padding-right:24px; }
+      .rpt-drawer-foot { padding:12px 20px 18px; }
+      #apptDrawer { width:100vw; }
+      #apptDrawer .rpt-drawer-body { padding:24px 24px 18px; }
+      #apptDrawer .rpt-drawer-foot { align-items:flex-start; flex-direction:column; gap:8px; }
+      #apptDrawer .appt-footer-hint { width:100%; min-width:0; margin:0; }
+      #apptDrawer .appt-footer-actions { width:100%; max-width:100%; margin:0; }
       #apptDrawer .pet-drawer-info { grid-template-columns:1fr; }
-      #apptDrawer .rpt-drawer-foot { align-items:stretch; flex-direction:column; gap:8px; }
-      #apptDrawer .rpt-drawer-foot .sd-btn { box-sizing:border-box; width:100%; flex:0 0 auto; min-height:42px; }
-      #apptDrawer .appt-footer-reschedule { width:100%; }
+      #apptDrawer .rpt-drawer-foot .sd-btn { box-sizing:border-box; width:auto; min-height:40px; padding:0 9px; flex:0 1 auto; font-size:12px; }
+      #apptDrawer .appt-footer-reschedule { width:auto; }
       #apptDrawer .appt-reschedule-soon { text-align:left; }
       #apptDrawer .appt-reschedule-actions { flex-direction:column; }
       #apptDrawer .appt-reschedule-times { grid-template-columns:1fr; gap:8px; }
+      #apptDrawer .appt-summary-avatar { width:64px; height:64px; flex-basis:64px; }
+      #apptDrawer .appt-summary-status { padding:4px 8px; font-size:12px; }
+      #apptDrawer .appt-detail-label { flex-basis:96px; }
+      #apptDrawer .appt-reschedule-reply { padding:12px 20px; }
+      #apptDrawer .appt-reschedule-review-actions { flex-direction:column-reverse; }
+      #apptDrawer .appt-reschedule-review-actions .sd-btn { width:100%; }
     }
-
     /* ï¿½"?ï¿½"? Submit Report wizard ï¿½"?ï¿½"? */
     .rpt-step-indicator { display:flex; align-items:center; gap:8px; margin-bottom:1.5rem; }
     .rpt-step { display:flex; align-items:center; gap:6px; }
@@ -3707,6 +3853,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <p class="appt-kpi-sub">Finished</p>
       </div>
     </div>
+    <div id="apptReplySummary" class="appt-reschedule-alert" hidden role="status">
+      <span id="apptReplySummaryText"></span>
+      <button type="button" class="sd-btn sd-btn-outline" id="apptReplySummaryButton">Review</button>
+    </div>
 
     <?php
     $apptStatusColors = [
@@ -3777,8 +3927,14 @@ include __DIR__ . '/../../includes/portal-toast.php';
           <?php foreach ($appointments as $appt):
             $aptRef = $appt['reference_id'] ?? fallbackRefId('#APT-', $appt['appointment_id']);
             $ast = $appt['status'];
-            $asc = $apptStatusColors[$ast] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
-            $astLabel = ucfirst(str_replace('_', ' ', $ast));
+            $hasApprovedReschedule = ($appt['reschedule_request_status'] ?? '') === 'approved';
+            $displayAppointmentStatus = $hasApprovedReschedule && in_array($ast, ['approved', 'rescheduled'], true)
+              ? 'scheduled'
+              : $ast;
+            $hasRescheduleActivity = in_array(($appt['reschedule_request_status'] ?? ''), ['pending', 'offered'], true);
+            $displayStatus = $displayAppointmentStatus === 'rescheduled' || $hasRescheduleActivity ? 'rescheduled' : $displayAppointmentStatus;
+            $asc = $apptStatusColors[$displayStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
+            $astLabel = $displayStatus === 'rescheduled' ? 'Rescheduled' : ucfirst(str_replace('_', ' ', $displayAppointmentStatus));
             if ($ast === 'action_needed') $astLabel = 'Action needed';
             elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $astLabel = 'Expired';
             elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $astLabel = 'Declined';
@@ -3789,8 +3945,11 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $aTime = date('g:i A', strtotime($scheduledTime));
             $aCreatedDate = date('M d, Y', strtotime($appt['created_at']));
             $aCreatedTime = date('g:i A', strtotime($appt['created_at']));
+            $rescheduleTag = '';
+            if (($appt['reschedule_request_status'] ?? '') === 'offered') $rescheduleTag = 'Reply needed';
+            elseif (($appt['reschedule_request_status'] ?? '') === 'declined') $rescheduleTag = 'Reschedule declined';
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($ast); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($scheduledDate); ?>" data-time="<?php echo (int)strtotime($scheduledTime); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($displayStatus); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($scheduledDate); ?>" data-time="<?php echo (int)strtotime($scheduledTime); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($aptRef); ?></div></td>
             <td class="sd-td">
               <div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div>
@@ -3814,7 +3973,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aTime; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedDate; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedTime; ?></div></td>
-            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span></td>
+            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span><?php if ($rescheduleTag !== ''): ?><span class="appt-reschedule-table-tag<?php echo $rescheduleTag === 'Reply needed' ? ' reply-needed' : ''; ?>"><?php echo htmlspecialchars($rescheduleTag); ?></span><?php endif; ?></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
               <button class="sd-row-actions" title="More options" onclick="event.stopPropagation();apptRowActions(event,<?php echo (int)$appt['appointment_id']; ?>)"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             </td>
@@ -5511,14 +5670,14 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
         </div>
       <?php else: ?>
       <div class="sd-field sd-field-full">
-        <label class="sd-label">Pet Photo (optional)</label>
+        <label class="sd-label">Pet Photo <span class="req">*</span></label>
         <div class="sd-photo-upload" id="addPetPhotoBox" onclick="document.getElementById('addPetPhoto').click()">
           <div class="upload-placeholder">
             <i class="fas fa-cloud-upload-alt"></i>
             <span>Upload a photo of your pet</span>
           </div>
           <img id="addPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
-          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onclick="event.stopPropagation()" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
+          <input type="file" name="photo" accept="image/jpeg,image/png,image/gif" id="addPetPhoto" required onclick="event.stopPropagation()" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
         </div>
       </div>
       <?php endif; ?>
@@ -6830,11 +6989,35 @@ window.APPT = window.APPT || {};
     'waitlisted': ['#fef3c7', '#92400e', '#fde68a']
   };
 
+  function buildAppointmentStatusSteps(status, requestStatus) {
+    var normalizedStatus = String(status || '').toLowerCase();
+    var normalizedRequestStatus = String(requestStatus || '').toLowerCase();
+    var currentStage = normalizedStatus === 'completed' ? 3
+      : (['pending', 'offered'].indexOf(normalizedRequestStatus) !== -1 ? 1
+        : (['scheduled', 'rescheduled', 'approved', 'in_progress'].indexOf(normalizedStatus) !== -1 ? 2 : 1));
+    var labels = ['Requested', 'Under review', 'Scheduled', 'Completed'];
+    return '<div class="appt-status-steps" aria-label="Appointment progress">' + labels.map(function(label, index) {
+      var complete = index < currentStage || normalizedStatus === 'completed';
+      var stepClass = complete ? ' is-complete' : (index === currentStage ? ' is-current' : '');
+      var checkIcon = complete
+        ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '';
+      return '<div class="appt-status-step' + stepClass + '"><span class="appt-status-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
+    }).join('') + '</div>';
+  }
+
   window.APPT.view = function(id) {
     var a = getAppt(id);
     if (!a) return;
     window.__currentApptId = a.id;
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
+    var displayStatus = a.status === 'approved' ? 'scheduled' : a.status;
+    var statusTimeline = document.getElementById('apptStatusTimeline');
+    if (statusTimeline) {
+      statusTimeline.innerHTML = buildAppointmentStatusSteps(displayStatus, a.rescheduleRequestStatus);
+      statusTimeline.hidden = false;
+    }
+    var pet = a.pet || 'your pet';
     set('adHeadPet', a.pet);
     var avEl = document.getElementById('adAvatar');
     if (avEl) {
@@ -6849,21 +7032,67 @@ window.APPT = window.APPT || {};
     set('adPet', a.pet);
     set('adDate', a.date);
     set('adTime', a.time);
-    set('adCreated', a.created + ' . ' + a.createdTime);
-    set('adNotes', a.notes === '-' ? '-' : a.notes);
-    var c = apptColors[a.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+    set('adCreated', (a.createdLong || a.created || '—') + (a.createdTime ? ', ' + a.createdTime : ''));
+    set('adNotes', a.notes && a.notes !== 'No notes added' ? a.notes : 'No note added.');
+    var summaryDate = displayStatus === 'pending' ? a.dateRaw : a.scheduledDateRaw;
+    var summaryTime = displayStatus === 'pending' ? a.timeRaw : a.scheduledTimeRaw;
+    set('adDatePrefix', displayStatus === 'pending' ? 'Preferred: ' : '');
+    set('adSummaryDate', formatAppointmentDate(summaryDate) || '—');
+    set('adSummaryTime', formatAppointmentTime(summaryTime) || '');
+    var originalRow = document.getElementById('adOriginalRow');
+    if (originalRow) {
+      originalRow.hidden = displayStatus !== 'rescheduled' && !a.hasApprovedReschedule;
+      set('adOriginalRequested', formatAppointmentDate(a.originalDateRaw) + ', ' + formatAppointmentTime(a.originalTimeRaw));
+    }
+    var requestStatus = a.rescheduleRequestStatus || '';
+    var requestCard = document.getElementById('apptRescheduleRequestCard');
+    var requestTitle = document.getElementById('apptRescheduleRequestTitle');
+    var requestText = document.getElementById('apptRescheduleRequestText');
+    if (requestCard) {
+      requestCard.hidden = requestStatus !== 'pending';
+      if (requestTitle) requestTitle.textContent = 'You requested to reschedule for ' +
+        formatAppointmentDate(a.requestedDate) + ' at ' + formatAppointmentTime(a.requestedTime) + '.';
+      if (requestText) requestText.textContent = 'The clinic is still reviewing your request. Your new time isn’t confirmed yet.';
+    }
+    var decisionCard = document.getElementById('apptRescheduleDecisionCard');
+    if (decisionCard) {
+      decisionCard.hidden = requestStatus !== 'approved' && requestStatus !== 'declined';
+      decisionCard.className = 'appt-reschedule-alert' + (requestStatus === 'approved' ? ' approved' : ' declined');
+      if (requestStatus === 'approved') {
+        decisionCard.textContent = 'Your reschedule request has been approved! Your appointment has been moved from ' +
+          formatAppointmentDate(a.originalDateRaw) + ', at ' + formatAppointmentTime(a.originalTimeRaw) +
+          ' to your requested schedule.';
+      } else if (requestStatus === 'declined') {
+        decisionCard.textContent = a.rescheduleDeclineReason
+          ? 'The clinic couldn’t approve your request: ' + a.rescheduleDeclineReason +
+            ' Your appointment stays on ' + formatAppointmentDate(a.scheduledDateRaw) + '.'
+          : 'You declined the clinic’s alternate time. Your current appointment remains booked for ' +
+            formatAppointmentDate(a.scheduledDateRaw) + ' at ' + formatAppointmentTime(a.scheduledTimeRaw) + '.';
+      }
+    }
+    var replyBanner = document.getElementById('apptRescheduleReplyBanner');
+    if (replyBanner) {
+      replyBanner.hidden = requestStatus !== 'offered';
+      if (requestStatus === 'offered') {
+        set('apptRescheduleReplyTitle', 'The clinic can’t do ' + formatAppointmentDate(a.requestedDate) +
+          '. They suggest ' + formatAppointmentDate(a.offeredDate) + ' at ' + formatAppointmentTime(a.offeredTime) + '.');
+        set('apptRescheduleReplyMessage', 'Your current appointment remains booked unless you accept this new time.');
+        set('apptRescheduleReplyStaffMessage', a.rescheduleStaffMessage || '');
+      }
+    }
+    var displayStatusKey = a.status === 'rescheduled' || ['pending', 'offered'].indexOf(requestStatus) !== -1
+      ? 'rescheduled' : a.status;
+    var c = apptColors[displayStatusKey] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+    var headStatus = document.getElementById('adHeadStatus');
+    if (headStatus) {
+      headStatus.textContent = a.statusLabel;
+      headStatus.style.background = c[0];
+      headStatus.style.color = c[1];
+      headStatus.style.borderColor = c[2] || '#e4e4e7';
+    }
     var pill = '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';border-color:' + (c[2] || '#e4e4e7') + ';">' + a.statusLabel + '</span>';
     var stEl = document.getElementById('adStatus');
     if (stEl) stEl.innerHTML = pill;
-    var hp = document.getElementById('adHeadStatus');
-    if (hp) {
-      hp.textContent = a.statusLabel;
-      hp.style.background = c[0];
-      hp.style.color = c[1];
-      hp.style.borderColor = c[2] || '#e4e4e7';
-    }
-    var statusNotice = document.getElementById('adStatusNotice');
-    if (statusNotice) statusNotice.hidden = a.status !== 'pending';
     var actionNeededNotice = document.getElementById('adActionNeeded');
     if (actionNeededNotice) actionNeededNotice.hidden = a.status !== 'action_needed';
     if (a.status === 'action_needed') {
@@ -6876,51 +7105,369 @@ window.APPT = window.APPT || {};
       set('adRescheduleDeadline', 'Please respond before ' + (a.rescheduleDeadlineLabel || 'the deadline') + '. Without a response, the request will close.');
       set('adRescheduleRequestedAt', (a.createdLong || a.created || '') + (a.createdTime ? ', ' + a.createdTime : ''));
     }
-    var scheduledNotice = document.getElementById('adScheduledNotice');
-    if (scheduledNotice) scheduledNotice.hidden = a.status !== 'scheduled' && a.status !== 'rescheduled' && a.status !== 'approved';
-    var requestedAt = document.getElementById('adRequestedAt');
-    if (requestedAt) requestedAt.textContent = (a.createdLong || a.created || '') + (a.createdTime ? ', ' + a.createdTime : '');
     var nextEl = document.getElementById('adNextList');
     if (nextEl) {
-      var steps = apptNextSteps(a.status);
+      var steps = apptNextSteps(displayStatus);
       nextEl.innerHTML = steps.map(function(t) { return '<li>' + t + '</li>'; }).join('');
-      nextEl.closest('.rpt-next').hidden = a.status === 'pending' || a.status === 'action_needed';
+      var nextSection = nextEl.closest('.rpt-next');
+      if (nextSection) nextSection.hidden = a.status === 'action_needed';
     }
     var changeButton = document.getElementById('apptChangeBtn');
     var rescheduleHint = document.getElementById('apptRescheduleSoon');
+    var pendingHint = document.getElementById('apptPendingHint');
     var rescheduleAction = document.getElementById('apptRescheduleAction');
+    var startRescheduleButton = document.getElementById('apptStartRescheduleBtn');
     var bookAgainButton = document.getElementById('apptBookAgainBtn');
     if (changeButton) {
       var canEdit = a.status === 'pending';
-      var canRequestReschedule = a.status === 'scheduled' || a.status === 'rescheduled' || a.status === 'approved';
       var isFinal = a.status === 'completed' || a.status === 'rejected' || a.status === 'cancelled' || a.status === 'no_show';
-      changeButton.style.display = canEdit || canRequestReschedule ? '' : 'none';
-      changeButton.textContent = canRequestReschedule ? 'Request to reschedule' : 'Edit Appointment';
-      changeButton.disabled = canRequestReschedule;
-      changeButton.setAttribute('data-action', canRequestReschedule ? 'request-reschedule' : 'edit');
-      if (rescheduleHint) rescheduleHint.hidden = !canRequestReschedule;
-      if (rescheduleAction) rescheduleAction.style.display = canEdit || canRequestReschedule ? '' : 'none';
-      if (bookAgainButton) bookAgainButton.style.display = isFinal ? '' : 'none';
+      changeButton.style.display = canEdit ? '' : 'none';
+      changeButton.textContent = 'Edit request';
+      changeButton.disabled = false;
+      changeButton.setAttribute('data-action', 'edit');
+      changeButton.classList.toggle('sd-btn-primary', canEdit);
+      changeButton.classList.toggle('sd-btn-outline', !canEdit);
+      if (pendingHint) pendingHint.hidden = !canEdit;
+      if (rescheduleAction) rescheduleAction.style.display = canEdit ? '' : 'none';
+      if (bookAgainButton) {
+        bookAgainButton.style.display = isFinal ? '' : 'none';
+        bookAgainButton.textContent = 'Book again for ' + pet;
+      }
     }
+    var isScheduled = ['approved', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
+    var cooldownActive = !!a.rescheduleCooldownActive;
+    var requestWaiting = requestStatus === 'pending' || requestStatus === 'offered';
+    if (startRescheduleButton) {
+      startRescheduleButton.style.display = isScheduled ? '' : 'none';
+      startRescheduleButton.disabled = requestWaiting || !a.canCancel || cooldownActive;
+      startRescheduleButton.textContent = requestWaiting ? 'Reschedule requested' : 'Reschedule';
+    }
+    if (rescheduleHint) {
+      rescheduleHint.hidden = !isScheduled || requestWaiting || (!cooldownActive && !!a.canCancel);
+      if (cooldownActive && a.rescheduleCooldownUntil) {
+        var cooldownDate = a.rescheduleCooldownUntil.substring(0, 10);
+        var cooldownTime = a.rescheduleCooldownUntil.substring(11, 16);
+        rescheduleHint.textContent = 'You can request another reschedule after ' +
+          formatAppointmentDate(cooldownDate) + ' at ' + formatAppointmentTime(cooldownTime) + '.';
+      } else {
+        rescheduleHint.innerHTML = 'Less than 24 hours away. Please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>.';
+      }
+    }
+    if (requestStatus === 'declined' && startRescheduleButton && isScheduled && a.canCancel && !cooldownActive) {
+      startRescheduleButton.disabled = false;
+      startRescheduleButton.textContent = 'Request another time';
+    }
+    var viewCalendarButton = document.getElementById('apptViewCalendarBtn');
+    if (viewCalendarButton) viewCalendarButton.style.display = ['completed', 'cancelled', 'rejected', 'no_show'].indexOf(a.status) !== -1 ? '' : 'none';
+    var drawerCloseButton = document.getElementById('apptDrawerCloseBtn');
+    if (drawerCloseButton) drawerCloseButton.style.display = a.status === 'action_needed' ? '' : 'none';
     var archiveButton = document.getElementById('apptArchiveBtn');
     var cancelCutoff = document.getElementById('apptCancelCutoff');
     var canCancelStatus = ['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
-    var hasCancellationWindow = a.status === 'pending' || a.canCancel;
+    var hasCancellationWindow = a.status === 'pending' || a.canCancel || requestWaiting;
     if (archiveButton) {
       archiveButton.style.display = canCancelStatus && hasCancellationWindow ? '' : 'none';
-      archiveButton.textContent = 'Cancel Appointment';
+      archiveButton.textContent = a.status === 'pending' ? 'Cancel request' : 'Cancel appointment';
     }
-    if (cancelCutoff) cancelCutoff.hidden = !canCancelStatus || hasCancellationWindow || a.status === 'pending';
-    var notesItem = document.getElementById('adNotesItem');
-    if (notesItem) notesItem.hidden = !a.notes || a.notes === 'No notes added';
+    if (cancelCutoff) {
+      cancelCutoff.hidden = !canCancelStatus || hasCancellationWindow || a.status === 'pending';
+      if (!cancelCutoff.hidden && requestWaiting) cancelCutoff.innerHTML = 'Less than 24 hours away. Please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>. Your pending reschedule request will also close if the appointment is cancelled.';
+    }
     document.getElementById('apptDrawer').classList.add('open');
     document.getElementById('apptDrawerOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
   };
 
+  var reschedulePicker = { slots: [], selectedDate: '', selectedTime: '', urgency: 'routine', programDay: false, month: '', serverToday: '', calendarDays: [] };
+  function renderRescheduleCalendar() {
+    var grid = document.getElementById('apptRescheduleCalendarGrid');
+    var parts = reschedulePicker.month.split('-');
+    var year = Number(parts[0]);
+    var monthNumber = Number(parts[1]);
+    var firstDay = new Date(year, monthNumber - 1, 1);
+    var daysInMonth = new Date(year, monthNumber, 0).getDate();
+    var todayParts = reschedulePicker.serverToday.split('-');
+    var currentMonth = todayParts.length === 3 ? todayParts[0] + '-' + todayParts[1] : reschedulePicker.month;
+    document.getElementById('apptRescheduleMonthLabel').textContent =
+      firstDay.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+    document.getElementById('apptReschedulePrevMonth').disabled = reschedulePicker.month <= currentMonth;
+    grid.textContent = '';
+    ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach(function(label) {
+      var weekday = document.createElement('span');
+      weekday.className = 'appt-reschedule-calendar-weekday';
+      weekday.textContent = label;
+      weekday.setAttribute('aria-hidden', 'true');
+      grid.appendChild(weekday);
+    });
+    var offset = (firstDay.getDay() + 6) % 7;
+    for (var blank = 0; blank < offset; blank++) {
+      var spacer = document.createElement('span');
+      spacer.setAttribute('aria-hidden', 'true');
+      grid.appendChild(spacer);
+    }
+    var availabilityByDate = {};
+    reschedulePicker.calendarDays.forEach(function(day) { availabilityByDate[day.date] = day; });
+    for (var dayNumber = 1; dayNumber <= daysInMonth; dayNumber++) {
+      var date = reschedulePicker.month + '-' + String(dayNumber).padStart(2, '0');
+      var isPastDate = reschedulePicker.serverToday !== '' && date < reschedulePicker.serverToday;
+      var dayInfo = availabilityByDate[date] || { closed:true, full:false, program_day:false };
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'appt-reschedule-calendar-day';
+      button.disabled = isPastDate || !!dayInfo.past || !!dayInfo.closed || !!dayInfo.full;
+      button.dataset.past = isPastDate || dayInfo.past ? 'true' : 'false';
+      button.dataset.program = dayInfo.program_day ? 'true' : 'false';
+      button.dataset.full = dayInfo.full ? 'true' : 'false';
+      button.dataset.closed = dayInfo.closed ? 'true' : 'false';
+      button.setAttribute('aria-pressed', reschedulePicker.selectedDate === date ? 'true' : 'false');
+      var dayStatus = isPastDate || dayInfo.past ? 'Past date' : (dayInfo.closed ? 'Closed' : (dayInfo.full ? 'Full' : (dayInfo.program_day ? 'Program day, available' : 'Available')));
+      button.setAttribute('aria-label', firstDay.toLocaleDateString('en-US', { month:'long' }) + ' ' + dayNumber + ', ' + year + ': ' + dayStatus);
+      var marker = document.createElement('span');
+      marker.className = 'day-marker';
+      marker.setAttribute('aria-hidden', 'true');
+      var dayDate = new Date(year, monthNumber - 1, dayNumber);
+      var weekdayLabel = document.createElement('span');
+      weekdayLabel.className = 'day-weekday';
+      weekdayLabel.textContent = dayDate.toLocaleDateString('en-US', { weekday:'short' });
+      weekdayLabel.setAttribute('aria-hidden', 'true');
+      var dayLabel = document.createElement('span');
+      dayLabel.className = 'day-number';
+      dayLabel.textContent = String(dayNumber);
+      dayLabel.setAttribute('aria-hidden', 'true');
+      button.appendChild(weekdayLabel);
+      button.appendChild(dayLabel);
+      button.appendChild(marker);
+      button.onclick = function(selectedDate) {
+        return function() {
+          document.getElementById('apptRescheduleDate').value = selectedDate;
+          reschedulePicker.selectedDate = selectedDate;
+          reschedulePicker.selectedTime = '';
+          renderRescheduleCalendar();
+          loadRescheduleSlots();
+        };
+      }(date);
+      grid.appendChild(button);
+    }
+  }
+  function loadRescheduleCalendar() {
+    var appointment = getAppt(window.__currentApptId);
+    var note = document.getElementById('apptRescheduleDayNote');
+    note.textContent = 'Loading calendar availability…';
+    fetch('api/resident/reschedule-availability.php?appointment_id=' + encodeURIComponent(appointment.id) + '&month=' + encodeURIComponent(reschedulePicker.month))
+      .then(function(response) { return response.json().then(function(body) { if (!response.ok || !body.success) throw new Error(body.message || 'Could not load calendar availability.'); return body; }); })
+      .then(function(result) {
+        reschedulePicker.calendarDays = result.days || [];
+        reschedulePicker.serverToday = result.server_today || '';
+        renderRescheduleCalendar();
+        note.textContent = '';
+      })
+      .catch(function(error) {
+        reschedulePicker.calendarDays = [];
+        renderRescheduleCalendar();
+        note.textContent = error.message || 'Could not load calendar availability.';
+      });
+  }
+  window.APPT.startReschedule = function() {
+    var appointment = getAppt(window.__currentApptId);
+    if (!appointment || !['approved', 'scheduled', 'rescheduled'].includes(appointment.status)) return;
+    if (!appointment.canCancel || appointment.rescheduleCooldownActive
+      || ['pending', 'offered'].includes(appointment.rescheduleRequestStatus || '')) return;
+    var today = new Date();
+    var initialMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+    document.getElementById('apptRescheduleReason').value = '';
+    document.getElementById('apptRescheduleError').hidden = true;
+    document.getElementById('apptRescheduleSubmitError').hidden = true;
+    document.getElementById('apptRescheduleCurrent').textContent =
+      formatAppointmentDate(appointment.scheduledDateRaw) + ' at ' + formatAppointmentTime(appointment.scheduledTimeRaw);
+    document.getElementById('apptDrawerNormalContent').hidden = true;
+    document.getElementById('apptStatusTimeline').hidden = true;
+    document.getElementById('apptRescheduleFlow').hidden = false;
+    document.getElementById('apptRescheduleFlowHeader').hidden = false;
+    document.getElementById('apptDrawerDefaultHeader').hidden = true;
+    document.querySelector('#apptDrawer .rpt-drawer-foot').hidden = true;
+    document.getElementById('apptRescheduleStepChoose').hidden = false;
+    document.getElementById('apptRescheduleStepReview').hidden = true;
+    document.getElementById('apptRescheduleFlowTitle').focus();
+    reschedulePicker = { slots: [], selectedDate: '', selectedTime: '', urgency: 'routine', programDay: false, month: initialMonth, serverToday: '', calendarDays: [] };
+    document.getElementById('apptRescheduleDate').value = '';
+    document.getElementById('apptReschedulePrevMonth').onclick = function() {
+      var parts = reschedulePicker.month.split('-');
+      var previous = new Date(Number(parts[0]), Number(parts[1]) - 2, 1);
+      reschedulePicker.month = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
+      reschedulePicker.selectedDate = '';
+      reschedulePicker.selectedTime = '';
+      document.getElementById('apptRescheduleDate').value = '';
+      document.getElementById('apptRescheduleSlots').textContent = '';
+      document.getElementById('apptRescheduleReviewButton').disabled = true;
+      loadRescheduleCalendar();
+    };
+    document.getElementById('apptRescheduleNextMonth').onclick = function() {
+      var parts = reschedulePicker.month.split('-');
+      var next = new Date(Number(parts[0]), Number(parts[1]), 1);
+      reschedulePicker.month = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+      reschedulePicker.selectedDate = '';
+      reschedulePicker.selectedTime = '';
+      document.getElementById('apptRescheduleDate').value = '';
+      document.getElementById('apptRescheduleSlots').textContent = '';
+      document.getElementById('apptRescheduleReviewButton').disabled = true;
+      loadRescheduleCalendar();
+    };
+    loadRescheduleCalendar();
+    document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(button) {
+      button.onclick = function() {
+        reschedulePicker.urgency = button.getAttribute('data-priority');
+        document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(item) {
+          item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+        });
+        renderRescheduleSlots();
+      };
+    });
+  };
+  function loadRescheduleSlots() {
+    var appointment = getAppt(window.__currentApptId);
+    var date = document.getElementById('apptRescheduleDate').value;
+    var area = document.getElementById('apptRescheduleSlots');
+    var note = document.getElementById('apptRescheduleDayNote');
+    var review = document.getElementById('apptRescheduleReviewButton');
+    area.textContent = 'Checking availability…';
+    review.disabled = true;
+    reschedulePicker.selectedDate = date;
+    reschedulePicker.selectedTime = '';
+    if (!date) { area.textContent = ''; return; }
+    fetch('api/resident/reschedule-availability.php?appointment_id=' + encodeURIComponent(appointment.id) + '&date=' + encodeURIComponent(date))
+      .then(function(response) { return response.json().then(function(body) { if (!response.ok || !body.success) throw new Error(body.message || 'Could not check availability.'); return body; }); })
+      .then(function(result) {
+        reschedulePicker.slots = result.slots || [];
+        reschedulePicker.programDay = !!result.program_day;
+        reschedulePicker.urgency = result.program_day ? 'routine' : 'routine';
+        var priorityWrap = document.getElementById('apptReschedulePriorityWrap');
+        priorityWrap.hidden = !result.program_day;
+        note.textContent = result.past ? 'Past dates are unavailable.' :
+          (result.closed ? 'Closed on this date.' :
+            (result.program_day ? 'Program day — choose Urgent or Routine. Daily capacity: up to 3 urgent and 2 routine appointments.' :
+              'Priority doesn’t apply on regular days. Daily limit: 5 routine appointments.'));
+        document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(button) {
+          button.setAttribute('aria-pressed', button.getAttribute('data-priority') === reschedulePicker.urgency ? 'true' : 'false');
+        });
+        renderRescheduleSlots();
+      })
+      .catch(function(error) {
+        area.textContent = '';
+        note.textContent = error.message || 'Could not check available times.';
+        document.getElementById('apptRescheduleError').textContent = error.message || 'Could not check available times.';
+        document.getElementById('apptRescheduleError').hidden = false;
+      });
+  }
+  function renderRescheduleSlots() {
+    var area = document.getElementById('apptRescheduleSlots');
+    var review = document.getElementById('apptRescheduleReviewButton');
+    area.textContent = '';
+    reschedulePicker.slots.forEach(function(slot) {
+      var availability = slot[reschedulePicker.urgency] || { available: false };
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = formatAppointmentTime(slot.time) + (availability.available ? '' : ' · ' + (slot.open ? 'Full' : 'Closed'));
+      var sameSlot = reschedulePicker.selectedDate === (getAppt(window.__currentApptId).scheduledDateRaw || '') &&
+        slot.time === (getAppt(window.__currentApptId).scheduledTimeRaw || '').substring(0, 5);
+      button.disabled = !availability.available || sameSlot;
+      if (sameSlot) button.textContent += ' · Current';
+      button.setAttribute('aria-pressed', slot.time === reschedulePicker.selectedTime ? 'true' : 'false');
+      button.onclick = function() {
+        reschedulePicker.selectedTime = slot.time;
+        area.querySelectorAll('button').forEach(function(item) { item.setAttribute('aria-pressed', item === button ? 'true' : 'false'); });
+        review.disabled = false;
+      };
+      area.appendChild(button);
+    });
+    if (!reschedulePicker.slots.length) area.textContent = 'No appointment times are configured.';
+  }
+  window.APPT.reviewReschedule = function() {
+    if (!reschedulePicker.selectedDate || !reschedulePicker.selectedTime) return;
+    var appointment = getAppt(window.__currentApptId);
+    document.getElementById('apptRescheduleReviewCurrent').textContent =
+      formatAppointmentDate(appointment.scheduledDateRaw) + ' at ' + formatAppointmentTime(appointment.scheduledTimeRaw);
+    document.getElementById('apptRescheduleReviewNew').textContent =
+      formatAppointmentDate(reschedulePicker.selectedDate) + ' at ' + formatAppointmentTime(reschedulePicker.selectedTime) +
+      (reschedulePicker.programDay ? ' · ' + (reschedulePicker.urgency === 'urgent' ? 'Urgent' : 'Routine') : '');
+    var reason = document.getElementById('apptRescheduleReason').value.trim();
+    document.getElementById('apptRescheduleReviewReason').textContent = reason ? 'Your reason: “' + reason + '”' : 'No reason provided.';
+    document.getElementById('apptRescheduleStepChoose').hidden = true;
+    document.getElementById('apptRescheduleStepReview').hidden = false;
+    document.querySelector('#apptRescheduleStepReview .appt-reschedule-step-title').focus();
+  };
+  window.APPT.backRescheduleToChoose = function() {
+    document.getElementById('apptRescheduleStepChoose').hidden = false;
+    document.getElementById('apptRescheduleStepReview').hidden = true;
+    document.querySelector('#apptRescheduleStepChoose .appt-reschedule-step-title').focus();
+  };
+  window.APPT.backReschedule = function() {
+    if (!document.getElementById('apptRescheduleStepReview').hidden) {
+      window.APPT.backRescheduleToChoose();
+      return;
+    }
+    document.getElementById('apptRescheduleFlow').hidden = true;
+    document.getElementById('apptRescheduleFlowHeader').hidden = true;
+    document.getElementById('apptDrawerDefaultHeader').hidden = false;
+    document.getElementById('apptDrawerNormalContent').hidden = false;
+    document.getElementById('apptStatusTimeline').hidden = false;
+    document.querySelector('#apptDrawer .rpt-drawer-foot').hidden = false;
+    document.getElementById('apptStartRescheduleBtn').focus();
+  };
+  window.APPT.submitReschedule = function() {
+    var button = document.getElementById('apptRescheduleSubmitButton');
+    button.disabled = true;
+    var body = new URLSearchParams();
+    body.set('appointment_id', String(window.__currentApptId));
+    body.set('date', reschedulePicker.selectedDate);
+    body.set('time', reschedulePicker.selectedTime);
+    body.set('urgency', reschedulePicker.urgency);
+    body.set('reason', document.getElementById('apptRescheduleReason').value.trim());
+    body.set('csrf_token', window.__APPT_CSRF || '');
+    fetch('api/resident/request-reschedule.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+      .then(function(response) { return response.json().then(function(result) { if (!response.ok || !result.success) { if (result.slot_available === false) { window.APPT.backRescheduleToChoose(); loadRescheduleSlots(); } throw new Error(result.message || 'Could not send your request.'); } return result; }); })
+      .then(function() { location.reload(); })
+      .catch(function(error) {
+        var errorEl = document.getElementById('apptRescheduleSubmitError');
+        errorEl.textContent = error.message || 'Could not send your request.';
+        errorEl.hidden = false;
+        button.disabled = false;
+      });
+  };
+  window.APPT.respondRescheduleRequest = function(response) {
+    var appointment = getAppt(window.__currentApptId);
+    if (!appointment || !appointment.rescheduleRequestId) return;
+    if (response === 'decline' && !window.confirm('Keep your current appointment? Declining the suggested time will leave the current booking unchanged.')) return;
+    var body = new URLSearchParams();
+    body.set('request_id', String(appointment.rescheduleRequestId));
+    body.set('response', response);
+    body.set('csrf_token', window.__APPT_CSRF || '');
+    fetch('api/resident/respond-reschedule-request.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+      .then(function(res) { return res.json().then(function(result) { if (!res.ok || !result.success) throw new Error(result.message || 'Could not save your response.'); }); })
+      .then(function() { location.reload(); })
+      .catch(function(error) { alert(error.message || 'Could not save your response.'); });
+  };
+
   function apptNextSteps(status) {
     if (status === 'action_needed') {
       return ['Review the proposed appointment time above and respond before the deadline.'];
+    }
+    if (status === 'pending') {
+      return [
+        'DCVS staff are reviewing your appointment request.',
+        'We’ll notify you when your request is confirmed or if another time is suggested.'
+      ];
+    }
+    if (status === 'scheduled') {
+      return [
+        'Arrive at the DCVS office on your scheduled date and time.',
+        'Bring your pet and any relevant service or vaccination records.'
+      ];
+    }
+    if (status === 'rescheduled') {
+      return [
+        'Your updated appointment date and time are shown above.',
+        'Arrive at the DCVS office and bring your pet and any relevant service records.'
+      ];
     }
     if (status === 'waitlisted') {
       return [
@@ -6935,11 +7482,7 @@ window.APPT = window.APPT || {};
       ];
     }
     if (status === 'completed') {
-      return [
-        'Your appointment has been completed.',
-        'You may view the details in your report or service history.',
-        'Thank you for using DCVS services.'
-      ];
+      return ['Your appointment has been completed. Thank you for using DCVS services.'];
     }
     if (status === 'cancelled' || status === 'no_show') {
       return [
@@ -7054,7 +7597,10 @@ window.APPT = window.APPT || {};
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
       var d = document.getElementById('apptDrawer');
-      if (d && d.classList.contains('open')) closeApptDrawer();
+      if (d && d.classList.contains('open')) {
+        if (!document.getElementById('apptRescheduleFlow').hidden) window.APPT.backReschedule();
+        else closeApptDrawer();
+      }
     }
   });
   window.APPT.refresh = function() {
@@ -7371,24 +7917,46 @@ window.APPT = window.APPT || {};
 <!-- Appointment Details Drawer -->
 <div class="rpt-drawer-overlay" id="apptDrawerOverlay" onclick="closeApptDrawer()"></div>
 <aside class="rpt-drawer" id="apptDrawer" aria-label="Appointment details">
+  <section class="appt-reschedule-reply" id="apptRescheduleReplyBanner" hidden aria-live="assertive">
+    <strong id="apptRescheduleReplyTitle">The clinic suggests another time</strong>
+    <p id="apptRescheduleReplyMessage"></p>
+    <p id="apptRescheduleReplyStaffMessage"></p>
+    <div>
+      <button type="button" class="sd-btn sd-btn-primary" onclick="APPT.respondRescheduleRequest('accept')">Accept new time</button>
+      <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.respondRescheduleRequest('decline')">Decline</button>
+    </div>
+  </section>
   <div class="rpt-drawer-head">
     <div style="min-width:0;">
-      <h2 class="rpt-drawer-title">Appointment Details</h2>
-      <p class="rpt-drawer-ref">Review details of this appointment request.</p>
+      <div id="apptDrawerDefaultHeader">
+        <h2 class="rpt-drawer-title">Appointment Details</h2>
+        <p class="rpt-drawer-ref">Review details of this appointment request.</p>
+      </div>
+      <div id="apptRescheduleFlowHeader" hidden>
+        <button type="button" class="appt-reschedule-back" onclick="APPT.backReschedule()">‹ Back</button>
+        <h2 class="rpt-drawer-title" id="apptRescheduleFlowTitle" tabindex="-1">Reschedule appointment</h2>
+      </div>
     </div>
     <button type="button" class="rpt-drawer-close" onclick="closeApptDrawer()" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
   <div class="rpt-drawer-body">
-    <div style="margin-bottom:24px;display:flex;align-items:center;gap:12px;">
-      <div id="adAvatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-family:Inter,Segoe UI,sans-serif;font-weight:600;font-size:28px;color:#64748b;">
-        <i class="fas fa-paw"></i>
+    <div id="apptDrawerNormalContent">
+    <div class="appt-reschedule-alert" id="apptRescheduleDecisionCard" hidden></div>
+    <section class="appt-summary">
+      <div class="appt-summary-head">
+        <div class="appt-summary-avatar" id="adAvatar" aria-hidden="true"><i class="fas fa-paw"></i></div>
+        <div class="appt-summary-pet">
+          <span class="appt-summary-label">Appointed for</span>
+          <span class="appt-summary-pet-name" id="adHeadPet">-</span>
+        </div>
+        <span class="appt-summary-status" id="adHeadStatus">-</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
-        <span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Appointed for</span>
-        <span id="adHeadPet" style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</span>
-      </div>
-      <span id="adHeadStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;border:1px solid #e4e4e7;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
-    </div>
+    </section>
+    <div id="apptStatusTimeline" hidden></div>
+    <section class="appt-reschedule-request-card" id="apptRescheduleRequestCard" hidden aria-live="polite">
+      <strong id="apptRescheduleRequestTitle"></strong>
+      <p id="apptRescheduleRequestText"></p>
+    </section>
     <section id="adActionNeeded" class="appt-action-needed" hidden>
       <h3>Staff suggested another time</h3>
       <p>The time you asked for is not available.</p>
@@ -7421,59 +7989,92 @@ window.APPT = window.APPT || {};
         </ol>
       </div>
     </section>
-    <div id="adStatusNotice" class="appt-status-notice" hidden>
-      <strong>Waiting for DCVS staff</strong>
-      <p>Your request is under review. You will get a notification once staff approves it or suggests another time. Please do not go to the office yet.</p>
-      <div class="appt-progress">
-        <div class="appt-progress-title">Progress</div>
-        <ol class="appt-progress-list">
-          <li class="appt-progress-step done">
-            <span class="appt-progress-step-title">Requested</span>
-            <span class="appt-progress-step-detail" id="adRequestedAt"></span>
-          </li>
-          <li class="appt-progress-step current">
-            <span class="appt-progress-step-title">Under review</span>
-            <span class="appt-progress-step-detail">Waiting for a decision</span>
-          </li>
-          <li class="appt-progress-step">
-            <span class="appt-progress-step-title">Scheduled</span>
-          </li>
-          <li class="appt-progress-step">
-            <span class="appt-progress-step-title">Completed</span>
-          </li>
-        </ol>
-      </div>
-    </div>
-    <div id="adScheduledNotice" class="appt-scheduled-notice" hidden>
-      <strong>Before your appointment</strong>
-      <p>Location details: Dasmariñas City Veterinary Services. Please confirm the service location with DCVS staff before traveling. Bring your pet and any relevant vaccination or service records, and arrive before your scheduled appointment time.</p>
-    </div>
-    <p id="apptCancelCutoff" class="appt-cancel-cutoff" hidden>This appointment is within the 24-hour cancellation cutoff, so it can no longer be cancelled here. Please contact DCVS staff for assistance.</p>
-    <p class="pet-drawer-section-title">Appointment Information</p>
-    <div class="pet-drawer-info">
-      <div class="pet-drawer-info-item"><div class="k">Request ID</div><div class="v" id="adRef"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Service</div><div class="v" id="adService"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Pet</div><div class="v" id="adPet"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Status</div><div class="v" id="adStatus"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Appointment Date</div><div class="v" id="adDate"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Appointment Time</div><div class="v" id="adTime"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Submitted</div><div class="v" id="adCreated"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full" id="adNotesItem"><div class="k">Notes</div><div class="v appt-notes" id="adNotes"></div></div>
-    </div>
-
-    <div class="rpt-next">
-      <div class="rpt-next-title"><i class="fas fa-info-circle"></i> What Happens Next?</div>
+    <section class="appt-detail-section">
+      <h3 class="appt-detail-title">Details</h3>
+      <div class="appt-detail-row"><span class="appt-detail-label">Pet</span><span class="appt-detail-value" id="adPet"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Service</span><span class="appt-detail-value" id="adService"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Appointment</span><span class="appt-detail-value"><span id="adDatePrefix"></span><span id="adSummaryDate"></span><span>, </span><span id="adSummaryTime"></span></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Location</span><span class="appt-detail-value">Dasmariñas City Veterinary Services</span></div>
+      <div class="appt-detail-row appt-original-request" id="adOriginalRow" hidden><span class="appt-detail-label">Originally requested</span><span class="appt-detail-value" id="adOriginalRequested"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Submitted</span><span class="appt-detail-value" id="adCreated"></span></div>
+    </section>
+    <section class="appt-note-section">
+      <h3 class="appt-note-title">Your note</h3>
+      <p class="appt-note-content" id="adNotes"></p>
+    </section>
+    <section class="rpt-next appt-next-section">
+      <div class="rpt-next-title">What happens next</div>
       <ol id="adNextList"></ol>
+    </section>
+    </div>
+    <section class="appt-reschedule-flow" id="apptRescheduleFlow" hidden>
+      <div id="apptRescheduleStepChoose">
+        <p class="appt-current-schedule"><strong>Current</strong><span id="apptRescheduleCurrent"></span></p>
+        <h3 class="appt-reschedule-step-title" tabindex="-1">Choose a date and time</h3>
+        <span class="appt-reschedule-label">New date</span>
+        <input type="hidden" id="apptRescheduleDate">
+        <div class="appt-reschedule-calendar" aria-label="Choose a reschedule date">
+          <div class="appt-reschedule-calendar-head">
+            <button type="button" id="apptReschedulePrevMonth" aria-label="Previous month">‹</button>
+            <strong id="apptRescheduleMonthLabel" aria-live="polite"></strong>
+            <button type="button" id="apptRescheduleNextMonth" aria-label="Next month">›</button>
+          </div>
+          <div class="appt-reschedule-calendar-grid" id="apptRescheduleCalendarGrid"></div>
+          <div class="appt-reschedule-calendar-legend" aria-label="Calendar legend">
+            <span><i></i>Available</span><span><i class="program"></i>Program</span>
+            <span><i class="full"></i>Full</span><span><i class="closed"></i>Closed</span>
+          </div>
+        </div>
+        <p class="appt-reschedule-day-note" id="apptRescheduleDayNote" aria-live="polite"></p>
+        <div id="apptReschedulePriorityWrap" hidden>
+          <span class="appt-reschedule-label">Priority</span>
+          <div class="appt-reschedule-priorities">
+            <button type="button" data-priority="routine" aria-pressed="true">Routine</button>
+            <button type="button" data-priority="urgent" aria-pressed="false">Urgent</button>
+          </div>
+        </div>
+        <div class="appt-reschedule-slots" id="apptRescheduleSlots" aria-live="polite"></div>
+        <label class="appt-reschedule-label" for="apptRescheduleReason">Reason (optional)</label>
+        <textarea id="apptRescheduleReason" maxlength="2000" rows="3" placeholder="Tell the clinic why you need to reschedule."></textarea>
+        <p class="appt-reschedule-not-reserved">Sending a request doesn't reserve the new time.</p>
+        <p class="appt-reschedule-error" id="apptRescheduleError" role="alert" hidden></p>
+        <button type="button" id="apptRescheduleReviewButton" class="sd-btn sd-btn-primary" disabled onclick="APPT.reviewReschedule()">Review request</button>
+      </div>
+      <div id="apptRescheduleStepReview" hidden>
+        <h3 class="appt-reschedule-step-title" tabindex="-1">Review and confirm</h3>
+        <div class="appt-reschedule-comparison">
+          <div><span>Current</span><strong id="apptRescheduleReviewCurrent"></strong></div>
+          <span aria-hidden="true">→</span>
+          <div><span>New</span><strong id="apptRescheduleReviewNew"></strong></div>
+        </div>
+        <p id="apptRescheduleReviewReason" class="appt-reschedule-review-reason"></p>
+        <p class="appt-reschedule-not-reserved">Your current appointment stays booked until the clinic approves the change. The requested time is not reserved.</p>
+        <p class="appt-reschedule-error" id="apptRescheduleSubmitError" role="alert" hidden></p>
+        <div class="appt-reschedule-review-actions">
+          <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.backRescheduleToChoose()">Back</button>
+          <button type="button" id="apptRescheduleSubmitButton" class="sd-btn sd-btn-primary" onclick="APPT.submitReschedule()">Send request</button>
+        </div>
+      </div>
+    </section>
+    <div class="appt-drawer-legacy" aria-hidden="true">
+      <span id="adRef"></span><span id="adStatus"></span>
+      <span id="adDate"></span><span id="adTime"></span><span id="adNotesItem"></span>
     </div>
   </div>
   <div class="rpt-drawer-foot">
-    <div id="apptRescheduleAction" class="appt-footer-reschedule">
-      <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit Appointment</button>
-      <span id="apptRescheduleSoon" class="appt-reschedule-soon" hidden>Reschedule request coming soon</span>
+    <p id="apptPendingHint" class="appt-footer-hint" hidden>You can change the date and time while it’s pending, as long as the slot is still available.</p>
+    <p id="apptRescheduleSoon" class="appt-footer-hint" hidden>Rescheduling online isn’t available yet. To change the time, please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>.</p>
+    <p id="apptCancelCutoff" class="appt-footer-hint" hidden>This appointment is within the 24-hour cancellation cutoff, so it can no longer be cancelled here. Please contact DCVS staff for assistance.</p>
+    <div class="appt-footer-actions">
+      <button type="button" id="apptStartRescheduleBtn" class="sd-btn sd-btn-outline" style="display:none;" onclick="APPT.startReschedule()">Reschedule</button>
+      <div id="apptRescheduleAction" class="appt-footer-reschedule">
+        <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit request</button>
+      </div>
+      <button type="button" id="apptBookAgainBtn" class="sd-btn sd-btn-primary" style="display:none;" onclick="APPT.bookAgain()">Book again</button>
+      <button type="button" id="apptViewCalendarBtn" class="sd-btn sd-btn-outline" style="display:none;" onclick="APPT.viewCalendar()">View on calendar</button>
+      <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel request</button>
+      <button type="button" id="apptDrawerCloseBtn" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
     </div>
-    <button type="button" id="apptBookAgainBtn" class="sd-btn sd-btn-primary" style="display:none;" onclick="APPT.bookAgain()">Book again</button>
-    <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel Appointment</button>
-    <button type="button" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
   </div>
 </aside>
 
@@ -7506,11 +8107,19 @@ window.APPT = window.APPT || {};
 window.__apptList = <?php
   $jsonAppts = [];
   foreach ($appointments as $appt) {
-      $appointmentStatusLabel = $appt['status'] === 'no_show' ? 'No Show' : ucfirst(str_replace('_', ' ', $appt['status']));
-      if ($appt['status'] === 'action_needed') $appointmentStatusLabel = 'Action needed';
-      elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $appointmentStatusLabel = 'Expired';
-      elseif ($appt['status'] === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $appointmentStatusLabel = 'Declined';
-      elseif ($appt['status'] === 'cancelled' && $appt['cancelled_by'] === 'resident') $appointmentStatusLabel = 'Cancelled by Resident';
+      $hasApprovedReschedule = ($appt['reschedule_request_status'] ?? '') === 'approved';
+      $displayAppointmentStatus = $hasApprovedReschedule
+        && in_array($appt['status'], ['approved', 'rescheduled'], true)
+        ? 'scheduled'
+        : $appt['status'];
+      $hasRescheduleActivity = in_array(($appt['reschedule_request_status'] ?? ''), ['pending', 'offered'], true);
+      $appointmentStatusLabel = $displayAppointmentStatus === 'rescheduled' || $hasRescheduleActivity
+        ? 'Rescheduled'
+        : ($displayAppointmentStatus === 'no_show' ? 'No Show' : ucfirst(str_replace('_', ' ', $displayAppointmentStatus)));
+      if ($displayAppointmentStatus === 'action_needed') $appointmentStatusLabel = 'Action needed';
+      elseif ($displayAppointmentStatus === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $appointmentStatusLabel = 'Expired';
+      elseif ($displayAppointmentStatus === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $appointmentStatusLabel = 'Declined';
+      elseif ($displayAppointmentStatus === 'cancelled' && $appt['cancelled_by'] === 'resident') $appointmentStatusLabel = 'Cancelled by Resident';
       $jsonAppts[] = [
           'id' => (int)$appt['appointment_id'],
           'ref' => $appt['reference_id'] ?? '#APT-' . str_pad($appt['appointment_id'], 4, '0', STR_PAD_LEFT),
@@ -7533,15 +8142,43 @@ window.__apptList = <?php
           'created' => date('M d, Y', strtotime($appt['created_at'])),
           'createdLong' => date('F j, Y', strtotime($appt['created_at'])),
           'createdTime' => date('g:i A', strtotime($appt['created_at'])),
-          'status' => $appt['status'],
+          'status' => $displayAppointmentStatus,
+          'hasApprovedReschedule' => $hasApprovedReschedule,
           'canCancel' => (bool)$appt['can_cancel'],
+          'rescheduleCooldownUntil' => $appt['reschedule_cooldown_until'] ?? '',
+          'rescheduleCooldownActive' => (bool)$appt['reschedule_cooldown_active'],
           'statusLabel' => $appointmentStatusLabel,
           'notes' => trim((string)($appt['notes'] ?? '')) !== '' ? $appt['notes'] : 'No notes added',
+          'rescheduleRequestId' => !empty($appt['reschedule_request_id']) ? (int)$appt['reschedule_request_id'] : null,
+          'rescheduleRequestStatus' => $appt['reschedule_request_status'] ?? '',
+          'requestedDate' => $appt['requested_date'] ?? '',
+          'requestedTime' => $appt['requested_time'] ?? '',
+          'requestedUrgency' => $appt['requested_urgency'] ?? 'routine',
+          'rescheduleReason' => $appt['resident_reason'] ?? '',
+          'rescheduleStaffMessage' => $appt['reschedule_staff_message'] ?? '',
+          'rescheduleDeclineReason' => $appt['reschedule_decline_reason'] ?? '',
+          'offeredDate' => $appt['offered_date'] ?? '',
+          'offeredTime' => $appt['offered_time'] ?? '',
+          'offeredUrgency' => $appt['offered_urgency'] ?? '',
+          'rescheduleRequestedAt' => $appt['reschedule_requested_at'] ?? '',
       ];
   }
   echo json_encode($jsonAppts);
 ?>;
 window.__APPT_CSRF = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+var appointmentsNeedingReply = (window.__apptList || []).filter(function(appointment) {
+  return appointment.rescheduleRequestStatus === 'offered';
+});
+var replySummary = document.getElementById('apptReplySummary');
+if (replySummary && appointmentsNeedingReply.length) {
+  replySummary.hidden = false;
+  document.getElementById('apptReplySummaryText').textContent =
+    appointmentsNeedingReply.length + ' appointment' + (appointmentsNeedingReply.length === 1 ? '' : 's') + ' need' +
+    (appointmentsNeedingReply.length === 1 ? 's' : '') + ' your reply.';
+  document.getElementById('apptReplySummaryButton').onclick = function() {
+    window.APPT.view(appointmentsNeedingReply[0].id);
+  };
+}
 </script>
 
 <!-- Edit Appointment Modal -->
@@ -7846,8 +8483,12 @@ function editAppointment(btn) {
 }
 
 function archiveAppointment(id) {
+    var appointment = getAppt(id);
+    var hasPendingReschedule = appointment && ['pending','offered'].includes(appointment.rescheduleRequestStatus || '');
     document.getElementById('confirmTitle').textContent = 'Cancel Appointment';
-    document.getElementById('confirmMessage').textContent = 'Are you sure you want to cancel this appointment? Cancelling may release the slot for another resident.';
+    document.getElementById('confirmMessage').textContent = hasPendingReschedule
+      ? 'Are you sure you want to cancel this appointment? Its pending reschedule request will also be closed.'
+      : 'Are you sure you want to cancel this appointment? Cancelling may release the slot for another resident.';
     document.getElementById('cancelAppointmentReasonWrap').hidden = false;
     document.getElementById('cancelAppointmentReason').value = '';
     var confirmButton = document.getElementById('confirmYesBtn');
@@ -7859,7 +8500,7 @@ function archiveAppointment(id) {
       body.append('appointment_id', id);
       body.append('csrf_token', ADOPTION_CSRF);
       body.append('cancellation_reason', document.getElementById('cancelAppointmentReason').value.trim());
-      fetch('cancel-resident-appointment.php', {
+      fetch('api/resident/cancel-appointment.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString()

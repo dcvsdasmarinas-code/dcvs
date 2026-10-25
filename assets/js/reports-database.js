@@ -1056,17 +1056,11 @@
 
   function rptResponseDecisionFooter(r) {
     var reportId = Number(r.id);
-    var riskReasons = rptHighResponseRiskReasons(r);
-    var highRisk = riskReasons.length > 0;
-    var hint = highRisk
-      ? 'DCVS decision needed: dispatch, return, or reject. Risk indicators: ' + riskReasons.join(' ')
-      : 'DCVS decision needed: dispatch, return, or reject.';
     var moreMenu = '<div class="rpt-response-more-wrap"><button type="button" class="sd-btn sd-btn-outline rpt-response-more" aria-label="More actions" title="More actions" aria-expanded="false" onclick="rptToggleDecisionMore(this)">&#8230;</button>' +
       '<div class="rpt-response-more-menu" hidden><button type="button" onclick="responseWorkflowAction(' + reportId + ',\'return_for_validation\');rptCloseDecisionMore()">Return to Barangay</button>' +
       '<button type="button" class="is-danger" onclick="responseWorkflowAction(' + reportId + ',\'reject_report\');rptCloseDecisionMore()">Reject Report</button></div></div>';
     var dispatch = '<button type="button" class="sd-btn rpt-response-primary" onclick="responseWorkflowAction(' + reportId + ',\'staff_decide\',{response_mode:\'dcvs_dispatch\'})">Dispatch DCVS Team</button>';
-    return '<div class="rpt-response-decision-footer"><div class="rpt-response-decision-hint" title="' + esc(hint) + '">&#9432; ' + esc(hint) + '</div>' +
-      '<div class="rpt-response-decision-actions">' + moreMenu + dispatch + '</div></div>';
+    return '<div class="rpt-response-decision-footer"><div class="rpt-response-decision-actions">' + moreMenu + dispatch + '</div></div>';
   }
 
   window.rptResponseDecisionFooter = rptResponseDecisionFooter;

@@ -272,8 +272,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($fileInfo !== false) {
         finfo_close($fileInfo);
     }
-    if ($locationStatus === 'unpinned_fallback' && !$validatedAttachments) {
-        $attachmentErrors[] = 'Attach at least one photo or video when submitting without an incident pin.';
+    if (!$validatedAttachments) {
+        $attachmentErrors[] = 'Attach at least one photo or video to submit your report.';
     }
     if ($attachmentErrors) {
         $_SESSION['report_error'] = implode('<br>', array_unique($attachmentErrors));

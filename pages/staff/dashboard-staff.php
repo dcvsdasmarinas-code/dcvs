@@ -405,10 +405,18 @@ $pendingQuery = $conn->query("
   SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
          COALESCE(a.scheduled_date, a.preferred_date) AS scheduled_date,
          COALESCE(a.scheduled_time, a.preferred_time) AS scheduled_time,
-         a.cancelled_by, a.status, a.created_at, a.reference_id, u.user_id, u.reference_id AS user_ref, u.full_name, u.email, u.phone, u.avatar_url, p.pet_name, p.photo_url, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status
+         a.cancelled_by, a.status, a.created_at, a.reference_id, u.user_id, u.reference_id AS user_ref, u.full_name, u.email, u.phone, u.avatar_url, p.pet_name, p.photo_url, p.pet_type, p.breed, p.gender, p.age, p.vaccination_status,
+         rr.request_id AS reschedule_request_id, rr.status AS reschedule_request_status,
+         rr.requested_date AS reschedule_requested_date, rr.requested_time AS reschedule_requested_time,
+         rr.requested_urgency AS reschedule_requested_urgency, rr.resident_reason AS reschedule_resident_reason,
+         rr.staff_message AS reschedule_staff_message, rr.offered_date AS reschedule_offered_date,
+         rr.offered_time AS reschedule_offered_time, rr.offered_urgency AS reschedule_offered_urgency,
+         rr.requested_at AS reschedule_requested_at
     FROM appointments a
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
+    LEFT JOIN appointment_reschedule_requests rr
+      ON rr.appointment_id = a.appointment_id AND rr.status IN ('pending','offered')
     WHERE $apptWhere
     ORDER BY a.created_at ASC, a.appointment_id ASC
 ");
@@ -420,6 +428,15 @@ if ($pendingQuery) {
     }
 }
 $pendingTotal = count($pendingAppts);
+$rescheduleRequestCount = 0;
+$rescheduleCountResult = $conn->query("SELECT COUNT(*) AS request_count
+    FROM appointment_reschedule_requests rr
+    JOIN appointments a ON a.appointment_id = rr.appointment_id
+    WHERE rr.status = 'pending' AND a.archived_at IS NULL
+      AND a.status IN ('approved','scheduled','rescheduled')");
+if ($rescheduleCountResult) {
+    $rescheduleRequestCount = (int)($rescheduleCountResult->fetch_assoc()['request_count'] ?? 0);
+}
 
 // Appointment status pill colors (all-clients style: light bg + accent text)
 $statusColors = [
@@ -2265,19 +2282,19 @@ if (!empty($_GET['waitlist_booking'])) {
     #penDetailsModal .pen-response-proposal strong,#penDetailsModal .pen-response-proposal div>span{ display:block; }
     #penDetailsModal .pen-response-proposal strong{ font-weight:700; }
     #penDetailsModal .rpt-response-risk{ margin:0 0 16px;padding:11px 12px;border:1px solid #d4d4d8;border-radius:10px;background:#fafafa;color:#18181b;font-family:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;font-size:13px;font-weight:400;line-height:1.45; }
-    #penDetailsModal .rpt-response-risk.is-high-risk{ border-color:#b91c1c;background:#2a1114;color:#fff; }
+    #penDetailsModal .rpt-response-risk.is-high-risk{ border-color:#dc2626;background:#fef2f2;color:#991b1b; }
     #penDetailsModal .rpt-response-risk-title{ display:flex;align-items:center;gap:6px;margin-bottom:7px;font-size:14px;font-weight:600;line-height:1.4; }
     #penDetailsModal .rpt-response-risk-row{ display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:18px; }
     #penDetailsModal .rpt-response-risk-row>span:last-child{ text-align:right; }
     #penDetailsModal .rpt-response-risk-label{ display:flex;align-items:center;gap:6px; }
     #penDetailsModal .rpt-response-risk-row.is-risk{ color:#dc2626; }
-    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-row.is-risk{ color:#f87171; }
+    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-row.is-risk{ color:#dc2626; }
     #penDetailsModal .rpt-response-risk-row.is-safe{ color:#15803d; }
-    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-row.is-safe{ color:#4ade80; }
+    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-row.is-safe{ color:#15803d; }
     #penDetailsModal .rpt-response-risk-row.is-suggestion{ color:#64748b; }
     #penDetailsModal .rpt-response-risk-explanation{ margin:7px 0 4px;font-size:13px;font-weight:500;line-height:1.45; }
     #penDetailsModal .rpt-response-risk-note{ margin:5px 0 0;color:#71717a;font-size:11px;font-weight:400;line-height:1.4; }
-    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-note{ color:#a1a1aa; }
+    #penDetailsModal .rpt-response-risk.is-high-risk .rpt-response-risk-note{ color:#7f1d1d; }
     #penDetailsModal .rpt-response-override-link{ margin-top:3px;padding:0;border:0;background:none;color:#b91c1c;text-decoration:underline;font:inherit;cursor:pointer; }
     #penDetailsModal .rpt-response-override-recorded{ margin-top:4px;color:#b91c1c;font-size:12px;font-weight:500;overflow-wrap:anywhere; }
     #penDetailsModal .rpt-response-decision-footer{ width:100%;min-width:0; }
@@ -2654,6 +2671,9 @@ if (!empty($_GET['waitlist_booking'])) {
               </div>
               </div>
               <div class="staff-toolbar-filters">
+              <button type="button" class="sd-btn sd-btn-outline" id="rescheduleRequestFilter" aria-pressed="false">
+                Reschedule requests (<?php echo $rescheduleRequestCount; ?>)
+              </button>
               <select id="apptStatusSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter">
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending</option>
@@ -2727,11 +2747,16 @@ if (!empty($_GET['waitlist_booking'])) {
                     $aptRef = $req['reference_id'] ?? fallbackRefId('#APT-', $req['appointment_id']);
                     $sc = $statusColors[$req['status']] ?? ['bg'=>'#f1f5f9','color'=>'#64748b'];
                     $statusKey = $req['status'];
+                    $hasPendingReschedule = ($req['reschedule_request_status'] ?? '') === 'pending';
                     $statusLabel = $req['status'] === 'cancelled' && $req['cancelled_by'] === 'resident'
                       ? 'Cancelled by Resident'
                       : ($req['status'] === 'cancelled' && $req['cancelled_by'] === 'staff'
                         ? 'Cancelled by Staff' : ucfirst(str_replace('_',' ', $req['status'])));
                     if ($req['status'] === 'no_show') $statusLabel = 'No Show';
+                    if ($hasPendingReschedule && $req['status'] === 'scheduled') {
+                      $statusLabel = 'Rescheduled';
+                      $sc = $statusColors['rescheduled'];
+                    }
                     $dt = date('F j, Y', strtotime($req['scheduled_date']));
                     $tm = date('g:i A', strtotime($req['scheduled_time']));
                     $sub = date('M d, Y', strtotime($req['created_at']));
@@ -2744,7 +2769,7 @@ if (!empty($_GET['waitlist_booking'])) {
                     if ($initials === '') $initials = '?';
                   ?>
                     <?php $canMarkOutcome = in_array($statusKey, ['scheduled', 'rescheduled', 'in_progress'], true) && strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']) <= time(); ?>
-                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-can-outcome="<?php echo $canMarkOutcome ? '1' : '0'; ?>" data-date="<?php echo (int)strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']); ?>" data-date-key="<?php echo htmlspecialchars((string)$req['scheduled_date'], ENT_QUOTES, 'UTF-8'); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
+                    <tr class="sd-tr" data-id="<?php echo (int)$req['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($statusKey); ?>" data-reschedule-request="<?php echo htmlspecialchars($req['reschedule_request_status'] ?? ''); ?>" data-can-outcome="<?php echo $canMarkOutcome ? '1' : '0'; ?>" data-date="<?php echo (int)strtotime($req['scheduled_date'] . ' ' . $req['scheduled_time']); ?>" data-date-key="<?php echo htmlspecialchars((string)$req['scheduled_date'], ENT_QUOTES, 'UTF-8'); ?>" data-submitted="<?php echo (int)strtotime($req['created_at']); ?>" onclick="APP.view(<?php echo (int)$req['appointment_id']; ?>)">
                       <td class="sd-td">
                         <input type="checkbox" class="sd-table-cb appt-row-check" data-id="<?php echo (int)$req['appointment_id']; ?>" onclick="event.stopPropagation();APP.toggleSelect(<?php echo (int)$req['appointment_id']; ?>)" />
                       </td>
@@ -2774,13 +2799,21 @@ if (!empty($_GET['waitlist_booking'])) {
                         </div>
                       </td>
                       <td class="sd-td">
-                        <div class="contact-main contact-normal"><?php echo $dt; ?> &middot; <?php echo $tm; ?></div>
+                        <div class="contact-main contact-normal"><?php if (in_array(($req['reschedule_request_status'] ?? ''), ['pending', 'offered'], true)) echo 'Current: '; ?><?php echo $dt; ?> &middot; <?php echo $tm; ?></div>
+                        <?php if (($req['reschedule_request_status'] ?? '') === 'pending'): ?>
+                          <div class="contact-sub" style="margin-top:4px;color:#52525b;">→ Requested: <?php echo htmlspecialchars(date('M j', strtotime($req['reschedule_requested_date'])) . ' · ' . date('g:i A', strtotime($req['reschedule_requested_time'])), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php elseif (($req['reschedule_request_status'] ?? '') === 'offered'): ?>
+                          <div class="contact-sub" style="margin-top:4px;color:#9a3412;">→ Offered: <?php echo htmlspecialchars(date('M j', strtotime($req['reschedule_offered_date'])) . ' · ' . date('g:i A', strtotime($req['reschedule_offered_time'])), ENT_QUOTES, 'UTF-8'); ?></div>
+                        <?php endif; ?>
                       </td>
                       <td class="sd-td">
                         <div class="contact-main contact-normal"><?php echo $sub; ?></div>
                       </td>
                       <td class="sd-td">
                         <span class="appt-status-pill" style="background:<?php echo $sc['bg']; ?>;color:<?php echo $sc['color']; ?>;border-color:<?php echo $sc['border'] ?? '#e4e4e7'; ?>;"><?php echo $statusLabel; ?></span>
+                        <?php if (($req['reschedule_request_status'] ?? '') === 'offered'): ?>
+                          <span class="appt-status-pill" style="display:inline-block;margin-top:5px;background:#fff7ed;color:#9a3412;border-color:#fed7aa;font-weight:700;">Resident reply needed</span>
+                        <?php endif; ?>
                       </td>
                       <td class="sd-td sd-td-action">
                         <button type="button" class="sd-row-actions" title="More options" data-appt-id="<?php echo (int)$req['appointment_id']; ?>" data-appt-status="<?php echo htmlspecialchars($statusKey); ?>" onclick="event.stopPropagation();openApptRowMenu(event,<?php echo (int)$req['appointment_id']; ?>,'<?php echo htmlspecialchars($statusKey); ?>')">
@@ -2829,6 +2862,7 @@ if (!empty($_GET['waitlist_booking'])) {
 
   <!-- CALENDAR SCHEDULE -->
   <section id="calendar-schedule" class="content-section">
+    <?php $isStaffDashboardCalendarEmbed = true; ?>
     <?php include __DIR__ . '/../../calendar/events-calendar.php'; ?>
   </section>
 
@@ -6890,6 +6924,35 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   #appointmentDetailsModal .appt-progress-dot.active{border-color:#16a34a;background:#fff}
   #appointmentDetailsModal .appt-progress-label{font-family:Inter,'Segoe UI',sans-serif;font-size:11px;font-weight:500;color:#a1a1aa;text-align:center;white-space:normal}
   #appointmentDetailsModal .appt-progress-label.active-label{color:#18181b;font-weight:600}
+  #appointmentDetailsModal .staff-reschedule-review{margin:0 0 18px;padding:16px;border:1px solid #e4e4e7;border-radius:8px;background:#fafafa;font-family:'Inter','Segoe UI',sans-serif}
+  #appointmentDetailsModal .staff-reschedule-review[hidden],
+  #appointmentDetailsModal .staff-reschedule-controls[hidden],
+  #appointmentDetailsModal .staff-reschedule-form[hidden],
+  #appointmentDetailsModal .staff-reschedule-decline-form[hidden],
+  #appointmentDetailsModal .staff-reschedule-warning[hidden],
+  #appointmentDetailsModal .staff-reschedule-note[hidden]{display:none!important}
+  #appointmentDetailsModal .staff-reschedule-title{font-size:15px;font-weight:600;color:#18181b}
+  #appointmentDetailsModal .staff-reschedule-narrative{margin-top:8px;color:#3f3f46;font-size:14px;font-weight:400;line-height:1.5}
+  #appointmentDetailsModal .staff-reschedule-meta{display:grid;gap:5px;margin-top:10px}
+  #appointmentDetailsModal .staff-reschedule-meta p{margin:0;color:#52525b;font-size:13px;line-height:1.45}
+  #appointmentDetailsModal .staff-reschedule-meta strong{color:#3f3f46;font-weight:600}
+  #appointmentDetailsModal .staff-reschedule-note,
+  #appointmentDetailsModal .staff-reschedule-availability,
+  #appointmentDetailsModal .staff-reschedule-warning{margin-top:10px;color:#52525b;font-size:13px;line-height:1.45}
+  #appointmentDetailsModal .staff-reschedule-warning{color:#9a3412}
+  #appointmentDetailsModal .staff-reschedule-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  #appointmentDetailsModal .staff-reschedule-decline{color:#b91c1c;border-color:#fecaca}
+  #appointmentDetailsModal .staff-reschedule-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+  #appointmentDetailsModal .staff-reschedule-field{display:flex;min-width:0;flex-direction:column;gap:6px;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;line-height:1.25}
+  #appointmentDetailsModal .staff-reschedule-field-full{grid-column:1/-1}
+  #appointmentDetailsModal .staff-reschedule-field input,
+  #appointmentDetailsModal .staff-reschedule-field select,
+  #appointmentDetailsModal .staff-reschedule-field textarea{box-sizing:border-box;width:100%;min-width:0;min-height:36px;padding:8px 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.5;box-shadow:0 1px 2px rgba(0,0,0,.05);outline:none}
+  #appointmentDetailsModal .staff-reschedule-field textarea{resize:vertical}
+  #appointmentDetailsModal .staff-reschedule-field input:focus,
+  #appointmentDetailsModal .staff-reschedule-field select:focus,
+  #appointmentDetailsModal .staff-reschedule-field textarea:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
+  #appointmentDetailsModal .staff-reschedule-form-actions{grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px}
   #appointmentDetailsModal .appt-outcome-unavailable{opacity:.55;cursor:not-allowed}
   #staffEditAppointmentModal.modal{ background:rgba(0,0,0,0.8); padding:1rem; z-index:1000; }
   #staffEditAppointmentModal .sd-dialog-content{ max-width:520px; gap:20px; }
@@ -7109,6 +7172,32 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
           <span id="detailStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
         </div>
         <div id="apptStatusProgress" class="appt-status-progress" role="list" aria-label="Appointment progress"></div>
+        <section id="staffRescheduleReview" class="staff-reschedule-review" hidden aria-live="polite">
+          <div class="staff-reschedule-title">Reschedule request</div>
+          <div id="staffRescheduleSlots" class="staff-reschedule-narrative"></div>
+          <div id="staffRescheduleResident" class="staff-reschedule-meta"></div>
+          <div id="staffRescheduleUnconfirmed" class="staff-reschedule-note">The requested time isn’t confirmed yet. Review the request before approving or declining it.</div>
+          <div id="staffRescheduleAvailability" class="staff-reschedule-availability" role="status"></div>
+          <div id="staffRescheduleCutoffWarning" class="staff-reschedule-warning" hidden>This appointment is now less than 24 hours away. Staff approval is still allowed.</div>
+          <div id="staffRescheduleWaiting" class="staff-reschedule-note" hidden>An alternate time was offered. Waiting for the resident’s reply.</div>
+          <div id="staffRescheduleControls" class="staff-reschedule-controls">
+            <button type="button" class="sd-btn sd-btn-default" id="staffRescheduleApprove" onclick="submitStaffRescheduleDecision('approve')">Approve</button>
+            <button type="button" class="sd-btn sd-btn-outline" onclick="toggleStaffRescheduleForm('suggest')">Suggest another time</button>
+            <button type="button" class="sd-btn sd-btn-outline staff-reschedule-decline" onclick="toggleStaffRescheduleForm('decline')">Decline</button>
+          </div>
+          <div id="staffRescheduleSuggestForm" class="staff-reschedule-form" hidden>
+            <label class="staff-reschedule-field">Date<input type="date" id="staffRescheduleDate"></label>
+            <label class="staff-reschedule-field">Time<select id="staffRescheduleTime"><option value="">Choose time</option><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></label>
+            <label class="staff-reschedule-field">Priority<select id="staffRescheduleUrgency"><option value="routine">Routine</option><option value="urgent">Urgent</option></select></label>
+            <label class="staff-reschedule-field staff-reschedule-field-full">Message (optional)<textarea id="staffRescheduleMessage" rows="2" maxlength="2000"></textarea></label>
+            <div id="staffRescheduleSuggestAvailability" class="staff-reschedule-availability staff-reschedule-field-full" role="status">Choose a date and time to check availability.</div>
+            <div class="staff-reschedule-form-actions"><button type="button" class="sd-btn sd-btn-outline" onclick="toggleStaffRescheduleForm('')">Back</button><button type="button" class="sd-btn sd-btn-default" id="staffRescheduleSuggest" onclick="submitStaffRescheduleDecision('suggest')" disabled>Send suggestion</button></div>
+          </div>
+          <div id="staffRescheduleDeclineForm" hidden class="staff-reschedule-decline-form">
+            <label class="staff-reschedule-field staff-reschedule-field-full">Reason required<textarea id="staffRescheduleReason" rows="3" maxlength="2000"></textarea></label>
+            <div class="staff-reschedule-form-actions"><button type="button" class="sd-btn sd-btn-outline" onclick="toggleStaffRescheduleForm('')">Back</button><button type="button" class="sd-btn sd-btn-outline staff-reschedule-decline" onclick="submitStaffRescheduleDecision('decline')">Decline request</button></div>
+          </div>
+        </section>
         <div>
           <div class="rpt-section-title-action" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;">Resident Information</span></div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
@@ -7691,6 +7780,7 @@ function openRejectionModal(reportId) {
     var filterStatus = 'all';
     var filterSearch = '';
     var filterDate = '';
+    var filterRescheduleOnly = false;
 
     function getStatus(row) {
         var st = row.getAttribute('data-status');
@@ -7707,7 +7797,8 @@ function openRejectionModal(reportId) {
             var matchQ = !filterSearch || text.includes(filterSearch);
             var rowDate = (r.getAttribute('data-date-key') || '').slice(0, 10);
             var matchD = !filterDate || rowDate === filterDate;
-            return matchS && matchQ && matchD;
+            var matchR = !filterRescheduleOnly || r.getAttribute('data-reschedule-request') === 'pending';
+            return matchS && matchQ && matchD && matchR;
         });
     }
 
@@ -8027,6 +8118,21 @@ function openRejectionModal(reportId) {
     if (apptStatus) {
         apptStatus.addEventListener('change', function() {
             filterStatus = this.value;
+            currentPage = 1;
+            renderTable();
+        });
+    }
+    var rescheduleFilter = document.getElementById('rescheduleRequestFilter');
+    if (rescheduleFilter) {
+        rescheduleFilter.addEventListener('click', function() {
+            filterRescheduleOnly = !filterRescheduleOnly;
+            if (filterRescheduleOnly && apptStatus) {
+                apptStatus.value = 'all';
+                filterStatus = 'all';
+            }
+            rescheduleFilter.setAttribute('aria-pressed', filterRescheduleOnly ? 'true' : 'false');
+            rescheduleFilter.classList.toggle('sd-btn-default', filterRescheduleOnly);
+            rescheduleFilter.classList.toggle('sd-btn-outline', !filterRescheduleOnly);
             currentPage = 1;
             renderTable();
         });
@@ -10220,6 +10326,202 @@ window.APP = window.APP || {};
     newStatus === 'no_show' ? 'Confirm No-show' : 'Continue');
   };
 
+  var staffRescheduleAppointmentId = 0;
+  window.toggleStaffRescheduleForm = function(form) {
+    var suggestForm = document.getElementById('staffRescheduleSuggestForm');
+    var declineForm = document.getElementById('staffRescheduleDeclineForm');
+    suggestForm.hidden = form !== 'suggest';
+    suggestForm.style.display = form === 'suggest' ? 'grid' : 'none';
+    declineForm.hidden = form !== 'decline';
+    declineForm.style.display = form === 'decline' ? 'block' : 'none';
+    if (form === 'suggest') checkStaffRescheduleAvailability(true);
+  };
+
+  function checkStaffRescheduleAvailability(suggestion) {
+    var date = suggestion
+      ? document.getElementById('staffRescheduleDate').value
+      : document.getElementById('staffRescheduleSlots').getAttribute('data-requested-date');
+    var time = suggestion
+      ? document.getElementById('staffRescheduleTime').value
+      : document.getElementById('staffRescheduleSlots').getAttribute('data-requested-time');
+    var urgency = suggestion
+      ? document.getElementById('staffRescheduleUrgency').value
+      : document.getElementById('staffRescheduleSlots').getAttribute('data-requested-urgency');
+    var result = document.getElementById(suggestion ? 'staffRescheduleSuggestAvailability' : 'staffRescheduleAvailability');
+    var actionButton = document.getElementById(suggestion ? 'staffRescheduleSuggest' : 'staffRescheduleApprove');
+    actionButton.disabled = true;
+    if (!date || !time || !urgency || !staffRescheduleAppointmentId) {
+      result.textContent = suggestion ? 'Choose a date and time to check availability.' : 'Could not check the requested slot.';
+      result.style.color = '#991b1b';
+      return;
+    }
+    if (suggestion
+        && date === document.getElementById('staffRescheduleSlots').getAttribute('data-current-date')
+        && time === document.getElementById('staffRescheduleSlots').getAttribute('data-current-time')) {
+      result.textContent = 'Choose a different date and time from the resident’s current appointment.';
+      result.style.color = '#991b1b';
+      return;
+    }
+    var params = new URLSearchParams({
+      appointment_id: String(staffRescheduleAppointmentId),
+      date: date,
+      time: time,
+      urgency: urgency
+    });
+    fetch(window.dcvsStaffUrl('api/staff/reschedule-availability.php') + '?' + params.toString())
+      .then(function(response) {
+        return response.json().then(function(data) {
+          if (!response.ok) throw new Error(data.message || 'Could not check appointment availability.');
+          return data;
+        });
+      })
+      .then(function(data) {
+        if (suggestion) {
+          if (!data.program_day && document.getElementById('staffRescheduleUrgency').value === 'urgent') {
+            document.getElementById('staffRescheduleUrgency').value = 'routine';
+            checkStaffRescheduleAvailability(true);
+            return;
+          }
+          result.textContent = data.available ? 'Suggested slot is available.' : data.message;
+        } else {
+          var remaining = Math.max(0, Number(data.slot_limit || 0) - Number(data.slot_count || 0));
+          result.textContent = data.available
+            ? 'Requested slot: ' + remaining + ' ' + (urgency === 'urgent' ? 'urgent' : 'routine') + ' slot' + (remaining === 1 ? '' : 's') + ' left.'
+            : data.message;
+        }
+        result.style.color = data.available ? '#166534' : '#991b1b';
+        actionButton.disabled = !data.available;
+      })
+      .catch(function(error) {
+        result.textContent = error.message || 'Could not check appointment availability.';
+        result.style.color = '#991b1b';
+        actionButton.disabled = true;
+      });
+  }
+
+  function populateStaffRescheduleRequest(appointment) {
+    var panel = document.getElementById('staffRescheduleReview');
+    var requestId = Number(appointment.request_id || 0);
+    panel.hidden = !requestId;
+    if (!requestId) {
+      staffRescheduleAppointmentId = 0;
+      return;
+    }
+    staffRescheduleAppointmentId = Number(appointment.appointment_id);
+    var status = appointment.reschedule_request_status || 'pending';
+    var currentDate = appointment.scheduled_date || appointment.preferred_date;
+    var currentTime = appointment.scheduled_time || appointment.preferred_time;
+    var requestedDate = appointment.requested_date;
+    var requestedTime = appointment.requested_time;
+    var requestedUrgency = appointment.requested_urgency;
+    var slots = document.getElementById('staffRescheduleSlots');
+    slots.setAttribute('data-requested-date', appointment.requested_date || '');
+    slots.setAttribute('data-requested-time', appointment.requested_time || '');
+    slots.setAttribute('data-requested-urgency', appointment.requested_urgency || 'routine');
+    slots.setAttribute('data-current-date', currentDate || '');
+    slots.setAttribute('data-current-time', String(currentTime || '').substring(0, 5));
+    var residentName = appointment.full_name || 'The resident';
+    var petName = appointment.pet_name || 'their pet';
+    var petPossessive = petName + (/s$/i.test(petName) ? '’' : '’s');
+    slots.textContent = residentName + ' requested to move ' + petPossessive + ' appointment from ' +
+      formatApptDate(currentDate) + ', at ' + formatApptTime(currentTime) + ' to ' +
+      formatApptDate(requestedDate) + ', at ' + formatApptTime(requestedTime) + '.';
+
+    var residentDetail = document.getElementById('staffRescheduleResident');
+    residentDetail.replaceChildren();
+    function addRescheduleMeta(label, value) {
+      var line = document.createElement('p');
+      var labelElement = document.createElement('strong');
+      labelElement.textContent = label + ': ';
+      line.appendChild(labelElement);
+      line.appendChild(document.createTextNode(value));
+      residentDetail.appendChild(line);
+    }
+    addRescheduleMeta('Priority', requestedUrgency === 'urgent' ? 'Urgent' : 'Routine');
+    var requestedFor = requestedDate
+      ? formatApptDate(requestedDate) + ', at ' + formatApptTime(requestedTime)
+      : '-';
+    addRescheduleMeta('Requested for', requestedFor);
+    if (appointment.resident_reason) addRescheduleMeta('Reason', '“' + appointment.resident_reason + '”');
+    document.getElementById('staffRescheduleUnconfirmed').hidden = status !== 'pending';
+    document.getElementById('staffRescheduleCutoffWarning').hidden = !appointment.reschedule_within_24h;
+    document.getElementById('staffRescheduleWaiting').hidden = status !== 'offered';
+    document.getElementById('staffRescheduleControls').hidden = status !== 'pending';
+    document.getElementById('staffRescheduleControls').style.display = status === 'pending' ? 'flex' : 'none';
+    document.getElementById('staffRescheduleAvailability').textContent = 'Checking requested slot…';
+    document.getElementById('staffRescheduleAvailability').style.color = '#52525b';
+    document.getElementById('staffRescheduleApprove').disabled = true;
+    document.getElementById('staffRescheduleDate').value = appointment.requested_date || '';
+    document.getElementById('staffRescheduleDate').min = new Date().toISOString().slice(0, 10);
+    document.getElementById('staffRescheduleTime').value = '';
+    document.getElementById('staffRescheduleUrgency').value = appointment.requested_urgency || 'routine';
+    document.getElementById('staffRescheduleMessage').value = '';
+    document.getElementById('staffRescheduleReason').value = '';
+    window.toggleStaffRescheduleForm('');
+    if (status === 'pending') {
+      checkStaffRescheduleAvailability(false);
+    } else {
+      document.getElementById('staffRescheduleAvailability').textContent = 'The alternate time is not reserved unless the resident accepts.';
+    }
+  }
+
+  ['staffRescheduleDate', 'staffRescheduleTime', 'staffRescheduleUrgency'].forEach(function(id) {
+    document.getElementById(id).addEventListener('change', function() {
+      checkStaffRescheduleAvailability(true);
+    });
+  });
+
+  window.submitStaffRescheduleDecision = function(action, confirmed) {
+    var requestId = Number(window._currentRescheduleRequestId || 0);
+    var body = new URLSearchParams({
+      request_id: String(requestId),
+      action: action,
+      csrf_token: window.DCVS_RESPONSE_CSRF || ''
+    });
+    if (action === 'suggest') {
+      body.set('date', document.getElementById('staffRescheduleDate').value);
+      body.set('time', document.getElementById('staffRescheduleTime').value);
+      body.set('urgency', document.getElementById('staffRescheduleUrgency').value);
+      body.set('message', document.getElementById('staffRescheduleMessage').value.trim());
+    } else if (action === 'decline') {
+      var reason = document.getElementById('staffRescheduleReason').value.trim();
+      if (!reason) {
+        alert('A reason is required so the resident knows why the request could not be approved.');
+        document.getElementById('staffRescheduleReason').focus();
+        return;
+      }
+      if (!confirm('Decline this reschedule request? The resident will see your reason.')) return;
+      body.set('reason', reason);
+    } else if (action === 'approve' && !confirmed) {
+      var requestedSlots = document.getElementById('staffRescheduleSlots');
+      var requestedDate = requestedSlots.getAttribute('data-requested-date');
+      var requestedTime = requestedSlots.getAttribute('data-requested-time');
+      confirmAppointmentAction(
+        'Approve reschedule request?',
+        'This will move the appointment to ' + formatApptDate(requestedDate) + ' at ' + formatApptTime(requestedTime) + '. Availability will be checked again before the change is saved.',
+        function() { window.submitStaffRescheduleDecision('approve', true); },
+        'Approve request'
+      );
+      return;
+    }
+    fetch(window.dcvsStaffUrl('api/staff/review-reschedule-request.php'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    }).then(function(response) {
+      return response.json().then(function(data) {
+        if (!response.ok || !data.success) throw new Error(data.message || 'Could not save the reschedule decision.');
+        return data;
+      });
+    }).then(function(data) {
+      apptToast('Reschedule request updated', data.message || 'The resident has been notified.');
+      window.location.reload();
+    }).catch(function(error) {
+      alert(error.message || 'Could not save the reschedule decision.');
+      checkStaffRescheduleAvailability(action === 'suggest');
+    });
+  };
+
   APP.view = function(id, onReady, onError) {
     fetch(window.dcvsStaffUrl('staff-get-appointment-request.php') + '?id=' + encodeURIComponent(id))
       .then(function(r) { return r.json(); })
@@ -10230,9 +10532,13 @@ window.APP = window.APP || {};
           return;
         }
         var a = d.data || d.appointment;
+        window._currentRescheduleRequestId = Number(a.request_id || 0);
+        populateStaffRescheduleRequest(a);
         function set(el, v) { if (el) el.textContent = v || '-'; }
         function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+        var hasPendingReschedule = a.reschedule_request_status === 'pending';
         var statusText = (a.status || '-').replace(/_/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+        if (hasPendingReschedule && a.status === 'scheduled') statusText = 'Rescheduled';
         if (a.status === 'cancelled') statusText = a.cancelled_by === 'resident' ? 'Cancelled by Resident' : (a.cancelled_by === 'staff' ? 'Cancelled by Staff' : 'Cancelled');
         set(document.getElementById('detailClient'), a.full_name);
         set(document.getElementById('detailResidentId'), a.user_reference_id || '-');
@@ -10242,8 +10548,11 @@ window.APP = window.APP || {};
         window._currentApptDate = a.scheduled_date || a.preferred_date || '';
         window._currentApptTime = a.scheduled_time || a.preferred_time || '';
         set(document.getElementById('detailType'), cap(a.appointment_type) + ((a.urgency_level || 'routine') === 'urgent' ? ' · Urgent' : ' · Routine'));
-        set(document.getElementById('detailPreferredDate'), formatApptDate(a.preferred_date));
-        set(document.getElementById('detailPreferredTime'), formatApptTime(a.preferred_time));
+        var hasPreviousSchedule = !!(a.original_schedule_date || a.original_schedule_time);
+        var displayedPreferredDate = hasPreviousSchedule ? (a.scheduled_date || a.preferred_date) : a.preferred_date;
+        var displayedPreferredTime = hasPreviousSchedule ? (a.scheduled_time || a.preferred_time) : a.preferred_time;
+        set(document.getElementById('detailPreferredDate'), formatApptDate(displayedPreferredDate));
+        set(document.getElementById('detailPreferredTime'), formatApptTime(displayedPreferredTime));
         set(document.getElementById('detailFinalDate'), formatApptDate(a.scheduled_date));
         set(document.getElementById('detailFinalTime'), formatApptTime(a.scheduled_time));
         var statusEl = document.getElementById('detailStatus');
@@ -10259,7 +10568,9 @@ window.APP = window.APP || {};
             in_progress: { bg: '#dbeafe', fg: '#1e40af', border: '#BFDBFE' },
             waitlisted: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' }
           };
-          var st = stColors[a.status] || { bg: '#f1f5f9', fg: '#475569', border: '#E2E8F0' };
+          var st = hasPendingReschedule && a.status === 'scheduled'
+            ? stColors.rescheduled
+            : (stColors[a.status] || { bg: '#f1f5f9', fg: '#475569', border: '#E2E8F0' });
           statusEl.textContent = statusText;
           statusEl.style.color = st.fg;
           statusEl.style.background = st.bg;

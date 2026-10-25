@@ -770,16 +770,19 @@
 
 @media (max-width: 540px) {
   .dcvs-report-pin-drawer {
-    top: auto;
-    right: 10px;
-    bottom: 10px;
-    left: auto;
-    width: min(280px, calc(100% - 32px));
-    max-height: min(62%, 360px);
+    position: fixed;
+    z-index: 1200;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
   }
 
   .dcvs-report-pin-hero-preview {
-    height: clamp(96px, 28vw, 132px);
+    height: clamp(180px, 30vh, 320px);
   }
 
   .dcvs-report-pin-drawer-header {
