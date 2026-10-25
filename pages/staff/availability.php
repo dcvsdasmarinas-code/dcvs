@@ -535,6 +535,183 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-cal-legend .pv-dot.custom { background: var(--av-green); }
     .pv-cal-legend .pv-dot.activity { background: #2563eb; }
 
+    /* Schedule preview layout */
+    #panel-preview .pv-preview-toolbar {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      padding: 1rem 0; border-top: 0;
+    }
+    #panel-preview .pv-layout {
+      display: grid; grid-template-columns: minmax(320px, 0.8fr) minmax(0, 1.45fr);
+      align-items: start; gap: 1.25rem; margin-top: 0.25rem;
+    }
+    #panel-preview .pv-cal-col,
+    #panel-preview .pv-detail-col { min-width: 0; max-width: none; }
+    #panel-preview .pv-card { border-radius: 0.75rem; }
+    #panel-preview .pv-cal { padding: 1rem 1.125rem; }
+    #panel-preview .pv-cal-nav { margin-bottom: 0.5rem; }
+    #panel-preview .pv-cal-grid {
+      gap: 0.25rem; background: transparent; border: 0; border-radius: 0;
+      overflow: visible;
+    }
+    #panel-preview .pv-cal-day {
+      height: 2.75rem; border-radius: 0.5rem;
+      background: transparent;
+    }
+    #panel-preview .pv-cal-day.available { background: transparent; }
+    #panel-preview .pv-cal-day.closed,
+    #panel-preview .pv-cal-day.resident-closed {
+      background: #f1f1f2; color: var(--av-muted-fg); opacity: 1;
+    }
+    #panel-preview .pv-cal-day.past-date {
+      background: #f1f1f2; color: #a1a1aa; cursor: not-allowed;
+      opacity: 1; pointer-events: none;
+    }
+    #panel-preview .pv-cal-day.has-override:not(.selected) {
+      outline: 1px dashed var(--av-green); outline-offset: -2px;
+    }
+    #panel-preview .pv-cal-day.has-override::after { content: none; }
+    #panel-preview .pv-cal-day.selected {
+      background: var(--av-bg); color: var(--av-fg);
+      box-shadow: inset 0 0 0 2px var(--av-fg);
+    }
+    #panel-preview .pv-cal-day.fully-booked { padding-bottom: 0.5rem; }
+    #panel-preview .pv-cal-day-full-label {
+      position: absolute; bottom: 0.125rem; color: var(--av-muted-fg);
+      font-size: 0.5625rem; font-weight: 400; line-height: 1;
+    }
+    #panel-preview .pv-cal-day.fully-booked .pv-cal-markers { display: none; }
+    #panel-preview .pv-cal-day.has-activity::before { display: none; }
+    #panel-preview .pv-cal-markers {
+      position: absolute; left: 50%; bottom: 0.25rem; transform: translateX(-50%);
+      display: flex; align-items: center; justify-content: center; gap: 0.125rem;
+      height: 0.375rem; pointer-events: none;
+    }
+    #panel-preview .pv-cal-marker-appointment {
+      width: 0.3125rem; height: 0.3125rem; border-radius: 50%; background: var(--av-green);
+    }
+    #panel-preview .pv-cal-marker-program {
+      width: 0.75rem; height: 0.25rem; border-radius: 999px; background: var(--av-fg);
+    }
+    #panel-preview .pv-cal-legend {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 0.75rem;
+      padding: 0.75rem 1rem;
+    }
+    #panel-preview .pv-cal-legend span { min-width: 0; }
+    #panel-preview .pv-cal-legend .pv-dot.avail,
+    #panel-preview .pv-cal-legend .pv-dot.activity {
+      background: var(--av-green); width: 0.375rem; height: 0.375rem;
+    }
+    #panel-preview .pv-cal-legend .pv-dot.closed {
+      width: 0.75rem; height: 0.75rem; border-radius: 0.2rem;
+      background: #f1f1f2; border: 1px solid var(--av-border);
+    }
+    #panel-preview .pv-cal-legend .pv-dot.custom {
+      width: 0.75rem; height: 0.75rem; border-radius: 0.2rem;
+      background: transparent; border: 1px dashed var(--av-green);
+    }
+    #panel-preview .pv-cal-legend .pv-dot.program {
+      width: 0.75rem; height: 0.25rem; border-radius: 999px; background: var(--av-fg);
+    }
+    #panel-preview .pv-cal-legend .pv-full-legend { grid-column: 1 / -1; }
+    #panel-preview .pv-detail { min-height: 0; }
+    #panel-preview .pv-detail-head { padding: 1.5rem 1.75rem 1rem; }
+    #panel-preview .pv-detail-date { font-size: 1.25rem; }
+    #panel-preview .pv-detail-source { margin-top: 0.25rem; }
+    #panel-preview .pv-detail-body {
+      padding: 0 1.75rem 1.25rem; border-top: 1px solid var(--av-border);
+    }
+    #panel-preview .pv-info-row {
+      display: grid; grid-template-columns: minmax(100px, 0.25fr) minmax(0, 1fr);
+      gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--av-border);
+    }
+    #panel-preview .pv-info-row:last-child { border-bottom: 0; }
+    #panel-preview .pv-info-label { color: var(--av-muted-fg); font-size: 0.875rem; }
+    #panel-preview .pv-info-value { min-width: 0; }
+    #panel-preview .pv-availability-line {
+      display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
+    }
+    #panel-preview .pv-availability-indicator {
+      width: 0.5rem; height: 0.5rem; flex: 0 0 auto; border-radius: 50%;
+      background: #15803d;
+    }
+    #panel-preview .pv-availability-indicator.closed { background: #71717a; }
+    #panel-preview .pv-availability-status { font-weight: 600; color: var(--av-fg); }
+    #panel-preview .pv-availability-hours { color: var(--av-muted-fg); }
+    #panel-preview .pv-next-open { margin-top: 0.75rem; color: var(--av-fg); line-height: 1.5; }
+    #panel-preview .pv-next-open-link {
+      padding: 0; border: 0; background: transparent; color: var(--av-green);
+      font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+    }
+    #panel-preview .pv-capacity-list { display: grid; gap: 0.5rem; margin-top: 0.625rem; }
+    #panel-preview .pv-capacity-line {
+      display: grid; grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+      align-items: center; gap: 0.5rem; color: var(--av-muted-fg); font-size: 0.8125rem;
+    }
+    #panel-preview .pv-capacity-line > span:first-child { white-space: nowrap; }
+    #panel-preview .pv-capacity-track { display: flex; gap: 0.1875rem; min-width: 0; }
+    #panel-preview .pv-capacity-segment {
+      height: 0.45rem; flex: 1 1 0; min-width: 0; border-radius: 0.125rem;
+      background: #e4e4e7;
+    }
+    #panel-preview .pv-program-row { align-items: start; }
+    #panel-preview .pv-program-entry + .pv-program-entry { margin-top: 0.75rem; }
+    #panel-preview .pv-program-hours {
+      color: var(--av-fg); font-size: 0.8125rem; font-variant-numeric: tabular-nums;
+    }
+    #panel-preview .pv-program-name { color: var(--av-fg); font-weight: 600; }
+    #panel-preview .pv-program-type { color: var(--av-muted-fg); font-size: 0.8125rem; }
+    #panel-preview .pv-program-location { color: var(--av-muted-fg); margin-top: 0.25rem; }
+    #panel-preview .pv-appointments-row { align-items: start; }
+    #panel-preview .pv-appointment-list { min-width: 0; }
+    #panel-preview .pv-appointment-entry {
+      display: grid; grid-template-columns: 4.25rem minmax(0, 1fr) 6.25rem;
+      align-items: start; gap: 0.625rem; padding: 0.625rem 0;
+      border-bottom: 1px solid var(--av-border);
+    }
+    #panel-preview .pv-appointment-entry:first-child { padding-top: 0; }
+    #panel-preview .pv-appointment-entry:last-child { padding-bottom: 0; border-bottom: 0; }
+    #panel-preview .pv-appointment-time {
+      color: var(--av-fg); font-size: 0.8125rem; font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    #panel-preview .pv-appointment-summary {
+      display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 0.25rem;
+      min-width: 0; line-height: 1.5;
+    }
+    #panel-preview .pv-appointment-kind {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      color: var(--av-fg); font-weight: 600;
+    }
+    #panel-preview .pv-appointment-kind::before {
+      content: ''; width: 0.5rem; height: 0.5rem; flex: 0 0 auto;
+      border: 1.5px solid var(--av-green); border-radius: 50%;
+    }
+    #panel-preview .pv-appointment-kind.confirmed::before { background: var(--av-green); }
+    #panel-preview .pv-appointment-location,
+    #panel-preview .pv-appointment-meta { color: var(--av-muted-fg); }
+    #panel-preview .pv-appointment-location {
+      min-width: 0; font-size: 0.8125rem; overflow-wrap: anywhere;
+    }
+    #panel-preview .pv-appointment-meta {
+      max-width: 6.25rem; color: var(--av-muted-fg); font-size: 0.8125rem;
+      line-height: 1.35; text-align: right; overflow-wrap: anywhere;
+    }
+    #panel-preview .pv-program-section {
+      padding-top: 1rem; border-top: 1px solid var(--av-border);
+    }
+    #panel-preview .pv-program-section .pv-info-row { padding-top: 0; border-bottom: 0; }
+    #panel-preview .pv-program-note {
+      margin: 0.75rem 0 0; padding-left: 0.75rem; border-left: 2px solid var(--av-border);
+      color: var(--av-muted-fg); font-size: 0.875rem; line-height: 1.5;
+    }
+    #panel-preview .pv-closed-summary,
+    #panel-preview .pv-no-program { color: var(--av-muted-fg); }
+    #panel-preview .pv-slots,
+    #panel-preview .pv-detail-label,
+    #panel-preview .pv-slot-count,
+    #panel-preview .pv-detail-nav { display: none !important; }
+    #panel-preview .pv-date-context { display: none !important; }
+
     /* Detail panel */
     .pv-detail { min-height: 20rem; }
     .pv-detail-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 1rem; text-align: center; padding: 2rem; }
@@ -582,8 +759,23 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-view-toggle button:hover:not(.active) { background: var(--av-muted); }
 
     @media (max-width: 768px) {
-      .pv-layout { flex-direction: column; }
-      .pv-cal-col { flex: 0 0 auto; }
+      #panel-preview .pv-layout { grid-template-columns: minmax(0, 1fr); }
+      #panel-preview .pv-cal-col { flex: 0 0 auto; }
+    }
+    @media (max-width: 640px) {
+      #panel-preview .pv-preview-toolbar > div { width: 100%; flex-wrap: wrap; gap: 0.625rem !important; }
+      #panel-preview .pv-info-row {
+        grid-template-columns: minmax(5rem, 0.35fr) minmax(0, 1fr);
+        gap: 0.625rem; padding: 0.875rem 0;
+      }
+      #panel-preview .pv-appointment-entry {
+        grid-template-columns: 3.75rem minmax(0, 1fr); gap: 0.375rem;
+      }
+      #panel-preview .pv-appointment-meta { grid-column: 2; }
+      #panel-preview .pv-detail-head { padding: 1.125rem 1rem 0.875rem; }
+      #panel-preview .pv-detail-body { padding: 0 1rem 1rem; }
+      #panel-preview .pv-capacity-line { grid-template-columns: 4.5rem minmax(0, 1fr) auto; }
+      #panel-preview .pv-cal-legend { gap: 0.5rem; padding: 0.75rem; font-size: 0.75rem; }
     }
 
     /* Responsive */
@@ -922,15 +1114,14 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     <!-- PANEL: Schedule Preview -->
     <div class="av-panel<?php echo $panel === 'preview' ? ' active' : ''; ?>" id="panel-preview">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.75rem;">
+      <div class="pv-preview-toolbar">
         <div style="display:flex;align-items:center;gap:1rem;">
           <div class="pv-view-toggle" id="pvViewToggle">
             <button type="button" class="active" data-view="resident">Resident</button>
             <button type="button" data-view="admin">Admin details</button>
           </div>
-          <span style="font-size:0.75rem;color:var(--av-muted-fg);display:flex;align-items:center;gap:0.375rem;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            <span id="pvModeLabel">Resident preview</span>
+          <span style="font-size:0.8125rem;color:var(--av-muted-fg);display:flex;align-items:center;gap:0.375rem;">
+            <span id="pvModeLabel">Showing what residents see</span>
           </span>
         </div>
       </div>
@@ -958,10 +1149,11 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
               <div class="pv-cal-grid" id="pvCalGrid"></div>
             </div>
             <div class="pv-cal-legend">
-              <span><span class="pv-dot avail"></span> Available</span>
               <span><span class="pv-dot closed"></span> Closed</span>
-              <span><span class="pv-dot custom"></span> Custom</span>
-              <span><span class="pv-dot activity"></span> Appointments or program</span>
+              <span><span class="pv-dot custom"></span> Custom hours</span>
+              <span><span class="pv-dot activity"></span> Appointments</span>
+              <span><span class="pv-dot program"></span> Program</span>
+              <span class="pv-full-legend">Full &nbsp; No slots left</span>
             </div>
           </div>
         </div>
@@ -971,7 +1163,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           <div class="pv-card pv-detail" id="pvDetail">
             <div class="pv-detail-empty" id="pvDetailEmpty">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-              Select a date to view available appointment times
+              Select a date to view availability and program details
             </div>
             <div id="pvDetailContent" style="display:none;"></div>
           </div>
@@ -1497,19 +1689,45 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var panel = new URLSearchParams(window.location.search).get('panel') || '';
       var y = year || (panel === 'overrides' && typeof ovCalYear === 'number' ? ovCalYear : panel === 'preview' && typeof pvCalYear === 'number' ? pvCalYear : now.getFullYear());
       var m = month || (panel === 'overrides' && typeof ovCalMonth === 'number' ? ovCalMonth + 1 : panel === 'preview' && typeof pvCalMonth === 'number' ? pvCalMonth + 1 : now.getMonth() + 1);
-      fetch(<?php echo json_encode($appBaseUrl . '/api/shared/appointment-availability.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> + '?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
+      fetch(pvAvailabilityEndpoint + '?sess=DCVS_STAFF_SESSION&year=' + y + '&month=' + m)
         .then(function(r) { return r.json(); })
         .then(function(data) {
           if (!data.ok) return;
+          if (panel === 'preview') pvAvailabilityMonths[pvMonthKey(y, m)] = data;
           avProgramEvents = data.programs || {};
           avAppointmentCounts = data.slots || {};
           if (panel === 'preview') {
             pvAppointmentCounts = data.routineSlots || {};
+            pvUrgentAppointmentCounts = data.urgentSlots || {};
             pvAllAppointmentCounts = data.slots || {};
             pvHeldSlots = data.held || {};
             pvBlockedSlots = data.blocked || {};
             pvSlotCapacity = data.routineCapacity || {};
-            pvMaxPerDay = parseInt(data.maxPerDay, 10) || 3;
+            pvUrgentSlotCapacity = data.urgentCapacity || {};
+            pvProgramDays = data.programDays || {};
+            pvMaxPerDay = parseInt(data.maxPerDay, 10) || 5;
+            pvMaxUrgentPerDay = parseInt(data.maxUrgentPerDay, 10) || 3;
+            pvMaxRoutinePerProgramDay = parseInt(data.maxRoutinePerProgramDay, 10) || 2;
+            var previewAppointmentsUrl = <?php echo json_encode($appBaseUrl . '/api/staff/availability-appointments.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+            fetch(previewAppointmentsUrl + '?year=' + y + '&month=' + m)
+              .then(function(response) {
+                if (!response.ok) throw new Error('Could not load appointment details.');
+                return response.json();
+              })
+              .then(function(appointmentData) {
+                if (!appointmentData.ok) throw new Error(appointmentData.error || 'Could not load appointment details.');
+                if (y !== pvCalYear || m !== pvCalMonth + 1) return;
+                pvAppointmentsByDate = appointmentData.appointments || {};
+                pvAppointmentDetailsError = '';
+                if (pvSelectedDate) pvRenderDetail();
+              })
+              .catch(function(error) {
+                console.error('Schedule preview appointments request failed:', error);
+                if (y !== pvCalYear || m !== pvCalMonth + 1) return;
+                pvAppointmentsByDate = {};
+                pvAppointmentDetailsError = 'Appointment details could not be loaded.';
+                if (pvSelectedDate) pvRenderDetail();
+              });
           }
           if (data.weekly) {
             for (var d = 1; d <= 7; d++) {
@@ -1736,7 +1954,9 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
           var time = program.start_time && program.end_time
             ? ' (' + timeValToLabel(program.start_time) + '–' + timeValToLabel(program.end_time) + ')'
             : '';
-          var location = program.venue || program.barangay_names || '';
+          var location = [program.venue, program.barangay_names].filter(function(value) {
+            return !!String(value || '').trim();
+          }).join(' · ');
           line.textContent = program.program_name + time + (location ? ' at ' + location : '') + '.';
           context.appendChild(line);
         });
@@ -2343,7 +2563,12 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
 
     /* ===== SCHEDULE PREVIEW PANEL ===== */
     var pvCalYear, pvCalMonth, pvSelectedDate = null, pvViewMode = 'resident';
-    var pvAppointmentCounts = {}, pvAllAppointmentCounts = {}, pvHeldSlots = {}, pvBlockedSlots = {}, pvSlotCapacity = {}, pvMaxPerDay = 3;
+    var pvAvailabilityEndpoint = <?php echo json_encode($appBaseUrl . '/api/shared/appointment-availability.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var pvAvailabilityMonths = {};
+    var pvAppointmentsByDate = {}, pvAppointmentDetailsError = '';
+    var pvAppointmentCounts = {}, pvUrgentAppointmentCounts = {}, pvAllAppointmentCounts = {}, pvHeldSlots = {}, pvBlockedSlots = {};
+    var pvSlotCapacity = {}, pvUrgentSlotCapacity = {}, pvProgramDays = {};
+    var pvMaxPerDay = 5, pvMaxUrgentPerDay = 3, pvMaxRoutinePerProgramDay = 2;
 
     function pvDateStr(y, m, d) { return y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
     function pvGetMonthDays(y, m) { return new Date(y, m + 1, 0).getDate(); }
@@ -2384,19 +2609,81 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       return result;
     }
     function pvGetResidentSlots(dateStr, scheduleState) {
-      var counts = pvAppointmentCounts[dateStr] || {};
-      var capacities = pvSlotCapacity[dateStr] || {};
-      var dailyCount = 0;
-      AV_SLOTS.forEach(function(slot) { dailyCount += parseInt(counts[slot] || 0, 10); });
-      var dateIsFull = dailyCount >= pvMaxPerDay;
+      var routineCounts = pvAppointmentCounts[dateStr] || {};
+      var urgentCounts = pvUrgentAppointmentCounts[dateStr] || {};
+      var allCounts = pvAllAppointmentCounts[dateStr] || {};
+      var routineCapacities = pvSlotCapacity[dateStr] || {};
+      var urgentCapacities = pvUrgentSlotCapacity[dateStr] || {};
+      var programDay = !!pvProgramDays[dateStr];
+      var routineDailyCount = pvCountSlots(routineCounts);
+      var urgentDailyCount = pvCountSlots(urgentCounts);
+      var allDailyCount = pvCountSlots(allCounts);
+      var programDailyCount = routineDailyCount + urgentDailyCount;
       var slots = {};
       AV_SLOTS.forEach(function(slot) {
         var scheduleOpen = scheduleState.slots && scheduleState.slots[slot] !== false;
-        var slotCount = parseInt(counts[slot] || 0, 10);
-        var capacity = parseInt(capacities[slot] || 0, 10);
-        slots[slot] = !pvIsPastDate(dateStr) && !dateIsFull && scheduleOpen && slotCount < capacity;
+        var routineSlotCount = parseInt(routineCounts[slot] || 0, 10);
+        var routineCapacity = parseInt(routineCapacities[slot] || 0, 10);
+        var urgentSlotCount = parseInt(urgentCounts[slot] || 0, 10);
+        var urgentCapacity = parseInt(urgentCapacities[slot] || 0, 10);
+        var routineOpen, urgentOpen;
+        if (programDay) {
+          routineOpen = programDailyCount < pvMaxPerDay
+            && routineDailyCount < pvMaxRoutinePerProgramDay && routineSlotCount < routineCapacity;
+          urgentOpen = programDailyCount < pvMaxPerDay
+            && urgentDailyCount < pvMaxUrgentPerDay && urgentSlotCount < urgentCapacity;
+        } else {
+          routineOpen = allDailyCount < pvMaxPerDay && parseInt(allCounts[slot] || 0, 10) < routineCapacity;
+          urgentOpen = false;
+        }
+        slots[slot] = !pvIsPastDate(dateStr) && scheduleOpen && (routineOpen || urgentOpen);
       });
       return slots;
+    }
+    function pvHasCapacityForUrgency(dateStr, scheduleState, urgency) {
+      var programDay = !!pvProgramDays[dateStr];
+      var routineCounts = pvAppointmentCounts[dateStr] || {};
+      var urgentCounts = pvUrgentAppointmentCounts[dateStr] || {};
+      var allCounts = pvAllAppointmentCounts[dateStr] || {};
+      var routineCapacities = pvSlotCapacity[dateStr] || {};
+      var urgentCapacities = pvUrgentSlotCapacity[dateStr] || {};
+      if (programDay && pvCountSlots(routineCounts) + pvCountSlots(urgentCounts) >= pvMaxPerDay) return false;
+      var dailyCount = urgency === 'urgent'
+        ? pvCountSlots(urgentCounts)
+        : programDay ? pvCountSlots(routineCounts) : pvCountSlots(allCounts);
+      var dailyLimit = urgency === 'urgent'
+        ? pvMaxUrgentPerDay
+        : programDay ? pvMaxRoutinePerProgramDay : pvMaxPerDay;
+      if (dailyCount >= dailyLimit) return false;
+      return AV_SLOTS.some(function(slot) {
+        if (!scheduleState.slots || scheduleState.slots[slot] === false) return false;
+        if (urgency === 'urgent') {
+          return parseInt(urgentCounts[slot] || 0, 10) < parseInt(urgentCapacities[slot] || 0, 10);
+        }
+        var booked = programDay ? parseInt(routineCounts[slot] || 0, 10) : parseInt(allCounts[slot] || 0, 10);
+        return booked < parseInt(routineCapacities[slot] || 0, 10);
+      });
+    }
+    function pvCountSlots(counts) {
+      return Object.keys(counts || {}).reduce(function(total, slot) {
+        return total + (parseInt(counts[slot], 10) || 0);
+      }, 0);
+    }
+    function pvFormatTime(value) {
+      var time = String(value || '').substring(0, 5);
+      return /^\d{2}:\d{2}$/.test(time) ? timeValToLabel(time) : (value || '');
+    }
+    function pvFormatHours(dateStr, state) {
+      if (state.closed) return 'No hours scheduled';
+      var ranges = state.type === 'override'
+        ? ovSlotsToRanges(state.slots || {})
+        : (avState[state.dayIdx] && avState[state.dayIdx].enabled ? avState[state.dayIdx].blocks : []);
+      if (!ranges.length) return 'No hours scheduled';
+      return ranges.map(function(range) {
+        var start = /^\d{2}:\d{2}$/.test(range.start) ? pvFormatTime(range.start) : range.start;
+        var end = /^\d{2}:\d{2}$/.test(range.end) ? pvFormatTime(range.end) : range.end;
+        return start + ' – ' + end;
+      }).join(' · ');
     }
     function pvIsPastDate(dateStr) {
       var now = new Date();
@@ -2423,13 +2710,17 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       for (var d = 1; d <= total; d++) {
         var ds = pvDateStr(pvCalYear, pvCalMonth, d);
         var state = pvGetDayState(ds);
+        var pastDate = pvIsPastDate(ds);
         var residentSlots = pvGetResidentSlots(ds, state);
         var residentOpen = pvGetAvailableSlots(residentSlots).length > 0;
+        var fullyBooked = !state.closed && !pastDate && !residentOpen;
         var el = document.createElement('div');
         el.className = 'pv-cal-day';
         el.textContent = d;
         if (ds === todayStr) el.classList.add('today');
         if (ds === pvSelectedDate) el.classList.add('selected');
+        if (pastDate) el.classList.add('past-date');
+        if (fullyBooked) el.classList.add('fully-booked');
         if (!state.closed && state.type === 'override') el.classList.add('has-override');
         if (pvViewMode === 'resident') {
           if (residentOpen) el.classList.add('available');
@@ -2444,27 +2735,54 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         }
         el.dataset.date = ds;
         var booked = pvAllAppointmentCounts[ds] || {};
-        var bookedCount = Object.keys(booked).reduce(function(total, time) {
-          return total + (parseInt(booked[time], 10) || 0);
-        }, 0);
+        var bookedCount = pvCountSlots(booked);
         var hasPrograms = (avProgramEvents[ds] || []).length > 0;
         if (hasPrograms || bookedCount > 0) {
           el.classList.add('has-activity');
-          el.title = (hasPrograms ? 'Program scheduled. ' : '') + (bookedCount ? bookedCount + ' appointment(s) booked. ' : '') + 'Select to view date details.';
+          el.title = pastDate
+            ? 'Past dates are unavailable.'
+            : (hasPrograms ? 'Program scheduled. ' : '') + (bookedCount ? bookedCount + ' appointment(s) booked. ' : '') + 'Select to view date details.';
         } else if (!residentOpen) {
-          el.title = 'No appointment times are currently available. Select to view details.';
+          el.title = pastDate ? 'Past dates are unavailable.' : 'No appointment times are currently available. Select to view details.';
         } else {
           el.title = 'Select to view date details.';
         }
-        el.setAttribute('role', 'button');
-        el.setAttribute('tabindex', '0');
-        el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
-        el.addEventListener('keydown', function(event) {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            pvSelectDate(this.dataset.date);
+        if (pastDate) el.title = 'Past dates are unavailable.';
+        if (hasPrograms || bookedCount > 0) {
+          var markers = document.createElement('span');
+          markers.className = 'pv-cal-markers';
+          markers.setAttribute('aria-hidden', 'true');
+          for (var appointmentMarkerIndex = 0; appointmentMarkerIndex < Math.min(bookedCount, 3); appointmentMarkerIndex++) {
+            var appointmentMarker = document.createElement('span');
+            appointmentMarker.className = 'pv-cal-marker-appointment';
+            markers.appendChild(appointmentMarker);
           }
-        });
+          if (hasPrograms) {
+            var programMarker = document.createElement('span');
+            programMarker.className = 'pv-cal-marker-program';
+            markers.appendChild(programMarker);
+          }
+          el.appendChild(markers);
+        }
+        if (fullyBooked) {
+          var fullLabel = document.createElement('span');
+          fullLabel.className = 'pv-cal-day-full-label';
+          fullLabel.textContent = 'Full';
+          el.appendChild(fullLabel);
+          el.title = 'Fully booked. Select to view details.';
+        }
+        el.setAttribute('role', 'button');
+        el.setAttribute('aria-disabled', pastDate ? 'true' : 'false');
+        el.setAttribute('tabindex', pastDate ? '-1' : '0');
+        if (!pastDate) {
+          el.addEventListener('click', function() { pvSelectDate(this.dataset.date); });
+          el.addEventListener('keydown', function(event) {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              pvSelectDate(this.dataset.date);
+            }
+          });
+        }
         grid.appendChild(el);
       }
       var totalCells = first + total;
@@ -2483,22 +2801,15 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       pvRenderDetail();
     }
 
-    function pvNavDay(dir) {
-      if (!pvSelectedDate) return;
-      var p = pvSelectedDate.split('-');
-      var d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]));
-      d.setDate(d.getDate() + dir);
-      var ds = pvDateStr(d.getFullYear(), d.getMonth(), d.getDate());
-      if (d.getMonth() !== pvCalMonth || d.getFullYear() !== pvCalYear) {
-        pvCalMonth = d.getMonth();
-        pvCalYear = d.getFullYear();
-      }
-      pvSelectDate(ds);
-    }
-
     function pvRenderDetail() {
       var empty = document.getElementById('pvDetailEmpty');
       var content = document.getElementById('pvDetailContent');
+      var modeLabel = document.getElementById('pvModeLabel');
+      if (modeLabel) {
+        modeLabel.textContent = pvViewMode === 'resident'
+          ? 'Showing what residents see'
+          : 'Showing staff availability details';
+      }
       if (!pvSelectedDate) {
         empty.style.display = '';
         content.style.display = 'none';
@@ -2511,83 +2822,241 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
       var state = pvGetDayState(pvSelectedDate);
       var residentSlots = pvGetResidentSlots(pvSelectedDate, state);
-      var availSlots = pvViewMode === 'resident' ? pvGetAvailableSlots(residentSlots) : pvGetAvailableSlots(state.slots);
-      var isClosed = pvViewMode === 'resident'
-        ? (pvIsPastDate(pvSelectedDate) || availSlots.length === 0)
-        : state.closed || availSlots.length === 0;
-
+      var availableSlots = pvGetAvailableSlots(residentSlots);
+      var programs = avProgramEvents[pvSelectedDate] || [];
+      var appointments = pvAppointmentsByDate[pvSelectedDate] || [];
+      var routineCount = pvCountSlots(pvAppointmentCounts[pvSelectedDate] || {});
+      var urgentCount = pvCountSlots(pvUrgentAppointmentCounts[pvSelectedDate] || {});
+      var allCount = pvCountSlots(pvAllAppointmentCounts[pvSelectedDate] || {});
+      var programDay = !!pvProgramDays[pvSelectedDate] || programs.length > 0;
+      var routineAvailable = !pvIsPastDate(pvSelectedDate) && pvHasCapacityForUrgency(pvSelectedDate, state, 'routine');
+      var urgentAvailable = programDay && !pvIsPastDate(pvSelectedDate) && pvHasCapacityForUrgency(pvSelectedDate, state, 'urgent');
+      var isOpen = pvViewMode === 'resident'
+        ? !pvIsPastDate(pvSelectedDate) && availableSlots.length > 0
+        : programDay ? routineAvailable || urgentAvailable : routineAvailable;
+      var fullyBooked = !pvIsPastDate(pvSelectedDate) && !state.closed && !isOpen;
+      var availabilityLabel = pvViewMode === 'resident'
+        ? fullyBooked ? 'Fully booked' : isOpen ? 'Available' : 'Closed'
+        : programDay && !routineAvailable && urgentAvailable
+          ? 'Open for urgent only'
+          : fullyBooked ? 'Fully booked' : isOpen ? 'Open for booking' : 'Closed';
+      var hours = pvFormatHours(pvSelectedDate, state);
       var html = '';
       html += '<div class="pv-detail-head">';
-      html += '<div class="pv-detail-date">' + dateLabel;
-      if (state.type === 'override') {
-        html += '<span class="pv-detail-badge custom">Custom</span>';
-      } else if (isClosed) {
-        html += '<span class="pv-detail-badge closed-badge">Closed</span>';
-      } else {
-        html += '<span class="pv-detail-badge weekly">Weekly</span>';
+      html += '<div class="pv-detail-date">' + pvEscapeHtml(dateLabel) + '</div>';
+      if (pvViewMode === 'admin') {
+        html += '<div class="pv-detail-source">' + (state.type === 'override' ? 'Custom hours' : 'Weekly schedule') + '</div>';
       }
-      html += '</div>';
-      html += '<div class="pv-detail-source">';
-      if (state.type === 'override') {
-        html += 'Custom schedule &middot; Source: Date override';
-      } else if (isClosed) {
-        html += state.type === 'override' ? 'Source: Date override' : 'Source: Weekly schedule';
-      } else {
-        html += 'Source: Weekly schedule';
-      }
-      html += '</div>';
-      html += '</div>';
-
-      html += '<div class="pv-detail-nav">';
-      html += '<button type="button" id="pvPrevDay"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg> Previous day</button>';
-      html += '<button type="button" id="pvNextDay">Next day <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg></button>';
       html += '</div>';
 
       html += '<div class="pv-detail-body">';
-      if (isClosed) {
-        html += '<div class="pv-closed">';
-        html += '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-        html += '<h4>No appointments available</h4>';
-        var dailyBooked = pvAppointmentCounts[pvSelectedDate] || {};
-        var dailyRoutineCount = Object.keys(dailyBooked).reduce(function(total, time) {
-          return total + (parseInt(dailyBooked[time], 10) || 0);
-        }, 0);
-        var unavailableReason = pvIsPastDate(pvSelectedDate)
-          ? 'This date has already passed.'
-          : state.closed
-            ? (state.type === 'override' ? 'A date-specific override closes the clinic for appointments.' : 'The weekly schedule has no appointment hours on this date.')
-            : dailyRoutineCount >= pvMaxPerDay
-              ? 'The daily routine appointment limit has been reached.'
-              : 'All currently available times are booked or have no remaining capacity.';
-        html += '<p>' + unavailableReason + '</p>';
-        html += '<div class="pv-closed-status">Date status: <strong>Closed</strong></div>';
-        html += '</div>';
-      } else if (pvViewMode === 'resident') {
-        html += '<div class="pv-detail-label">Available appointment times</div>';
-        html += '<div class="pv-slots">';
-        availSlots.forEach(function(s) {
-          html += '<div class="pv-slot"><span class="pv-slot-time">' + timeValToLabel(s) + '</span><span class="pv-slot-status open">Available</span></div>';
-        });
-        html += '</div>';
-        html += '<div class="pv-slot-count">' + availSlots.length + ' available slot' + (availSlots.length !== 1 ? 's' : '') + '</div>';
-      } else {
-        html += '<div class="pv-detail-label">All appointment slots</div>';
-        html += '<div class="pv-slots">';
-        AV_SLOTS.forEach(function(s) {
-          var isOpen = state.slots && state.slots[s] !== false;
-          html += '<div class="pv-slot"><span class="pv-slot-time">' + timeValToLabel(s) + '</span><span class="pv-slot-status ' + (isOpen ? 'open' : 'closed') + '">' + (isOpen ? 'Available' : 'Closed') + '</span></div>';
-        });
-        html += '</div>';
-        html += '<div class="pv-slot-count">' + availSlots.length + ' of ' + AV_SLOTS.length + ' slots available</div>';
+      html += '<div class="pv-info-row">';
+      html += '<div class="pv-info-label">Availability</div>';
+      html += '<div class="pv-info-value">';
+      html += '<div class="pv-availability-line"><span class="pv-availability-indicator' + (isOpen ? '' : ' closed') + '"></span>';
+      html += '<span class="pv-availability-status">' + pvEscapeHtml(availabilityLabel) + '</span>';
+      if (pvViewMode === 'admin' && programDay && isOpen) {
+        html += '<span class="pv-availability-hours">Limited slots today</span>';
+      }
+      if (pvViewMode === 'resident') {
+        html += fullyBooked
+          ? '<span class="pv-availability-hours">All times are taken</span>'
+          : '<span class="pv-availability-hours">· ' + pvEscapeHtml(hours) + '</span>';
+      } else if (fullyBooked) {
+        var bookedForCapacity = programDay ? routineCount + urgentCount : allCount;
+        html += '<span class="pv-availability-hours">' + bookedForCapacity + ' of '
+          + pvMaxPerDay + ' slots taken</span>';
       }
       html += '</div>';
-      content.innerHTML = html;
-      appendDateContext(content.querySelector('.pv-detail-body'), pvSelectedDate);
+      if (pvViewMode === 'resident' && fullyBooked) {
+        html += '<div class="pv-next-open" id="pvNextOpen">Next day with open slots: <span>Finding next open date…</span></div>';
+      }
+      if (pvViewMode === 'admin') {
+        html += '<div class="pv-capacity-list">';
+        if (programDay) {
+          html += pvCapacityLine('Urgent', urgentCount, pvMaxUrgentPerDay, '#71717a');
+          html += pvCapacityLine('Routine', routineCount, pvMaxRoutinePerProgramDay, '#15803d');
+        } else {
+          html += pvCapacityLine('Bookings', allCount, pvMaxPerDay, '#15803d');
+        }
+        html += '</div>';
+      }
+      html += '</div></div>';
 
-      var prevBtn = document.getElementById('pvPrevDay');
-      var nextBtn = document.getElementById('pvNextDay');
-      if (prevBtn) prevBtn.addEventListener('click', function() { pvNavDay(-1); });
-      if (nextBtn) nextBtn.addEventListener('click', function() { pvNavDay(1); });
+      if (pvViewMode === 'admin') {
+        html += '<div class="pv-info-row"><div class="pv-info-label">Hours</div>';
+        html += '<div class="pv-info-value pv-program-hours">' + pvEscapeHtml(hours) + '</div></div>';
+        if (pvAppointmentDetailsError) {
+          html += '<div class="pv-info-row pv-appointments-row"><div class="pv-info-label">Appointments</div>';
+          html += '<div class="pv-info-value pv-no-program">' + pvEscapeHtml(pvAppointmentDetailsError) + '</div></div>';
+        } else if (appointments.length) {
+          html += '<div class="pv-info-row pv-appointments-row"><div class="pv-info-label">Appointments</div>';
+          html += '<div class="pv-info-value pv-appointment-list">';
+          appointments.forEach(function(appointment) {
+            var status = pvAppointmentStatusLabel(appointment.status);
+            var appointmentType = pvAppointmentTypeLabel(appointment.appointment_type);
+            html += '<div class="pv-appointment-entry">';
+            html += '<span class="pv-appointment-time">' + pvEscapeHtml(pvFormatTime(appointment.time)) + '</span>';
+            html += '<div class="pv-appointment-summary"><span class="pv-appointment-kind' + (status === 'Confirmed' ? ' confirmed' : '') + '">' + pvEscapeHtml(appointmentType) + '</span>';
+            if (appointment.barangay_name) {
+              html += ' <span class="pv-appointment-location">in ' + pvEscapeHtml(appointment.barangay_name) + '</span>';
+            }
+            html += '</div>';
+            var urgency = String(appointment.urgency_level || 'routine').replace(/\b\w/g, function(letter) {
+              return letter.toUpperCase();
+            });
+            html += '<span class="pv-appointment-meta">' + pvEscapeHtml(urgency) + ', ' + pvEscapeHtml(status) + '</span>';
+            html += '</div>';
+          });
+          html += '</div></div>';
+        }
+      }
+
+      html += '<div class="pv-program-section"><div class="pv-info-row pv-program-row"><div class="pv-info-label">Program today</div>';
+      html += '<div class="pv-info-value">';
+      if (programs.length) {
+        programs.forEach(function(program) {
+          var programHours = pvFormatTime(program.start_time) + ' – ' + pvFormatTime(program.end_time);
+          var location = program.venue || program.barangay_names || '';
+          html += '<div class="pv-program-entry">';
+          html += '<div class="pv-program-hours">' + pvEscapeHtml(programHours) + '</div>';
+          html += '<div class="pv-program-name">' + pvEscapeHtml(program.program_name || 'Program') + '</div>';
+          if (program.program_type) html += '<div class="pv-program-type">' + pvEscapeHtml(program.program_type) + '</div>';
+          if (location) html += '<div class="pv-program-location">' + pvEscapeHtml(location) + '</div>';
+          html += '</div>';
+        });
+      } else {
+        html += '<span class="pv-no-program">No program scheduled</span>';
+      }
+      html += '</div></div>';
+      if (pvViewMode === 'admin' && programs.length) {
+        html += '<div class="pv-info-row pv-program-row"><div class="pv-info-label"></div>';
+        html += '<div class="pv-info-value"><p class="pv-program-note">Appointment capacity follows the existing program-day limits: up to '
+          + pvMaxUrgentPerDay + ' urgent and ' + pvMaxRoutinePerProgramDay + ' routine appointments.</p></div></div>';
+      }
+      html += '</div>';
+      html += '</div>';
+      content.innerHTML = html;
+      if (pvViewMode === 'resident' && fullyBooked) {
+        var selectedDateForLookup = pvSelectedDate;
+        pvFindNextOpenDate(selectedDateForLookup).then(function(nextDate) {
+          var nextOpen = document.getElementById('pvNextOpen');
+          if (!nextOpen || pvSelectedDate !== selectedDateForLookup || pvViewMode !== 'resident') return;
+          if (!nextDate) {
+            nextOpen.textContent = 'No open appointment dates found in the next 90 days.';
+            return;
+          }
+          var nextDateParts = nextDate.split('-');
+          var nextDateObject = new Date(parseInt(nextDateParts[0], 10), parseInt(nextDateParts[1], 10) - 1, parseInt(nextDateParts[2], 10));
+          var nextDateLabel = nextDateObject.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+          nextOpen.textContent = 'Next day with open slots: ';
+          var nextDateButton = document.createElement('button');
+          nextDateButton.type = 'button';
+          nextDateButton.className = 'pv-next-open-link';
+          nextDateButton.textContent = nextDateLabel;
+          nextDateButton.addEventListener('click', function() {
+            pvSelectedDate = nextDate;
+            pvCalYear = nextDateObject.getFullYear();
+            pvCalMonth = nextDateObject.getMonth();
+            pvRenderCal();
+            loadFromServer(pvCalYear, pvCalMonth + 1);
+          });
+          nextOpen.appendChild(nextDateButton);
+        }).catch(function(error) {
+          console.error('Schedule preview next-availability lookup failed:', error);
+          var nextOpen = document.getElementById('pvNextOpen');
+          if (nextOpen && pvSelectedDate === selectedDateForLookup && pvViewMode === 'resident') {
+            nextOpen.textContent = 'Could not check the next open date. Please try again.';
+          }
+        });
+      }
+    }
+    function pvEscapeHtml(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function(character) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character];
+      });
+    }
+    function pvMonthKey(year, month) {
+      return year + '-' + String(month).padStart(2, '0');
+    }
+    function pvLoadAvailabilityMonth(year, month) {
+      var key = pvMonthKey(year, month);
+      if (pvAvailabilityMonths[key]) return Promise.resolve(pvAvailabilityMonths[key]);
+      return fetch(pvAvailabilityEndpoint + '?sess=DCVS_STAFF_SESSION&year=' + year + '&month=' + month)
+        .then(function(response) {
+          if (!response.ok) throw new Error('Could not load availability for the next date.');
+          return response.json();
+        })
+        .then(function(data) {
+          if (!data.ok) throw new Error(data.error || 'Could not load availability for the next date.');
+          pvAvailabilityMonths[key] = data;
+          return data;
+        });
+    }
+    function pvDataHasOpenSlot(data, dateStr) {
+      var programDay = !!((data.programDays || {})[dateStr]);
+      var routineCounts = (data.routineSlots || {})[dateStr] || {};
+      var urgentCounts = (data.urgentSlots || {})[dateStr] || {};
+      var allCounts = (data.slots || {})[dateStr] || {};
+      var routineCapacities = (data.routineCapacity || {})[dateStr] || {};
+      var urgentCapacities = (data.urgentCapacity || {})[dateStr] || {};
+      var routineDailyCount = pvCountSlots(routineCounts);
+      var urgentDailyCount = pvCountSlots(urgentCounts);
+      var allDailyCount = pvCountSlots(allCounts);
+      if (programDay && routineDailyCount + urgentDailyCount >= (parseInt(data.maxPerDay, 10) || 5)) return false;
+      if (programDay) {
+        return AV_SLOTS.some(function(slot) {
+          return (routineDailyCount < (parseInt(data.maxRoutinePerProgramDay, 10) || 2)
+              && parseInt(routineCounts[slot] || 0, 10) < parseInt(routineCapacities[slot] || 0, 10))
+            || (urgentDailyCount < (parseInt(data.maxUrgentPerDay, 10) || 3)
+              && parseInt(urgentCounts[slot] || 0, 10) < parseInt(urgentCapacities[slot] || 0, 10));
+        });
+      }
+      var dailyLimit = parseInt(data.maxPerDay, 10) || 5;
+      return allDailyCount < dailyLimit && AV_SLOTS.some(function(slot) {
+        return parseInt(allCounts[slot] || 0, 10) < parseInt(routineCapacities[slot] || 0, 10);
+      });
+    }
+    function pvFindNextOpenDate(fromDate, offset) {
+      var nextOffset = offset || 1;
+      if (nextOffset > 90) return Promise.resolve(null);
+      var parts = fromDate.split('-');
+      var date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10) + nextOffset);
+      var dateStr = pvDateStr(date.getFullYear(), date.getMonth(), date.getDate());
+      if (pvIsPastDate(dateStr)) return pvFindNextOpenDate(fromDate, nextOffset + 1);
+      return pvLoadAvailabilityMonth(date.getFullYear(), date.getMonth() + 1).then(function(data) {
+        return pvDataHasOpenSlot(data, dateStr) ? dateStr : pvFindNextOpenDate(fromDate, nextOffset + 1);
+      });
+    }
+    function pvCapacityLine(label, count, maximum, color) {
+      var segments = '';
+      for (var i = 0; i < maximum; i++) {
+        segments += '<span class="pv-capacity-segment" style="' + (i < count ? 'background:' + color : '') + '"></span>';
+      }
+      return '<div class="pv-capacity-line"><span>' + pvEscapeHtml(label) + '</span><span class="pv-capacity-track">' + segments + '</span><span>' + count + ' of ' + maximum + '</span></div>';
+    }
+    function pvAppointmentTypeLabel(type) {
+      var labels = {
+        adoption: 'Adoption appointment',
+        kapon: 'Kapon appointment',
+        checkup: 'Check-up appointment',
+        deworming: 'Deworming appointment',
+        vaccination: 'Vaccination appointment'
+      };
+      return labels[type] || String(type || 'Appointment');
+    }
+    function pvAppointmentStatusLabel(status) {
+      var labels = {
+        pending: 'Pending',
+        approved: 'Confirmed',
+        scheduled: 'Confirmed',
+        rescheduled: 'Rescheduled',
+        action_needed: 'Action needed',
+        in_progress: 'In progress'
+      };
+      return labels[status] || String(status || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, function(letter) {
+        return letter.toUpperCase();
+      });
     }
 
     var panelInitialized = false;

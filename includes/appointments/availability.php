@@ -8,9 +8,10 @@
  */
 
 const DCVS_STANDARD_TIMES = ['09:00', '10:00', '11:00', '14:00', '15:00'];
-const DCVS_MAX_APPOINTMENTS_PER_DAY = 3;
+const DCVS_MAX_APPOINTMENTS_PER_DAY = 5;
 const DCVS_MAX_APPOINTMENTS_PER_SLOT = 1;
-const DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY = 2;
+const DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY = 2;
+const DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY = 3;
 
 function dcvsTimeKey($time) {
     return substr((string)$time, 0, 5);
@@ -19,6 +20,68 @@ function dcvsTimeKey($time) {
 function dcvsIsStandardTime($time) {
     return preg_match('/^\d{2}:\d{2}(?::00)?$/', (string)$time)
         && in_array(dcvsTimeKey($time), DCVS_STANDARD_TIMES, true);
+}
+
+/** Whether a scheduled or live program runs on this calendar day. */
+function dcvsDateHasActiveProgram($conn, $date) {
+    $stmt = $conn->prepare("SELECT 1 FROM programs
+        WHERE status IN ('scheduled', 'live') AND start_date <= ? AND end_date >= ?
+        LIMIT 1");
+    if (!$stmt) {
+        error_log('Failed to prepare appointment program-day lookup: ' . $conn->error);
+        throw new RuntimeException('Could not check program availability for this date.');
+    }
+    $stmt->bind_param('ss', $date, $date);
+    if (!$stmt->execute()) {
+        error_log('Failed to check appointment program day: ' . $stmt->error);
+        $stmt->close();
+        throw new RuntimeException('Could not check program availability for this date.');
+    }
+    $hasProgram = $stmt->get_result()->num_rows > 0;
+    $stmt->close();
+    return $hasProgram;
+}
+
+/** Serialize capacity-changing writes and program schedule changes around capacity checks. */
+function dcvsLockAppointmentCapacityDates($conn, array $dates) {
+    static $registered = false;
+    $dates = array_values(array_unique(array_filter(array_map('strval', $dates))));
+    sort($dates, SORT_STRING);
+    foreach ($dates as $date) {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
+            || !checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4))) {
+            throw new InvalidArgumentException('A valid appointment date is required for capacity locking.');
+        }
+    }
+    if ($registered) return;
+
+    $lockName = 'dcvs_appointment_capacity';
+    $stmt = $conn->prepare('SELECT GET_LOCK(?, 10)');
+    if (!$stmt) {
+        error_log('Failed to prepare appointment capacity lock: ' . $conn->error);
+        throw new RuntimeException('Could not secure appointment capacity. Please try again.');
+    }
+    $stmt->bind_param('s', $lockName);
+    if (!$stmt->execute()) {
+        error_log('Failed to acquire appointment capacity lock: ' . $stmt->error);
+        $stmt->close();
+        throw new RuntimeException('Could not secure appointment capacity. Please try again.');
+    }
+    $acquired = (int)$stmt->get_result()->fetch_row()[0] === 1;
+    $stmt->close();
+    if (!$acquired) throw new RuntimeException('Appointment capacity is busy. Please try again.');
+    $registered = true;
+
+    register_shutdown_function(static function () use ($conn, $lockName) {
+        $stmt = $conn->prepare('SELECT RELEASE_LOCK(?)');
+        if (!$stmt) {
+            error_log('Failed to prepare appointment capacity lock release: ' . $conn->error);
+            return;
+        }
+        $stmt->bind_param('s', $lockName);
+        if (!$stmt->execute()) error_log('Failed to release appointment capacity lock: ' . $stmt->error);
+        $stmt->close();
+    });
 }
 
 /** Load the weekly template: day_of_week(1-7) => [ 'HH:MM' => bool available ] */
@@ -101,10 +164,36 @@ function dcvsActiveStaffCount($conn) {
     return $count;
 }
 
-/** Number of routine appointments that can be handled in one time slot. Programs do not reserve clinic appointment capacity. */
+/** Number of routine appointments that can be handled in one time slot. */
 function dcvsRoutineSlotCapacity($conn, $date, $time, $staffCount = null) {
     if ($staffCount === null) $staffCount = dcvsActiveStaffCount($conn);
     return max(0, (int)$staffCount);
+}
+
+/** Daily priority limits vary only by whether any active program runs that day. */
+function dcvsAppointmentDailyLimit($conn, $date, $urgency = 'routine') {
+    if (!in_array($urgency, ['routine', 'urgent'], true)) return 0;
+    if (dcvsDateHasActiveProgram($conn, $date)) {
+        return $urgency === 'urgent'
+            ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY
+            : DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY;
+    }
+    return $urgency === 'routine' ? DCVS_MAX_APPOINTMENTS_PER_DAY : 0;
+}
+
+/** Check the applicable daily limit; normal days count all appointments together. */
+function dcvsAppointmentDailyCapacity($conn, $date, $urgency = 'routine', $excludeId = 0) {
+    $hasProgram = dcvsDateHasActiveProgram($conn, $date);
+    $limit = $hasProgram
+        ? ($urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY)
+        : ($urgency === 'routine' ? DCVS_MAX_APPOINTMENTS_PER_DAY : 0);
+    $count = dcvsAppointmentDayCount($conn, $date, $excludeId, $hasProgram ? $urgency : 'all');
+    return [
+        'has_program' => $hasProgram,
+        'limit' => $limit,
+        'count' => $count,
+        'available' => $limit > 0 && $count < $limit,
+    ];
 }
 
 /** Routine appointments follow clinic availability; urgent appointments use separately reserved capacity. */
@@ -165,14 +254,18 @@ function dcvsCapacityStatuses() {
 /** Count appointments consuming daily capacity, optionally excluding one appointment. */
 function dcvsAppointmentDayCount($conn, $date, $excludeId = 0, $urgency = 'routine') {
     $statuses = implode("','", dcvsCapacityStatuses());
-    $sql = "SELECT COUNT(*) FROM appointments WHERE COALESCE(scheduled_date, preferred_date) = ? AND status IN ('$statuses') AND archived_at IS NULL AND urgency_level = ?";
+    $sql = "SELECT COUNT(*) FROM appointments WHERE COALESCE(scheduled_date, preferred_date) = ? AND status IN ('$statuses') AND archived_at IS NULL";
+    if ($urgency !== 'all') $sql .= " AND COALESCE(urgency_level, 'routine') = ?";
     if ($excludeId) $sql .= " AND appointment_id != ?";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
         error_log('Failed to prepare appointment day count: ' . $conn->error);
         throw new RuntimeException('Could not check appointment capacity.');
     }
-    if ($excludeId) $stmt->bind_param('ssi', $date, $urgency, $excludeId);
+    if ($urgency === 'all') {
+        if ($excludeId) $stmt->bind_param('si', $date, $excludeId);
+        else $stmt->bind_param('s', $date);
+    } elseif ($excludeId) $stmt->bind_param('ssi', $date, $urgency, $excludeId);
     else $stmt->bind_param('ss', $date, $urgency);
     if (!$stmt->execute()) {
         error_log('Failed to count appointments by day: ' . $stmt->error);
@@ -189,7 +282,7 @@ function dcvsAppointmentSlotCount($conn, $date, $time, $excludeId = 0, $urgency 
     $time = dcvsTimeKey($time) . ':00';
     $statuses = implode("','", dcvsCapacityStatuses());
     $sql = "SELECT COUNT(*) FROM appointments WHERE COALESCE(scheduled_date, preferred_date) = ? AND COALESCE(scheduled_time, preferred_time) = ? AND status IN ('$statuses') AND archived_at IS NULL";
-    if ($urgency !== 'all') $sql .= " AND urgency_level = ?";
+    if ($urgency !== 'all') $sql .= " AND COALESCE(urgency_level, 'routine') = ?";
     if ($excludeId) $sql .= " AND appointment_id != ?";
     $stmt = $conn->prepare($sql);
     if (!$stmt) {
@@ -217,7 +310,10 @@ function dcvsAppointmentSlotCount($conn, $date, $time, $excludeId = 0, $urgency 
 /** True if a slot already has an active (non-closed) appointment on it.
  *  $excludeId skips one appointment id (used when editing/approving that request). */
 function dcvsSlotHeld($conn, $date, $time, $excludeId = 0, $urgency = 'routine') {
-    $count = dcvsAppointmentSlotCount($conn, $date, $time, $excludeId, $urgency);
+    $hasProgram = dcvsDateHasActiveProgram($conn, $date);
+    if (!$hasProgram && $urgency === 'urgent') return true;
+    $countUrgency = $hasProgram ? $urgency : 'all';
+    $count = dcvsAppointmentSlotCount($conn, $date, $time, $excludeId, $countUrgency);
     if ($urgency === 'all') return $count > 0;
     $capacity = $urgency === 'urgent'
         ? 1

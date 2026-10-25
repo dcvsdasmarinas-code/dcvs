@@ -129,6 +129,12 @@ $programStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_ty
     WHERE p.status IN ('scheduled','live') AND p.end_date >= ? AND p.start_date <= ?
     GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
 $programsByDate = [];
+if (!$programStmt) {
+    error_log('Failed to prepare scheduled program availability: ' . $conn->error);
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'error' => 'Could not load program availability.']);
+    exit;
+}
 if ($programStmt) {
     $programStmt->bind_param('ss', $firstDay, $lastDay);
     if ($programStmt->execute()) {
@@ -154,9 +160,15 @@ if ($programStmt) {
         }
     } else {
         error_log('Failed to load scheduled programs: ' . $programStmt->error);
+        $programStmt->close();
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'Could not load program availability.']);
+        exit;
     }
     $programStmt->close();
 }
+
+$programDays = array_fill_keys(array_keys($programsByDate), true);
 
 echo json_encode([
     'ok' => true,
@@ -170,6 +182,7 @@ echo json_encode([
     'routineCapacity' => $routineCapacity,
     'urgentCapacity' => $urgentCapacity,
     'programs' => $programsByDate,
+    'programDays' => $programDays,
     'held' => $held,
     'locked' => $locked,
     'overrides' => $overrides,
@@ -178,5 +191,6 @@ echo json_encode([
     'maxPerSlot' => DCVS_MAX_APPOINTMENTS_PER_SLOT,
     'maxPerDay' => DCVS_MAX_APPOINTMENTS_PER_DAY,
     'maxUrgentPerDay' => DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY,
+    'maxRoutinePerProgramDay' => DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY,
 ]);
 $conn->close();

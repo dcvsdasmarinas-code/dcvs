@@ -40,6 +40,15 @@ if ($appointmentId <= 0 || !in_array($response, ['accept', 'decline'], true)) {
 
 $residentId = (int)$_SESSION['user_id'];
 dcvsExpireAppointmentRescheduleOffers($conn);
+$dateStmt = $conn->prepare("SELECT scheduled_date FROM appointments
+    WHERE appointment_id = ? AND user_id = ? AND status = 'action_needed' AND archived_at IS NULL");
+$dateStmt->bind_param('ii', $appointmentId, $residentId);
+$dateStmt->execute();
+$scheduledDate = $dateStmt->get_result()->fetch_row()[0] ?? null;
+$dateStmt->close();
+if ($response === 'accept' && $scheduledDate) {
+    dcvsLockAppointmentCapacityDates($conn, [$scheduledDate]);
+}
 $conn->begin_transaction();
 $stmt = $conn->prepare("SELECT appointment_type, urgency_level, original_schedule_date, original_schedule_time,
     scheduled_date, scheduled_time, status, reschedule_response_deadline,
@@ -61,9 +70,10 @@ if (!$appointment || $appointment['status'] !== 'action_needed'
 }
 
 if ($response === 'accept') {
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $appointment['scheduled_date'], $appointment['urgency_level'] ?: 'routine', $appointmentId);
     if (dcvsSlotHeld($conn, $appointment['scheduled_date'], $appointment['scheduled_time'], $appointmentId, $appointment['urgency_level'] ?: 'routine')
-        || dcvsAppointmentDayCount($conn, $appointment['scheduled_date'], $appointmentId, $appointment['urgency_level'] ?: 'routine')
-            >= (($appointment['urgency_level'] ?? 'routine') === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY)) {
+        || !$dailyCapacity['available']
+        || (!$dailyCapacity['has_program'] && ($appointment['urgency_level'] ?? 'routine') === 'urgent')) {
         $conn->rollback();
         http_response_code(409);
         echo json_encode(['success' => false, 'message' => 'That proposed time is no longer available. Please contact DCVS staff for help.']);

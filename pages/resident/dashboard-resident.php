@@ -847,19 +847,19 @@ $annResult = $annStmt->get_result();
 .calendar-tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#1f2937 transparent transparent transparent;}
 .calendar-date:hover .calendar-tooltip{opacity:1;visibility:visible;}
 /* Dedicated page container */
-.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;font-family:'Inter',sans-serif;}
+.bk-page{max-width:1040px;margin:0 auto;padding:24px 40px 32px;font-family:'Inter',sans-serif;}
 .bk-card2{background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);padding:28px 32px;font-family:'Inter',sans-serif;}
 @media (max-width:640px){ .bk-page{padding:16px 20px;} .bk-card2{padding:20px 18px;} }
 /* Two-column body: LEFT = calendar, RIGHT = pet/service/time */
 .bk-heading{font-family:'Inter',sans-serif;}
-.bk-heading-title{font-family:'Inter',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1;margin:0;}
-.bk-heading-sub{font-family:'Inter',sans-serif;font-size:14px;color:#71717a;line-height:1.5;margin:6px 0 0;}
+.bk-heading-title{font-family:'Inter',sans-serif;font-size:27px;font-weight:700;color:#18181b;letter-spacing:-0.025em;line-height:1.15;margin:0;}
+.bk-heading-sub{font-family:'Inter',sans-serif;font-size:16px;color:#71717a;line-height:1.5;margin:8px 0 0;}
 /* Two-column body: LEFT ~45% (calendar), RIGHT ~55% (fields) */
-.bk-body{display:grid;grid-template-columns:minmax(0,45%) minmax(0,55%);gap:40px;align-items:start;margin-top:28px;}
+.bk-body{display:grid;grid-template-columns:minmax(320px,390px) minmax(0,1fr);gap:36px;align-items:start;margin-top:28px;}
 .bk-col{min-width:0;}
 .bk-col-left{display:flex;flex-direction:column;gap:8px;}
 .bk-col-right{display:flex;flex-direction:column;gap:18px;}
-@media (max-width:720px){ .bk-body{grid-template-columns:1fr;gap:24px;} }
+@media (max-width:820px){ .bk-body{grid-template-columns:minmax(0,1fr);gap:24px;} .bk-cal-area{max-width:420px;} }
 /* Compact, professional form fields */
 .bk-dropdowns{display:flex;flex-direction:column;gap:18px;}
 .bk-field{display:flex;flex-direction:column;gap:8px;}
@@ -898,16 +898,16 @@ $annResult = $annStmt->get_result();
 .bk-cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:12px 14px 8px;}
 .bk-month-nav{display:flex;align-items:center;gap:8px;min-width:0;}
 .bk-cal-controls{display:flex;align-items:center;gap:4px;flex:none;}
-.bk-cal-title{font-family:inherit;font-size:16px;font-weight:600;color:#18181b;min-width:0;text-align:left;white-space:nowrap;}
+.bk-cal-title{font-family:inherit;font-size:17px;font-weight:700;color:#18181b;min-width:0;text-align:left;white-space:nowrap;}
 .bk-cal-btn{width:32px;height:32px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;transition:background 0.15s,color 0.15s;font-size:18px;}
 .bk-cal-btn:hover{background:#f4f4f5;color:#18181b;}
 .bk-cal-btn svg{width:18px;height:18px;}
 .bk-cal-today{border:none;background:transparent;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;padding:6px 8px;border-radius:4px;cursor:pointer;}
 .bk-cal-today:hover{background:#f4f4f5;}
-.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 14px;}
-.bk-weekdays span{text-align:center;font-size:12px;font-weight:600;color:#71717a;height:34px;line-height:34px;text-transform:uppercase;letter-spacing:.04em;}
-.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;margin:0 14px 14px;background:#e4e4e7;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden;}
-.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:1/1;max-width:none;margin:0;border:0;border-radius:0;font-family:inherit;font-size:14px;font-weight:500;color:#18181b;background:#fff;cursor:pointer;transition:background 0.12s,color 0.12s;}
+.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 16px;}
+.bk-weekdays span{text-align:center;font-size:12px;font-weight:500;color:#71717a;height:34px;line-height:34px;text-transform:none;letter-spacing:0;}
+.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:0 16px 12px;background:transparent;border:0;border-radius:0;overflow:visible;}
+.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:1/1;max-width:none;margin:0;border:0;border-radius:9px;font-family:inherit;font-size:14px;font-weight:500;color:#18181b;background:#fff;cursor:pointer;transition:background 0.12s,color 0.12s;}
 .bk-day:hover:not(:disabled){background:#f4f4f5;color:#18181b;}
 .bk-day.bk-day-today{font-weight:700;}
 .bk-day.bk-day-selected{background:#f0fdf4;color:#166534;font-weight:600;box-shadow:inset 0 0 0 2px #0e8131;}
@@ -915,21 +915,47 @@ $annResult = $annStmt->get_result();
 .bk-day.bk-day-dim{color:#a1a1aa;background:#f1f1f2;cursor:default;pointer-events:none;}
 .bk-day.bk-day-custom:not(.bk-day-disabled)::after{content:'';position:absolute;bottom:4px;width:4px;height:4px;border-radius:50%;background:#0e8131;}
 .bk-day.bk-day-selected.bk-day-custom::after{background:#166534;}
+.bk-day.bk-day-program:not(.bk-day-disabled)::after{content:'';position:absolute;bottom:5px;width:13px;height:3px;border-radius:999px;background:#18181b;}
+.bk-day.bk-day-selected.bk-day-program::after{background:#15803d;}
+.bk-day.bk-day-full{padding-bottom:8px;}
+.bk-day.bk-day-full::after{display:none;}
+.bk-day-full-label{position:absolute;bottom:2px;font-size:9px;font-weight:500;line-height:1;color:#71717a;}
+.bk-cal-legend{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 16px 14px;border-top:1px solid #e4e4e7;font-size:13px;color:#71717a;}
+.bk-cal-legend-item{display:flex;align-items:center;gap:7px;min-width:0;}
+.bk-cal-legend-mark{display:inline-block;flex:none;width:12px;height:12px;border-radius:3px;background:#f1f1f2;border:1px solid #e4e4e7;}
+.bk-cal-legend-mark.program{width:13px;height:3px;border:0;border-radius:999px;background:#18181b;}
+.bk-cal-legend-full{grid-column:1/-1;font-size:12px;color:#71717a;}
 /* Available Time section */
 .bk-slots-wrap{display:flex;flex-direction:column;gap:0;margin-top:4px;}
-.bk-slots-title{font-family:inherit;font-size:15px;font-weight:600;color:var(--bk-fg);margin-bottom:4px;}
-.bk-program-notice{margin:0 0 10px;color:#09090b;font-family:inherit;font-size:0.875rem;font-weight:400;line-height:1.5;}
+.bk-slots-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 12px;padding:0 0 12px;border-bottom:1px solid #e4e4e7;}
+.bk-slots-title{font-family:inherit;font-size:20px;font-weight:700;color:var(--bk-fg);margin:0;}
+.bk-slots-remaining{font-size:13px;color:#71717a;white-space:nowrap;}
+.bk-slots-remaining.full{color:#71717a;font-weight:500;}
+.bk-next-availability{margin:12px 0 0;color:#18181b;font-size:14px;line-height:1.5;}
+.bk-next-availability.program-full{padding-top:16px;border-top:1px solid #e4e4e7;}
+.bk-next-date-link{display:inline;padding:0;border:0;background:transparent;color:#0e8131;font-family:inherit;font-size:inherit;font-weight:500;text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+.bk-urgent-care-notice{margin:-4px 0 0;color:#71717a;font-size:13px;line-height:1.5;}
+.bk-urgent-care-help{margin:10px 0 0;padding-left:14px;border-left:3px solid #dc2626;color:#18181b;font-size:14px;line-height:1.55;}
+.bk-urgent-care-help p{margin:0;}
+.bk-urgent-care-help p + p{margin-top:8px;}
+.bk-urgent-care-help strong{color:#b91c1c;font-weight:600;}
+.bk-urgent-care-help a{color:inherit;text-decoration:underline;text-underline-offset:2px;}
+.bk-program-notice{margin:0 0 12px;color:#09090b;font-family:inherit;font-size:0.875rem;font-weight:400;line-height:1.5;}
 .bk-program-notice-heading{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 10px;border-radius:4px;background:#333;color:#fff;font-size:13px;font-weight:600;line-height:1.3;}
 .bk-program-notice-heading svg{width:14px;height:14px;flex:none;}
-.bk-program-notice-message{margin:0;}
+.bk-program-notice-message{margin:6px 0 0;padding-left:12px;border-left:2px solid #e4e4e7;color:#71717a;font-size:13px;line-height:1.5;}
+.bk-program-entry + .bk-program-entry{margin-top:10px;}
+.bk-program-entry-time{font-family:inherit;font-size:13px;font-weight:600;color:#18181b;}
+.bk-program-entry-name{font-family:inherit;font-size:16px;font-weight:700;color:#18181b;}
+.bk-program-entry-location{margin-top:2px;color:#71717a;font-size:14px;}
 .bk-slots-hint{font-size:13px;color:var(--bk-muted);margin-bottom:12px;line-height:1.4;}
 .bk-cal-hint{font-size:14px;color:var(--bk-muted);margin-top:2px;line-height:1.4;}
-.bk-slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.bk-slot-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
 .bk-slot-btn{width:100%;padding:12px 6px;border-radius:10px;border:1px solid var(--bk-border);background:#fff;font-family:inherit;font-size:14px;font-weight:600;color:var(--bk-fg);cursor:pointer;transition:background 0.15s,border-color 0.15s,color 0.15s;text-align:center;}
 .bk-slot-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8;color:#18181b;}
 .bk-slot-btn.bk-slot-selected{background:#18181b;color:#fff;border-color:#18181b;font-weight:700;}
 .bk-slot-btn.bk-slot-unavailable,.bk-slot-btn:disabled{color:#a1a1aa;cursor:not-allowed;background:#f8f8f8;border-color:#ececec;font-weight:500;}
-.bk-slot-none{grid-column:1 / -1;font-size:13px;color:#919aa5;padding:8px 2px;}
+@media (max-width:480px){ .bk-heading-title{font-size:23px;} .bk-slots-heading{flex-wrap:wrap;gap:4px 12px;} .bk-slots-title{font-size:19px;} .bk-cal-legend{gap:7px;} }
 /* Bottom actions */
 .bk-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:28px;padding-top:20px;border-top:1px solid #eef2f6;}
 .bk-btn-ghost{height:42px;padding:0 20px;border-radius:10px;border:1px solid #e4e4e7;background:#fff;color:#525252;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background 0.15s,border-color 0.15s;}
@@ -3828,10 +3854,13 @@ include __DIR__ . '/../../includes/portal-toast.php';
                   <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
                 <div class="bk-days" id="bkGridDates"></div>
+                <div class="bk-cal-legend">
+                  <span class="bk-cal-legend-item"><span class="bk-cal-legend-mark"></span> Closed</span>
+                  <span class="bk-cal-legend-item"><span class="bk-cal-legend-mark program"></span> Program or event, limited slots</span>
+                  <span class="bk-cal-legend-full">Full &nbsp; No slots left</span>
+                </div>
               </div>
             </div>
-            <div class="bk-cal-hint" id="bkSlotsHint">Select your preferred appointment date.</div>
-            <div id="bkNearestSlotNotice" hidden role="status" aria-live="polite" style="margin-top:6px;font-size:13px;color:#52525b;"></div>
           </div>
 
           <!-- RIGHT column: pet, service, available time -->
@@ -3867,10 +3896,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
                   <svg class="bk-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </div>
               </div>
-              <div class="bk-field">
+              <div class="bk-field" id="apptPriorityField" hidden>
                 <label class="bk-label" for="apptUrgencySelect">Appointment Priority <span class="req">*</span></label>
                 <div class="bk-select">
-                  <select id="apptUrgencySelect" name="urgency_level" required>
+                  <select id="apptUrgencySelect" name="urgency_level">
                     <option value="routine">Routine</option>
                     <option value="urgent">Urgent</option>
                   </select>
@@ -3879,9 +3908,12 @@ include __DIR__ . '/../../includes/portal-toast.php';
               </div>
             </div>
 
-            <div id="bkUrgentCareNotice" hidden style="margin:12px 0;padding:12px 14px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.5;">
-              <strong>Urgent care:</strong> For an animal bite or possible rabies exposure, go to an animal bite center or hospital immediately. Do not wait for an appointment.
-              For other urgent help, call <a href="tel:+63464321234" style="color:inherit;font-weight:700;">(046) 432-1234</a> or visit the DCVS office.
+            <div id="bkUrgentCareNotice" class="bk-urgent-care-notice" hidden>
+              <div>For pets that are injured or seriously ill.</div>
+              <div class="bk-urgent-care-help">
+                <p><strong>Bitten, or possibly exposed to rabies?</strong> Do not wait for an appointment. Go to an animal bite center or hospital now.</p>
+                <p><strong>Pet needs help right away?</strong> Call DCVS at <a href="tel:+639755583461">0975 558 3461</a> or visit the DCVS office.</p>
+              </div>
             </div>
 
             <!-- Pet info (shown once a pet is selected) -->
@@ -3898,14 +3930,16 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
             <!-- Available Time -->
             <div class="bk-slots-wrap">
-              <div class="bk-slots-title">Available Time</div>
+              <div class="bk-slots-heading">
+                <div class="bk-slots-title" id="bkSlotsTitle">Select a date</div>
+                <div class="bk-slots-remaining" id="bkSlotsRemaining"></div>
+              </div>
+              <div class="bk-slots-hint" id="bkSlotsHint" aria-live="polite"></div>
               <div id="bkProgramNotice" class="bk-program-notice" hidden>
-                <div class="bk-program-notice-heading">
-                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.25v3.5M8 5.25h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                  <span id="bkProgramNoticeTitle"></span>
-                </div>
+                <div id="bkProgramNoticeDetails"></div>
                 <p class="bk-program-notice-message" id="bkProgramNoticeMessage"></p>
               </div>
+              <div id="bkNearestSlotNotice" class="bk-next-availability" hidden role="status" aria-live="polite"></div>
               <div class="bk-slot-grid" id="bkSlots"></div>
               <div id="bkWaitlistWrap" hidden style="margin-top:10px;">
                 <button type="button" class="sd-btn sd-btn-outline" id="bkJoinWaitlist">Notify me if a slot opens</button>
@@ -8200,9 +8234,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var blockedSlots = {};
     var urgentBlockedSlots = {};
     var programEvents = {};
+    var programDays = {};
     var dateOverrides = {};
-    var maxAppointmentsPerDay = 3;
-    var maxUrgentPerDay = 2;
+    var maxAppointmentsPerDay = 5;
+    var maxRoutinePerProgramDay = 2;
+    var maxUrgentPerDay = 3;
     var availabilityError = '';
     var waitlistWrap = document.getElementById('bkWaitlistWrap');
     var waitlistButton = document.getElementById('bkJoinWaitlist');
@@ -8227,16 +8263,40 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function selectedUrgency() {
-        return urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+        return selStart && programDays[selStart] && urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+    }
+    function isProgramDay(dateKey) {
+        return !!programDays[dateKey];
+    }
+    function urgencyForDate(dateKey) {
+        return dateKey === selStart && isProgramDay(dateKey) && urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+    }
+    function updatePriorityForDate() {
+        var field = document.getElementById('apptPriorityField');
+        var hasPriority = !!(selStart && isProgramDay(selStart));
+        if (field) field.hidden = !hasPriority;
+        if (field) field.style.display = hasPriority ? '' : 'none';
+        if (urgencySelect) {
+            urgencySelect.required = hasPriority;
+            if (!hasPriority) urgencySelect.value = 'routine';
+        }
     }
     function getSlotCounts(dateKey) {
-        return selectedUrgency() === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        var urgency = urgencyForDate(dateKey);
+        if (urgency === 'urgent') return urgentSlots[dateKey] || {};
+        if (isProgramDay(dateKey)) return routineSlots[dateKey] || {};
+        var combined = {};
+        BK_SLOTS.forEach(function(time) {
+            combined[time] = (routineSlots[dateKey] || {})[time] || 0;
+            combined[time] += (urgentSlots[dateKey] || {})[time] || 0;
+        });
+        return combined;
     }
     function getSlotCapacities(dateKey) {
-        return selectedUrgency() === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
+        return urgencyForDate(dateKey) === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
     }
     function isBlocked(dateKey, time) {
-        var map = selectedUrgency() === 'urgent' ? urgentBlockedSlots : blockedSlots;
+        var map = urgencyForDate(dateKey) === 'urgent' ? urgentBlockedSlots : blockedSlots;
         return !!(map[dateKey] && map[dateKey][time]);
     }
     function matchingWaitlistEntry(dateKey) {
@@ -8265,16 +8325,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 blockedSlots = d.blocked || {};
                 urgentBlockedSlots = d.urgentBlocked || {};
                 programEvents = d.programs || {};
+                programDays = d.programDays || {};
                 dateOverrides = d.overrides || {};
-                maxAppointmentsPerDay = parseInt(d.maxPerDay, 10) || 3;
-                maxUrgentPerDay = parseInt(d.maxUrgentPerDay, 10) || 2;
+                maxAppointmentsPerDay = parseInt(d.maxPerDay, 10) || 5;
+                maxRoutinePerProgramDay = parseInt(d.maxRoutinePerProgramDay, 10) || 2;
+                maxUrgentPerDay = parseInt(d.maxUrgentPerDay, 10) || 3;
                 availabilityError = '';
             })
             .catch(function(error) {
                 availabilityError = error.message || 'Could not load appointment availability.';
                 console.error('Appointment availability request failed:', error);
                 routineSlots = {}; urgentSlots = {}; routineCapacity = {}; urgentCapacity = {};
-                blockedSlots = {}; urgentBlockedSlots = {}; programEvents = {}; dateOverrides = {};
+                blockedSlots = {}; urgentBlockedSlots = {}; programEvents = {}; programDays = {}; dateOverrides = {};
             });
     }
 
@@ -8282,9 +8344,19 @@ document.addEventListener('DOMContentLoaded', function() {
         var counts = getSlotCounts(dateKey);
         return Object.keys(counts).reduce(function(total, time) { return total + (parseInt(counts[time], 10) || 0); }, 0);
     }
+    function dayAppointmentCountForUrgency(dateKey, urgency) {
+        var counts = urgency === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        return Object.keys(counts).reduce(function(total, time) { return total + (parseInt(counts[time], 10) || 0); }, 0);
+    }
+    function programDayAppointmentCount(dateKey) {
+        return dayAppointmentCountForUrgency(dateKey, 'routine') + dayAppointmentCountForUrgency(dateKey, 'urgent');
+    }
 
     function dayOpenCount(dateKey) {
-        var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
+        var dateUrgency = urgencyForDate(dateKey);
+        var dayLimit = isProgramDay(dateKey)
+            ? (dateUrgency === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay)
+            : maxAppointmentsPerDay;
         if (dayAppointmentCount(dateKey) >= dayLimit) return 0;
         var counts = getSlotCounts(dateKey);
         var capacities = getSlotCapacities(dateKey);
@@ -8293,6 +8365,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isBlocked(dateKey, s)) return;
             var booked = counts[s] || 0;
             if (booked < (capacities[s] || 0)) open++;
+        });
+        return open;
+    }
+    function dayOpenCountForUrgency(dateKey, urgency) {
+        var dayLimit = urgency === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay;
+        if (dayAppointmentCountForUrgency(dateKey, urgency) >= dayLimit
+            || programDayAppointmentCount(dateKey) >= maxAppointmentsPerDay) return 0;
+        var counts = urgency === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        var capacities = urgency === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
+        var blocked = urgency === 'urgent' ? urgentBlockedSlots : blockedSlots;
+        var open = 0;
+        BK_SLOTS.forEach(function(time) {
+            if (!(blocked[dateKey] && blocked[dateKey][time]) && (counts[time] || 0) < (capacities[time] || 0)) open++;
         });
         return open;
     }
@@ -8358,6 +8443,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderCalendar() {
+        updatePriorityForDate();
         var year = viewDate.getFullYear();
         var month = viewDate.getMonth();
         var monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -8386,23 +8472,34 @@ document.addEventListener('DOMContentLoaded', function() {
             div.setAttribute('data-date', key);
 
             var isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-            var openCount = dayOpenCount(key);
-            var bookedCount = dayAppointmentCount(key);
+            var openCount = isProgramDay(key)
+                ? dayOpenCountForUrgency(key, 'routine') + dayOpenCountForUrgency(key, 'urgent')
+                : dayOpenCount(key);
+            var dailyCapacityReached = isProgramDay(key)
+                ? programDayAppointmentCount(key) >= maxAppointmentsPerDay
+                    || (dayAppointmentCountForUrgency(key, 'routine') >= maxRoutinePerProgramDay
+                        && dayAppointmentCountForUrgency(key, 'urgent') >= maxUrgentPerDay)
+                : dayAppointmentCount(key) >= maxAppointmentsPerDay;
             if (isPast) {
                 div.classList.add('bk-day-disabled');
                 div.disabled = true;
             }
-            var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
-            if (!isPast && openCount === 0) {
+            if (!isPast && openCount === 0 && !isClinicClosed(key)) {
               div.classList.add('bk-day-full');
-              div.title = bookedCount >= dayLimit
-                ? 'No ' + selectedUrgency() + ' slots available (' + bookedCount + '/' + dayLimit + ' daily limit)'
-                : 'No appointment times available';
+              div.title = dailyCapacityReached ? 'Daily appointment capacity is full.' : 'No appointment times are available.';
+              var fullLabel = document.createElement('span');
+              fullLabel.className = 'bk-day-full-label';
+              fullLabel.textContent = 'Full';
+              div.appendChild(fullLabel);
             }
             if (!isPast && isClinicClosed(key)) {
               div.classList.add('bk-day-disabled');
               div.disabled = true;
               div.title = 'The clinic is closed on this date';
+            }
+            if (isProgramDay(key)) {
+              div.classList.add('bk-day-program');
+              div.title = (div.title ? div.title + '. ' : '') + 'Program or event scheduled; appointment capacity is limited.';
             }
             if (key === todayIso) div.classList.add('bk-day-today');
             if (selStart !== null && key === selStart) div.classList.add('bk-day-selected');
@@ -8437,31 +8534,90 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             selStart = key;
         }
+        updatePriorityForDate();
         clearBooking();
         renderCalendar();
     }
 
     function renderSlots() {
+        var requestId = ++nearestRequestId;
         bkSlots.innerHTML = '';
         waitlistWrap.hidden = true;
         nearestSlotNotice.hidden = true;
-        nearestSlotNotice.textContent = '';
-        document.getElementById('bkProgramNotice').hidden = true;
+        nearestSlotNotice.replaceChildren();
+        nearestSlotNotice.classList.remove('program-full');
+        var slotsTitle = document.getElementById('bkSlotsTitle');
+        var slotsRemaining = document.getElementById('bkSlotsRemaining');
+        var programNotice = document.getElementById('bkProgramNotice');
+        var programDetails = document.getElementById('bkProgramNoticeDetails');
+        var programMessage = document.getElementById('bkProgramNoticeMessage');
+        bkSlots.hidden = false;
+        slotsRemaining.classList.remove('full');
+        programNotice.hidden = true;
+        programDetails.innerHTML = '';
+        programMessage.textContent = '';
         document.getElementById('bkUrgentCareNotice').hidden = selectedUrgency() !== 'urgent';
         if (selStart === null) {
-            bkSlotsHint.textContent = 'Select your preferred appointment date.';
+            slotsTitle.textContent = 'Select a date';
+            slotsRemaining.textContent = '';
+            bkSlotsHint.textContent = '';
             return;
         }
         if (availabilityError) {
+            slotsTitle.textContent = 'Availability unavailable';
+            slotsRemaining.textContent = '';
             bkSlotsHint.textContent = availabilityError + ' Please refresh the page and try again.';
             return;
         }
         var dd = new Date(selStart + 'T00:00:00');
-        bkSlotsHint.textContent = 'Available times on ' + dd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
+        slotsTitle.textContent = dd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        bkSlotsHint.textContent = '';
 
         var counts = getSlotCounts(selStart);
         var capacities = getSlotCapacities(selStart);
+        var dayLimit = isProgramDay(selStart)
+            ? (selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay)
+            : maxAppointmentsPerDay;
+        var capacityRemaining = 0;
+        BK_SLOTS.forEach(function(time) {
+            if (!isBlocked(selStart, time)) {
+                capacityRemaining += Math.max(0, (capacities[time] || 0) - (counts[time] || 0));
+            }
+        });
+        var remainingAppointments = Math.min(
+            Math.max(0, dayLimit - dayAppointmentCount(selStart)),
+            capacityRemaining,
+            isProgramDay(selStart)
+                ? Math.max(0, maxAppointmentsPerDay - programDayAppointmentCount(selStart))
+                : Math.max(0, maxAppointmentsPerDay - dayAppointmentCount(selStart))
+        );
+        var dailyLimitReached = isProgramDay(selStart)
+            ? programDayAppointmentCount(selStart) >= maxAppointmentsPerDay
+            : dayAppointmentCount(selStart) >= maxAppointmentsPerDay;
         var anyOpen = false;
+        BK_SLOTS.forEach(function(time) {
+            if (!dailyLimitReached && !isBlocked(selStart, time) && (counts[time] || 0) < (capacities[time] || 0)) anyOpen = true;
+        });
+        var bothProgramPrioritiesFull = isProgramDay(selStart)
+            && dayAppointmentCountForUrgency(selStart, 'routine') >= maxRoutinePerProgramDay
+            && dayAppointmentCountForUrgency(selStart, 'urgent') >= maxUrgentPerDay;
+        var programDailyCapacityReached = isProgramDay(selStart)
+            && programDayAppointmentCount(selStart) >= maxAppointmentsPerDay;
+        var dateIsFull = !anyOpen && (
+            isProgramDay(selStart)
+                ? bothProgramPrioritiesFull || programDailyCapacityReached
+                : dayAppointmentCount(selStart) >= maxAppointmentsPerDay
+        );
+        slotsRemaining.textContent = isProgramDay(selStart)
+            ? remainingAppointments + ' ' + selectedUrgency() + ' slot' + (remainingAppointments === 1 ? '' : 's') + ' left'
+            : remainingAppointments + ' appointment' + (remainingAppointments === 1 ? '' : 's') + ' left';
+        if (!anyOpen) {
+            slotsRemaining.textContent = dateIsFull
+                ? 'Fully booked'
+                : isProgramDay(selStart) ? 'No ' + selectedUrgency() + ' slots left' : 'No slots left';
+            slotsRemaining.classList.add('full');
+            bkSlots.hidden = true;
+        }
         BK_SLOTS.forEach(function(s) {
             var blocked = isBlocked(selStart, s);
             var booked = counts[s] || 0;
@@ -8471,14 +8627,14 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.className = 'bk-slot-btn';
             btn.setAttribute('data-date', selStart);
             btn.setAttribute('data-time', s);
-            if (blocked || booked >= capacity) {
+            if (blocked || dailyLimitReached || booked >= capacity) {
                 btn.classList.add('bk-slot-unavailable');
                 btn.textContent = fmtTime(s);
                 btn.disabled = true;
                 btn.title = blocked ? 'Clinic closed' : 'No remaining capacity';
             } else {
                 anyOpen = true;
-                btn.textContent = fmtTime(s) + (capacity > 1 ? ' · ' + (capacity - booked) + ' left' : '');
+                btn.textContent = fmtTime(s);
                 btn.addEventListener('click', function() {
                     selectTime(this.getAttribute('data-date'), this.getAttribute('data-time'));
                 });
@@ -8488,24 +8644,49 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         if (!anyOpen) {
-            var none = document.createElement('div');
-            none.className = 'bk-slot-none';
-            none.textContent = 'No ' + selectedUrgency() + ' slots are available on this day.';
-            bkSlots.appendChild(none);
-            var requestId = ++nearestRequestId;
-            fetch('includes/check_slot.php?date=' + encodeURIComponent(selStart) + '&time=09%3A00&urgency=' + encodeURIComponent(selectedUrgency()))
+            var preferredUrgency = bothProgramPrioritiesFull || programDailyCapacityReached ? 'routine' : selectedUrgency();
+            var requestedDate = selStart;
+            nearestSlotNotice.classList.toggle('program-full', isProgramDay(selStart) && dateIsFull);
+            fetch('includes/check_slot.php?date=' + encodeURIComponent(requestedDate) + '&time=09%3A00&urgency=' + encodeURIComponent(preferredUrgency))
                 .then(function(response) {
                     if (!response.ok) throw new Error('Could not find the nearest available appointment.');
                     return response.json();
                 })
                 .then(function(data) {
-                    if (requestId !== nearestRequestId || selStart === null) return;
+                    if (requestId !== nearestRequestId || selStart !== requestedDate) return;
                     if (data.nearest_slot) {
                         var nearest = data.nearest_slot.split(' ');
                         var nearestDate = new Date(nearest[0] + 'T00:00:00');
-                        nearestSlotNotice.textContent = 'Nearest available ' + selectedUrgency() + ' appointment: ' + nearestDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + fmtTime(nearest[1]) + '.';
+                        var dateLink = document.createElement('button');
+                        dateLink.type = 'button';
+                        dateLink.className = 'bk-next-date-link';
+                        dateLink.textContent = nearestDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+                        dateLink.addEventListener('click', function() {
+                            viewDate = new Date(nearestDate.getFullYear(), nearestDate.getMonth(), 1);
+                            selStart = nearest[0];
+                            if (urgencySelect) urgencySelect.value = preferredUrgency;
+                            clearBooking();
+                            fetchAvailability().then(function() {
+                                updatePriorityForDate();
+                                if (urgencySelect && preferredUrgency === 'urgent' && isProgramDay(selStart)) {
+                                    urgencySelect.value = 'urgent';
+                                }
+                                renderCalendar();
+                            });
+                        });
+                        if (bothProgramPrioritiesFull) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All ' + maxUrgentPerDay + ' urgent and ' + maxRoutinePerProgramDay + ' routine slots are taken for this day. Next day with routine slots: '));
+                        } else if (programDailyCapacityReached) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All appointments are taken for this day. Next day with routine slots: '));
+                        } else if (dateIsFull && !isProgramDay(requestedDate)) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All times are taken for this day. Next day with open times: '));
+                        } else {
+                            nearestSlotNotice.appendChild(document.createTextNode('No ' + preferredUrgency + ' slots are left for this day. Next day with ' + preferredUrgency + ' slots: '));
+                        }
+                        nearestSlotNotice.appendChild(dateLink);
+                        nearestSlotNotice.appendChild(document.createTextNode('.'));
                     } else {
-                        nearestSlotNotice.textContent = 'No available appointment found in the next 90 days. ' + (selectedUrgency() === 'urgent' ? 'Call (046) 432-1234 or visit the DCVS office for urgent assistance.' : 'Please join the waitlist or contact the DCVS office.');
+                        nearestSlotNotice.textContent = 'No available appointment found in the next 90 days. ' + (preferredUrgency === 'urgent' ? 'Call 0975 558 3461 or visit the DCVS office for urgent assistance.' : 'Please join the waitlist or contact the DCVS office.');
                     }
                     nearestSlotNotice.hidden = false;
                 })
@@ -8518,8 +8699,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         var events = programEvents[selStart] || [];
         if (events.length) {
-            var notice = document.getElementById('bkProgramNotice');
-            var programDescriptions = events.map(function(event) {
+            events.forEach(function(event) {
                 var programName = String(event.program_name || 'Program')
                     .toLowerCase()
                     .replace(/\b[a-z]/g, function(letter) { return letter.toUpperCase(); });
@@ -8527,17 +8707,27 @@ document.addEventListener('DOMContentLoaded', function() {
                 var time = event.start_time && event.end_time
                     ? fmtTime(event.start_time) + ' to ' + fmtTime(event.end_time)
                     : '';
-                var description = 'A ' + programName + ' is scheduled in ' + location + (time ? ', from ' + time : '') + '.';
-                return description;
+                var entry = document.createElement('div');
+                entry.className = 'bk-program-entry';
+                if (time) {
+                    var timeElement = document.createElement('div');
+                    timeElement.className = 'bk-program-entry-time';
+                    timeElement.textContent = time;
+                    entry.appendChild(timeElement);
+                }
+                var nameElement = document.createElement('div');
+                nameElement.className = 'bk-program-entry-name';
+                nameElement.textContent = programName;
+                entry.appendChild(nameElement);
+                var locationElement = document.createElement('div');
+                locationElement.className = 'bk-program-entry-location';
+                locationElement.textContent = location;
+                entry.appendChild(locationElement);
+                programDetails.appendChild(entry);
             });
-            programDescriptions.push('You can still book an available appointment slot. If the program is held at the clinic, just check in with the staff when you arrive.');
-            var noticeProgramName = events.length === 1
-                ? String(events[0].program_name || 'Program').toLowerCase().replace(/\b[a-z]/g, function(letter) { return letter.toUpperCase(); })
-                : 'Program';
-            document.getElementById('bkProgramNoticeTitle').textContent =
-                noticeProgramName + ' Notice';
-            document.getElementById('bkProgramNoticeMessage').textContent = programDescriptions.join(' ');
-            notice.hidden = false;
+            programMessage.textContent = 'You can still book. Appointments are limited to up to ' + maxUrgentPerDay + ' urgent and '
+                + maxRoutinePerProgramDay + ' routine slots on this day. If the program is held at the clinic, check in with staff when you arrive.';
+            programNotice.hidden = false;
         }
         if (!anyOpen && typeSelect && typeSelect.value && document.getElementById('petSelect').value
             && (selectedUrgency() === 'routine' || ['vaccination', 'checkup', 'deworming'].indexOf(typeSelect.value) !== -1)) {
@@ -8594,7 +8784,9 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('cfPet').value = petSel ? petSel.value : '';
         document.getElementById('cfType').value = typeVal;
         document.getElementById('cfUrgency').value = selectedUrgency();
-        document.getElementById('bkDetailUrgency').textContent = selectedUrgency() === 'urgent' ? 'Urgent' : 'Routine';
+        document.getElementById('bkDetailUrgency').textContent = !isProgramDay(chosenDate)
+            ? 'Standard appointment'
+            : (selectedUrgency() === 'urgent' ? 'Urgent' : 'Routine');
         document.getElementById('apptDate').value = chosenDate;
         document.getElementById('apptTime').value = selectedTime;
         // Open the Confirm Booking dialog
@@ -8687,6 +8879,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function resetSelection() {
         selStart = null;
+        updatePriorityForDate();
         clearBooking();
     }
 
@@ -8703,6 +8896,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (urgencySelect) urgencySelect.value = bookingPrefill.urgency_level;
                 updatePetProfile();
                 fetchAvailability().then(function() {
+                    updatePriorityForDate();
                     renderCalendar();
                     if (bookingPrefill.preferred_time) {
                         var counts = getSlotCounts(bookingPrefill.preferred_date);

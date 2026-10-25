@@ -26,6 +26,9 @@ $endDate = $_GET['end_date'] ?? '';
 $startTime = $_GET['start_time'] ?? '';
 $endTime = $_GET['end_time'] ?? '';
 $programId = (int)($_GET['program_id'] ?? 0);
+$barangayIds = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_GET['barangay_ids'] ?? ''))), static function ($id) {
+    return $id > 0;
+})));
 $isValidDate = static function ($date) {
     return preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
         && checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4));
@@ -41,7 +44,7 @@ if (!$isValidDate($startDate) || !$isValidDate($endDate) || $startDate > $endDat
 }
 
 $appointments = dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $programId, $startTime, $endTime);
-$reports = dcvsProgramReportWarnings($conn, $startDate, $endDate);
+$reports = dcvsProgramReportWarnings($conn, $startDate, $endDate, $barangayIds);
 $scheduleUnchanged = false;
 if ($programId > 0) {
     $programStmt = $conn->prepare("SELECT start_date, end_date, program_start_time, program_end_time FROM programs WHERE program_id = ?");

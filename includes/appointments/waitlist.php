@@ -65,11 +65,12 @@ function dcvsNotifyWaitlistForSlot($conn, $date, $time, $service = null, $urgenc
     $slotAvailable = $urgency === 'urgent'
         ? dcvsUrgentSlotAvailable($conn, $date, $time)
         : dcvsClinicSlotAvailable($conn, $date, $time) && dcvsRoutineSlotCapacity($conn, $date, $time) > 0;
-    $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
     $slotLimit = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $time);
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $date, $urgency);
     if (!$slotAvailable
-        || dcvsAppointmentDayCount($conn, $date, 0, $urgency) >= $dailyLimit
-        || dcvsAppointmentSlotCount($conn, $date, $time, 0, $urgency) >= $slotLimit) {
+        || !$dailyCapacity['available']
+        || (!$dailyCapacity['has_program'] && $urgency === 'urgent')
+        || dcvsAppointmentSlotCount($conn, $date, $time, 0, $dailyCapacity['has_program'] ? $urgency : 'all') >= $slotLimit) {
         return false;
     }
 

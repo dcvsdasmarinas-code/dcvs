@@ -67,6 +67,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $urgency = $appt['urgency_level'] ?: 'routine';
+    try {
+        dcvsLockAppointmentCapacityDates($conn, [$scheduledDate]);
+    } catch (RuntimeException $error) {
+        apptRespond(false, $error->getMessage());
+    }
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $scheduledDate, $urgency, $appointmentId);
+    if (!$dailyCapacity['has_program'] && $urgency === 'urgent') {
+        apptRespond(false, 'Urgent priority is only available on dates with a scheduled program.');
+    }
     $slotIsAvailable = $urgency === 'urgent'
         ? dcvsUrgentSlotAvailable($conn, $scheduledDate, $scheduledTime)
         : dcvsSlotAvailable($conn, $scheduledDate, $scheduledTime);
@@ -87,10 +96,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $dupStmt->close();
 
-    $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-    $dailyCount = dcvsAppointmentDayCount($conn, $scheduledDate, $appointmentId, $urgency);
+    $dailyLimit = $dailyCapacity['limit'];
+    $dailyCount = $dailyCapacity['count'];
     $slotCapacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $scheduledDate, $scheduledTime);
-    $slotCount = dcvsAppointmentSlotCount($conn, $scheduledDate, $scheduledTime, $appointmentId, $urgency);
+    $slotCount = dcvsAppointmentSlotCount($conn, $scheduledDate, $scheduledTime, $appointmentId, $dailyCapacity['has_program'] ? $urgency : 'all');
     $isFull = $dailyCount >= $dailyLimit || $slotCount >= $slotCapacity;
 
     if ($isFull && empty($appt['pet_id'])) {

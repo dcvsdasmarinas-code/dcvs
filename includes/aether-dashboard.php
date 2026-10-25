@@ -73,9 +73,32 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                     }
                     // Update DB if status changed
                     if ($dbStatus !== $row['status']) {
-                        if (!$conn->query("UPDATE programs SET status = '" . $conn->real_escape_string($dbStatus) . "' WHERE program_id = " . (int)$row['program_id'])) {
+                        $statusAllowed = true;
+                        $wasActive = in_array($row['status'], ['scheduled', 'live'], true);
+                        $willBeActive = in_array($dbStatus, ['scheduled', 'live'], true);
+                        if ($wasActive !== $willBeActive) {
+                            try {
+                                $capacityConflicts = dcvsProgramCapacityTransitionConflicts(
+                                    $conn,
+                                    (int)$row['program_id'],
+                                    $row['start_date'],
+                                    $row['end_date'],
+                                    $willBeActive
+                                );
+                                if ($capacityConflicts) {
+                                    $statusAllowed = false;
+                                    $dbStatus = $row['status'];
+                                    error_log('Program status change blocked by appointment capacity conflicts for program ' . (int)$row['program_id']);
+                                }
+                            } catch (Throwable $error) {
+                                $statusAllowed = false;
+                                $dbStatus = $row['status'];
+                                error_log('Could not validate program status capacity transition for program ' . (int)$row['program_id'] . ': ' . $error->getMessage());
+                            }
+                        }
+                        if ($statusAllowed && !$conn->query("UPDATE programs SET status = '" . $conn->real_escape_string($dbStatus) . "' WHERE program_id = " . (int)$row['program_id'])) {
                             error_log('Failed to update program ' . (int)$row['program_id'] . ' status to ' . $dbStatus . ': ' . $conn->error);
-                        } elseif (in_array($row['status'], ['scheduled', 'live'], true) && in_array($dbStatus, ['completed', 'ended'], true)) {
+                        } elseif ($statusAllowed && $wasActive && !$willBeActive) {
                             dcvsNotifyWaitlistForDateRange($conn, $row['start_date'], $row['end_date']);
                         }
                     }
@@ -1927,14 +1950,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
             <input type="radio" name="program_conflict_choice" value="notify" id="abKeepAppointmentsChoice" style="flex:0 0 auto;">
             <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
               <strong style="display:block;color:#18181b;font-size:14px;">Keep appointments as they are</strong>
-              <span>Appointments remain unchanged.</span>
-            </span>
-          </label>
-          <label style="display:flex;align-items:center;gap:12px;padding:10px 4px;cursor:pointer;">
-            <input type="radio" name="program_conflict_choice" value="adjust_hours" id="abChangeProgramHoursChoice" style="flex:0 0 auto;">
-            <span style="display:block;font-size:13px;line-height:1.45;color:#334155;">
-              <strong style="display:block;color:#18181b;font-size:14px;">Change program hours</strong>
-              <span>Adjust Operating Time above. Conflicts are recalculated when the hours change.</span>
+              <span>Keep existing dates and times. New bookings remain subject to the program-day limits.</span>
             </span>
           </label>
           <input type="checkbox" name="notify_affected" id="abNotifyAffectedInput" value="1" hidden>
@@ -3588,7 +3604,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var conflictChoices = document.getElementById('abProgramConflictChoices');
     var notifyInput = document.getElementById('abNotifyAffectedInput');
     var keepChoice = document.getElementById('abKeepAppointmentsChoice');
-    var hoursChoice = document.getElementById('abChangeProgramHoursChoice');
     var rescheduleChoice = document.getElementById('abRescheduleAppointmentsChoice');
     var offersInput = document.getElementById('abRescheduleOffersJson');
     if (!start || !end || !startTime || !endTime) {
@@ -3596,7 +3611,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       if (conflictChoices) conflictChoices.hidden = true;
       if (notifyInput) notifyInput.checked = false;
       if (keepChoice) keepChoice.checked = false;
-      if (hoursChoice) hoursChoice.checked = false;
       if (rescheduleChoice) rescheduleChoice.checked = false;
       if (offersInput) offersInput.value = '[]';
       return;
@@ -3604,7 +3618,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
     var requestId = ++abConflictRequest;
     if (keepChoice) keepChoice.checked = false;
-    if (hoursChoice) hoursChoice.checked = false;
     if (rescheduleChoice) rescheduleChoice.checked = false;
     if (notifyInput) notifyInput.checked = false;
     if (offersInput) offersInput.value = '[]';
@@ -3620,6 +3633,8 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
       end_time: endTime
     });
     if (programId && programId.value) params.set('program_id', programId.value);
+    var selectedBarangayIds = Object.keys(abSelectedBrgys);
+    if (selectedBarangayIds.length) params.set('barangay_ids', selectedBarangayIds.join(','));
 
     fetch(window.dcvsStaffUrl('program-conflicts.php') + '?' + params.toString())
       .then(function(response) { return response.json(); })
@@ -3654,12 +3669,7 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
           var context = document.createElement('p');
           context.style.cssText = 'margin:4px 0 10px;color:#334155;';
-          var remainingRoutineCapacity = appointments.reduce(function(minimum, item) {
-            return Math.min(minimum, Number(item.slot_capacity_after) || 0);
-          }, Number.POSITIVE_INFINITY);
-          context.textContent = 'This program is from ' + formatProgramTime(startTime) + ' to ' + formatProgramTime(endTime) + ' on '
-            + formatProgramDate(start) + ' to ' + formatProgramDate(end) + ', leaving '
-            + remainingRoutineCapacity + ' for routine appointments at the affected times.';
+          context.textContent = 'Program days allow up to 2 routine and 3 urgent appointments each. These bookings exceed a daily limit. Existing appointments stay booked unless you choose to reschedule them.';
           summary.appendChild(context);
 
           var grouped = {};
@@ -3754,12 +3764,11 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
           summary.style.color = reports.length ? '#92400e' : '#166534';
           summary.style.borderColor = reports.length ? '#fde68a' : '#bbf7d0';
           var clear = document.createElement('div');
-          clear.textContent = reports.length ? 'No appointment staffing conflicts found.' : 'No appointment or report conflicts found.';
+          clear.textContent = reports.length ? 'No appointments exceed the daily capacity limits.' : 'No appointments exceed daily capacity limits or reports fall within this date range.';
           summary.appendChild(clear);
           if (conflictChoices) conflictChoices.hidden = true;
           if (notifyInput) notifyInput.checked = false;
           if (keepChoice) keepChoice.checked = false;
-          if (hoursChoice) hoursChoice.checked = false;
           if (rescheduleChoice) rescheduleChoice.checked = false;
           if (offersInput) offersInput.value = '[]';
         }
@@ -3831,7 +3840,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
   if (programForm) {
     var keepAppointmentsChoice = document.getElementById('abKeepAppointmentsChoice');
-    var changeProgramHoursChoice = document.getElementById('abChangeProgramHoursChoice');
     var rescheduleAppointmentsChoice = document.getElementById('abRescheduleAppointmentsChoice');
     var notifyAffectedInput = document.getElementById('abNotifyAffectedInput');
     if (keepAppointmentsChoice) {
@@ -3841,18 +3849,6 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     }
     if (rescheduleAppointmentsChoice) {
       rescheduleAppointmentsChoice.addEventListener('change', syncProgramRescheduleOffers);
-    }
-    if (changeProgramHoursChoice) {
-      changeProgramHoursChoice.addEventListener('change', function() {
-        if (!changeProgramHoursChoice.checked) return;
-        if (notifyAffectedInput) notifyAffectedInput.checked = false;
-        var startTimeControl = document.getElementById('abTimeStart');
-        if (startTimeControl) {
-          startTimeControl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          startTimeControl.focus();
-          if (typeof startTimeControl.showPicker === 'function') startTimeControl.showPicker();
-        }
-      });
     }
     programForm.addEventListener('input', aethSaveProgramDraft);
     programForm.addEventListener('change', aethSaveProgramDraft);

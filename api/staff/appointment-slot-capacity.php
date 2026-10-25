@@ -48,9 +48,10 @@ if (!$appointment || $appointment['status'] !== 'pending') {
 }
 
 $urgency = $appointment['urgency_level'] ?: 'routine';
-$dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-$dailyCount = dcvsAppointmentDayCount($conn, $date, $appointmentId, $urgency);
-$slotCount = dcvsAppointmentSlotCount($conn, $date, $time, $appointmentId, $urgency);
+$dailyCapacity = dcvsAppointmentDailyCapacity($conn, $date, $urgency, $appointmentId);
+$dailyLimit = $dailyCapacity['limit'];
+$dailyCount = $dailyCapacity['count'];
+$slotCount = dcvsAppointmentSlotCount($conn, $date, $time, $appointmentId, $dailyCapacity['has_program'] ? $urgency : 'all');
 $slotCapacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $time);
 $slotIsOpen = dcvsIsStandardTime($time)
     && ($urgency === 'urgent'
@@ -70,16 +71,18 @@ $duplicate->close();
 $isPast = strtotime($date . ' ' . $time) <= time();
 $isFull = $dailyCount >= $dailyLimit || $slotCount >= $slotCapacity;
 $canSchedule = !$isPast && $slotIsOpen && !$hasConflict && !$isFull;
+if (!$dailyCapacity['has_program'] && $urgency === 'urgent') $canSchedule = false;
 
 echo json_encode([
     'success' => true,
     'urgency' => $urgency,
+    'program_day' => $dailyCapacity['has_program'],
     'daily_count' => $dailyCount,
     'daily_limit' => $dailyLimit,
     'slot_count' => $slotCount,
     'slot_capacity' => $slotCapacity,
     'slot_open' => $slotIsOpen,
-    'full' => $isFull,
+    'full' => $isFull || ($urgency === 'urgent' && !$dailyCapacity['has_program']),
     'conflict' => $hasConflict,
     'past' => $isPast,
     'can_schedule' => $canSchedule,

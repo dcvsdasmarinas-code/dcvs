@@ -72,6 +72,13 @@ function dcvsValidateAppointmentRescheduleOffers($conn, array $conflicts, $offer
     $conflictIds = array_map(function ($appointment) {
         return (int)$appointment['appointment_id'];
     }, $conflicts);
+    $urgencyById = [];
+    $lockDates = [];
+    foreach ($conflicts as $appointment) {
+        $id = (int)$appointment['appointment_id'];
+        $urgencyById[$id] = ($appointment['urgency_level'] ?? 'routine') === 'urgent' ? 'urgent' : 'routine';
+        $lockDates[] = $appointment['schedule_date'] ?? $appointment['preferred_date'] ?? '';
+    }
     $offersById = [];
     foreach ($offers as $offer) {
         $id = (int)($offer['appointment_id'] ?? 0);
@@ -85,8 +92,10 @@ function dcvsValidateAppointmentRescheduleOffers($conn, array $conflicts, $offer
             $errorMessage = 'Each affected appointment needs a valid future date and available appointment time.';
             return false;
         }
-        $offersById[$id] = ['date' => $date, 'time' => dcvsTimeKey($time)];
+        $offersById[$id] = ['date' => $date, 'time' => dcvsTimeKey($time), 'urgency' => $urgencyById[$id] ?? 'routine'];
+        $lockDates[] = $date;
     }
+    dcvsLockAppointmentCapacityDates($conn, $lockDates);
     sort($conflictIds);
     $offerIds = array_keys($offersById);
     sort($offerIds);
@@ -100,17 +109,18 @@ function dcvsValidateAppointmentRescheduleOffers($conn, array $conflicts, $offer
     $groups = [];
     $dailyProposalCounts = [];
     foreach ($offersById as $id => $offer) {
-        $key = $offer['date'] . ' ' . $offer['time'];
-        $groups[$key] = $groups[$key] ?? ['date' => $offer['date'], 'time' => $offer['time'], 'count' => 0];
+        $key = $offer['date'] . ' ' . $offer['time'] . ' ' . $offer['urgency'];
+        $groups[$key] = $groups[$key] ?? ['date' => $offer['date'], 'time' => $offer['time'], 'urgency' => $offer['urgency'], 'count' => 0];
         $groups[$key]['count']++;
-        $dailyProposalCounts[$offer['date']] = ($dailyProposalCounts[$offer['date']] ?? 0) + 1;
+        $dailyProposalCounts[$offer['date']][$offer['urgency']] = ($dailyProposalCounts[$offer['date']][$offer['urgency']] ?? 0) + 1;
     }
 
     foreach ($groups as $group) {
         $date = $group['date'];
         $time = $group['time'] . ':00';
         $slotStmt = $conn->prepare("SELECT COUNT(*) AS total,
-                SUM(CASE WHEN urgency_level = 'routine' THEN 1 ELSE 0 END) AS routine_count
+                SUM(CASE WHEN urgency_level = 'routine' THEN 1 ELSE 0 END) AS routine_count,
+                SUM(CASE WHEN urgency_level = 'urgent' THEN 1 ELSE 0 END) AS urgent_count
             FROM appointments
             WHERE COALESCE(scheduled_date, preferred_date) = ?
               AND COALESCE(scheduled_time, preferred_time) = ?
@@ -128,19 +138,22 @@ function dcvsValidateAppointmentRescheduleOffers($conn, array $conflicts, $offer
         }
         $counts = $slotStmt->get_result()->fetch_assoc();
         $slotStmt->close();
-        $capacity = dcvsRoutineSlotCapacity($conn, $date, substr($time, 0, 5));
-        if ((int)$counts['routine_count'] + $group['count'] > $capacity) {
-            $errorMessage = 'One or more proposed times do not have enough routine appointment capacity.';
+        $hasProgram = dcvsDateHasActiveProgram($conn, $date);
+        $urgency = $group['urgency'];
+        $slotCount = (int)$counts[$hasProgram ? $urgency . '_count' : 'total'];
+        $capacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, substr($time, 0, 5));
+        if ((!$hasProgram && $urgency === 'urgent') || $slotCount + $group['count'] > $capacity) {
+            $errorMessage = 'One or more proposed times do not have enough appointment capacity.';
             return false;
         }
 
-        $dayStmt = $conn->prepare("SELECT COUNT(*) AS total
+        $dayStmt = $conn->prepare("SELECT urgency_level, COUNT(*) AS total
             FROM appointments
             WHERE COALESCE(scheduled_date, preferred_date) = ?
-              AND urgency_level = 'routine'
               AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
               AND archived_at IS NULL
-              AND appointment_id NOT IN ($affectedPlaceholders)");
+              AND appointment_id NOT IN ($affectedPlaceholders)
+            GROUP BY urgency_level");
         if (!$dayStmt) {
             throw new RuntimeException('Could not validate proposed appointment daily capacity.');
         }
@@ -150,9 +163,19 @@ function dcvsValidateAppointmentRescheduleOffers($conn, array $conflicts, $offer
             $dayStmt->close();
             throw new RuntimeException('Could not validate proposed appointment daily capacity.');
         }
-        $dailyCount = (int)$dayStmt->get_result()->fetch_assoc()['total'];
+        $dailyCounts = ['routine' => 0, 'urgent' => 0];
+        $dailyResult = $dayStmt->get_result();
+        while ($row = $dailyResult->fetch_assoc()) $dailyCounts[$row['urgency_level'] ?? 'routine'] = (int)$row['total'];
         $dayStmt->close();
-        if ($dailyCount + $dailyProposalCounts[$date] > DCVS_MAX_APPOINTMENTS_PER_DAY) {
+        if ($hasProgram) {
+            $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY;
+            $dailyCount = $dailyCounts[$urgency] + ($dailyProposalCounts[$date][$urgency] ?? 0);
+        } else {
+            $dailyLimit = DCVS_MAX_APPOINTMENTS_PER_DAY;
+            $dailyCount = $dailyCounts['routine'] + $dailyCounts['urgent']
+                + ($dailyProposalCounts[$date]['routine'] ?? 0) + ($dailyProposalCounts[$date]['urgent'] ?? 0);
+        }
+        if ($dailyCount > $dailyLimit) {
             $errorMessage = 'One or more proposed dates exceed the daily routine appointment limit.';
             return false;
         }

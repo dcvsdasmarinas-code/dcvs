@@ -965,10 +965,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     $targetReach = intval($_POST['target_reach'] ?? 0);
     $dogsTarget  = intval($_POST['dogs_target'] ?? 0);
     $catsTarget  = intval($_POST['cats_target'] ?? 0);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)
+        && checkdate((int)substr($startDate, 5, 2), (int)substr($startDate, 8, 2), (int)substr($startDate, 0, 4))
+        && checkdate((int)substr($endDate, 5, 2), (int)substr($endDate, 8, 2), (int)substr($endDate, 0, 4))
+        && $startDate <= $endDate) {
+      try {
+        dcvsLockAppointmentCapacityDates($conn, [$startDate, $endDate]);
+      } catch (RuntimeException $error) {
+        $_SESSION['program_error'] = $error->getMessage();
+        header('Location: dashboard-staff.php#analytics');
+        exit;
+      }
+    }
     $appointmentConflicts = (!empty($startDate) && !empty($endDate) && !empty($programStartTime) && !empty($programEndTime))
         ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, 0, $programStartTime, $programEndTime)
         : [];
-    $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
+    $reportWarnings = (!empty($startDate) && !empty($endDate) && is_array($barangayIds)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate, $barangayIds) : [];
     $rescheduleOffers = null;
     $rescheduleOffersError = '';
     if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -987,7 +999,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_program'])) {
     } elseif (!preg_match('/^\d{2}:\d{2}$/', $programStartTime) || !preg_match('/^\d{2}:\d{2}$/', $programEndTime) || $programStartTime >= $programEndTime) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
     } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
-      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
+      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the daily capacity limits. Choose how to handle the affected appointments.";
     } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
       $_SESSION['program_error'] = $rescheduleOffersError;
     } elseif (!in_array($progType, $validTypes)) {
@@ -1101,10 +1113,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
       $existingProgram = $existingProgramStmt->get_result()->fetch_assoc();
       $existingProgramStmt->close();
     }
+    if ($existingProgram && preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)
+        && checkdate((int)substr($startDate, 5, 2), (int)substr($startDate, 8, 2), (int)substr($startDate, 0, 4))
+        && checkdate((int)substr($endDate, 5, 2), (int)substr($endDate, 8, 2), (int)substr($endDate, 0, 4))
+        && $startDate <= $endDate) {
+      try {
+        dcvsLockAppointmentCapacityDates($conn, [$existingProgram['start_date'], $existingProgram['end_date'], $startDate, $endDate]);
+      } catch (RuntimeException $error) {
+        $_SESSION['program_error'] = $error->getMessage();
+        header('Location: dashboard-staff.php#analytics');
+        exit;
+      }
+    }
     $appointmentConflicts = ($existingProgram && !empty($startDate) && !empty($endDate) && !empty($programStartTime) && !empty($programEndTime))
         ? dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $progId, $programStartTime, $programEndTime)
         : [];
-    $reportWarnings = (!empty($startDate) && !empty($endDate)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate) : [];
+    $reportWarnings = (!empty($startDate) && !empty($endDate) && is_array($barangayIds)) ? dcvsProgramReportWarnings($conn, $startDate, $endDate, $barangayIds) : [];
     $rescheduleOffers = null;
     $rescheduleOffersError = '';
     if ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
@@ -1124,7 +1148,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_program'])) {
     } elseif (!preg_match('/^\d{2}:\d{2}$/', $programStartTime) || !preg_match('/^\d{2}:\d{2}$/', $programEndTime) || $programStartTime >= $programEndTime) {
       $_SESSION['program_error'] = "Enter a valid program start and end time.";
     } elseif (!empty($appointmentConflicts) && (!$notifyAffected || !in_array($conflictChoice, ['reschedule', 'notify'], true))) {
-      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the remaining staff capacity. Choose how to handle the affected appointments.";
+      $_SESSION['program_error'] = count($appointmentConflicts) . " appointment(s) would exceed the daily capacity limits. Choose how to handle the affected appointments.";
     } elseif ($conflictChoice === 'reschedule' && !$appointmentConflicts) {
       $_SESSION['program_error'] = $rescheduleOffersError;
     } elseif (!in_array($progType, $validTypes)) {
@@ -1246,7 +1270,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pause_program'])) {
         $rangeStmt->close();
         $pauseStmt = $conn->prepare("UPDATE programs SET status = 'paused' WHERE program_id = ?");
         $pauseStmt->bind_param('i', $progId);
-        if ($pauseStmt->execute()) {
+        $capacityConflicts = $programRange
+            ? dcvsProgramCapacityTransitionConflicts($conn, $progId, $programRange['start_date'], $programRange['end_date'], false)
+            : [];
+        if ($capacityConflicts) {
+            $_SESSION['program_error'] = "Program cannot be paused because its dates would exceed the five-appointment daily limit. Reschedule or cancel the affected appointments first.";
+        } elseif ($pauseStmt->execute()) {
             $_SESSION['program_success'] = "Program paused.";
             if ($programRange) dcvsNotifyWaitlistForDateRange($conn, $programRange['start_date'], $programRange['end_date']);
         } else {
@@ -1268,12 +1297,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resume_program'])) {
     $programStmt->execute();
     $program = $programStmt->get_result()->fetch_assoc();
     $programStmt->close();
+    $resumeLockError = null;
+    if ($program) {
+      try {
+        dcvsLockAppointmentCapacityDates($conn, [$program['start_date'], $program['end_date']]);
+      } catch (RuntimeException $error) {
+        $resumeLockError = $error->getMessage();
+      }
+    }
     if (!$program) {
       $_SESSION['program_error'] = "Paused program not found.";
-    } elseif (dcvsProgramAppointmentConflicts($conn, $program['start_date'], $program['end_date'])) {
-      $_SESSION['program_error'] = "Program cannot resume because active appointments overlap its dates. Reschedule or cancel those appointments first.";
+    } elseif ($resumeLockError !== null) {
+      $_SESSION['program_error'] = $resumeLockError;
+    } elseif (dcvsProgramAppointmentConflicts($conn, $program['start_date'], $program['end_date'], $progId, '09:00', '15:00', true)) {
+      $_SESSION['program_error'] = "Program cannot resume because its dates would exceed daily appointment capacity. Reschedule or cancel the affected appointments first.";
     } else {
-      $reportWarnings = dcvsProgramReportWarnings($conn, $program['start_date'], $program['end_date']);
+      $barangayStmt = $conn->prepare("SELECT barangay_id FROM program_barangays WHERE program_id = ?");
+      $barangayStmt->bind_param('i', $progId);
+      $barangayStmt->execute();
+      $barangayResult = $barangayStmt->get_result();
+      $programBarangayIds = [];
+      while ($barangay = $barangayResult->fetch_assoc()) $programBarangayIds[] = (int)$barangay['barangay_id'];
+      $barangayStmt->close();
+      $reportWarnings = dcvsProgramReportWarnings($conn, $program['start_date'], $program['end_date'], $programBarangayIds);
       $resumeStmt = $conn->prepare("UPDATE programs SET status = 'live' WHERE program_id = ? AND status = 'paused'");
       $resumeStmt->bind_param('i', $progId);
       $resumeStmt->execute();
@@ -1297,7 +1343,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_program'])) {
         $rangeStmt->close();
         $cancelStmt = $conn->prepare("UPDATE programs SET status = 'cancelled' WHERE program_id = ?");
         $cancelStmt->bind_param('i', $progId);
-        if ($cancelStmt->execute()) {
+        $capacityConflicts = $programRange
+            ? dcvsProgramCapacityTransitionConflicts($conn, $progId, $programRange['start_date'], $programRange['end_date'], false)
+            : [];
+        if ($capacityConflicts) {
+            $_SESSION['program_error'] = "Program cannot be cancelled because its dates would exceed the five-appointment daily limit. Reschedule or cancel the affected appointments first.";
+        } elseif ($cancelStmt->execute()) {
             $_SESSION['program_success'] = "Program cancelled.";
             if ($programRange) dcvsNotifyWaitlistForDateRange($conn, $programRange['start_date'], $programRange['end_date']);
         } else {
@@ -1314,7 +1365,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_program'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_completed'])) {
     $progId = intval($_POST['program_id'] ?? 0);
     if ($progId > 0) {
-        $rangeStmt = $conn->prepare("SELECT start_date, end_date, target_reach, (SELECT COALESCE(SUM(dogs_served + cats_served), 0) FROM program_progress WHERE program_id = programs.program_id) AS reached FROM programs WHERE program_id = ?");
+        $rangeStmt = $conn->prepare("SELECT start_date, end_date, status, target_reach, (SELECT COALESCE(SUM(dogs_served + cats_served), 0) FROM program_progress WHERE program_id = programs.program_id) AS reached FROM programs WHERE program_id = ?");
         $rangeStmt->bind_param('i', $progId);
         $rangeStmt->execute();
         $programRange = $rangeStmt->get_result()->fetch_assoc();
@@ -1323,6 +1374,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mark_completed'])) {
             $_SESSION['program_error'] = "Program not found.";
         } elseif ((int)$programRange['target_reach'] > 0 && (int)$programRange['reached'] < (int)$programRange['target_reach']) {
             $_SESSION['program_error'] = "The program cannot be marked completed until its target reach is met.";
+        } elseif (dcvsProgramCapacityTransitionConflicts($conn, $progId, $programRange['start_date'], $programRange['end_date'], false)) {
+            $_SESSION['program_error'] = "Program cannot be marked completed because its dates would exceed the five-appointment daily limit. Reschedule or cancel the affected appointments first.";
         } else {
             $completeStmt = $conn->prepare("UPDATE programs SET status = 'completed' WHERE program_id = ?");
             if ($completeStmt) {
@@ -1356,7 +1409,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['archive_program'])) {
         $rangeStmt->close();
         $archiveStmt = $conn->prepare("UPDATE programs SET status = 'archived' WHERE program_id = ?");
         $archiveStmt->bind_param('i', $progId);
-        if ($archiveStmt->execute()) {
+        $capacityConflicts = $programRange
+            ? dcvsProgramCapacityTransitionConflicts($conn, $progId, $programRange['start_date'], $programRange['end_date'], false)
+            : [];
+        if ($capacityConflicts) {
+            $_SESSION['program_error'] = "Program cannot be archived because its dates would exceed the five-appointment daily limit. Reschedule or cancel the affected appointments first.";
+        } elseif ($archiveStmt->execute()) {
             $_SESSION['program_success'] = "Program archived.";
             if ($programRange) dcvsNotifyWaitlistForDateRange($conn, $programRange['start_date'], $programRange['end_date']);
         } else {

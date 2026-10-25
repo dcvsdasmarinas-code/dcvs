@@ -87,6 +87,17 @@ if ($action === 'approve') {
     $urgency = $appointment['urgency_level'] ?: 'routine';
     $date = $appointment['preferred_date'];
     $time = substr($appointment['preferred_time'], 0, 5);
+    try {
+        dcvsLockAppointmentCapacityDates($conn, [$date]);
+    } catch (RuntimeException $error) {
+        echo json_encode(['success' => false, 'message' => $error->getMessage()]);
+        exit;
+    }
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $date, $urgency, (int)$appointment['appointment_id']);
+    if (!$dailyCapacity['has_program'] && $urgency === 'urgent') {
+        echo json_encode(['success' => false, 'message' => 'Urgent priority is only available on dates with a scheduled program.']);
+        exit;
+    }
     if (!dcvsIsStandardTime($time) || strtotime($date . ' ' . $time) <= time()) {
         echo json_encode(['success' => false, 'message' => 'The requested appointment time has passed or is invalid.']);
         exit;
@@ -111,10 +122,10 @@ if ($action === 'approve') {
         echo json_encode(['success' => false, 'message' => 'This resident already has another appointment at the requested date and time.']);
         exit;
     }
-    $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-    $dailyFull = dcvsAppointmentDayCount($conn, $date, $appointment['appointment_id'], $urgency) >= $dailyLimit;
+    $dailyFull = !$dailyCapacity['available'];
     $slotCapacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $time);
-    $slotFull = dcvsAppointmentSlotCount($conn, $date, $time, $appointment['appointment_id'], $urgency) >= $slotCapacity;
+    $slotCountUrgency = $dailyCapacity['has_program'] ? $urgency : 'all';
+    $slotFull = dcvsAppointmentSlotCount($conn, $date, $time, $appointment['appointment_id'], $slotCountUrgency) >= $slotCapacity;
     $nextStatus = 'scheduled';
     if ($dailyFull || $slotFull) {
         if (empty($appointment['pet_id'])) {
@@ -251,6 +262,16 @@ if ($action === 'reschedule') {
         echo json_encode(['success' => false, 'message' => 'Appointment(s) not found.']);
         exit;
     }
+    $lockDates = [$date];
+    foreach ($rows as $row) {
+        $lockDates[] = $row['scheduled_date'] ?: $row['preferred_date'];
+    }
+    try {
+        dcvsLockAppointmentCapacityDates($conn, $lockDates);
+    } catch (RuntimeException $error) {
+        echo json_encode(['success' => false, 'message' => $error->getMessage()]);
+        exit;
+    }
 
     $reschedulableStatuses = ['pending', 'approved', 'scheduled', 'rescheduled'];
     if (count($rows) !== count($ids) || count(array_filter($rows, function ($row) use ($reschedulableStatuses) {
@@ -290,9 +311,17 @@ if ($action === 'reschedule') {
             ? dcvsUrgentSlotAvailable($conn, $date, $timeKey)
             : dcvsSlotAvailable($conn, $date, $timeKey);
         $slotLimit = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $timeKey);
-        $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-        if (!$open || $slotCounts[$urgency] + $targetCount > $slotLimit
-            || $dailyCounts[$urgency] + $targetCount > $dailyLimit) {
+        $hasProgram = dcvsDateHasActiveProgram($conn, $date);
+        $dailyLimit = $hasProgram
+            ? ($urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY)
+            : DCVS_MAX_APPOINTMENTS_PER_DAY;
+        $dayCount = $hasProgram
+            ? $dailyCounts[$urgency]
+            : $dailyCounts['routine'] + $dailyCounts['urgent'];
+        $isInvalidUrgentDay = !$hasProgram && $urgency === 'urgent';
+        $slotCount = $hasProgram ? $slotCounts[$urgency] : $slotCounts['routine'] + $slotCounts['urgent'];
+        if (!$open || $slotCount + $targetCount > $slotLimit
+            || $dayCount + $targetCount > $dailyLimit || $isInvalidUrgentDay) {
             echo json_encode(['success' => false, 'message' => 'That date and time does not have enough ' . $urgency . ' appointment capacity for the selected residents.']);
             exit;
         }
