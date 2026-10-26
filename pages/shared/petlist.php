@@ -414,7 +414,6 @@ body {
                     </div>
                     <div class="pet-card-header">
                         <h2 class="name"><?php echo htmlspecialchars($p['name']); ?></h2>
-                        <span class="pet-card-id">DCVS-<?php echo str_pad((string)$id, 4, '0', STR_PAD_LEFT); ?></span>
                     </div>
                     <p class="pet-card-meta"><?php echo htmlspecialchars(trim(($petGender !== '' ? ucfirst($petGender) . ' ' : '') . ($petBreed !== '' ? $petBreed : 'Unknown breed') . ($petAgeDisplay !== '' ? ', ' . $petAgeDisplay : ''))); ?></p>
                     <p class="pet-card-status">Available</p>

@@ -80,6 +80,16 @@ while ($row = $bq->fetch_assoc()) {
 }
 $bq->free();
 
+$locationBarangays = [];
+$locationBarangayQuery = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
+if (!$locationBarangayQuery) {
+    throw new RuntimeException('Could not load barangays for announcement locations: ' . $conn->error);
+}
+while ($row = $locationBarangayQuery->fetch_assoc()) {
+    $locationBarangays[] = ['id' => (int)$row['barangay_id'], 'name' => $row['barangay_name']];
+}
+$locationBarangayQuery->free();
+
 $eventIds = [];
 foreach ($announcements as $announcement) {
     if ((int)($announcement['is_event'] ?? 0) === 1) $eventIds[] = (int)$announcement['announcement_id'];
@@ -1065,6 +1075,21 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       }
       #announcementModal .sd-input::placeholder{ color:#a1a1aa; }
       #announcementModal .sd-input:focus-visible{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #announcementModal .sd-location-picker{ position:relative; }
+      #announcementModal .sd-location-trigger{ display:flex; align-items:center; justify-content:space-between; gap:10px; text-align:left; cursor:pointer; }
+      #announcementModal .sd-location-trigger[aria-expanded="true"]{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #announcementModal .sd-location-trigger-label{ min-width:0; overflow:hidden; color:#18181b; text-overflow:ellipsis; white-space:nowrap; }
+      #announcementModal .sd-location-trigger-label.is-placeholder{ color:#a1a1aa; }
+      #announcementModal .sd-location-options{ position:absolute; z-index:20; top:calc(100% + 2px); left:0; right:0; max-height:min(52vh,520px); overflow:auto; padding:2px 0; border:1px solid #8a8a8a; border-radius:0; background:#fff; box-shadow:none; }
+      #announcementModal .sd-location-options[hidden]{ display:none; }
+      #announcementModal .sd-location-option{ position:relative; display:flex; align-items:center; gap:8px; min-height:26px; padding:2px 8px; border-radius:0; color:#18181b; font-size:14px; font-weight:400; cursor:pointer; }
+      #announcementModal .sd-location-option:hover{ background:#e8f0fe; }
+      #announcementModal .sd-location-option.is-selected{ background:#1a73e8; color:#fff; }
+      #announcementModal .sd-location-option:focus-within{ outline:2px solid #18181b; outline-offset:-2px; }
+      #announcementModal .sd-location-option[hidden]{ display:none; }
+      #announcementModal .sd-location-option input{ width:14px; height:14px; flex:0 0 14px; margin:0; accent-color:#1a73e8; cursor:pointer; }
+      #announcementModal .sd-location-custom{ margin:6px 6px 0; padding-top:8px; border-top:1px solid #e4e4e7; }
+      #announcementModal .sd-location-custom-label{ display:block; margin-bottom:5px; color:#52525b; font-size:12px; font-weight:500; }
       #announcementModal select.sd-input{
         appearance:none; -webkit-appearance:none;
         background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -1082,7 +1107,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       #announcementModal .sd-photo-upload .upload-placeholder i{ font-size:1.7rem; color:#a1a1aa; display:block; margin-bottom:0.35rem; }
       #announcementModal .sd-photo-upload .upload-placeholder span{ font-size:0.8rem; color:#a1a1aa; }
       #announcementModal .sd-photo-upload input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
-      #announcementModal .sd-event-section{ display:flex; flex-direction:column; gap:16px; padding:16px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; }
+      #announcementModal .sd-event-section{ display:flex; flex-direction:column; gap:16px; padding:16px; border:1px solid #e4e4e7; border-radius:0; background:#fff; }
       #announcementModal .sd-event-section + .sd-event-section{ margin-top:20px; }
       #announcementModal .sd-event-section-title{ margin:0; color:#18181b; font-size:16px; font-weight:600; line-height:1.35; }
       #announcementModal .sd-event-help{ margin:4px 0 0; color:#71717a; font-size:12px; line-height:1.45; }
@@ -1153,7 +1178,7 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
       #announcementModal .sd-event-remove:hover{ color:#dc2626; border-color:#fecaca; }
       #announcementModal .sd-event-add{ align-self:flex-start; min-height:30px; padding:0 10px; border:1px solid #e4e4e7; border-radius:5px; background:#fff; color:#18181b; font:500 12px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
       #announcementModal .sd-event-add:hover{ background:#f4f4f5; }
-      #announcementModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
+      #announcementModal .sd-dialog-footer{ display:flex; flex-direction:row; justify-content:flex-end; gap:8px; }
       @media (min-width:640px){ #announcementModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
       #announcementModal .sd-btn{
         display:inline-flex; align-items:center; justify-content:center; gap:8px;
@@ -1220,8 +1245,28 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
                 <input type="text" name="title" id="formTitle" class="sd-input" required placeholder="e.g. Free Kapon Caravan">
               </div>
               <div class="sd-field sd-field-full" id="locationField">
-                <label class="sd-label" for="formProgramLocation">Location/s</label>
-                <input type="text" name="location" id="formProgramLocation" class="sd-input" placeholder="e.g. Paliparan 1, Salawag">
+                <span class="sd-label" id="formLocationLabel">Location/s</span>
+                <input type="hidden" name="location" id="formProgramLocation" value="">
+                <div class="sd-location-picker">
+                  <button type="button" class="sd-input sd-location-trigger" id="locationPickerToggle" aria-haspopup="true" aria-expanded="false" aria-controls="locationPickerOptions" aria-labelledby="formLocationLabel locationPickerSummary">
+                    <span class="sd-location-trigger-label is-placeholder" id="locationPickerSummary">Select barangay location/s...</span>
+                    <span aria-hidden="true">&#9662;</span>
+                  </button>
+                  <div class="sd-location-options" id="locationPickerOptions" role="group" aria-label="Announcement locations" hidden>
+                    <div id="locationPickerList">
+                      <?php foreach ($locationBarangays as $locationBarangay): ?>
+                        <label class="sd-location-option" data-location-option>
+                          <input type="checkbox" value="<?php echo htmlspecialchars($locationBarangay['name'], ENT_QUOTES, 'UTF-8'); ?>">
+                          <span><?php echo htmlspecialchars($locationBarangay['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        </label>
+                      <?php endforeach; ?>
+                    </div>
+                    <div class="sd-location-custom">
+                      <label class="sd-location-custom-label" for="locationPickerCustom">Other location or venue (optional)</label>
+                      <input type="text" class="sd-input" id="locationPickerCustom" placeholder="Enter another location">
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="sd-field">
@@ -1246,14 +1291,14 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
 
               <div class="sd-field">
                 <label class="sd-label" for="formStatus">Status</label>
-                <select name="status" id="formStatus" class="sd-input">
+                <select name="status" id="formStatus" class="sd-input" onchange="syncScheduleField()">
                   <option value="draft">Draft</option>
                   <option value="scheduled">Scheduled</option>
                   <option value="published">Published</option>
                 </select>
               </div>
 
-              <div class="sd-field" id="scheduleField">
+              <div class="sd-field" id="scheduleField" hidden>
                 <label class="sd-label" for="formPublishAt">Schedule Publish Date &amp; Time</label>
                 <input type="datetime-local" name="publish_at" id="formPublishAt" class="sd-input" onchange="onScheduleChange()">
               </div>
@@ -1269,9 +1314,9 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
               </div>
 
               <div class="sd-field sd-field-full">
-                <label class="sd-label">Poster / Photo</label>
+                <label class="sd-label" for="photoInput">Poster / Photo <span class="req">*</span></label>
                 <div class="sd-photo-upload" id="photoArea">
-                  <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
+                  <input type="file" name="photo" id="photoInput" accept="image/*" required onchange="previewImage(this, 'photoPreview', 'photoArea')">
                   <div class="upload-placeholder" id="photoPlaceholder">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <span>Click to upload poster photo</span>
@@ -2254,17 +2299,96 @@ function formatAnnouncementTime(value){
 }
 
 /* ───────────────────────── Create / edit modal ───────────────────────── */
+let announcementHasExistingPhoto = false;
+
+function syncPhotoRequirement(){
+  document.getElementById('photoInput').required = !announcementHasExistingPhoto;
+}
+
+function syncAnnouncementLocations(){
+  const hiddenLocation = document.getElementById('formProgramLocation');
+  const summary = document.getElementById('locationPickerSummary');
+  const selected = Array.from(document.querySelectorAll('#locationPickerList input[type="checkbox"]:checked'))
+    .map(function(input){ return input.value; });
+  document.querySelectorAll('#locationPickerList [data-location-option]').forEach(function(option){
+    option.classList.toggle('is-selected', !!option.querySelector('input[type="checkbox"]:checked'));
+  });
+  const customValue = document.getElementById('locationPickerCustom').value;
+  const customLocations = customValue.split(',').map(function(value){ return value.trim(); }).filter(Boolean);
+  const locations = [];
+  const seen = new Set();
+  selected.concat(customLocations).forEach(function(location){
+    const key = location.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      locations.push(location.trim());
+    }
+  });
+  hiddenLocation.value = locations.join(', ');
+  summary.textContent = locations.length ? locations.join(', ') : 'Select barangay location/s...';
+  summary.classList.toggle('is-placeholder', locations.length === 0);
+  document.getElementById('locationPickerToggle').title = locations.join(', ');
+}
+
+function setAnnouncementLocations(value){
+  const options = Array.from(document.querySelectorAll('#locationPickerList input[type="checkbox"]'));
+  const byName = new Map(options.map(function(input){ return [input.value.trim().toLowerCase(), input]; }));
+  const customLocations = [];
+  options.forEach(function(input){ input.checked = false; });
+  String(value || '').split(',').map(function(location){ return location.trim(); }).filter(Boolean).forEach(function(location){
+    const option = byName.get(location.toLowerCase());
+    if (option) option.checked = true;
+    else customLocations.push(location);
+  });
+  document.getElementById('locationPickerCustom').value = customLocations.join(', ');
+  syncAnnouncementLocations();
+  closeAnnouncementLocationPicker();
+}
+
+function closeAnnouncementLocationPicker(){
+  const menu = document.getElementById('locationPickerOptions');
+  const toggle = document.getElementById('locationPickerToggle');
+  menu.hidden = true;
+  toggle.setAttribute('aria-expanded', 'false');
+}
+
+document.getElementById('locationPickerToggle').addEventListener('click', function(){
+  const menu = document.getElementById('locationPickerOptions');
+  const isOpening = menu.hidden;
+  menu.hidden = !isOpening;
+  this.setAttribute('aria-expanded', isOpening ? 'true' : 'false');
+});
+document.getElementById('locationPickerList').addEventListener('change', function(event){
+  const option = event.target.closest('[data-location-option]');
+  if (option) option.classList.toggle('is-selected', event.target.checked);
+  syncAnnouncementLocations();
+});
+document.getElementById('locationPickerCustom').addEventListener('input', syncAnnouncementLocations);
+document.addEventListener('click', function(event){
+  if (!event.target.closest('#locationField .sd-location-picker')) closeAnnouncementLocationPicker();
+});
+document.addEventListener('keydown', function(event){
+  if (event.key === 'Escape' && !document.getElementById('locationPickerOptions').hidden) {
+    closeAnnouncementLocationPicker();
+    document.getElementById('locationPickerToggle').focus();
+  }
+});
+
 function openCreate(category){
   programPrefillSnapshot = null;
+  announcementHasExistingPhoto = false;
   document.getElementById('formSaveMode').value = 'create';
   document.getElementById('modalTitle').textContent = category === 'advisory' ? 'Create Advisory' : 'Create Announcement';
   document.getElementById('submitBtnText').textContent = 'Create';
   document.getElementById('formId').value = '0';
   document.getElementById('announcementForm').reset();
+  setAnnouncementLocations('');
   document.getElementById('formProgramId').value = '';
   document.getElementById('programPrefillNote').hidden = true;
   document.getElementById('formCategory').value = category;
   document.getElementById('formStatus').value = 'draft';
+  syncScheduleField();
+  syncPhotoRequirement();
   document.getElementById('eventAudience').value = 'selected';
   document.getElementById('eventEndDate').value = '';
   document.getElementById('eventEndDateField').hidden = true;
@@ -2281,7 +2405,7 @@ function openCreate(category){
 
 function announcementFormSnapshot(){
   return JSON.stringify(Array.prototype.map.call(
-    document.querySelectorAll('#announcementForm input:not([type="file"]), #announcementForm select, #announcementForm textarea'),
+    document.querySelectorAll('#announcementForm input:not([type="file"]):not([data-draft-ignore]), #announcementForm select, #announcementForm textarea'),
     function(field){
       return [field.name, field.type === 'checkbox' ? field.checked : field.value];
     }
@@ -2407,7 +2531,7 @@ async function openCreateAnnouncement(options){
     document.getElementById('formProgramId').value = String(program.program_id);
     document.getElementById('formCategory').value = 'event';
     document.getElementById('formTitle').value = program.title || '';
-    document.getElementById('formProgramLocation').value = program.location || '';
+    setAnnouncementLocations(program.location || '');
     document.getElementById('formContent').value = program.content || '';
     document.getElementById('eventDate').value = program.event_date || '';
     document.getElementById('eventEndDate').value = program.end_date || '';
@@ -2470,11 +2594,12 @@ function openEdit(id){
       document.getElementById('formId').value = a.announcement_id;
       document.getElementById('formProgramId').value = a.program_id || '';
       document.getElementById('formTitle').value = a.title;
-      document.getElementById('formProgramLocation').value = a.location || '';
+      setAnnouncementLocations(a.location || '');
       document.getElementById('formCategory').value = a.is_event ? 'event' : a.category;
       document.getElementById('formSubject').value = a.subject || 'general_notices';
       document.getElementById('formStatus').value = a.status === 'archived' ? 'draft' : a.status;
       document.getElementById('formPublishAt').value = a.publish_at ? toLocalInput(a.publish_at) : '';
+      syncScheduleField();
       document.getElementById('formLinkUrl').value = a.link_url || '';
       document.getElementById('formContent').value = a.content;
       document.getElementById('formAudienceType').value = a.audience_type || 'all';
@@ -2499,6 +2624,8 @@ function openEdit(id){
       loadEventRequirements(a.event_requirements || []);
       toggleEventFields();
       const preview = document.getElementById('photoPreview');
+      announcementHasExistingPhoto = !!a.photo_url;
+      syncPhotoRequirement();
       if(a.photo_url){
         preview.src = announcementPhotoUrl(a.photo_url);
         preview.style.display = 'block';
@@ -2557,6 +2684,7 @@ function setAnnouncementTab(tab){
 }
 
 function hasEventCoordinationInput(){
+  if (document.getElementById('formCategory').value !== 'event') return false;
   const values = ['eventDate', 'eventEndDate', 'eventStartTime', 'eventEndTime', 'eventVenueProvider', 'eventVenueName', 'eventResponseDeadline', 'formProgramId'];
   if (values.some(function(id){ return document.getElementById(id).value.trim() !== ''; })) return true;
   if (document.getElementById('eventAudience').value === 'all') return true;
@@ -2891,8 +3019,17 @@ function onScheduleChange(){
   var val = document.getElementById('formPublishAt').value;
   if(val){
     document.getElementById('formStatus').value = 'scheduled';
-    document.getElementById('scheduleField').style.display = 'block';
   }
+  syncScheduleField();
+}
+
+function syncScheduleField(){
+  const isScheduled = document.getElementById('formStatus').value === 'scheduled';
+  const scheduleField = document.getElementById('scheduleField');
+  const publishAt = document.getElementById('formPublishAt');
+  scheduleField.hidden = !isScheduled;
+  publishAt.required = isScheduled;
+  if (!isScheduled) publishAt.value = '';
 }
 /* ───────────────────────── Form submit ───────────────────────── */
 let announcementSaveInProgress = false;
@@ -2942,6 +3079,8 @@ document.getElementById('announcementForm').addEventListener('submit', function(
   announcementSaveSucceeded = false;
   reindexEventRequirements();
   const fd = new FormData(this);
+  syncAnnouncementLocations();
+  fd.set('location', document.getElementById('formProgramLocation').value);
   fd.set('save_mode', requestedSaveMode);
   fd.set('id', String(requestedAnnouncementId));
   const isNewAnnouncement = requestedSaveMode === 'create';

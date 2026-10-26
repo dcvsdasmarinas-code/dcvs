@@ -31,10 +31,20 @@ function publicAnnouncementDate($value, string $format): string
 function publicAnnouncementIsPast(array $announcement): bool
 {
     $isEvent = (int)($announcement['is_event'] ?? 0) === 1;
-    $date = $isEvent
-        ? ($announcement['event_end_date'] ?? $announcement['event_date'] ?? '')
-        : ($announcement['publish_at'] ?? $announcement['created_at'] ?? '');
-    return $date !== '' && substr((string)$date, 0, 10) < date('Y-m-d');
+    if ($isEvent) {
+        $date = $announcement['event_end_date'] ?? '';
+        if ($date === '') {
+            $date = $announcement['event_date'] ?? '';
+        }
+        return $date !== '' && substr((string)$date, 0, 10) < date('Y-m-d');
+    }
+
+    $date = $announcement['publish_at'] ?? '';
+    if ($date === '') {
+        $date = $announcement['created_at'] ?? '';
+    }
+    return $date !== ''
+        && substr((string)$date, 0, 10) < date('Y-m-d', strtotime('-30 days'));
 }
 
 function publicAnnouncementCard(array $announcement, bool $past = false): void
@@ -131,7 +141,7 @@ function publicAnnouncementCard(array $announcement, bool $past = false): void
             </div>
         <?php endif; ?>
         </article>
-        <div class="public-ann-popover" id="<?php echo publicAnnouncementEscape($popoverId); ?>" role="region" aria-label="Full announcement details">
+        <div class="public-ann-popover" id="<?php echo publicAnnouncementEscape($popoverId); ?>" role="region" aria-label="Full announcement details" data-lenis-prevent>
             <strong class="public-ann-popover-title"><?php echo publicAnnouncementEscape($announcement['title'] ?? ''); ?></strong>
             <?php if ($dateText !== ''): ?>
                 <span class="public-ann-popover-date"><?php echo publicAnnouncementEscape($dateLabel . $dateText); ?></span>
@@ -196,7 +206,7 @@ foreach ($announcements as $announcement) {
     .public-ann-summary { display:-webkit-box; overflow:hidden; margin:0; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; line-height:1.45; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
     .public-ann-targets { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
     .public-ann-targets .public-ann-location-prefix { display:inline-flex; align-items:center; min-height:0; padding:0; border:0; border-radius:0; background:transparent; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:500; }
-    .public-ann-popover { position:fixed; z-index:2147483001; display:none; box-sizing:border-box; width:min(420px,calc(100vw - 24px)); max-height:min(60vh,440px); overflow:auto; padding:16px 18px; border:1px solid #dfe4df; border-radius:8px; background:#fff; box-shadow:0 12px 32px rgba(18,35,24,.2); color:#18181b; font-family:Inter,'Segoe UI',sans-serif; font-size:14px; line-height:1.55; }
+    .public-ann-popover { position:fixed; z-index:2147483001; display:none; box-sizing:border-box; width:min(420px,calc(100vw - 24px)); max-height:min(60vh,440px); overflow:auto; overscroll-behavior:contain; -webkit-overflow-scrolling:touch; touch-action:pan-y; padding:16px 18px; border:1px solid #dfe4df; border-radius:8px; background:#fff; box-shadow:0 12px 32px rgba(18,35,24,.2); color:#18181b; font-family:Inter,'Segoe UI',sans-serif; font-size:14px; line-height:1.55; }
     .public-ann-popover.is-open { display:block; }
     .public-ann-popover-title { display:block; margin-bottom:5px; font-size:16px; line-height:1.35; }
     .public-ann-popover-date, .public-ann-popover-location { display:block; color:#59645e; font-size:13px; font-weight:600; }
@@ -438,7 +448,7 @@ foreach ($announcements as $announcement) {
             var popover = document.getElementById(activeItem.getAttribute('aria-describedby'));
             if (popover) positionPopover(activeItem, popover);
         }
-    }, true);
+    });
 
     function applyFilters() {
         var selectedTab = tabs.find(function (tab) { return tab.getAttribute('aria-selected') === 'true'; });

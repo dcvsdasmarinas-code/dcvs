@@ -7,11 +7,17 @@
 /* ── Terms Modal ── */
 window.openTermsModal = function () {
   const modal = document.getElementById('termsModal');
-  if (modal) modal.classList.add('active');
+  if (modal) {
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+  }
 };
 window.closeTermsModal = function () {
   const modal = document.getElementById('termsModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  }
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,7 +55,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!alert) return;
     alert.style.display = 'flex';
     alert.className = `auth-alert auth-alert-${type}`;
-    if (msg) msg.textContent = message;
+    if (msg) {
+      msg.textContent = message;
+      msg.style.whiteSpace = message.includes('\n') ? 'pre-line' : '';
+    }
     alert.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -71,7 +80,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const revise = messages.filter(message => !missing.includes(message));
     const summary = [];
 
-    if (missing.length) summary.push(`Complete the required items: ${missing.join(' ')}`);
+    if (missing.length) {
+      summary.push('Please complete the required fields\nSome information is missing. Please check the highlighted fields below.');
+    }
     if (revise.length) summary.push(`Please revise: ${revise.join(' ')}`);
 
     showAlert(

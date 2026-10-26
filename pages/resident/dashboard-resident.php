@@ -2579,10 +2579,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
     <?php if (empty($pets)): ?>
       <div class="pet-empty">
-        <i class="fas fa-paw"></i>
         <h3>No pets registered yet</h3>
         <p>Register your first pet to start managing its profile.</p>
-        <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')"><i class="fas fa-plus"></i> Register a Pet</button>
+        <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')">Register a Pet</button>
       </div>
     <?php else: ?>
     <div class="appt-card-header resident-list-toolbar">
@@ -2841,7 +2840,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .dt-page-btn:disabled{opacity:.5;cursor:not-allowed;}
 
     .pet-empty{text-align:center;padding:3.5rem 1.5rem;color:#64748b;border:2px dashed #e2e8f0;border-radius:16px;}
-    .pet-empty i{font-size:3rem;color:#94a3b8;display:block;margin-bottom:1rem;}
+    .pet-empty > i{font-size:3rem;color:#94a3b8;display:block;margin-bottom:1rem;}
+    .pet-empty .sd-btn i{font-size:12px;display:inline-block;margin:0;}
     .pet-empty h3{font-size:1.05rem;font-weight:700;color:#0f172a;margin:0 0 4px;}
     .pet-empty p{font-size:0.85rem;margin:0 0 1.25rem;}
     .pet-empty .sd-btn{margin:0 auto;}
@@ -3191,10 +3191,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
     ?>
     <?php if (empty($reports)): ?>
       <div class="rpt-empty">
-        <i class="fas fa-file-medical-alt"></i>
         <h3>No reports submitted yet</h3>
         <p>Submit your first report to help us keep the community safe.</p>
-        <a href="submit-report-page.php" class="sd-btn sd-btn-default"><i class="fas fa-plus"></i> Submit a Report</a>
+        <a href="submit-report-page.php" class="sd-btn sd-btn-default">Submit a Report</a>
       </div>
     <?php else: ?>
     <div class="appt-card-header resident-list-toolbar">
@@ -3282,7 +3281,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #my-reports { font-family:'Inter',sans-serif; }
 
     .rpt-empty { text-align:center; padding:3.5rem 1.5rem; color:#64748b; border:2px dashed #e2e8f0; border-radius:16px; }
-    .rpt-empty i { font-size:3rem; color:#94a3b8; display:block; margin-bottom:1rem; }
+    .rpt-empty > i { font-size:3rem; color:#94a3b8; display:block; margin-bottom:1rem; }
+    .rpt-empty .sd-btn i { font-size:12px; display:inline-block; margin:0; }
     .rpt-empty h3 { font-size:1.05rem; font-weight:700; color:#0f172a; margin:0 0 4px; }
     .rpt-empty p { font-size:0.85rem; margin:0 0 1.25rem; }
     .rpt-empty .sd-btn { margin:0 auto; }
@@ -3874,10 +3874,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
     ?>
     <?php if (empty($appointments)): ?>
       <div class="rpt-empty">
-        <i class="fas fa-calendar-alt"></i>
         <h3>No appointments yet</h3>
         <p>Request an appointment to get started.</p>
-        <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()"><i class="fas fa-plus"></i> Request Appointment</button>
+        <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()">Request Appointment</button>
       </div>
     <?php else: ?>
     <div class="appt-card-header resident-list-toolbar">

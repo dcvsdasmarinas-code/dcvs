@@ -104,10 +104,6 @@ function validateFields($p) {
         if ($ts) $publishAt = date('Y-m-d H:i:s', $ts);
     }
 
-    if ($status === 'scheduled' && !$publishAt) {
-        $publishAt = date('Y-m-d H:i:s', time() + 3600);
-    }
-
     $featured = !empty($p['is_featured']) ? 1 : 0;
 
     return [$category, $subject, $status, $audienceType, $audienceBarangays, $barangayId, $publishAt, $featured];
@@ -678,6 +674,9 @@ function handleSave($conn, $userId) {
         return ['success' => false, 'message' => 'Title and content are required'];
     }
     list($category, $subject, $status, $audienceType, $audienceBarangays, $barangayId, $publishAt, $featured) = validateFields($_POST);
+    if ($status === 'scheduled' && !$publishAt) {
+        return ['success' => false, 'message' => 'Choose a schedule publish date and time.'];
+    }
     try {
         $missingColumn = announcementMissingRequiredColumn($conn, $isEvent);
     } catch (Throwable $exception) {
@@ -728,10 +727,17 @@ function handleSave($conn, $userId) {
     }
 
     if (isset($_FILES['photo']) && $_FILES['photo']['error'] !== UPLOAD_ERR_NO_FILE) {
-        $uploaded = uploadPhoto($_FILES['photo'], 'ann_photo');
-        if ($uploaded) {
-            $photoUrl = $uploaded;
+        if ($_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
+            return ['success' => false, 'message' => 'The poster/photo upload failed. Please choose another image and try again.'];
         }
+        $uploaded = uploadPhoto($_FILES['photo'], 'ann_photo');
+        if (!$uploaded) {
+            return ['success' => false, 'message' => 'Upload a valid poster/photo image (JPG, PNG, GIF, or WebP).'];
+        }
+        $photoUrl = $uploaded;
+    }
+    if (!$photoUrl) {
+        return ['success' => false, 'message' => 'A poster/photo is required before saving this announcement.'];
     }
 
     if ($category === 'advisory' && isset($_FILES['photo_hover']) && $_FILES['photo_hover']['error'] !== UPLOAD_ERR_NO_FILE) {

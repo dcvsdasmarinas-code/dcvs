@@ -950,74 +950,6 @@
 
   // Detail drawer with tabs
   var rptDetailTab = 'details';
-  function rptHighResponseRiskReasons(r) {
-    var reasons = [];
-    var count = String(r.animalCount || '').trim();
-    var countIsHigh = /^(?:6\+|[6-9]\d*|\d{2,})$/.test(count);
-    var type = String(r.type || '').toLowerCase();
-    var urgency = String(r.urgencyRaw || r.urgency || '').toLowerCase();
-    var behavior = String(r.animalBehavior || '');
-    var description = String(r.desc || '');
-
-    if (type === 'rabies') reasons.push('Report type is identified as a rabies concern.');
-    if (/^(?:high|critical)$/.test(urgency)) reasons.push('The submitted priority is ' + String(r.urgency || r.urgencyRaw) + '.');
-    if (/bit(e|ten)|aggress|sever|malubha|critical/i.test(behavior)) {
-      reasons.push('Reported animal behavior: ' + behavior + '.');
-    }
-    if (/bit(e|ten)/i.test(description)) reasons.push('The description reports a bite or biting.');
-    if (/aggress/i.test(description)) reasons.push('The description reports aggressive behavior.');
-    if (/rabies/i.test(description)) reasons.push('The description mentions rabies.');
-    if (/sever|malubha|critical/i.test(description)) reasons.push('The description indicates a severe or critical condition.');
-    if (countIsHigh) reasons.push('The reported number of animals is ' + count + '.');
-    return reasons;
-  }
-
-  function rptHasHighResponseRisk(r) {
-    return rptHighResponseRiskReasons(r).length > 0;
-  }
-
-  function rptResponseRiskExplanation(r) {
-    var priority = String(r.urgency || r.urgencyRaw || 'not specified');
-    var type = String(r.type || '').toLowerCase();
-    var behavior = String(r.animalBehavior || '').trim();
-    var description = String(r.desc || '');
-    var count = String(r.animalCount || '').trim();
-    var details = [];
-
-    if (type === 'rabies') details.push('The report is categorized as a rabies concern.');
-    if (/bit(e|ten)/i.test(behavior)) details.push('The animal was reported to have bitten someone.');
-    else if (/aggress/i.test(behavior)) details.push('The animal was reported to be aggressive.');
-    else if (/sever|malubha|critical/i.test(behavior)) details.push('The animal was reported to be in a severe or critical condition.');
-    if (/bit(e|ten)/i.test(description) && !/bit(e|ten)/i.test(behavior)) details.push('The report description mentions a bite.');
-    if (/aggress/i.test(description) && !/aggress/i.test(behavior)) details.push('The report description mentions aggressive behavior.');
-    if (/rabies/i.test(description) && type !== 'rabies') details.push('The report description mentions rabies.');
-    if (/sever|malubha|critical/i.test(description) && !/sever|malubha|critical/i.test(behavior)) details.push('The report description indicates a severe or critical condition.');
-    if (/^(?:6\+|[6-9]\d*|\d{2,})$/.test(count)) details.push('Six or more animals were reported.');
-
-    var opening = 'The report was submitted with ' + priority + ' priority';
-    if (details.length) {
-      opening += ', but the details also help us assess the case. ';
-      if (details.length === 1) {
-        return opening + details[0].slice(0, -1) + ', so please keep this in mind when reviewing it.';
-      }
-      return opening + details.join(' ') + ' Please keep these details in mind when reviewing the case.';
-    }
-    return opening + ', so please keep this in mind when reviewing the case.';
-  }
-
-  function rptResponseRiskPanel(r, previewOnly) {
-    if (r.responseState !== 'awaiting_dcvs_decision') return '';
-    var reasons = rptHighResponseRiskReasons(r);
-    var highRisk = reasons.length > 0;
-    return '<section class="rpt-response-risk ' + (highRisk ? 'is-high-risk' : 'is-low-risk') + '" aria-label="DCVS response coordination check">' +
-      '<div class="rpt-response-risk-title"><span aria-hidden="true">' + (highRisk ? '&#9888;' : '&#10003;') + '</span> Barangay response check</div>' +
-      '<p class="rpt-response-risk-explanation">' + (highRisk
-        ? esc(rptResponseRiskExplanation(r))
-        : 'No high-risk indicators detected. This forwarded report still needs a DCVS handling decision.') + '</p>' +
-      (highRisk ? '<p class="rpt-response-risk-explanation">This is just a coordination note. The barangay can still accept the case while reviewing the details.</p>' : '') +
-      '</section>';
-  }
-
   function rptResponseWorkflowDetails(r) {
     if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return '';
     var labels = {
@@ -1064,7 +996,6 @@
   }
 
   window.rptResponseDecisionFooter = rptResponseDecisionFooter;
-  window.rptResponseRiskPanel = rptResponseRiskPanel;
 
   window.rptToggleDecisionMore = function (button) {
     var menu = button.nextElementSibling;
@@ -1080,37 +1011,6 @@
     document.querySelectorAll('.rpt-response-more[aria-expanded="true"]').forEach(function (button) { button.setAttribute('aria-expanded', 'false'); });
   };
 
-  function rptInitResponsePreview() {
-    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED
-        || new URLSearchParams(window.location.search).get('response_preview') !== '1') return;
-    var samples = [
-      { id: -1, name: 'Rabies, High priority', type: 'rabies', typeLabel: 'Rabies concern', urgency: 'High', urgencyRaw: 'high', animalCount: '1', animalBehavior: 'Aggressive', barangayProposed: true, responseState: 'awaiting_dcvs_decision' },
-      { id: -2, name: 'Stray, calm animal', type: 'stray', typeLabel: 'Stray Animal', urgency: 'Medium', urgencyRaw: 'medium', animalCount: '1', animalBehavior: 'Calm / Stray', barangayProposed: true, responseState: 'awaiting_dcvs_decision' }
-    ];
-    var panel = document.createElement('aside');
-    panel.className = 'rpt-response-preview-panel';
-    panel.setAttribute('aria-label', 'Response workflow sample preview');
-    panel.innerHTML = '<strong>Preview case</strong><div class="rpt-response-preview-options"></div><p>Same drawer rules, different risk result. These examples are not real reports.</p><div class="rpt-response-preview-result" aria-live="polite"></div>';
-    document.body.appendChild(panel);
-    var options = panel.querySelector('.rpt-response-preview-options');
-    var result = panel.querySelector('.rpt-response-preview-result');
-    samples.forEach(function (sample, index) {
-      var button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = sample.name;
-      button.setAttribute('aria-pressed', index === 0 ? 'true' : 'false');
-      button.addEventListener('click', function () {
-        options.querySelectorAll('button').forEach(function (item) {
-          item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
-        });
-        result.innerHTML = '<div class="rpt-response-preview-proposal">Barangay is requesting to respond. This report was forwarded to DCVS for review and assignment.</div>' +
-          rptResponseRiskPanel(sample, true);
-      });
-      options.appendChild(button);
-      if (index === 0) button.click();
-    });
-  }
-
   window.rptSelect = function (id) {
     var r = ALL.find(function (x) { return x.id === id; });
     if (!r) return;
@@ -1123,12 +1023,8 @@
 
     var typeTag = r.typeLabel || r.type || 'Report';
     var statusStyle = statusBadgeStyle(r);
-    var drawerStatus = document.getElementById('rptDrawerStatus');
-    if (drawerStatus) {
-      drawerStatus.textContent = (r.statusLabel || r.status || '-') + (!r.structured && r.status === 'resolved' ? ' (Resident)' : '');
-      drawerStatus.setAttribute('style', statusStyle + 'border-radius:6px;font-family:Inter,sans-serif;font-size:12px;font-weight:500;padding:4px 10px;');
-      drawerStatus.hidden = false;
-    }
+    var drawerStatusLabel = (r.statusLabel || r.status || '-') + (!r.structured && r.status === 'resolved' ? ' (Resident)' : '');
+    var drawerStatusHtml = '<span class="rpt-drawer-status" style="' + statusStyle + '">' + esc(drawerStatusLabel) + '</span>';
     if (r.structured) {
       box.innerHTML = '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="rptDetailGo(\'details\')">Details</button>' +
@@ -1139,7 +1035,7 @@
         '<div style="margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">' +
         '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
         '<div style="display:flex;flex:1 1 150px;flex-direction:column;gap:2px;min-width:0;">' +
-        '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
+        '<div class="rpt-drawer-reporter-label">' + drawerStatusHtml + '<span>Reported by</span></div>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '\u2014') + '</span>' +
         '</div>' +
         '</div>' +
@@ -1149,11 +1045,10 @@
         priorityPill(r.urgency) +
         '</div>' +
 
-        rptResponseRiskPanel(r) +
         rptResponseWorkflowDetails(r) +
 
         '<div class="rpt-detail-grid">' +
-        '<div class="rpt-col rpt-full-col"><div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="' + esc(window.dcvsStaffUrl('assets/images/edit%20icon.png')) + '" alt=""></button>' : '') + '</div><div class="info-rows info-rows-2col">' +
+        '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows info-rows-2col">' +
         infoRow('cal', 'Date Submitted', r.submitted || r.date || '-') +
         infoRow('cal', 'Incident Date', r.incidentDate || r.date || '-') +
         infoRow('home2', 'Location', r.location || '-') +
@@ -1212,7 +1107,7 @@
       '<div style="margin-bottom:14px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;">' +
       '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + (r.avatar ? '<img src="' + esc(window.dcvsStaffMediaUrl ? window.dcvsStaffMediaUrl(r.avatar) : r.avatar) + '" alt="" style="width:100%;height:100%;object-fit:cover;">' : esc(initials(r.reporter))) + '</div>' +
       '<div style="display:flex;flex:1 1 150px;flex-direction:column;gap:2px;min-width:0;">' +
-      '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
+      '<div class="rpt-drawer-reporter-label">' + drawerStatusHtml + '<span>Reported by</span></div>' +
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + esc(r.reporter || '—') + '</span>' +
       '</div>' +
       '</div>' +
@@ -1222,13 +1117,12 @@
       priorityPill(r.urgency) +
       '</div>' +
 
-      rptResponseRiskPanel(r) +
       rptResponseWorkflowDetails(r) +
 
       '<div class="rpt-detail-grid">' +
 
       '<div class="rpt-col rpt-full-col">' +
-      '<div class="rpt-section-title rpt-section-title-action"><span>Report Information</span>' + ((r.status === 'pending') ? '<button type="button" class="cpd-edit-icon" onclick="openEditReport(' + r.id + ')" aria-label="Edit report" title="Edit report"><img src="' + esc(window.dcvsStaffUrl('assets/images/edit%20icon.png')) + '" alt=""></button>' : '') + '</div>' +
+      '<div class="rpt-section-title">Report Information</div>' +
       '<div class="info-rows info-rows-2col">' +
       infoRow('cal', 'Date Submitted', r.submitted || r.reported || r.date || '-') +
       infoRow('cal', 'Incident Date', r.incidentDate || r.date || '-') +
@@ -1675,5 +1569,4 @@
 
   // Init
   render();
-  rptInitResponsePreview();
 })();

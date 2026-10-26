@@ -2173,10 +2173,10 @@ if (!empty($_GET['waitlist_booking'])) {
     .cpd .response-step>span:last-child{ max-width:100%;overflow-wrap:anywhere; }
     #brgDetailsModal .brg-drawer-reporter{ display:flex;align-items:center;gap:10px;margin-bottom:14px; }
     #brgDetailsModal .brg-drawer-photo{ width:85px;height:85px;flex:0 0 85px;overflow:hidden;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:#64748b; }
-    #brgDetailsModal .brg-drawer-reporter-copy{ display:flex;min-width:0;flex-direction:column;gap:2px; }
+    #brgDetailsModal .brg-drawer-reporter-copy{ display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:3px; }
     #brgDetailsModal .brg-drawer-reporter-copy span{ color:#71717a;font-size:12px; }
     #brgDetailsModal .brg-drawer-reporter-copy strong{ overflow:hidden;color:#18181b;font-size:18px;font-weight:600;text-overflow:ellipsis;white-space:nowrap; }
-    #brgDetailsModal .brg-drawer-status{ margin-left:auto;flex:0 0 auto;padding:5px 10px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:500;white-space:nowrap; }
+    #brgDetailsModal .brg-drawer-reporter-copy .brg-drawer-status{ margin:0 0 2px;flex:0 0 auto;padding:4px 9px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:500;white-space:nowrap; }
     #brgDetailsModal .brg-drawer-priority{ display:flex;align-items:center;gap:7px;margin:0 0 16px;font-size:14px;font-weight:500;color:#18181b; }
     #brgDetailsModal .brg-response-card{ overflow:hidden;margin:0 0 18px;border:1px solid #e4e4e7;border-radius:10px;background:#fff; }
     #brgDetailsModal .brg-response-heading{ display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 8px; }
@@ -2217,7 +2217,7 @@ if (!empty($_GET['waitlist_booking'])) {
     #penDetailsModal .pen-reporter-row{ display:flex;align-items:center;gap:12px;margin-bottom:14px; }
     #penDetailsModal .pen-reporter-avatar{ width:42px;height:42px;border-radius:50%;flex:0 0 auto;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#64748b; }
     #penDetailsModal .pen-reporter-avatar img{ width:100%;height:100%;object-fit:cover; }
-    #penDetailsModal .pen-reporter-status{ margin-left:auto;white-space:nowrap; }
+    #penDetailsModal .pen-reporter-status{ align-self:flex-start;margin:0 0 2px;white-space:nowrap; }
     #penDetailsModal .rpt-status{ display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7; }
     #penDetailsModal .rpt-status.pending{background:#fef3c7;color:#92400e;border-color:#fde68a;}
     #penDetailsModal .rpt-status.validated{background:#dcebe0;color:#045e1f;border-color:#bbf7d0;}
@@ -2264,7 +2264,7 @@ if (!empty($_GET['waitlist_booking'])) {
     #rptDetailsModal .rpt-response-override-recorded{ margin-top:4px;color:#b91c1c;font-size:12px;font-weight:500;overflow-wrap:anywhere; }
     #rptDetailsModal .rpt-response-decision-footer{ width:100%;min-width:0;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
     #rptDetailsModal .rpt-response-decision-hint{ overflow:hidden;margin-bottom:6px;color:#71717a;font-size:12px;font-weight:400;line-height:1.35;text-overflow:ellipsis;white-space:nowrap; }
-    #rptDetailsModal .rpt-response-decision-actions{ display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:8px;width:100%;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+    #rptDetailsModal .rpt-response-decision-actions{ display:grid;grid-template-columns:36px minmax(0,1fr) minmax(0,1fr);align-items:center;gap:8px;width:100%;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
     #rptDetailsModal .rpt-response-decision-actions>.sd-btn,#rptDetailsModal .rpt-response-more-wrap>.sd-btn{ display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:0;height:36px;padding:0 8px;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;font-weight:500;line-height:1;white-space:nowrap; }
     #rptDetailsModal .rpt-response-more-wrap>.sd-btn{ width:36px;padding:0;font-size:22px;font-weight:400; }
     #rptDetailsModal .rpt-response-decision-actions .sd-btn:focus-visible,#rptDetailsModal .rpt-response-more-menu button:focus-visible{ outline:2px solid #18181b;outline-offset:2px; }
@@ -4567,10 +4567,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
         <div class="sd-dialog-header">
-          <div class="rpt-drawer-header-row">
-            <h2 class="sd-dialog-title">Report Details</h2>
-            <span id="rptDrawerStatus" hidden></span>
-          </div>
+          <h2 class="sd-dialog-title">Report Details</h2>
           <p class="sd-dialog-description">Review report information and case details.</p>
         </div>
         <div class="sd-field-group">
@@ -5766,17 +5763,17 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         : (r.responseMode === 'dcvs_dispatch' ? 'DCVS Dispatch' : 'Undecided');
       var responseDeadlineValue = deadlineDate && !isNaN(deadlineDate.getTime())
         ? deadlineDate.toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
-        : '—';
+        : 'No response deadline set';
       var lastProgress = r.lastProgressAt
         ? new Date(String(r.lastProgressAt).replace(' ', 'T')).toLocaleString('en-US', { year:'numeric', month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })
-        : '—';
+        : 'No progress update yet';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="brgDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="updates" onclick="brgDetailGo(\'updates\')">Updates</button></div>' +
         '<div class="rpt-detail-body" data-tab="details">' +
         '<div class="brg-drawer-reporter"><div class="brg-drawer-photo">' + headerImage + '</div>' +
-        '<div class="brg-drawer-reporter-copy"><span>Reported by</span><strong>' + casEsc(r.reporter || '—') + '</strong></div>' +
-        '<span class="brg-drawer-status">' + casEsc(responseStatus) + '</span></div>' +
+        '<div class="brg-drawer-reporter-copy"><span class="brg-drawer-status">' + casEsc(responseStatus) + '</span><span>Reported by</span><strong>' + casEsc(r.reporter || '—') + '</strong></div>' +
+        '</div>' +
         '<div class="brg-drawer-priority"><span>Priority</span>' + casPriorityPill(r.urgency) + '</div>' +
         '<section class="brg-response-card" aria-label="Barangay Response">' +
         '<div class="brg-response-heading"><div><strong>Barangay Response</strong><span>Handled by Brgy. ' + casEsc(r.brgy || '—') + '</span></div>' +
@@ -5788,10 +5785,10 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<div class="info-rows info-rows-2col rpt-response-custody-grid">' +
         casInfoRow('Response Status', responseStatus) + casInfoRow('Response Mode', responseMode) +
         casInfoRow('Last Progress Update', lastProgress) + casInfoRow('Response Due', responseDeadlineValue) +
-        casInfoRow('Holding Location', r.holdingLocation || '—') + casInfoRow('Animal Condition', r.animalCondition || '—') +
-        casInfoRow('Resolution Details', r.resolutionDetails || '—') +
-        casInfoRow('Animal Disposition', r.animalDisposition ? r.animalDisposition.replace(/_/g, ' ') : '—') +
-        casInfoRow('Secured', r.securedAt || '—') +
+        casInfoRow('Holding Location', r.holdingLocation || 'Not provided yet') + casInfoRow('Animal Condition', r.animalCondition || 'Not reported yet') +
+        casInfoRow('Resolution Details', r.resolutionDetails || 'Not resolved yet') +
+        casInfoRow('Animal Disposition', r.animalDisposition ? r.animalDisposition.replace(/_/g, ' ') : 'Not recorded yet') +
+        casInfoRow('Secured', r.securedAt || 'Not secured yet') +
         '</div></section>' +
         '<div class="rpt-detail-grid"><div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows info-rows-2col">' +
         casInfoRow('Date Submitted', r.submitted || r.date || '—') + casInfoRow('Incident Date', r.incidentDate || r.date || '—') +
@@ -5877,11 +5874,11 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
 
         '<div class="pen-reporter-row" style="display:flex;align-items:center;gap:12px;margin-bottom:14px;">' +
         '<div class="pen-reporter-avatar" style="width:85px;height:85px;border-radius:8px;flex:0 0 85px;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<div class="pen-reporter-copy" style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        casStatusPill(r.statusRaw === 'validated' ? 'validated' : 'pending', r.statusLabel || 'Pending Barangay Review').replace('class="rpt-status ', 'class="rpt-status pen-reporter-status ') +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
-        casStatusPill(r.statusRaw === 'validated' ? 'validated' : 'pending', r.statusLabel || 'Pending Barangay Review').replace('class="rpt-status ', 'class="rpt-status pen-reporter-status ') +
         '</div>' +
 
         '<div style="display:flex;align-items:center;gap:6px;margin:0 0 16px;">' +
@@ -5890,7 +5887,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '</div>' +
 
         casResponseWorkflowDetails(r) +
-        (typeof window.rptResponseRiskPanel === 'function' ? window.rptResponseRiskPanel(r) : '') +
 
         '<section class="rpt-col rpt-full-col">' +
         '<div class="rpt-section-title">Report Information</div>' +
@@ -6009,11 +6005,11 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
 
         '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
         '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<div class="case-drawer-reporter-copy" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;">' +
+        '<span class="case-drawer-status" style="font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Active') + '</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
-        '<span style="margin-left:auto;font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Active') + '</span>' +
         '</div>' +
 
         '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;">' +
@@ -6022,7 +6018,6 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '</div>' +
 
         casResponseWorkflowDetails(r, { hideProgress: true }) +
-        (typeof window.rptResponseRiskPanel === 'function' ? window.rptResponseRiskPanel(r) : '') +
 
         '<div class="rpt-detail-grid">' +
 
@@ -6179,12 +6174,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<div class="rpt-detail-body" data-tab="details">' +
 
         '<div style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">' +
-        '<div class="avatar" style="width:42px;height:42px;border-radius:50%;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:15px;color:#64748b;">' + casAvatar(r) + '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:2px;min-width:0;">' +
+        '<div class="avatar" style="width:85px;height:85px;border-radius:8px;flex:0 0 85px;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">' + casAvatar(r) + '</div>' +
+        '<div class="case-drawer-reporter-copy" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;">' +
+        '<span class="case-drawer-status" style="font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Resolved') + '</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Reported by</span>' +
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:normal;overflow-wrap:anywhere;">' + casEsc(r.reporter || '—') + '</span>' +
         '</div>' +
-        '<span style="margin-left:auto;font-size:13px;font-weight:500;color:' + statusColor + ';background:' + statusBg + ';border:1px solid ' + statusBorder + ';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">' + casEsc(r.statusLabel || 'Resolved') + '</span>' +
         '</div>' +
 
         '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;">' +
@@ -6655,18 +6650,19 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   #rptDetailsModal .sd-dialog-header{
     padding-right:54px;
   }
-  #rptDetailsModal .rpt-drawer-header-row{
+  #rptDetailsModal .rpt-drawer-reporter-label{
     display:flex;
+    align-items:flex-start;
+    flex-direction:column;
+    gap:4px;
+    font-family:'Inter','Segoe UI',sans-serif;
+    font-size:12px;
+    font-weight:400;
+    color:#71717a;
+  }
+  #rptDetailsModal .rpt-drawer-status{
+    display:inline-flex;
     align-items:center;
-    justify-content:space-between;
-    gap:8px;
-    min-width:0;
-  }
-  #rptDetailsModal .rpt-drawer-header-row .sd-dialog-title{
-    min-width:0;
-    white-space:nowrap;
-  }
-  #rptDetailsModal #rptDrawerStatus{
     flex:0 1 auto;
     max-width:100%;
     overflow:hidden;
@@ -6679,11 +6675,9 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     text-overflow:ellipsis;
     white-space:nowrap;
   }
-  #rptDetailsModal #rptDrawerStatus[hidden]{display:none;}
   @media(max-width:600px){
     #rptDetailsModal .sd-dialog-header{padding-right:48px;}
-    #rptDetailsModal .rpt-drawer-header-row{gap:6px;}
-    #rptDetailsModal #rptDrawerStatus{padding:3px 7px;font-size:11px;}
+    #rptDetailsModal .rpt-drawer-status{padding:3px 7px;font-size:11px;}
   }
   .staff-detail-drawer .sd-field-group{
     display:flex;
@@ -7200,7 +7194,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         </section>
         <div>
           <div class="rpt-section-title-action" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin:18px 0 10px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;">Resident Information</span></div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
+          <div class="appt-detail-values-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Resident ID</p><p id="detailResidentId" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Mobile Number</p><p id="detailPhone" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Email</p><p id="detailEmail" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
@@ -7208,7 +7202,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         </div>
         <div>
           <div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;">Appointment Information</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
+          <div class="appt-detail-values-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Service</p><p id="detailType" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Pet</p><p id="detailPet" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Preferred Date</p><p id="detailPreferredDate" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
@@ -7221,12 +7215,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         </div>
         <div>
           <div style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:18px 0 10px;">Pet Details</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
+          <div class="appt-detail-values-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Species</p><p id="detailPetType" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Breed</p><p id="detailPetBreed" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Sex</p><p id="detailPetGender" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
             <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Age</p><p id="detailPetAge" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
-            <div style="grid-column:1/-1;"><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Vaccination Status</p><p id="detailPetVax" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
+            <div><p style="font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Vaccination Status</p><p id="detailPetVax" style="font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">-</p></div>
           </div>
         </div>
         <div id="detailNotesContainer" style="margin-top:8px;">
@@ -10635,6 +10629,18 @@ window.APP = window.APP || {};
         var avatarEl = document.getElementById('detailAvatar');
         var pic = a.avatar_url || a.profile_picture;
         if (avatarEl) {
+          avatarEl.style.width = '85px';
+          avatarEl.style.height = '85px';
+          avatarEl.style.borderRadius = '8px';
+          avatarEl.style.flexShrink = '0';
+          avatarEl.style.overflow = 'hidden';
+          avatarEl.style.background = '#e4e4e7';
+          avatarEl.style.display = 'flex';
+          avatarEl.style.alignItems = 'center';
+          avatarEl.style.justifyContent = 'center';
+          avatarEl.style.fontWeight = '600';
+          avatarEl.style.fontSize = '28px';
+          avatarEl.style.color = '#64748b';
           if (pic) {
             avatarEl.innerHTML = '<img src="' + window.dcvsStaffMediaUrl(pic) + '" alt="" style="width:100%;height:100%;object-fit:cover;">';
           } else {

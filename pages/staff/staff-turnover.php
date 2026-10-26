@@ -352,7 +352,8 @@ $turnoverKpis = [
     .turnover-reporter-avatar img{width:100%;height:100%;object-fit:cover}
     .turnover-detail-label{display:block;margin-bottom:3px;color:#71717a;font-size:12px}
     .turnover-reporter-name{color:#18181b;font-size:16px;font-weight:600}
-    .turnover-drawer-status{margin-left:auto}
+    .turnover-reporter-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:2px}
+    .turnover-drawer-status{margin:0 0 2px}
     .turnover-priority{display:flex;align-items:center;gap:8px;margin:0 0 16px;color:#18181b;font-size:14px;font-weight:500}
     .turnover-priority-pill{padding:4px 10px;border:1px solid #bfdbfe;border-radius:5px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:500}
     .turnover-detail-card{margin:0 0 18px;padding:15px;border:1px solid #e4e4e7;border-radius:8px;background:#fff}
@@ -760,8 +761,7 @@ window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $workflowEnabled ? 'true' : '
       ? '<span class="turnover-status is-rescued turnover-drawer-status">Turned over</span>'
       : '<span class="turnover-status is-pending-review turnover-drawer-status">Awaiting Barangay Turnover</span>';
     drawerBody.innerHTML =
-      '<div class="turnover-reporter"><div class="turnover-reporter-avatar">' + avatar + '</div><div><span class="turnover-detail-label">Reported by</span><div class="turnover-reporter-name">' + escapeHtml(row.reporter_name || '—') + '</div></div>' +
-      headerStatus + '</div>' +
+      '<div class="turnover-reporter"><div class="turnover-reporter-avatar">' + avatar + '</div><div class="turnover-reporter-copy">' + headerStatus + '<span class="turnover-detail-label">Reported by</span><div class="turnover-reporter-name">' + escapeHtml(row.reporter_name || '—') + '</div></div></div>' +
       '<div class="turnover-priority"><span>Priority</span><span class="turnover-priority-pill">' + escapeHtml(priority) + '</span></div>' +
       validationHtml + handoverHtml;
     drawerFooter.innerHTML = received ? '' :

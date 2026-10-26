@@ -189,7 +189,13 @@ $conn->close();
 
     @media (max-width: 480px) {
       body { padding: 1rem; }
-      .auth-form-card { padding: 1.75rem 1.25rem 1.5rem; }
+      .auth-form-card {
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
       .form-header h2 { font-size: 1.2rem; }
     }
   </style>

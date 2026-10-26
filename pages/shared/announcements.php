@@ -6,12 +6,14 @@ require_once __DIR__ . '/../../db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
 $aq = $conn->query(
-    "SELECT title, location, content, category, subject, link_url, photo_url,
-            status, created_at, publish_at, is_event, event_date, event_end_date
+    "SELECT announcement_id, title, location, content, category, subject, link_url, photo_url,
+            status, created_at, publish_at, expiry_date, is_event, event_date, event_end_date
      FROM announcements
      WHERE is_active=1
        AND status='published'
        AND archived_at IS NULL
+       AND (publish_at IS NULL OR publish_at <= NOW())
+       AND (expiry_date IS NULL OR expiry_date >= CURDATE())
      ORDER BY COALESCE(publish_at, created_at) DESC"
 );
 if ($aq) { while ($rr = $aq->fetch_assoc()) $announcements[] = $rr; }
