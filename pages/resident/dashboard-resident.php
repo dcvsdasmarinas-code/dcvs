@@ -9,6 +9,8 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
@@ -17,13 +19,13 @@ require_once __DIR__ . '/../../includes/appointment-workflow.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
-    header('Location: login.php');
+    header('Location: ' . $appBaseUrl . '/login.php');
     exit;
 }
 
 // Check if user has resident role
 if ($_SESSION['role'] !== 'resident') {
-    header('Location: login.php');
+    header('Location: ' . $appBaseUrl . '/login.php');
     exit;
 }
 

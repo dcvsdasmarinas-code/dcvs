@@ -383,6 +383,7 @@ $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
 
 // Fetch ALL appointments (search + status filter) - CHRONOLOGICAL
 $pendingAppts = [];
+$appointmentLoadError = '';
 $apptStatusFilter = trim($_GET['appt_status'] ?? 'all');
 $apptSearchFilter = trim($_GET['appt_search'] ?? '');
 
@@ -426,6 +427,9 @@ if ($pendingQuery) {
         $row['photo_url'] = dcvsStaffReportMediaUrl($row['photo_url']);
         $pendingAppts[] = $row;
     }
+} else {
+    $appointmentLoadError = 'Appointment requests could not be loaded. Please check the database migrations and try again.';
+    error_log('Staff appointment requests query failed: ' . $conn->error);
 }
 $pendingTotal = count($pendingAppts);
 $rescheduleRequestCount = 0;
@@ -2629,22 +2633,22 @@ if (!empty($_GET['waitlist_booking'])) {
     <div class="kpis">
       <div class="kpi-card">
         <p class="kpi-label">Total Appointments</p>
-        <div class="kpi-value"><?php echo $apptCounts['all']; ?></div>
+        <div class="kpi-value"><?php echo $appointmentLoadError !== '' ? '—' : $apptCounts['all']; ?></div>
         <p class="kpi-sub">All appointment requests</p>
       </div>
       <div class="kpi-card">
         <p class="kpi-label">Pending</p>
-        <div class="kpi-value"><?php echo $apptCounts['pending']; ?></div>
+        <div class="kpi-value"><?php echo $appointmentLoadError !== '' ? '—' : $apptCounts['pending']; ?></div>
         <p class="kpi-sub">Awaiting decision</p>
       </div>
       <div class="kpi-card">
         <p class="kpi-label">Scheduled</p>
-        <div class="kpi-value"><?php echo $apptCounts['scheduled']; ?></div>
+        <div class="kpi-value"><?php echo $appointmentLoadError !== '' ? '—' : $apptCounts['scheduled']; ?></div>
         <p class="kpi-sub">Confirmed bookings</p>
       </div>
       <div class="kpi-card">
         <p class="kpi-label">Completed</p>
-        <div class="kpi-value"><?php echo $apptCounts['completed']; ?></div>
+        <div class="kpi-value"><?php echo $appointmentLoadError !== '' ? '—' : $apptCounts['completed']; ?></div>
         <p class="kpi-sub">Finished appointments</p>
       </div>
     </div>
@@ -2725,8 +2729,8 @@ if (!empty($_GET['waitlist_booking'])) {
 
 
           <div class="appt-table-wrap" id="appointmentsTable">
-              <div class="appt-no-results" id="apptNoResults"><?php echo empty($pendingAppts) ? 'No appointments found.' : 'No appointments match this filter.'; ?></div>
-              <div class="appt-db-table-area dt-container">
+              <div class="appt-no-results" id="apptNoResults" <?php echo $appointmentLoadError !== '' ? 'style="display:block;color:#991b1b;" role="alert"' : ''; ?>><?php echo htmlspecialchars($appointmentLoadError !== '' ? $appointmentLoadError : (empty($pendingAppts) ? 'No appointments found.' : 'No appointments match this filter.'), ENT_QUOTES, 'UTF-8'); ?></div>
+              <div class="appt-db-table-area dt-container" <?php echo $appointmentLoadError !== '' ? 'style="display:none;"' : ''; ?>>
                 <table class="appt-table">
                   <thead>
                     <tr class="sd-tr">
