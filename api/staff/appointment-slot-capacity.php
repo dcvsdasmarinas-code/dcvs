@@ -41,9 +41,20 @@ $stmt->execute();
 $appointment = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
-if (!$appointment || $appointment['status'] !== 'pending') {
+if (!$appointment) {
+    http_response_code(404);
+    echo json_encode(['success' => false, 'message' => 'This appointment is no longer available.']);
+    exit;
+}
+
+$appointmentStatus = strtolower(trim((string)$appointment['status']));
+if ($appointmentStatus !== 'pending') {
     http_response_code(409);
-    echo json_encode(['success' => false, 'message' => 'This appointment is no longer pending.']);
+    echo json_encode([
+        'success' => false,
+        'message' => 'This appointment is no longer pending (current status: ' . $appointmentStatus . ').',
+        'current_status' => $appointmentStatus,
+    ]);
     exit;
 }
 

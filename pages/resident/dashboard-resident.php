@@ -7958,7 +7958,7 @@ window.APPT = window.APPT || {};
     </section>
     <section id="adActionNeeded" class="appt-action-needed" hidden>
       <h3>Staff suggested another time</h3>
-      <p>The time you asked for is not available.</p>
+      <p>Your requested time has changed. Please review the proposed schedule and respond before the deadline.</p>
       <div class="appt-reschedule-times">
         <div class="requested"><span>You requested</span><strong id="adOriginalAppointmentTime"></strong></div>
         <div><span>Staff suggests</span><strong id="adProposedAppointmentTime"></strong></div>

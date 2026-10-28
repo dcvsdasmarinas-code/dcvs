@@ -751,9 +751,11 @@ if ($rptQ) {
                     ? 'Escalated to DCVS'
                     : ((string)($r['response_state'] ?? '') === 'unable_to_locate'
                         ? 'Unable to Locate'
-                        : (in_array(strtolower((string)$r['status']), ['pending', 'validated'], true)
+                        : (strtolower((string)$r['status']) === 'pending'
                             ? 'Pending Barangay Review'
-                            : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at'])))))),
+                            : (strtolower((string)$r['status']) === 'validated'
+                                ? 'Pending DCVS Review'
+                                : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at']))))))),
 'scheduled' => $r['scheduled_at'] ? date('M d, Y h:i A', strtotime($r['scheduled_at'])) : '',
            'validated'=> $r['validated_at'] ? date('M d, Y h:i A', strtotime($r['validated_at'])) : '',
            'vts'      => $r['validated_at'] ? strtotime($r['validated_at']) : 0,
@@ -7924,7 +7926,7 @@ function openRejectionModal(reportId) {
         row.setAttribute('data-can-outcome', '0');
         var badge = row.querySelector('.appt-status-pill');
         var statusStyles = {
-          pending: ['#fef3c7', '#92400e'], scheduled: ['#0E8131', '#ffffff'], approved: ['#dcfce7', '#166534'],
+          pending: ['#fef3c7', '#92400e'], action_needed: ['#ffedd5', '#9a3412'], scheduled: ['#0E8131', '#ffffff'], approved: ['#dcfce7', '#166534'],
           rescheduled: ['#dbeafe', '#1d4ed8'], completed: ['#dbeafe', '#1e40af'], cancelled: ['#f3f4f6', '#6b7280'],
           rejected: ['#fee2e2', '#991b1b'], no_show: ['#fef2f2', '#b91c1c'], waitlisted: ['#fef3c7', '#92400e']
         };
@@ -8854,9 +8856,9 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
     modal.id = 'scheduleAppointmentDialog';
     modal.className = 'modal';
     modal.innerHTML = '<section class="sd-dialog-content schedule-dialog-content" role="dialog" aria-modal="true" aria-labelledby="scheduleAppointmentTitle" aria-describedby="scheduleAppointmentDescription">' +
-      '<header class="schedule-dialog-header"><button type="button" class="schedule-dialog-close" id="scheduleAppointmentClose" aria-label="Close">&times;</button><h2 id="scheduleAppointmentTitle">Schedule Appointment</h2><p id="scheduleAppointmentDescription">Choose the final appointment date and time. The resident’s requested schedule remains recorded separately.</p></header>' +
-      '<div><label class="schedule-dialog-label" for="scheduleAppointmentDate">Final Appointment Date</label><input class="schedule-date-input" id="scheduleAppointmentDate" type="date" required></div>' +
-      '<div><span class="schedule-dialog-label">Final Appointment Time</span><div class="schedule-time-grid" id="scheduleAppointmentTimeOptions" role="group" aria-label="Final appointment time"></div><select id="scheduleAppointmentTime" aria-hidden="true" tabindex="-1" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);"><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></div>' +
+      '<header class="schedule-dialog-header"><button type="button" class="schedule-dialog-close" id="scheduleAppointmentClose" aria-label="Close">&times;</button><h2 id="scheduleAppointmentTitle">Schedule Appointment</h2><p id="scheduleAppointmentDescription">Keep the requested time to schedule directly. A different date or time will be sent to the resident for confirmation.</p></header>' +
+      '<div><label class="schedule-dialog-label" for="scheduleAppointmentDate">Appointment Date</label><input class="schedule-date-input" id="scheduleAppointmentDate" type="date" required></div>' +
+      '<div><span class="schedule-dialog-label">Appointment Time</span><div class="schedule-time-grid" id="scheduleAppointmentTimeOptions" role="group" aria-label="Appointment time"></div><select id="scheduleAppointmentTime" aria-hidden="true" tabindex="-1" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);"><option value="09:00">9:00 AM</option><option value="10:00">10:00 AM</option><option value="11:00">11:00 AM</option><option value="14:00">2:00 PM</option><option value="15:00">3:00 PM</option></select></div>' +
       '<section class="schedule-capacity is-checking" id="scheduleAppointmentCapacity" aria-live="polite"><div class="schedule-capacity-heading"><span class="schedule-capacity-icon" id="scheduleAppointmentCapacityIcon">…</span><span id="scheduleAppointmentCapacityTitle">Checking appointment availability</span></div><div class="schedule-capacity-counts"><span>Daily appointments</span><strong id="scheduleAppointmentDailyCount">Checking…</strong></div><div class="schedule-capacity-bar" aria-hidden="true"><div class="schedule-capacity-fill" id="scheduleAppointmentCapacityFill"></div></div><p class="schedule-capacity-detail" id="scheduleAppointmentCapacityDetail">Checking daily and time-slot capacity…</p></section>' +
       '<p class="schedule-dialog-error" id="scheduleAppointmentError" role="alert" hidden></p>' +
       '<footer class="schedule-dialog-footer"><button type="button" class="sd-btn sd-btn-outline" id="scheduleAppointmentCancel">Cancel</button><button type="button" class="sd-btn sd-btn-default" id="scheduleAppointmentSubmit" disabled>Check Availability</button></footer>' +
@@ -8875,6 +8877,11 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
   var capacityFill = document.getElementById('scheduleAppointmentCapacityFill');
   var capacityDetail = document.getElementById('scheduleAppointmentCapacityDetail');
   var capacityIcon = document.getElementById('scheduleAppointmentCapacityIcon');
+  var requestedDate = '';
+  var requestedTime = '';
+  function scheduleDiffersFromRequest() {
+    return !!requestedDate && (dateInput.value !== requestedDate || timeInput.value !== requestedTime);
+  }
   function updateSelectedTime() {
     Array.prototype.forEach.call(timeOptions.querySelectorAll('.schedule-time-option'), function (button) {
       var selected = button.dataset.time === timeInput.value;
@@ -8942,7 +8949,13 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
       .then(function (response) { return response.json(); })
       .then(function (result) {
         if (request !== previewSequence) return;
-        if (!result || !result.success) throw new Error((result && result.message) || 'Could not check appointment capacity.');
+        if (!result || !result.success) {
+          if (result && result.current_status && window.apptUpdateRow) {
+            window.apptUpdateRow(id, result.current_status);
+            if (window.APP && typeof window.APP.view === 'function') window.APP.view(id);
+          }
+          throw new Error((result && result.message) || 'Could not check appointment capacity.');
+        }
         slotState = result;
         capacity.className = 'schedule-capacity';
         capacityIcon.textContent = result.can_schedule ? '✓' : '!';
@@ -8976,7 +8989,7 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
             capacityTitle.textContent = 'Capacity reached — waitlist available';
             capacityDetail.textContent = 'This request can be moved to the waitlist.';
           }
-          submit.textContent = result.full ? 'Move to Waitlist' : 'Confirm Schedule';
+          submit.textContent = result.full ? 'Move to Waitlist' : (scheduleDiffersFromRequest() ? 'Request Confirmation' : 'Confirm Schedule');
           submit.disabled = false;
         }
       })
@@ -8999,7 +9012,7 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
   submit.onclick = function () {
     if (!slotState || submit.disabled) return;
     submit.disabled = true;
-    submit.textContent = slotState.full ? 'Moving to Waitlist…' : 'Scheduling…';
+    submit.textContent = slotState.full ? 'Moving to Waitlist…' : (scheduleDiffersFromRequest() ? 'Requesting confirmation…' : 'Scheduling…');
     var body = new URLSearchParams();
     body.append('ajax', '1');
     body.append('appointment_id', id);
@@ -9018,10 +9031,13 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
           var chosenTimeLabel = timeInput.options[timeInput.selectedIndex].text;
           if (window.apptUpdateRow) window.apptUpdateRow(id, nextStatus, chosenDateLabel + ' · ' + chosenTimeLabel);
           var tableRow = document.querySelector('#appointmentsTable tr[data-id="' + id + '"]');
-          if (tableRow && nextStatus === 'scheduled') {
+          if (tableRow && (nextStatus === 'scheduled' || nextStatus === 'action_needed')) {
             tableRow.setAttribute('data-date', String(Math.floor(new Date(dateInput.value + 'T' + timeInput.value + ':00').getTime() / 1000)));
           }
-          if (window.portalToast) portalToast(nextStatus === 'waitlisted' ? 'Appointment waitlisted' : 'Appointment scheduled', data.message || 'Appointment request updated.');
+          if (window.portalToast) portalToast(
+            nextStatus === 'waitlisted' ? 'Appointment waitlisted' : (nextStatus === 'action_needed' ? 'Resident confirmation requested' : 'Appointment scheduled'),
+            data.message || 'Appointment request updated.'
+          );
           if (typeof onComplete === 'function') onComplete(nextStatus);
           return;
         }
@@ -9040,8 +9056,9 @@ function schedulePendingAppointment(id, onComplete, staffMessage){
     .then(function (result) {
       var appointment = result && result.data;
       if (!result || !result.success || !appointment) throw new Error((result && result.message) || 'Could not load the requested schedule.');
-      dateInput.value = appointment.preferred_date || '';
-      var requestedTime = (appointment.preferred_time || '').substring(0, 5);
+      requestedDate = appointment.preferred_date || '';
+      dateInput.value = requestedDate;
+      requestedTime = (appointment.preferred_time || '').substring(0, 5);
       if (requestedTime) timeInput.value = requestedTime;
       updateSelectedTime();
       refreshCapacity();
@@ -10927,7 +10944,7 @@ window.applyStaffRealtimeReport = function(source) {
     statusLabel = window.dcvsStaffBarangayCaseStatusLabel({ responseState: responseState });
   } else if (responseState === 'escalated_to_dcvs') statusLabel = 'Escalated to DCVS';
   else if (rawStatus === 'rejected') statusLabel = 'Closed';
-  else if (rawStatus === 'validated') statusLabel = 'Pending Barangay Review';
+  else if (rawStatus === 'validated') statusLabel = 'Pending DCVS Review';
   else if (rawStatus === 'pending') statusLabel = 'Pending Barangay Review';
   else if (allStatus === 'active') statusLabel = 'In Progress';
   else statusLabel = allStatus.charAt(0).toUpperCase() + allStatus.slice(1);

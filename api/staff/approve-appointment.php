@@ -13,6 +13,7 @@ session_start();
 
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/availability.php';
+require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
 require_once __DIR__ . '/../../mailer.php';
 require_once __DIR__ . '/../../sms-sender.php';
 
@@ -51,7 +52,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         apptRespond(false, "Appointment request not found.");
     }
 
-    if ($appt['status'] !== 'pending') {
+    $appointmentStatus = strtolower(trim((string)$appt['status']));
+    if ($appointmentStatus !== 'pending') {
         apptRespond(false, "This request has already been processed (current status: " . $appt['status'] . ").");
     }
 
@@ -106,6 +108,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         apptRespond(false, 'This request has no pet linked, so it cannot be moved to the pet-required waitlist. It remains pending.');
     }
 
+    $requestedTime = dcvsTimeKey($appt['preferred_time']);
+    $scheduleChanged = $scheduledDate !== $appt['preferred_date']
+        || dcvsTimeKey($scheduledTime) !== $requestedTime;
+    $scheduledTimeSql = $scheduledTime . ':00';
+    if (!$isFull && $scheduleChanged) {
+        $conn->begin_transaction();
+        $appointmentForOffer = $appt;
+        $appointmentForOffer['schedule_date'] = $appt['preferred_date'];
+        $appointmentForOffer['schedule_time'] = $appt['preferred_time'];
+        $offer = [
+            $appointmentId => [
+                'date' => $scheduledDate,
+                'time' => dcvsTimeKey($scheduledTime),
+                'urgency' => $urgency,
+            ],
+        ];
+        try {
+            $releasedSlots = dcvsCreateAppointmentRescheduleOffers($conn, [$appointmentForOffer], $offer);
+            $conn->commit();
+        } catch (Throwable $error) {
+            $conn->rollback();
+            error_log('Staff appointment reschedule offer failed: ' . $error->getMessage());
+            apptRespond(false, 'Could not send the proposed time for resident confirmation. The request remains pending.');
+        }
+
+        foreach ($releasedSlots as $slot) {
+            dcvsNotifyWaitlistForSlot($conn, $slot['date'], $slot['time'], $slot['appointment_type'], $slot['urgency_level']);
+        }
+        $action = 'Appointment Reschedule Proposed';
+        $details = 'Proposed ' . ucfirst($appt['appointment_type']) . ' appointment for ' . $appt['resident_name']
+            . (!empty($appt['pet_name']) ? ' (pet: ' . $appt['pet_name'] . ')' : '')
+            . ' for ' . $scheduledDate . ' at ' . $scheduledTimeSql . '; awaiting resident response.';
+        $ip = $_SERVER['REMOTE_ADDR'];
+        $logStmt = $conn->prepare("INSERT INTO activity_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)");
+        $logStmt->bind_param('isss', $_SESSION['user_id'], $action, $details, $ip);
+        $logStmt->execute();
+        $logStmt->close();
+
+        apptRespond(true, 'The proposed time was sent to the resident for confirmation.', 'action_needed');
+    }
+
     $conn->begin_transaction();
     if ($isFull) {
         $existing = $conn->prepare("SELECT waitlist_id FROM appointment_waitlist
@@ -129,7 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $waitlist->close();
         }
-        $updStmt = $conn->prepare("UPDATE appointments SET status = 'waitlisted', scheduled_date = NULL, scheduled_time = NULL WHERE appointment_id = ? AND status = 'pending'");
+        $updStmt = $conn->prepare("UPDATE appointments SET status = 'waitlisted', scheduled_date = NULL, scheduled_time = NULL WHERE appointment_id = ? AND LOWER(TRIM(status)) = 'pending'");
         $updStmt->bind_param('i', $appointmentId);
         $updated = $updStmt->execute() && $updStmt->affected_rows > 0;
         $updStmt->close();
@@ -147,8 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         apptRespond(true, 'The selected date or time is full. The appointment was moved to the waitlist.', 'waitlisted');
     }
 
-    $updStmt = $conn->prepare("UPDATE appointments SET status = 'scheduled', scheduled_date = ?, scheduled_time = ?, cancelled_by = NULL WHERE appointment_id = ? AND status = 'pending'");
-    $scheduledTimeSql = $scheduledTime . ':00';
+    $updStmt = $conn->prepare("UPDATE appointments SET status = 'scheduled', scheduled_date = ?, scheduled_time = ?, cancelled_by = NULL WHERE appointment_id = ? AND LOWER(TRIM(status)) = 'pending'");
     $updStmt->bind_param('ssi', $scheduledDate, $scheduledTimeSql, $appointmentId);
     $updated = $updStmt->execute() && $updStmt->affected_rows > 0;
     $updStmt->close();
