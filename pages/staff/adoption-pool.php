@@ -234,6 +234,12 @@ $activePage = 'adoption-pool';
       justify-content: center;
       padding: 1rem;
     }
+    #confirm-dialog {
+      z-index: 1300;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
     .modal.open,
     .modal.show,
     #logoutModal.modal.active {

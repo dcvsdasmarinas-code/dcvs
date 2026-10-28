@@ -119,8 +119,7 @@ $pageTitle = 'Account Settings';
     .notif-time{font-size:.65rem;color:#94a3b8;margin-top:3px;}
     .notif-empty{text-align:center;padding:2rem;color:#94a3b8;font-size:.82rem;}
     @media(max-width:640px){.notif-panel{width:calc(100vw - 2rem)!important;right:.5rem!important;}}
-    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);border:1px solid transparent;}
-    .user-profile:hover{background:#F3F4F6;border-color:#F0F2F5;}
+    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;border:1px solid transparent;}
     .user-avatar{width:34px;height:34px;border-radius:50%;background:#D5ECE0;border:1px solid #B8DEC9;display:flex;align-items:center;justify-content:center;color:#0B4D26;font-weight:700;font-size:12px;overflow:hidden;}
     .user-meta{display:flex;flex-direction:column;line-height:1.25;}
     .user-name{font-size:14px;font-weight:600;color:#18181B;}
@@ -259,7 +258,7 @@ $pageTitle = 'Account Settings';
           </div>
         </div>
       </div>
-      <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-profile">
         <div class="user-avatar">
           <?php if (!empty($avatarUrl)): ?>
             <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">

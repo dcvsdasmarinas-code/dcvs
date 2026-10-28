@@ -326,7 +326,7 @@ window.SB2_CONFIG = {
       </div>
     </div>
     <!-- User Profile Pill -->
-    <div class="user-profile" id="user-profile-btn" title="View Profile">
+    <div class="user-profile">
       <div class="user-avatar">
         <?php if (!empty($adminAvatar)): ?>
           <img src="<?php echo htmlspecialchars($adminAvatar); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
@@ -349,8 +349,7 @@ window.SB2_CONFIG = {
 
 <style>
   /* User Profile Pill */
-  .user-profile { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); border: 1px solid transparent; }
-  .user-profile:hover { background-color: #F3F4F6; border-color: #F0F2F5; }
+  .user-profile { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; border: 1px solid transparent; }
   .user-avatar { width: 34px; height: 34px; border-radius: 50%; background: #D5ECE0; border: 1px solid #B8DEC9; display: flex; align-items: center; justify-content: center; color: #0B4D26; font-weight: 700; font-size: 12px; overflow: hidden; }
   .user-meta { display: flex; flex-direction: column; line-height: 1.25; }
   .user-name { font-size: 14px; font-weight: 600; color: #18181B; }

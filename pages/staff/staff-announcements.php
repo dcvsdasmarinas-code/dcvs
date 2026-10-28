@@ -529,6 +529,13 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
     #publishModal .sd-dialog-content{
       position:relative; width:100%; max-width:420px; background:#fff; border:1px solid rgba(15,23,42,0.08); border-radius:12px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(15,23,42,0.1), 0 4px 6px -4px rgba(15,23,42,0.1); animation:modalIn 0.2s ease;
     }
+    #archiveModal.modal,
+    #annBulkModal.modal{
+      z-index:1300;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
+    }
     .sd-alert-dialog-header, .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
     .sd-alert-dialog-title, .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; color:#18181b; }
     .sd-alert-dialog-description, .sd-dialog-description{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; line-height:1.5; color:#71717a; }

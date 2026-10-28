@@ -683,14 +683,7 @@ $dashboardConfig = [
       gap: 10px;
       padding: 4px 8px;
       border-radius: var(--radius-sm);
-      cursor: pointer;
-      transition: var(--transition);
       border: 1px solid transparent;
-    }
-
-    .user-profile:hover {
-      background-color: var(--bg-hover);
-      border-color: var(--border-color-light);
     }
 
     .user-avatar {
@@ -2764,7 +2757,7 @@ $dashboardConfig = [
       </div>
 
       <!-- User Profile Pill -->
-      <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-profile">
         <div class="user-avatar">
           <?php if ($avatarUrl): ?>
             <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">

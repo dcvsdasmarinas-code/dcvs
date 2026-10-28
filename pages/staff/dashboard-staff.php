@@ -6866,6 +6866,16 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     }
   }
 
+  #archiveClientModal.modal,
+  #archiveClientsBulkModal.modal,
+  #archiveReportModal.modal,
+  #archiveApptModal.modal{
+    z-index:1300 !important;
+    align-items:center !important;
+    justify-content:center !important;
+    padding:16px !important;
+  }
+
   #appointmentDetailsModal.appt-bulk-dialog.modal{ align-items:center; justify-content:center; padding:16px; }
   #appointmentDetailsModal.appt-bulk-dialog .sd-dialog{ width:100%; height:auto; justify-content:center; }
   #appointmentDetailsModal.appt-bulk-dialog .sd-dialog-content{ width:min(560px,94vw); max-width:min(560px,94vw); height:auto; max-height:calc(100vh - 32px); box-sizing:border-box; overflow-y:auto; border:1px solid #e4e4e7; border-radius:10px; box-shadow:0 20px 25px rgba(15,23,32,.18); transform:none; transition:none; padding:24px; gap:16px; }
@@ -7159,13 +7169,13 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
             <i class="fas fa-user"></i>
           </div>
           <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+            <span id="detailStatus" style="align-self:flex-start;max-width:100%;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;line-height:1.35;white-space:normal;">-</span>
             <span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Requested by</span>
             <span id="detailClient" style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</span>
             <button type="button" class="copy-id-btn" id="copyApptIdBtn" onclick="copyAppointmentId()" style="margin-top:4px;width:fit-content;">
               <span id="copyApptIdLabel">Copy ID</span>
             </button>
           </div>
-          <span id="detailStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
         </div>
         <div id="apptStatusProgress" class="appt-status-progress" role="list" aria-label="Appointment progress"></div>
         <section id="staffRescheduleReview" class="staff-reschedule-review" hidden aria-live="polite">
@@ -10570,6 +10580,7 @@ window.APP = window.APP || {};
         if (statusEl) {
           var stColors = {
             pending: { bg: '#fef3c7', fg: '#92400e', border: '#fde68a' },
+            action_needed: { bg: '#ffedd5', fg: '#9a3412', border: '#fed7aa' },
             scheduled: { bg: '#0E8131', fg: '#ffffff', border: '#0E8131' },
             rescheduled: { bg: '#ede9fe', fg: '#7c3aed', border: '#DDD6FE' },
             completed: { bg: '#dbeafe', fg: '#1e40af', border: '#bfdbfe' },

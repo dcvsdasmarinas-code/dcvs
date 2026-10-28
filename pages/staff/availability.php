@@ -394,17 +394,27 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-editor { border: 1px solid var(--av-border); border-radius: 0.75rem; background: var(--av-bg); min-height: 20rem; }
     .ov-editor-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 20rem; color: var(--av-muted-fg); font-size: 1rem; }
     .ov-editor-empty svg { width: 2rem; height: 2rem; margin-bottom: 0.75rem; opacity: 0.5; }
-    .ov-editor-head { padding: 1.25rem 1.5rem 0; }
+    .ov-editor-head { padding: 1.25rem 1.5rem 1rem; }
     .ov-editor-date { font-size: 1.125rem; font-weight: 600; color: var(--av-fg); }
     .ov-editor-sub { font-size: 0.9375rem; color: var(--av-muted-fg); margin-top: 0.125rem; }
-    .ov-editor-status { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.5rem; font-size: 0.875rem; font-weight: 500; }
+    .ov-editor-status { display: inline-flex; align-items: center; gap: 0.375rem; margin-top: 0.625rem; padding: 0.25rem 0.625rem; border-radius: 9999px; font-size: 0.8125rem; font-weight: 500; }
+    .ov-editor-status.is-custom { background: #f0fdf4; }
+    .ov-editor-status.is-closed { background: #fef2f2; }
+    .ov-editor-status.is-weekly { background: var(--av-muted); }
     .ov-editor-status .ov-status-dot { width: 6px; height: 6px; border-radius: 50%; }
-    .ov-editor-body { padding: 1rem 1.5rem 1.25rem; }
-    .ov-editor-label { font-size: 0.9375rem; font-weight: 500; color: var(--av-fg); margin-bottom: 0.5rem; }
+    #ovEditorView .ov-editor-head,
+    #ovEditorNoOv .ov-editor-head { border-bottom: 1px solid var(--av-border); }
+    .ov-editor-body { padding: 1.125rem 1.5rem 1.25rem; }
+    .ov-editor-label { font-size: 0.8125rem; font-weight: 600; color: var(--av-muted-fg); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.04em; }
     .ov-hours-display { display: flex; flex-direction: column; gap: 0.375rem; }
     .ov-hours-range { font-size: 1rem; font-weight: 500; color: var(--av-fg); font-variant-numeric: tabular-nums; }
     .ov-hours-info { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.5rem; line-height: 1.5; }
-    .ov-editor-actions { padding: 0 1.5rem 1.25rem; display: flex; gap: 0.5rem; }
+    .ov-editor-actions { padding: 1rem 1.5rem 1.25rem; border-top: 1px solid var(--av-border); display: flex; gap: 0.5rem; }
+    .av-date-context { margin-top: 1rem; padding: 0.875rem 1rem; border: 1px solid #bfdbfe; border-radius: 0.5rem; background: #eff6ff; color: #1e3a8a; font-size: 0.875rem; line-height: 1.5; }
+    .av-date-context-title { margin: 0 0 0.5rem; font-size: 0.8125rem; font-weight: 600; }
+    .av-date-context p { margin: 0; }
+    .av-date-context p + p { margin-top: 0.4rem; }
+    .av-date-context strong { font-weight: 600; }
 
     /* Editor form (edit/create mode) */
     .ov-mode-group { display: flex; flex-direction: column; gap: 0.625rem; margin-bottom: 1rem; }
@@ -756,11 +766,6 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .pv-slot-status.open { color: #166534; }
     .pv-slot-status.closed { color: var(--av-muted-fg); }
     .pv-slot-count { font-size: 0.875rem; color: var(--av-muted-fg); margin-top: 0.75rem; text-align: right; }
-    .av-date-context { margin-top: 1rem; padding: 0.875rem 1rem; border: 1px solid #bfdbfe; border-radius: 0.5rem; background: #eff6ff; color: #1e3a8a; font-size: 0.875rem; line-height: 1.5; }
-    .av-date-context p { margin: 0; }
-    .av-date-context p + p { margin-top: 0.4rem; }
-    .av-date-context strong { font-weight: 600; }
-
     /* Closed state */
     .pv-closed { display: flex; flex-direction: column; align-items: center; padding: 2.5rem 1.5rem; text-align: center; }
     .pv-closed svg { width: 2.5rem; height: 2.5rem; color: var(--av-muted-fg); opacity: 0.5; margin-bottom: 0.75rem; }
@@ -821,6 +826,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       .ov-time-select select { width: 100%; min-width: 0; padding-right: 1.5rem; }
       .ov-range-actions { flex-shrink: 0; }
       .ov-editor-actions { flex-wrap: wrap; padding-right: 1rem; padding-left: 1rem; }
+      .ov-editor-head, .ov-editor-body { padding-right: 1rem; padding-left: 1rem; }
       .ov-editor-foot { flex-wrap: wrap; gap: 0.5rem; padding-right: 1rem; padding-left: 1rem; }
       .ov-editor-foot-text { flex: 1 1 100%; }
       .ov-editor-foot-btns { width: 100%; justify-content: flex-end; flex-wrap: wrap; }
@@ -857,7 +863,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       <div class="av-header-left">
         <?php if ($panel === 'overrides'): ?>
         <h1>Date Overrides</h1>
-        <p>Add custom availability for specific dates.<br>Changes here override your regular weekly schedule.</p>
+        <p>Review the schedule and activity for a date.<br>A date override replaces weekly hours for that day only.</p>
         <?php elseif ($panel === 'bulk'): ?>
         <h1>Bulk Schedule</h1>
         <p>Set availability for multiple dates at once.<br>Quickly apply the same schedule across a date range.</p>
@@ -955,9 +961,9 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
                 <div class="ov-editor-status" id="ovViewStatus"></div>
               </div>
               <div class="ov-editor-body">
-                <div class="ov-editor-label">Date-specific availability</div>
+                <div class="ov-editor-label">Availability for this date</div>
                 <div class="ov-hours-display" id="ovViewHours"></div>
-                <div class="ov-hours-info">This date has a custom schedule that overrides the weekly schedule.</div>
+                <div class="ov-hours-info" id="ovViewHoursInfo"></div>
                 <div id="ovViewContext"></div>
               </div>
               <div class="ov-editor-actions">
@@ -976,16 +982,16 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
             <div id="ovEditorNoOv" style="display:none;">
               <div class="ov-editor-head">
                 <div class="ov-editor-date" id="ovNoOvDate"></div>
-                <div class="ov-editor-sub">Using weekly schedule</div>
-                <div class="ov-editor-status">
+                <div class="ov-editor-sub">Regular weekly hours apply</div>
+                <div class="ov-editor-status is-weekly">
                   <span class="ov-status-dot" style="background:var(--av-muted-fg);"></span>
                   <span style="color:var(--av-muted-fg);">Weekly schedule</span>
                 </div>
               </div>
               <div class="ov-editor-body">
-                <div class="ov-editor-label">Current availability</div>
+                <div class="ov-editor-label">Availability for this date</div>
                 <div class="ov-hours-display" id="ovNoOvHours"></div>
-                <div class="ov-hours-info">This date currently follows the weekly schedule.</div>
+                <div class="ov-hours-info">No date override is set, so this date uses its regular weekly hours.</div>
                 <div id="ovNoOvContext"></div>
               </div>
               <div class="ov-editor-actions">
@@ -1951,20 +1957,26 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       container.innerHTML = '';
       var context = document.createElement('div');
       context.className = 'av-date-context';
+      var title = document.createElement('div');
+      title.className = 'av-date-context-title';
+      title.textContent = 'Bookings and programs';
+      context.appendChild(title);
       var counts = avAppointmentCounts[dateStr] || {};
       var appointmentCount = Object.keys(counts).reduce(function(total, time) {
         return total + (parseInt(counts[time], 10) || 0);
       }, 0);
       var appointmentNote = document.createElement('p');
       appointmentNote.textContent = appointmentCount === 0
-        ? 'No appointments are currently booked for this date.'
-        : appointmentCount + ' appointment' + (appointmentCount === 1 ? ' is' : 's are') + ' currently booked for this date. Remaining booking availability may be limited.';
+        ? 'No appointments are currently booked.'
+        : appointmentCount + ' appointment' + (appointmentCount === 1 ? ' is' : 's are') + ' currently booked. Remaining booking availability may be limited.';
       context.appendChild(appointmentNote);
 
       var programs = avProgramEvents[dateStr] || [];
       if (programs.length) {
         var intro = document.createElement('p');
-        intro.textContent = 'Program schedule:';
+        var introLabel = document.createElement('strong');
+        introLabel.textContent = 'Scheduled programs:';
+        intro.appendChild(introLabel);
         context.appendChild(intro);
         programs.forEach(function(program) {
           var line = document.createElement('p');
@@ -2032,9 +2044,12 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         document.getElementById('ovViewSub').textContent = 'Date-specific availability';
         var statusEl = document.getElementById('ovViewStatus');
         if (ovIsClosed(ov)) {
-          statusEl.innerHTML = '<span class="ov-status-dot" style="background:#dc2626;"></span><span style="color:#dc2626;">Closed</span>';
+          statusEl.className = 'ov-editor-status is-closed';
+          statusEl.innerHTML = '<span class="ov-status-dot" style="background:#dc2626;"></span><span style="color:#dc2626;">Closed for this date</span>';
           document.getElementById('ovViewHours').innerHTML = '<div class="ov-hours-range" style="color:var(--av-muted-fg);">No available times</div>';
+          document.getElementById('ovViewHoursInfo').textContent = 'This date is closed instead of following the regular weekly schedule.';
         } else {
+          statusEl.className = 'ov-editor-status is-custom';
           statusEl.innerHTML = '<span class="ov-status-dot" style="background:var(--av-green);"></span><span style="color:var(--av-green);">Custom schedule</span>';
           var ranges = ovSlotsToRanges(ov.slots);
           var html = '';
@@ -2042,6 +2057,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
             html += '<div class="ov-hours-range">' + timeValToLabel(r.start) + ' – ' + timeValToLabel(r.end) + '</div>';
           });
           document.getElementById('ovViewHours').innerHTML = html;
+          document.getElementById('ovViewHoursInfo').textContent = 'These custom hours replace the regular weekly schedule for this date only.';
         }
         appendDateContext(document.getElementById('ovViewContext'), ovSelectedDate);
         document.getElementById('ovEditBtn').onclick = function() { ovEditing = true; ovRenderEditor(); };
