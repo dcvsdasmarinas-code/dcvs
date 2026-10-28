@@ -292,9 +292,6 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
             </div>
           </div>
         </div>
-        <button class="cb-icon-btn" type="button" title="View">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/></svg>
-        </button>
       </div>
     </div>
 
@@ -385,8 +382,6 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
           <div class="cb-program-location" id="cbProgramLocation"></div>
           <div class="cb-program-description" id="cbProgramDescription" style="display:none;"></div>
         </div>
-        <a class="cb-appointment-link" href="#calendar-booking">View on the appointment page</a>
-
         <div class="cb-people" id="cbPeopleList">
           <div class="cb-help">
             <p class="cb-help-txt">Questions? Call <a class="cb-contact" href="tel:+63464321234">(046) 432-1234</a> or email <a class="cb-contact" href="mailto:admin@dcvs.gov.ph">admin@dcvs.gov.ph</a>.</p>

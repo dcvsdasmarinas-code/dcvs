@@ -361,6 +361,8 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     .ov-cal-day { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 2.25rem; border-radius: 0.375rem; font-size: 0.9375rem; font-weight: 500; cursor: pointer; transition: background 0.12s, color 0.12s; color: var(--av-fg); }
     .ov-cal-day:hover { background: var(--av-muted); }
     .ov-cal-day.today { font-weight: 700; }
+    .ov-cal-day.past-date { color: var(--av-muted-fg); opacity: 0.45; cursor: not-allowed; }
+    .ov-cal-day.past-date:hover { background: transparent; }
     .ov-cal-day.selected { background: var(--av-green); color: #fff; }
     .ov-cal-day.selected:hover { background: var(--av-green-hover); }
     .ov-cal-day.other { color: var(--av-muted-fg); opacity: 0.5; pointer-events: none; }
@@ -1920,6 +1922,12 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         el.className = 'ov-cal-day';
         el.textContent = d;
         if (ds === todayStr) el.classList.add('today');
+        var isPastDate = ds < todayStr;
+        if (isPastDate) {
+          el.classList.add('past-date');
+          el.setAttribute('aria-disabled', 'true');
+          el.title = 'Past dates cannot be selected.';
+        }
         if (ds === ovSelectedDate) el.classList.add('selected');
         var ov = ovFindOverride(ds);
         if (ov) el.classList.add('has-override');
@@ -1928,10 +1936,14 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
         var hasPrograms = (avProgramEvents[ds] || []).length > 0;
         if (hasBookings || hasPrograms) {
           el.classList.add('has-activity');
-          el.title = (hasBookings ? 'Appointments are booked. ' : '') + (hasPrograms ? 'A program is scheduled. ' : '') + 'Select for details.';
+          if (!isPastDate) {
+            el.title = (hasBookings ? 'Appointments are booked. ' : '') + (hasPrograms ? 'A program is scheduled. ' : '') + 'Select for details.';
+          }
         }
         el.dataset.date = ds;
-        el.addEventListener('click', function() { ovSelectDate(this.dataset.date); });
+        if (!isPastDate) {
+          el.addEventListener('click', function() { ovSelectDate(this.dataset.date); });
+        }
         grid.appendChild(el);
       }
       var remaining = (first + total) % 7;
@@ -1946,6 +1958,9 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
     }
 
     function ovSelectDate(dateStr) {
+      var today = new Date();
+      var todayStr = ovDateStr(today.getFullYear(), today.getMonth(), today.getDate());
+      if (dateStr < todayStr) return;
       ovSelectedDate = dateStr;
       ovEditing = false;
       ovRenderCal();
@@ -1968,7 +1983,7 @@ if (!in_array($panel, ['', 'overrides', 'bulk', 'preview'])) $panel = '';
       var appointmentNote = document.createElement('p');
       appointmentNote.textContent = appointmentCount === 0
         ? 'No appointments are currently booked.'
-        : appointmentCount + ' appointment' + (appointmentCount === 1 ? ' is' : 's are') + ' currently booked. Remaining booking availability may be limited.';
+        : appointmentCount + ' appointment' + (appointmentCount === 1 ? ' is' : 's are') + ' booked for this date. Check Schedule Preview for remaining appointment slots.';
       context.appendChild(appointmentNote);
 
       var programs = avProgramEvents[dateStr] || [];
