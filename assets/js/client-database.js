@@ -2,7 +2,7 @@
 // Expects globals: CLIENTS, PETS, VIEW_OWNER (output by the page before this script)
 var currentProfile = null;
 
-var state = { mode:'clients', view:'table', group:'all', quick:'', brgy:'', type:'', petSearch:'', search:'', sort:'newest', page:1, perPage:10, selected:0, sortCol:'', sortDir:'' };
+var state = { mode:'clients', view:'table', group:'all', quick:'', brgy:'', type:'', date:'', petSearch:'', search:'', sort:'newest', page:1, perPage:10, selected:0, sortCol:'', sortDir:'' };
 
 function cpdEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function vaxInfo(v){ var s=String(v||'').toLowerCase(); var ok = s.indexOf('vaccinated')!==-1 && s.indexOf('not')===-1; return ok ? {l:'Vaccinated',c:'vax-yes'} : {l:'Not vaccinated',c:'vax-no'}; }
@@ -81,6 +81,7 @@ function currentList(){
       if (state.group==='dog' && x.type!=='dog') return false;
     }
     if (state.quick==='recent' && (now - x.ts) > 30*86400) return false;
+    if (state.date && x.dateKey !== state.date) return false;
     if (state.mode==='clients'){
       if (state.quick==='active' && x.status!=='Active') return false;
       if (state.quick==='inactive' && x.status!=='Inactive') return false;
@@ -284,6 +285,11 @@ function setSearch(v){ state.search = v; state.page = 1; render(); }
 function setPetSearch(v){ state.petSearch = v; state.page = 1; render(); }
 function setBrgy(v){ state.brgy = v; state.page = 1; render(); }
 function setType(v){ state.type = v; state.page = 1; render(); }
+function cpdSetDate(){
+  state.date = document.getElementById('cpdDateFrom').value;
+  state.page = 1;
+  render();
+}
 
 function setGroup(v){
   state.group = v; state.page = 1;
@@ -310,6 +316,7 @@ function clearFilters(){
   state.quick = '';
   state.brgy = '';
   state.type = '';
+  state.date = '';
   state.petSearch = '';
   state.search = '';
   state.page = 1;
@@ -321,6 +328,12 @@ function clearFilters(){
   if (ps) ps.value = '';
   if (bf) bf.value = '';
   if (tf) tf.value = '';
+  var dateFrom = document.getElementById('cpdDateFrom');
+  var dateTo = document.getElementById('cpdDateTo');
+  if (dateFrom) dateFrom.value = '';
+  if (dateTo) dateTo.value = '';
+  var dateButton = document.querySelector('[data-date-filter="cpd"] .staff-date-filter-button');
+  if (dateButton) dateButton.classList.remove('has-date');
   document.querySelectorAll('.cpd .filter-item').forEach(function(b){
     b.classList.toggle('active', b.getAttribute('data-filter')==='group' && b.getAttribute('data-value')==='all');
   });
@@ -425,7 +438,7 @@ function renderProfile(tab){
   var footer = document.getElementById('clientProfileFooter');
   if (footer) {
     footer.innerHTML =
-      '<a class="sd-btn sd-btn-default" href="staff-communication.php?recipient_id='+encodeURIComponent(c.user_id)+'&recipient_role=resident">Email/Message</a>' +
+      '<a class="sd-btn sd-btn-default" href="#" onclick="openClientComposeFromProfile(); return false;">Email/Message</a>' +
       '<button class="sd-btn sd-btn-outline" style="color:#b91c1c;border-color:#fecaca;" onclick="confirmArchive('+c.user_id+',\''+cpdEsc(c.full_name).replace(/'/g,"\\'")+'\')">Archive</button>';
   }
 
@@ -442,7 +455,7 @@ function renderProfile(tab){
     body.innerHTML =
       '<div style="margin-top:2px;"><div class="info-card-head"><div class="rpt-section-title-action"><h3 style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:600;color:#18181b;margin:0;">Client Information</h3><button type="button" class="cpd-edit-icon" onclick="openEditClient('+c.user_id+')" aria-label="Edit client" title="Edit client"><img src="assets/images/edit%20icon.png" alt=""></button></div>'+
       '</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">'+
+      '<div class="client-profile-values-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 20px;">'+
         '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Resident ID</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.reference_id||'-')+'</p></div></div>'+
         '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Barangay</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.barangay_name||'-')+'</p></div></div>'+
         '<div class="info-row" style="display:flex;gap:12px;align-items:flex-start;padding:0;"><div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><p class="info-row-label" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;margin:0;">Full Name</p><p class="info-row-value" style="font-family:Inter,Segoe UI,sans-serif;font-size:15px;font-weight:400;color:#18181b;margin:0;">'+cpdEsc(c.full_name)+'</p></div></div>'+
@@ -456,11 +469,16 @@ function renderProfile(tab){
   } else if (activeTab==='history'){
     var history = d.history || [];
     if (!history.length){
-      body.innerHTML = '<div class="no-results"><i class="fas fa-history"></i><p>No activity yet.</p></div>';
+      body.innerHTML = '<div class="rpt-section-title">Client updates</div><p class="rpt-updates-empty">No client updates have been recorded yet.</p>';
     } else {
-      body.innerHTML = '<div class="rpt-section-title">Activity Timeline</div>'+
-        '<div class="rpt-history">'+history.map(function(h){
-          return '<div class="rpt-h-item"><div class="rpt-h-dot"></div><div class="rpt-h-content"><div class="rpt-h-title">'+cpdEsc(h.t)+'</div><div class="rpt-h-meta">by '+cpdEsc(h.a)+(h.d ? ' \u00b7 '+cpdEsc(h.d) : '')+'</div></div></div>';
+      body.innerHTML = '<div class="rpt-section-title">Client updates</div>'+
+        '<div class="rpt-updates-timeline">'+history.map(function(h){
+          return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">'+
+            '<span class="rpt-updates-entry-title">'+cpdEsc(h.t)+'</span>'+
+            (h.d ? '<time class="rpt-updates-entry-date">'+cpdEsc(h.d)+'</time>' : '')+
+            '</div><span class="rpt-updates-entry-actor">'+cpdEsc(h.a || 'DCVS')+'</span>'+
+            (h.copy ? '<p class="rpt-updates-entry-copy">'+cpdEsc(h.copy)+'</p>' : '')+
+            '</article>';
         }).join('')+'</div>';
     }
   }

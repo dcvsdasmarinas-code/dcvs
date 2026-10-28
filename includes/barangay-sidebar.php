@@ -23,13 +23,17 @@ if (!isset($barangayAvatar)) {
 }
 if (!isset($activePage)) $activePage = 'overview';
 if (!isset($barangayName)) $barangayName = 'Barangay';
+require_once __DIR__ . '/barangay-app-base.php';
 
 $sbPageToModule = [
     'overview' => 'operations',
+    'announcements' => 'operations',
     'geo'      => 'operations',
+    'turnover' => 'operations',
     'archive'  => 'operations',
 ];
 $sbActiveModule = $sbPageToModule[$activePage] ?? 'operations';
+$barangayAppBaseUrl = dcvsBarangayAppBaseUrl();
 
 // Item helper: label, icon, optional href / section / page-filter fn
 function sbItem($label, $icon, $opts = []) {
@@ -55,6 +59,7 @@ $sbModules = [
                 'title' => 'Overview', 'icon' => 'fa-home',
                 'items' => [
                     sbItem('Overview', 'fa-chart-line', ['href' => 'dashboard-barangay.php', 'initialActive' => $activePage === 'overview']),
+                    sbItem('Announcements', 'fa-bullhorn', ['href' => 'announcements-barangay.php', 'initialActive' => $activePage === 'announcements']),
                     sbItem('Geo-Mapping', 'fa-map-marked-alt', ['href' => 'dashboard-barangay-geo.php', 'initialActive' => $activePage === 'geo']),
                 ],
             ],
@@ -64,6 +69,7 @@ $sbModules = [
                     sbItem('All Reports', 'fa-list', ['href' => 'reports-barangay.php']),
                     sbItem('Pending Validation', 'fa-hourglass-half', ['href' => 'reports-barangay.php?status=pending']),
                     sbItem('Resolved Cases', 'fa-check-circle', ['href' => 'reports-barangay.php?status=resolved']),
+                    sbItem('Turnover', 'fa-exchange-alt', ['href' => 'turnover-barangay.php', 'initialActive' => $activePage === 'turnover']),
                 ],
             ],
             [
@@ -99,7 +105,9 @@ $sbRail = [
     'system'        => ['icon' => 'fa-cog',            'label' => 'System',        'href' => 'account-settings-barangay.php'],
 ];
 ?>
-<link rel="stylesheet" href="assets/css/sb2.css" />
+<?php if (empty($barangaySidebarStylesheetInHead)): ?>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+<?php endif; ?>
 <style>
 /* Sidebar logout modal — hidden by default, shown when .active */
 #logoutModal {
@@ -208,6 +216,7 @@ window.SB2_CONFIG = {
   activeModule: <?php echo json_encode($sbActiveModule); ?>,
   activePage: <?php echo json_encode($activePage); ?>
 };
+window.DCVS_APP_BASE_URL = <?php echo json_encode($barangayAppBaseUrl, JSON_UNESCAPED_SLASHES); ?>;
 </script>
 
 <aside class="sb2" id="sidebar" data-state="expanded" data-collapsible="icon">
@@ -217,7 +226,7 @@ window.SB2_CONFIG = {
     <div class="sb2-header">
       <div class="sb2-brand">
         <div class="sb2-brand-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS" />
+          <img src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/uploads/site/DCVS LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS" />
         </div>
         <div class="sb2-brand-text">
           <span class="sb2-brand-name">DCVS</span>
@@ -291,7 +300,6 @@ window.SB2_CONFIG = {
 (function() {
   var sidebar = document.getElementById('sidebar');
   var overlay = document.getElementById('sidebarOverlay');
-  var toggle = document.getElementById('sidebarToggle');
   var rail = document.getElementById('sb2Rail');
 
   document.body.classList.add('sb2-active');
@@ -316,12 +324,13 @@ window.SB2_CONFIG = {
     }
   }
   window.addEventListener('resize', handleResize);
-  if (toggle) {
-    toggle.addEventListener('click', function() {
+  document.addEventListener('click', function(event) {
+    var toggle = event.target.closest('#sidebarToggle');
+    if (toggle) {
       sidebar.classList.toggle('collapsed');
       if (overlay) overlay.classList.toggle('active');
-    });
-  }
+    }
+  });
   if (rail) {
     rail.addEventListener('click', function() {
       setDesktopState(sidebar.getAttribute('data-state') !== 'collapsed');

@@ -14,18 +14,21 @@ header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 $adoptionApplications = [];
 $applicationResult = $conn->query(
     "SELECT a.application_id, a.status, a.application_date, a.date_of_birth,
             a.residency_proof_file, a.requested_info,
-            a.resident_response, a.info_deadline, a.approved_pickup_at, a.finalized_at,
+            a.resident_response, a.info_deadline, a.approved_pickup_at, a.reserved_at,
+            a.response_deadline, a.confirmed_at, a.pickup_deadline, a.decline_reason, a.finalized_at,
             a.housing_type, a.landlord_permission,
             a.home_type, a.has_fenced_yard, a.household_members, a.has_other_pets,
             a.other_pets_details, a.pet_care_experience, a.reason_for_adoption,
@@ -37,7 +40,7 @@ $applicationResult = $conn->query(
      LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
      JOIN pet_listings p ON p.listing_id = a.pet_listing_id
      WHERE a.pet_listing_id IS NOT NULL
-       AND a.status IN ('pending','under_review','needs_info','approved','adopted','expired')
+       AND a.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired')
      ORDER BY a.application_date ASC, a.application_id ASC"
 );
 if (!$applicationResult) {
@@ -63,35 +66,51 @@ $activePage = 'adoption-pool';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css?v=20260919" />
-  <link rel="stylesheet" href="assets/css/responsive.css?v=20260919" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
-    .adoption-review-card{background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:16px 20px;margin:0 0 14px;box-shadow:0 1px 2px rgba(0,0,0,.05);font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
-    .adoption-review-summary{display:flex;align-items:center;gap:14px;min-width:0}
-    .adoption-review-pet-photo{width:68px;height:68px;flex:0 0 68px;object-fit:cover;border-radius:8px;background:#f4f4f5}
-    .adoption-review-summary-copy{min-width:0;flex:1}
+    body.adoption-pool-page,.adoption-pool-page .main-content{background:#fff}
+    .adoption-review-card{background:#fff;border:1px solid #e4e4e7;border-radius:0;padding:16px 20px;margin:0 0 14px;box-shadow:0 1px 2px rgba(0,0,0,.05);font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
+    .adoption-review-summary{display:grid;grid-template-columns:56px minmax(0,1fr) auto;align-items:center;gap:14px;min-width:0}
+    .adoption-review-pet-photo,.adoption-review-pet-placeholder{width:56px;height:56px;flex:0 0 56px;object-fit:cover;border-radius:8px;background:#f4f4f5}
+    .adoption-review-pet-placeholder{display:flex;align-items:center;justify-content:center}
+    .adoption-review-summary-copy{min-width:0}
     .adoption-review-pet-title{margin:0 0 3px;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;color:#18181b;line-height:1.35}
     .adoption-review-pet-meta{margin-left:6px;color:#71717a;font-size:12px;font-weight:400}
+    .adoption-review-pet-line{margin:2px 0;color:#18181b;font-size:14px;line-height:1.4}
     .adoption-review-applicant,.adoption-review-submitted{margin:2px 0;color:#18181b;font-size:14px;font-weight:400;line-height:1.45}
     .adoption-review-submitted{color:#71717a;font-size:13px}
-    .adoption-review-summary-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex:0 0 auto}
+    .adoption-review-mobile-facts{display:none}
+    .adoption-review-summary-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:3px 12px;flex:0 0 auto}
+    .adoption-review-status-meta{display:contents}
+    .adoption-review-status{grid-column:1;grid-row:1;justify-self:end}
+    .adoption-review-status-detail{grid-column:1/-1;grid-row:2;font-size:12px;color:#71717a;text-align:center}
     .adoption-review-status{display:inline-flex;align-items:center;padding:3px 10px;border:1px solid #e4e4e7;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;line-height:1.4;white-space:nowrap}
     .adoption-review-status.pending{background:#fef3c7;color:#92400e;border-color:#fde68a}
     .adoption-review-status.active{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
     .adoption-review-status.needs-info{background:#fef3c7;color:#92400e;border-color:#fde68a}
-    .adoption-review-toggle{min-width:130px;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:background-color .15s ease,border-color .15s ease}
+    .adoption-review-status.expired{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
+    .adoption-review-toggle{grid-column:2;grid-row:1;min-width:0;padding:3px 10px;border:1px solid #e4e4e7;border-radius:4px;background:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;line-height:1.4;cursor:pointer;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:background-color .15s ease,border-color .15s ease}
     .adoption-review-toggle:hover{background:#f4f4f5}
-    .adoption-review-details{margin-top:18px}
+    .adoption-review-details{margin-top:14px;padding-top:14px;border-top:1px solid #e4e4e7}
     .adoption-review-details[hidden]{display:none}
     .adoption-review-details-title{margin:0 0 10px;color:#18181b;font-size:14px;font-weight:600;letter-spacing:0;text-transform:none}
-    .adoption-review-checks{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
-    .adoption-review-check{padding:5px 9px;border:1px solid #e4e4e7;border-radius:6px;background:#fafafa;color:#3f3f46;font-size:13px;font-weight:500}
-    .adoption-review-check.pending{border-color:#e4e4e7;background:#f4f4f5;color:#71717a}
-    .adoption-review-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .adoption-review-checks{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+    .adoption-review-check{padding:0;border:0;border-radius:0;background:transparent;color:#3f3f46;font-size:13px;font-weight:500}
+    .adoption-review-check.pending{border:0;background:transparent;color:#71717a}
+    .adoption-review-details-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px}
+    .adoption-review-detail-section{min-width:0}
+    .adoption-review-detail-rows{display:grid;gap:7px}
+    .adoption-review-detail-row{display:grid;grid-template-columns:minmax(95px,0.42fr) minmax(0,1fr);gap:12px;min-width:0}
+    .adoption-review-detail-label{color:#71717a;font-size:13px}
+    .adoption-review-detail-value{min-width:0;color:#18181b;font-size:14px;line-height:1.4;overflow-wrap:anywhere}
+    .adoption-review-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:12px}
     .adoption-review-fact{min-width:0;padding:10px 12px;border:1px solid #f4f4f5;border-radius:6px;background:#fafafa}
     .adoption-review-fact-label{display:block;margin-bottom:2px;color:#71717a;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none}
     .adoption-review-fact-value{display:block;color:#18181b;font-size:15px;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}
-    .adoption-review-reason{margin-top:10px;padding:12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff}
+    .adoption-review-reason{margin-top:14px;padding:12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff}
+    .adoption-review-expiry-notice{margin:0 0 16px}
     .adoption-review-documents{margin:10px 0 0;font-size:13px}
     .adoption-review-documents a{color:#18181b;font-weight:500;text-decoration:underline;text-underline-offset:4px}
     .adoption-review-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
@@ -100,7 +119,7 @@ $activePage = 'adoption-pool';
     .adoption-review-grid input,.adoption-review-grid select,.adoption-review-grid textarea{box-sizing:border-box;width:100%;min-height:36px;border:1px solid #e4e4e7;border-radius:6px;padding:8px 12px;background:#fff;color:#18181b;font:14px 'Inter','Segoe UI',sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.05);outline:none;transition:border-color .15s ease,box-shadow .15s ease}
     .adoption-review-grid input:focus,.adoption-review-grid select:focus,.adoption-review-grid textarea:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
     .adoption-review-grid textarea{min-height:76px;resize:vertical}
-    .adoption-review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:0}
+    .adoption-review-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #e4e4e7}
     .adoption-review-actions button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:0 14px;border:1px solid #18181b;border-radius:6px;background:#18181b;color:#fafafa;font:500 14px 'Inter','Segoe UI',sans-serif;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.05);transition:background-color .15s ease,border-color .15s ease,color .15s ease}
     .adoption-review-actions button:hover{background:#27272a}
     .adoption-review-actions button.secondary{background:#fff;color:#18181b;border-color:#e4e4e7}
@@ -110,30 +129,16 @@ $activePage = 'adoption-pool';
     .adoption-review-actions button.confirm-reject:hover{background:#b91c1c;border-color:#b91c1c}
     .adoption-review-actions button:disabled{opacity:.5;cursor:not-allowed}
     .adoption-review-notice{margin:10px 0;padding:10px;border:1px solid #e4e4e7;border-radius:6px;background:#fafafa;color:#3f3f46;font-size:13px}
-    .adoption-document-dialog,.adoption-action-dialog{position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.65)}
-    .adoption-document-dialog.open,.adoption-action-dialog.open{display:flex}
-    .adoption-document-dialog-panel,.adoption-action-dialog-panel{position:relative;box-sizing:border-box;width:100%;max-width:900px;max-height:92vh;padding:20px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.1);font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
-    .adoption-document-dialog-panel{display:flex;flex-direction:column;gap:12px}
-    .adoption-document-dialog-header,.adoption-action-dialog-footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
-    .adoption-document-dialog-title,.adoption-action-dialog-title{margin:0;color:#18181b;font-size:16px;font-weight:600}
-    .adoption-document-dialog-close,.adoption-action-dialog-cancel,.adoption-action-dialog-confirm{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 14px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:500 14px 'Inter','Segoe UI',sans-serif;cursor:pointer}
-    .adoption-document-dialog-close:hover,.adoption-action-dialog-cancel:hover{background:#f4f4f5}
-    .adoption-document-preview{width:100%;height:min(72vh,760px);border:1px solid #e4e4e7;border-radius:6px;background:#f4f4f5}
-    .adoption-action-dialog{z-index:1210}
-    .adoption-action-dialog-panel{max-width:440px;padding:24px}
-    .adoption-action-dialog-description{margin:8px 0 20px;color:#71717a;font-size:14px;line-height:1.5}
-    .adoption-action-schedule-field{margin:0 0 18px}
-    .adoption-action-schedule-field[hidden]{display:none}
-    .adoption-action-schedule-field label{display:block;margin-bottom:6px;color:#18181b;font-size:13px;font-weight:500}
-    .adoption-action-schedule-field input{box-sizing:border-box;width:100%;height:36px;padding:0 10px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:14px 'Inter','Segoe UI',sans-serif;outline:none}
-    .adoption-action-schedule-field input:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
-    .adoption-action-dialog-footer{justify-content:flex-end}
-    .adoption-action-dialog-confirm{border-color:#18181b;background:#18181b;color:#fafafa}
-    .adoption-action-dialog-confirm:hover{background:#27272a}
-    .adoption-action-dialog-confirm.danger{border-color:#dc2626;background:#dc2626}
-    .adoption-action-dialog-confirm.danger:hover{border-color:#b91c1c;background:#b91c1c}
     @media(max-width:850px){.adoption-review-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media(max-width:700px){.adoption-review-card{padding:14px}.adoption-review-summary{align-items:flex-start;flex-wrap:wrap}.adoption-review-summary-actions{flex-wrap:wrap;justify-content:flex-end;margin-left:auto}.adoption-review-grid,.adoption-review-facts{grid-template-columns:1fr}.adoption-review-toggle{min-width:0}.adoption-review-pet-photo{width:56px;height:56px;flex-basis:56px}.adoption-document-dialog-panel{padding:14px}.adoption-document-preview{height:75vh}}
+    @media(max-width:700px){.adoption-review-card{padding:14px}.adoption-review-summary{align-items:flex-start;flex-wrap:wrap}.adoption-review-summary-actions{grid-template-columns:minmax(0,1fr) auto;flex-wrap:initial;justify-content:initial;margin-left:auto}.adoption-review-status{justify-self:start}.adoption-review-grid,.adoption-review-facts{grid-template-columns:1fr}.adoption-review-toggle{min-width:0}.adoption-review-pet-photo{width:56px;height:56px;flex-basis:56px}}
+    .adoption-review-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+    .adoption-review-fact{min-width:0;padding:10px 12px;border:1px solid #f4f4f5;border-radius:6px;background:#fafafa}
+    .adoption-review-fact-label{display:block;margin-bottom:2px;color:#71717a;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none}
+    .adoption-review-fact-value{display:block;color:#18181b;font-size:15px;font-weight:400;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}
+    .adoption-review-empty{padding:24px 0;text-align:center;color:#71717a}
+    @media(max-width:700px){
+      .adoption-review-facts{grid-template-columns:1fr}
+    }
   </style>
 
   <style>
@@ -219,30 +224,6 @@ $activePage = 'adoption-pool';
       box-sizing: border-box;
     }
 
-    /* ── Topbar & Modal (from dashboard.css / staff-sidebar.php) ── */
-    .topbar {
-      position: fixed !important;
-      top: 0;
-      left: var(--sidebar-w, 270px);
-      right: 0;
-      height: var(--topbar-h, 64px);
-      background: #fff;
-      border-bottom: 1px solid var(--border, #e4e4e7);
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0 1.5rem;
-      z-index: 100;
-      transition: left 0.2s ease;
-    }
-    body.sb2-active .topbar { left: var(--sidebar-w) !important; }
-    .main-content {
-      margin-left: var(--sidebar-w, 270px);
-      margin-top: var(--topbar-h, 64px);
-      padding: 1.75rem 2rem;
-      min-height: calc(100vh - var(--topbar-h, 64px));
-      background: #ffffff;
-    }
     .modal {
       display: none !important;
       position: fixed;
@@ -252,6 +233,12 @@ $activePage = 'adoption-pool';
       align-items: center;
       justify-content: center;
       padding: 1rem;
+    }
+    #confirm-dialog {
+      z-index: 1300;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
     }
     .modal.open,
     .modal.show,
@@ -1066,52 +1053,9 @@ $activePage = 'adoption-pool';
     /* ==========================================================================
        MODAL: ADD TO ADOPTION POOL (sd-dialog shadcn style)
        ========================================================================== */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.8);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      padding: 1rem;
-    }
-
-    .modal-backdrop.show {
-      display: flex;
-    }
-
     @keyframes modalIn {
       from { opacity: 0; transform: scale(0.95); }
       to { opacity: 1; transform: scale(1); }
-    }
-
-    .modal-window {
-      position: relative;
-      width: 100%;
-      max-width: 560px;
-      background: #ffffff;
-      border: 1px solid #e4e4e7;
-      border-radius: 8px;
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
-      animation: modalIn 0.2s ease;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
-
-    #record-rescue-modal .modal-window {
-      max-width: 640px;
-    }
-
-    @media (max-width: 560px) {
-      #record-rescue-modal .modal-window {
-        max-width: 100%;
-        margin: 8px;
-      }
     }
 
     .modal-head {
@@ -1158,13 +1102,6 @@ $activePage = 'adoption-pool';
     .btn-modal-close:hover {
       background: #f4f4f5;
       color: #18181b;
-    }
-
-    .modal-form-body {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      overflow-x: hidden;
     }
 
     .form-group {
@@ -1812,14 +1749,6 @@ $activePage = 'adoption-pool';
       margin: 6px 0;
     }
 
-    .modal-footer {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: 8px;
-      padding-top: 4px;
-    }
-
     .btn-cancel {
       display: inline-flex;
       align-items: center;
@@ -2026,8 +1955,8 @@ $activePage = 'adoption-pool';
       color: #18181b;
       margin: 0;
     }
-    .info-card-head .pool-edit-icon { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; cursor:pointer; }
-    .info-card-head .pool-edit-icon img { display:block; width:16px; height:16px; object-fit:contain; }
+    .info-card-head .pool-edit-icon { display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; cursor:pointer; }
+    .info-card-head .pool-edit-icon svg { display:block; width:16px; height:16px; stroke:currentColor; }
     .info-card-head .pool-edit-icon:hover { border-color:#18181b; background:#f4f4f5; }
 
     .drawer-info-grid {
@@ -2379,6 +2308,13 @@ $activePage = 'adoption-pool';
     }
 
     @media (max-width: 1080px) {
+      .pool-body {
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        margin: 0;
+      }
+
       .kpis {
         grid-template-columns: repeat(2, 1fr);
       }
@@ -2445,40 +2381,10 @@ $activePage = 'adoption-pool';
         padding: 14px 12px;
       }
 
-      .pool-tabs {
-        width: 100%;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: thin;
-      }
-
-      .pool-tab {
-        flex: 0 0 auto;
-        min-height: 42px;
-        padding: 10px 14px;
-        white-space: nowrap;
-      }
-
       .table-filter-bar {
         align-items: stretch;
         flex-direction: column;
         gap: 8px;
-      }
-
-      .table-filter-actions {
-        width: 100%;
-        margin-left: 0;
-      }
-
-      .table-filter-actions > .btn-primary-action,
-      .table-filter-actions > .rescue-dropdown-wrap {
-        flex: 1 1 calc(50% - 4px);
-        min-width: 0;
-      }
-
-      .table-filter-actions .btn-primary-action,
-      .table-filter-actions .rescue-dropdown-wrap > button {
-        width: 100%;
       }
 
       .filter-left-controls {
@@ -2528,56 +2434,10 @@ $activePage = 'adoption-pool';
         width: auto;
       }
 
-      .modal-backdrop {
-        align-items: flex-start;
-        overflow-y: auto;
-        padding: 8px;
-      }
-
-      .modal-window {
-        width: 100%;
-        max-width: none;
-        max-height: calc(100dvh - 16px);
-        margin: 0;
-        padding: 18px 16px;
-        border-radius: 10px;
-      }
-
-      .modal-window form,
-      .modal-window .modal-form-body,
-      .modal-window .form-group {
-        min-width: 0;
-      }
-
-      .modal-window .form-grid-2,
-      .modal-window div[style*="grid-template-columns"] {
-        grid-template-columns: 1fr !important;
-      }
-
-      .modal-window input,
-      .modal-window select,
-      .modal-window textarea {
-        width: 100%;
-        max-width: 100%;
-        min-width: 0;
-      }
-
       .rescue-identity-photo {
         flex: 1 1 140px;
         width: auto;
         max-width: 180px;
-      }
-
-      .modal-footer {
-        align-items: stretch;
-        flex-direction: column-reverse;
-      }
-
-      .modal-footer .btn-cancel,
-      .modal-footer .btn-submit,
-      .modal-footer .sd-btn {
-        width: 100%;
-        justify-content: center;
       }
 
       .pet-drawer {
@@ -2617,8 +2477,8 @@ $activePage = 'adoption-pool';
       }
 
       .drawer-info-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px 12px;
       }
 
       .readiness-table {
@@ -2706,9 +2566,156 @@ $activePage = 'adoption-pool';
     }
     .batch-slot-photo-upload .rescue-photo-placeholder { padding: 16px 12px; }
     .batch-slot-photo-upload .rescue-photo-preview img { max-height: 120px; }
+
+    @media (max-width: 768px) {
+      .main-wrapper,
+      .pool-body {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        margin: 0;
+      }
+
+      .table-filter-bar {
+        align-items: stretch;
+        min-width: 0;
+      }
+      .filter-left-controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+        min-width: 0;
+        align-items: stretch;
+      }
+      .filter-left-controls .search-grow-wrap {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-width: 0;
+      }
+      .filter-left-controls .table-filter-select,
+      .filter-left-controls .btn-reset-filters {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        padding-inline: 8px 22px;
+        font-size: 12px;
+      }
+
+      .table-responsive {
+        box-sizing: border-box;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      .data-table th:first-child,
+      .data-table td:first-child {
+        position: sticky;
+        left: 0;
+        z-index: 3;
+        background: #fff;
+      }
+      .data-table thead th:first-child {
+        z-index: 4;
+        background: #f8fafc;
+      }
+
+      .dt-pagination {
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        align-items: flex-start;
+        flex-direction: row;
+        padding-inline: 8px;
+      }
+      .dt-pagination-right {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        width: 100%;
+        min-width: 0;
+      }
+      .dt-rows { min-width: 0; flex-wrap: wrap; }
+      .dt-page-label { min-width: 0; }
+      .dt-page-btns {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+      }
+
+      .adoption-review-card {
+        min-width: 0;
+        padding: 12px;
+      }
+      .adoption-review-summary {
+        display: grid;
+        grid-template-columns: 56px minmax(0, 1fr);
+        align-items: start;
+        gap: 8px 10px;
+      }
+      .adoption-review-pet-photo,
+      .adoption-review-pet-placeholder {
+        grid-column: 1;
+        grid-row: 1;
+      }
+      .adoption-review-summary-copy {
+        grid-column: 2;
+        grid-row: 1;
+      }
+      .adoption-review-summary-actions {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        width: 100%;
+        align-items: start;
+      }
+      .adoption-review-pet-title {
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .adoption-review-pet-meta {
+        display: block;
+        margin: 1px 0 0;
+      }
+      .adoption-review-applicant,
+      .adoption-review-submitted {
+        font-size: 13px;
+      }
+      .adoption-review-toggle {
+        width: auto;
+        min-width: 0;
+      }
+      .adoption-review-details-columns {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+      }
+      .adoption-review-detail-row {
+        grid-template-columns:minmax(88px,0.4fr) minmax(0,1fr);
+      }
+      .adoption-review-checks {
+        gap: 6px;
+      }
+      .adoption-review-check {
+        max-width: 100%;
+        overflow-wrap: anywhere;
+      }
+      .adoption-review-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .adoption-review-actions button {
+        min-width: 0;
+        padding-inline: 8px;
+        white-space: normal;
+      }
+    }
+
   </style>
 </head>
-<body>
+<body class="adoption-pool-page">
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
 <div class="main-wrapper">
@@ -2742,7 +2749,7 @@ $activePage = 'adoption-pool';
       </div>
 
       <!-- Tab Navigation -->
-      <div class="pool-tabs">
+      <div class="pool-tabs" role="tablist" aria-label="Adoption management sections">
         <button class="pool-tab active" data-tab="tab-pool">Adoption Pool</button>
         <button class="pool-tab" data-tab="tab-applications">Applications</button>
         <button class="pool-tab" data-tab="tab-batches">Rescue Batches</button>
@@ -2751,25 +2758,33 @@ $activePage = 'adoption-pool';
       <!-- TAB: Adoption Pool -->
       <div class="tab-panel active" id="tab-pool">
         <!-- Table Filter Bar -->
-        <div class="table-filter-bar">
-        <div class="filter-left-controls">
-          <!-- Search input -->
-          <div class="search-grow-wrap">
+        <div class="table-filter-bar staff-mobile-toolbar">
+          <div class="staff-toolbar-search-row">
+          <div class="search-grow-wrap staff-toolbar-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
             </svg>
-            <input type="text" id="table-search-input" class="table-search-input" placeholder="Search pet name, breed, ID...">
+            <input type="text" id="table-search-input" class="table-search-input" placeholder="Search pets...">
+          </div>
+          <div class="staff-date-filter staff-toolbar-filter" data-date-filter="pool">
+            <button class="staff-date-filter-button" type="button" aria-label="Filter adoption pool by rescue date" title="Filter by rescue date" aria-expanded="false">
+              <i class="fas fa-filter" aria-hidden="true"></i>
+            </button>
+            <input type="hidden" id="poolDateFrom" value="">
+            <input type="hidden" id="poolDateTo" value="">
+          </div>
           </div>
 
+        <div class="filter-left-controls staff-toolbar-filters">
           <!-- Species Dropdown Filter -->
-          <select id="filter-species" class="table-filter-select">
+          <select id="filter-species" class="table-filter-select staff-toolbar-select">
             <option value="all">Species: All ▾</option>
             <option value="Dog">Dog</option>
             <option value="Cat">Cat</option>
           </select>
 
           <!-- Rescue Source Dropdown Filter -->
-          <select id="filter-source" class="table-filter-select">
+          <select id="filter-source" class="table-filter-select staff-toolbar-select">
             <option value="all">Rescue Source: All ▾</option>
             <option value="Barangay-Reported">Barangay-Reported</option>
             <option value="Resident Surrender">Resident Surrender</option>
@@ -2777,7 +2792,7 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Adoption Status Dropdown Filter -->
-          <select id="filter-adoption-status" class="table-filter-select">
+          <select id="filter-adoption-status" class="table-filter-select staff-toolbar-select">
             <option value="all">Adoption Status: All ▾</option>
             <option value="Pending Review">Pending Review</option>
             <option value="Available">Available</option>
@@ -2786,7 +2801,7 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Listing Status Dropdown Filter -->
-          <select id="filter-listing-status" class="table-filter-select">
+          <select id="filter-listing-status" class="table-filter-select staff-toolbar-select">
             <option value="all">Listing: All ▾</option>
             <option value="Not Listed">Not Listed</option>
             <option value="Published">Published</option>
@@ -2794,17 +2809,17 @@ $activePage = 'adoption-pool';
           </select>
 
           <!-- Reset Button -->
-          <button class="btn-reset-filters" id="btn-reset-filters">Clear Filters</button>
+          <button class="btn-reset-filters staff-toolbar-reset" id="btn-reset-filters">Clear Filters</button>
         </div>
-        <div class="table-filter-actions">
-          <button class="btn-secondary-action" type="button" onclick="exportAdoptionPoolCSV()" title="Export filtered adoption pool as CSV">
+        <div class="table-filter-actions staff-toolbar-actions">
+          <button class="btn-secondary-action staff-toolbar-secondary" type="button" onclick="exportAdoptionPoolCSV()" title="Export filtered adoption pool as CSV">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
             <span>Export CSV</span>
           </button>
           <!-- Record Rescue Dropdown -->
-          <div class="rescue-dropdown-wrap" id="rescue-dropdown-wrap">
+          <div class="rescue-dropdown-wrap staff-toolbar-secondary" id="rescue-dropdown-wrap">
             <button class="btn-secondary-action" id="header-record-rescue-btn">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 0 0 7.75"/>
@@ -2834,7 +2849,7 @@ $activePage = 'adoption-pool';
           </div>
 
           <!-- Primary Action: + Add to Adoption Pool -->
-          <button class="btn-primary-action" id="open-add-pool-btn">
+          <button class="btn-primary-action staff-toolbar-primary" id="open-add-pool-btn">
             <span>+ Add to Adoption Pool</span>
           </button>
         </div>
@@ -2853,10 +2868,11 @@ $activePage = 'adoption-pool';
         </div>
         <!-- Table View -->
         <div class="table-responsive">
-          <table class="data-table">
+          <table class="data-table no-responsive">
             <thead>
               <tr>
                 <th style="width:40px;"><input type="checkbox" class="sd-table-cb" id="poolSelectAll" onclick="togglePoolSelectAll(this)" /></th>
+                <th class="sd-th"><button type="button" class="th-sort" data-col="listingId" onclick="sortBy('listingId')">ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="name" onclick="sortBy('name')">Pet<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="gender" onclick="sortBy('gender')">Gender<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
                 <th class="sd-th"><button type="button" class="th-sort" data-col="breed" onclick="sortBy('breed')">Breed<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -2922,8 +2938,8 @@ $activePage = 'adoption-pool';
         ?></script>
       </div><!-- /tab-applications -->
 
-      <div class="adoption-document-dialog" id="adoption-document-dialog" aria-hidden="true">
-        <section class="adoption-document-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="adoption-document-dialog-title">
+      <div class="ab-modal-backdrop adoption-document-dialog" id="adoption-document-dialog" aria-hidden="true">
+        <section class="sd-dialog-content adoption-document-dialog-panel" role="dialog" aria-modal="true" aria-labelledby="adoption-document-dialog-title">
           <div class="adoption-document-dialog-header">
             <h2 class="adoption-document-dialog-title" id="adoption-document-dialog-title">Proof of residency</h2>
             <button type="button" class="adoption-document-dialog-close" id="adoption-document-dialog-close">Close</button>
@@ -2931,8 +2947,8 @@ $activePage = 'adoption-pool';
           <iframe class="adoption-document-preview" id="adoption-document-preview" title="Residency proof preview"></iframe>
         </section>
       </div>
-      <div class="adoption-action-dialog" id="adoption-action-dialog" aria-hidden="true">
-        <section class="adoption-action-dialog-panel" role="alertdialog" aria-modal="true" aria-labelledby="adoption-action-dialog-title" aria-describedby="adoption-action-dialog-description">
+      <div class="ab-modal-backdrop adoption-action-dialog" id="adoption-action-dialog" aria-hidden="true">
+        <section class="sd-dialog-content adoption-action-dialog-panel" role="alertdialog" aria-modal="true" aria-labelledby="adoption-action-dialog-title" aria-describedby="adoption-action-dialog-description">
           <h2 class="adoption-action-dialog-title" id="adoption-action-dialog-title"></h2>
           <p class="adoption-action-dialog-description" id="adoption-action-dialog-description"></p>
           <div class="adoption-action-schedule-field" id="adoption-action-schedule-field" hidden>
@@ -2965,10 +2981,10 @@ $activePage = 'adoption-pool';
   <!-- ==========================================================================
        MODAL: ADD TO ADOPTION POOL (RECOMMENDED EXACT UI)
        ========================================================================== -->
-  <div class="modal-backdrop" id="add-pool-modal">
-    <div class="modal-window">
+  <div class="ab-modal-backdrop" id="add-pool-modal">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="add-pool-modal-title">
       <div class="modal-head">
-        <h3 class="modal-title">Add to Adoption Pool</h3>
+        <h3 class="modal-title" id="add-pool-modal-title">Add to Adoption Pool</h3>
         <p class="modal-subtitle">Add an existing rescued animal to the adoption workflow.</p>
       </div>
       <button class="btn-modal-close" id="close-add-pool-modal" title="Close">
@@ -3000,7 +3016,7 @@ $activePage = 'adoption-pool';
             </div>
             <div id="modal-preview-content" class="pet-info-card-enhanced" style="display:none;">
               <div class="pet-info-header-row">
-                <img src="aspin4.jpeg" alt="Pet preview" class="pet-info-photo-lg" id="modal-preview-photo">
+                <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/aspin4.jpeg', ENT_QUOTES, 'UTF-8'); ?>" alt="Pet preview" class="pet-info-photo-lg" id="modal-preview-photo">
                 <div>
                   <div class="pet-info-primary-title" id="modal-preview-name"></div>
                   <div class="pet-info-primary-sub" id="modal-preview-meta"></div>
@@ -3113,10 +3129,10 @@ $activePage = 'adoption-pool';
   </div>
 
   <!-- Edit Pet Details Modal -->
-  <div class="modal-backdrop" id="edit-pet-details-modal">
-    <div class="modal-window">
+  <div class="ab-modal-backdrop" id="edit-pet-details-modal">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="edit-pet-details-title">
       <div class="modal-head">
-        <h3 class="modal-title">Edit Pet Details</h3>
+        <h3 class="modal-title" id="edit-pet-details-title">Edit Pet Details</h3>
         <p class="modal-subtitle">Edit the rescued animal and adoption details.</p>
       </div>
       <button class="btn-modal-close" id="close-edit-pet-details-modal" title="Close">
@@ -3258,10 +3274,10 @@ $activePage = 'adoption-pool';
   </div>
 
   <!-- Record Rescue Modal (Reused for header button) -->
-  <div class="modal-backdrop" id="record-rescue-modal">
-    <div class="modal-window">
+  <div class="ab-modal-backdrop" id="record-rescue-modal">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="record-rescue-title">
       <div class="modal-head">
-        <h3 class="modal-title">+ Record Shelter Rescue</h3>
+        <h3 class="modal-title" id="record-rescue-title">+ Record Shelter Rescue</h3>
         <p class="modal-subtitle">Record an animal rescued or received by DCVS and create its initial pet record.</p>
       </div>
       <button class="btn-modal-close" id="close-rescue-modal" title="Close">
@@ -3286,7 +3302,7 @@ $activePage = 'adoption-pool';
                   <span>Click to upload photo</span>
                 </div>
                 <div class="rescue-photo-preview" id="rescue-photo-preview" style="display:none;">
-                  <img id="rescue-photo-img" src="" alt="Preview">
+                  <img id="rescue-photo-img" src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/aspin4.jpeg', ENT_QUOTES, 'UTF-8'); ?>" alt="Preview">
                   <button type="button" class="rescue-photo-remove" id="rescue-photo-remove" title="Remove photo">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                   </button>
@@ -3391,10 +3407,10 @@ $activePage = 'adoption-pool';
   </div>
 
   <!-- Multiple Animals Rescue Modal -->
-  <div class="modal-backdrop" id="multi-rescue-modal">
-    <div class="modal-window">
+  <div class="ab-modal-backdrop" id="multi-rescue-modal">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="multi-rescue-title">
       <div class="modal-head">
-        <h3 class="modal-title">+ Record Rescue Batch</h3>
+        <h3 class="modal-title" id="multi-rescue-title">+ Record Rescue Batch</h3>
         <p class="modal-subtitle">Record multiple animals rescued in a single event.</p>
       </div>
       <button class="btn-modal-close" id="close-multi-rescue-modal" title="Close">
@@ -3482,8 +3498,8 @@ $activePage = 'adoption-pool';
   </div>
 
   <!-- Rescue Batch Dossier Modal -->
-  <div class="modal-backdrop" id="batch-detail-modal">
-    <div class="modal-window" style="max-width: 560px;">
+  <div class="ab-modal-backdrop" id="batch-detail-modal">
+    <div class="sd-dialog-content" role="dialog" aria-modal="true" aria-labelledby="batch-detail-title" style="max-width: 560px;">
       <div class="modal-head">
         <h3 class="modal-title" id="batch-detail-title">Rescue Batch Dossier</h3>
         <p class="modal-subtitle" id="batch-detail-subtitle"></p>
@@ -3509,8 +3525,8 @@ $activePage = 'adoption-pool';
   <!-- ==========================================================================
        SHADCN CONFIRMATION DIALOG (shared for Set as Available, Archive, Edit)
        ========================================================================== -->
-  <div class="modal-backdrop" id="confirm-dialog" style="background:rgba(0,0,0,0.8);">
-    <div class="modal-window" style="max-width:440px;">
+  <div class="ab-modal-backdrop" id="confirm-dialog" style="background:rgba(0,0,0,0.8);">
+    <div class="sd-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-desc" style="max-width:440px;">
       <button class="btn-modal-close" id="confirm-dialog-close" title="Close">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -3531,23 +3547,45 @@ $activePage = 'adoption-pool';
        JAVASCRIPT DATA & LOGIC
        ========================================================================== -->
   <script>
-    window.adoptionPickupPeriodLabel = function (approvedPickupAt, applicationStatus) {
-      if (applicationStatus === 'expired') return 'Expired / Unclaimed';
-      if (applicationStatus !== 'approved' || !approvedPickupAt) return '—';
-      const scheduledAt = new Date(String(approvedPickupAt).replace(' ', 'T'));
-      if (Number.isNaN(scheduledAt.getTime())) return '—';
-      const remaining = scheduledAt.getTime() + 3 * 24 * 60 * 60 * 1000 - Date.now();
-      if (remaining <= 0) return 'Pickup period expired';
-      const daysRemaining = Math.min(3, Math.ceil(remaining / (24 * 60 * 60 * 1000)));
-      return daysRemaining + (daysRemaining === 1 ? ' day remaining' : (daysRemaining === 3 ? ' days allotted' : ' days remaining'));
+    window.adoptionPickupPeriodLabel = function (responseDeadline, pickupDeadline, applicationStatus) {
+      if (applicationStatus === 'expired' || applicationStatus === 'declined') return 'Expired';
+      const deadline = applicationStatus === 'reserved' ? responseDeadline
+        : (applicationStatus === 'confirmed' ? pickupDeadline : '');
+      if (!deadline) return '—';
+      const date = new Date(String(deadline).replace(' ', 'T'));
+      if (Number.isNaN(date.getTime())) return '—';
+      const formatted = date.toLocaleString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+      });
+      return (applicationStatus === 'reserved' ? 'Respond by ' : 'Pick up by ') + formatted;
     };
+
+    const APP_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    function resolvePetPhotoUrl(photoUrl, species) {
+      const photo = String(photoUrl || '').trim();
+      if (!photo) {
+        const fallback = String(species || '').toLowerCase() === 'cat' ? 'aspin5.webp' : 'aspin4.jpeg';
+        return APP_BASE_URL + '/uploads/site/' + fallback;
+      }
+      if (/^(?:https?:|data:|blob:)/i.test(photo) || photo.startsWith('/')) return photo;
+
+      const relativePhoto = photo.replace(/^(?:\.\/)+/, '');
+      const photoPath = /^(?:aspin4\.jpeg|aspin5\.webp)$/i.test(relativePhoto)
+        ? '/uploads/site/' + relativePhoto
+        : '/' + relativePhoto;
+      return APP_BASE_URL + photoPath;
+    }
 
     document.addEventListener('DOMContentLoaded', () => {
       const STORAGE_KEY = 'DCVS_ADOPTION_DATA_V1';
       const PETS_KEY = 'DCVS_ADOPTION_PETS_V6';
       const INTAKE_KEY = 'DCVS_INTAKE_REGISTRY_V3';
       const BATCH_KEY_V2 = 'DCVS_RESCUE_BATCHES_V2';
-      const SYNC_HANDLER = 'staff-pets-handler.php';
+      const LEGACY_BATCH_KEY = 'DCVS_RESCUE_BATCHES_V1';
+      const RESCUE_BATCH_HANDLER = APP_BASE_URL + '/api/staff/rescue-batches-handler.php';
+      const SYNC_HANDLER = APP_BASE_URL + '/api/staff/staff-pets-handler.php';
+      let rescueBatchSaveQueue = Promise.resolve();
+      let rescueBatchSaveWarningShown = false;
       const POOL_RESCUE_SOURCES = {
         'Barangay-Reported': 'barangay_reported',
         'Resident Surrender': 'resident_surrender',
@@ -3567,7 +3605,7 @@ $activePage = 'adoption-pool';
       function recordPoolRescueIntake(source, date, barangay, animalCount, notes) {
         const sourceCode = POOL_RESCUE_SOURCES[source];
         if (!sourceCode) return Promise.reject(new Error('Choose a valid rescue source.'));
-        return fetch('record-rescue-handler.php', {
+        return fetch(APP_BASE_URL + '/api/staff/record-rescue-handler.php', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3585,7 +3623,7 @@ $activePage = 'adoption-pool';
       }
 
       // One-time clear of old data from previous versions
-      ['DCVS_ADOPTION_PETS_V5','DCVS_INTAKE_REGISTRY_V2','DCVS_RESCUE_BATCHES_V1'].forEach(k => {
+      ['DCVS_ADOPTION_PETS_V5','DCVS_INTAKE_REGISTRY_V2'].forEach(k => {
         if (localStorage.getItem(k)) localStorage.removeItem(k);
       });
 
@@ -3619,7 +3657,7 @@ $activePage = 'adoption-pool';
               const pets = getPoolPets();
               const target = pets.find(p => p.id === pet.id);
               if (target) {
-                target.image = res.photo_url || target.image;
+                target.image = resolvePetPhotoUrl(res.photo_url || target.image, target.species);
                 if (!target.listingId) target.listingId = res.listing_id;
                 savePoolPets(pets);
               }
@@ -3721,20 +3759,38 @@ $activePage = 'adoption-pool';
       // Format a DB timestamp/date (YYYY-MM-DD...) as "MMM DD, YYYY" (matches PHP date('M d, Y'))
       function fmtAdoptedDate(s) {
         if (!s) return '';
-        const p = String(s).slice(0, 10).split('-');
-        if (p.length < 3 || !p[0] || !p[1] || !p[2]) return '';
-        const M = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const mi = parseInt(p[1], 10) - 1;
-        return (M[mi] || p[1]) + ' ' + p[2] + ', ' + p[0];
+        const datePart = String(s).slice(0, 10);
+        const date = new Date(datePart + 'T00:00:00');
+        return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('en-US', {
+          month: 'long', day: 'numeric', year: 'numeric'
+        });
+      }
+
+      function formatPoolDate(value) {
+        if (!value) return '—';
+        const text = String(value);
+        const date = /^\d{4}-\d{2}-\d{2}/.test(text)
+          ? new Date(text.slice(0, 10) + 'T00:00:00')
+          : new Date(text);
+        return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString('en-US', {
+          month: 'long', day: 'numeric', year: 'numeric'
+        });
       }
 
       // Pull adoption status + adopted date from DB for pets adopted via
       // the resident adoption flow / staff actions (localStorage may be stale)
+      let adoptionSyncErrorShown = false;
       function syncAdoptedFromDB() {
         return fetch(SYNC_HANDLER + '?action=get_all')
-          .then(r => r.json())
+          .then(response => {
+            if (!response.ok) throw new Error('Adoption pool sync failed with HTTP ' + response.status);
+            return response.json();
+          })
           .then(res => {
-            if (!(res.success && Array.isArray(res.data))) return;
+            if (!(res.success && Array.isArray(res.data))) {
+              throw new Error(res.message || 'The adoption pool returned an invalid response.');
+            }
+            adoptionSyncErrorShown = false;
             const byId = {}, byName = {};
             res.data.forEach(row => {
               if (row.listing_id != null) byId[String(row.listing_id)] = row;
@@ -3760,8 +3816,17 @@ $activePage = 'adoption-pool';
               if (Number(p.adoptionApplicationId || 0) !== applicationId) { p.adoptionApplicationId = applicationId; changed = true; }
               if (p.adoptionApplicationStatus !== applicationStatus) { p.adoptionApplicationStatus = applicationStatus; changed = true; }
               if ((p.approvedPickupAt || '') !== (row.approved_pickup_at || '')) { p.approvedPickupAt = row.approved_pickup_at || ''; changed = true; }
+              if ((p.adoptedAtRaw || '') !== (row.adopted_at || '')) { p.adoptedAtRaw = row.adopted_at || ''; changed = true; }
+              ['responseDeadline', 'pickupDeadline', 'confirmedAt'].forEach(function (key) {
+                const field = key.replace(/[A-Z]/g, function (letter) { return '_' + letter.toLowerCase(); });
+                if ((p[key] || '') !== (row[field] || '')) { p[key] = row[field] || ''; changed = true; }
+              });
               if (Number(row.rescue_intake_id) > 0 && Number(p.rescueIntakeId) !== Number(row.rescue_intake_id)) {
                 p.rescueIntakeId = Number(row.rescue_intake_id);
+                changed = true;
+              }
+              if (Number(row.listing_id) > 0 && Number(p.listingId) !== Number(row.listing_id)) {
+                p.listingId = Number(row.listing_id);
                 changed = true;
               }
               const sourceLabel = POOL_RESCUE_SOURCE_LABELS[row.rescue_source];
@@ -3775,6 +3840,7 @@ $activePage = 'adoption-pool';
                 if (p.adoptionStatus !== 'Reserved') { p.adoptionStatus = 'Reserved'; changed = true; }
                 if (p.listingStatus !== 'Not Listed') { p.listingStatus = 'Not Listed'; changed = true; }
                 if (p.adoptedDate) { p.adoptedDate = ''; changed = true; }
+                if (p.adoptedAtRaw) { p.adoptedAtRaw = ''; changed = true; }
                 if (p.adopterName) { p.adopterName = ''; changed = true; }
                 if (p.adopterReferenceId) { p.adopterReferenceId = ''; changed = true; }
                 if (p.adopterBarangay) { p.adopterBarangay = ''; changed = true; }
@@ -3784,6 +3850,7 @@ $activePage = 'adoption-pool';
                 p.adoptionStatus = 'Available';
                 p.listingStatus = 'Published';
                 p.adoptedDate = '';
+                p.adoptedAtRaw = '';
                 p.adopterName = '';
                 p.adopterReferenceId = '';
                 p.adopterBarangay = '';
@@ -3802,8 +3869,21 @@ $activePage = 'adoption-pool';
               if (d && p.adoptedDate !== d) { p.adoptedDate = d; changed = true; }
             });
             if (changed) { savePoolPets(visiblePets); refreshCounts(); renderTable(); }
-          })
-          .catch(() => {});
+          });
+      }
+
+      function reportAdoptionSyncError(error) {
+        console.error('Could not sync adoption pool status:', error);
+        if (adoptionSyncErrorShown) return;
+        adoptionSyncErrorShown = true;
+        showToast('Adoption Pool Not Updated', {
+          type: 'error',
+          description: 'The latest reservation status could not be loaded. Check your connection and refresh the page.'
+        });
+      }
+
+      function refreshAdoptionPool() {
+        return syncAdoptedFromDB().then(() => renderTable());
       }
 
       // Load pets from DB when localStorage is empty (after key bump or first visit)
@@ -3829,13 +3909,17 @@ $activePage = 'adoption-pool';
                   rescueIntakeId: Number(row.rescue_intake_id || 0),
                   adoptionStatus: adoptionStatus,
                   listingStatus: listingStatus,
-                  image: row.photo_url || '',
+                  image: resolvePetPhotoUrl(row.photo_url, row.species),
                   readyDate: row.rescued_date || '',
                   notes: row.description || '',
                   listingId: row.listing_id,
                   adoptionApplicationId: Number(row.adoption_application_id || 0),
                   adoptionApplicationStatus: row.adoption_application_status || '',
                   approvedPickupAt: row.approved_pickup_at || '',
+                  responseDeadline: row.response_deadline || '',
+                  pickupDeadline: row.pickup_deadline || '',
+                  confirmedAt: row.confirmed_at || '',
+                  adoptedAtRaw: row.adopted_at || '',
                   adopterName: row.adopter_name || '',
                   adopterReferenceId: row.adopter_reference_id || '',
                   adopterBarangay: row.adopter_barangay || '',
@@ -3874,10 +3958,12 @@ $activePage = 'adoption-pool';
       const filterAdoptionStatus = document.getElementById('filter-adoption-status');
       const filterListingStatus = document.getElementById('filter-listing-status');
       const emptyState = document.getElementById('table-empty-state');
+      const poolTableWrapper = document.querySelector('.table-panel .table-responsive');
 
       let currentFilterCard = null;
       let poolPage = 1;
       let poolPerPage = 10;
+      let poolDate = '';
 
       var sortCol = '';
       var sortDir = 'asc';
@@ -3909,6 +3995,12 @@ $activePage = 'adoption-pool';
         poolPage = 1;
         renderTable();
       };
+      window.poolSetDate = function() {
+        poolDate = document.getElementById('poolDateFrom').value;
+        poolPage = 1;
+        renderTable();
+        updateResetBtn();
+      };
 
       function renderPoolPagination(total) {
         const pages = Math.max(1, Math.ceil(total / poolPerPage));
@@ -3938,22 +4030,33 @@ $activePage = 'adoption-pool';
           const matchesSearch = !search || 
             p.name.toLowerCase().includes(search) || 
             p.breed.toLowerCase().includes(search) ||
-            p.rescueSource.toLowerCase().includes(search);
+            p.rescueSource.toLowerCase().includes(search) ||
+            String(p.listingId || p.id || '').toLowerCase().includes(search);
 
           // Dropdown filters
           const matchesSpecies = species === 'all' || p.species === species;
           const matchesSource = source === 'all' || p.rescueSource === source;
           const matchesAdStatus = adStatus === 'all' || p.adoptionStatus === adStatus;
           const matchesListStatus = listStatus === 'all' || p.listingStatus === listStatus;
+          const rescueDate = String(p.fullRescueDate || p.rescueDate || '').slice(0, 10);
+          const matchesDate = !poolDate || rescueDate === poolDate;
 
-          return matchesSearch && matchesSpecies && matchesSource && matchesAdStatus && matchesListStatus;
+          return matchesSearch && matchesSpecies && matchesSource && matchesAdStatus && matchesListStatus && matchesDate;
         });
 
         if (sortCol) {
           var dir = sortDir === 'desc' ? -1 : 1;
           filtered.sort(function(a, b) {
-            var av = a[sortCol] || '';
-            var bv = b[sortCol] || '';
+            var av, bv;
+            if (sortCol === 'listingId') {
+              av = Number(a.listingId || 0);
+              bv = Number(b.listingId || 0);
+            } else {
+              av = sortCol === 'rescueDate' ? (a.fullRescueDate || a.rescueDate || '')
+                : (sortCol === 'adoptedDate' ? (a.adoptedAtRaw || a.confirmedAt || a.adoptedDate || '') : (a[sortCol] || ''));
+              bv = sortCol === 'rescueDate' ? (b.fullRescueDate || b.rescueDate || '')
+                : (sortCol === 'adoptedDate' ? (b.adoptedAtRaw || b.confirmedAt || b.adoptedDate || '') : (b[sortCol] || ''));
+            }
             if (typeof av === 'string') av = av.toLowerCase();
             if (typeof bv === 'string') bv = bv.toLowerCase();
             return av < bv ? -dir : av > bv ? dir : 0;
@@ -3968,14 +4071,15 @@ $activePage = 'adoption-pool';
           if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
           return '"' + text.replace(/"/g, '""') + '"';
         }
-        const headers = ['Pet', 'Gender', 'Breed', 'Age', 'Species', 'Rescue Source', 'Rescue Date', 'Adoption Status', 'Confirmed/Adopted Date', 'Pickup Period', 'Listing'];
+        const headers = ['ID', 'Pet', 'Gender', 'Breed', 'Age', 'Species', 'Rescue Source', 'Rescue Date', 'Adoption Status', 'Confirmed/Adopted Date', 'Pickup Period', 'Listing'];
         const rows = [headers.map(csvCell).join(',')];
         getFilteredPoolPets().forEach(pet => {
           rows.push([
-            pet.name, pet.gender, pet.breed, pet.age, pet.species, pet.rescueSource,
+            pet.listingId || pet.id, pet.name, pet.gender, pet.breed, pet.age, pet.species,
+            pet.rescueSource,
             pet.rescueDate, pet.adoptionStatus,
-            pet.adoptedDate || '—',
-            adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus),
+            formatPoolDate(pet.adoptedAtRaw || pet.confirmedAt || pet.adoptedDate),
+            adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus),
             pet.listingStatus === 'Published' ? 'Published' : 'Not Listed'
           ].map(csvCell).join(','));
         });
@@ -3999,10 +4103,12 @@ $activePage = 'adoption-pool';
         updatePoolBulkBar();
 
         if (filtered.length === 0) {
+          poolTableWrapper.classList.remove('has-results');
           emptyState.style.display = 'flex';
           return;
         }
 
+        poolTableWrapper.classList.add('has-results');
         emptyState.style.display = 'none';
 
         pageItems.forEach(pet => {
@@ -4021,12 +4127,18 @@ $activePage = 'adoption-pool';
 
           // Listing status text
           const listStatusLabel = pet.listingStatus === 'Published' ? 'Published' : 'Not Listed';
+          const petAge = String(pet.age || '').trim();
+          const existingYearValue = petAge.match(/^(.+?)\s+years?$/i);
+          const displayedAge = !petAge ? '—'
+            : (/^unknown$/i.test(petAge) ? petAge : (existingYearValue ? existingYearValue[1] + ' years' : petAge + ' years'));
+          const displayPetId = pet.listingId ? '#' + pet.listingId : String(pet.id || '—');
 
           tr.innerHTML = `
             <td><input type="checkbox" class="sd-table-cb row-cb" value="${pet.id}" onclick="event.stopPropagation();updatePoolBulkBar()" /></td>
+            <td data-sort="${pet.listingId || 0}">${displayPetId}</td>
             <td>
               <div class="pet-cell">
-                <img src="${pet.image}" alt="${pet.name}" class="pet-thumbnail">
+                <img src="${resolvePetPhotoUrl(pet.image, pet.species)}" alt="${pet.name}" class="pet-thumbnail">
                 <div class="pet-meta-text">
                   <div class="pet-name-title">${pet.name}</div>
                 </div>
@@ -4034,15 +4146,15 @@ $activePage = 'adoption-pool';
             </td>
             <td>${pet.gender}</td>
             <td>${pet.breed}</td>
-            <td>${pet.age}</td>
+            <td>${displayedAge}</td>
             <td>${pet.species}</td>
             <td>${pet.rescueSource}</td>
-            <td>${pet.rescueDate}</td>
+            <td data-sort="${pet.fullRescueDate || pet.rescueDate || ''}">${formatPoolDate(pet.fullRescueDate || pet.rescueDate)}</td>
             <td>
               <span class="status-pill ${adStatusClass}">${pet.adoptionStatus}</span>
             </td>
-            <td>${pet.adoptedDate || '—'}</td>
-            <td>${adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus)}</td>
+            <td data-sort="${pet.adoptedAtRaw || pet.confirmedAt || ''}">${formatPoolDate(pet.adoptedAtRaw || pet.confirmedAt || pet.adoptedDate)}</td>
+            <td>${adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus)}</td>
             <td>${listStatusLabel}</td>
             <td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" data-pet-id="${pet.id}"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>
           `;
@@ -4367,7 +4479,7 @@ $activePage = 'adoption-pool';
       // Filter events
       const btnResetFilters = document.getElementById('btn-reset-filters');
       function updateResetBtn() {
-        const hasFilter = searchInput.value || filterSpecies.value !== 'all' || filterSource.value !== 'all' || filterAdoptionStatus.value !== 'all' || filterListingStatus.value !== 'all';
+        const hasFilter = searchInput.value || filterSpecies.value !== 'all' || filterSource.value !== 'all' || filterAdoptionStatus.value !== 'all' || filterListingStatus.value !== 'all' || poolDate;
         btnResetFilters.style.display = hasFilter ? '' : 'none';
       }
       searchInput.addEventListener('input', () => { renderTable(); updateResetBtn(); });
@@ -4382,6 +4494,10 @@ $activePage = 'adoption-pool';
         filterSource.value = 'all';
         filterAdoptionStatus.value = 'all';
         filterListingStatus.value = 'all';
+        poolDate = '';
+        document.getElementById('poolDateFrom').value = '';
+        document.getElementById('poolDateTo').value = '';
+        document.querySelector('[data-date-filter="pool"] .staff-date-filter-button').classList.remove('has-date');
         document.querySelectorAll('.kpi-card').forEach(c => c.classList.remove('active-filter'));
         renderTable();
         updateResetBtn();
@@ -4466,7 +4582,7 @@ $activePage = 'adoption-pool';
         document.getElementById('modal-preview-date').textContent = pet.rescueDate;
         document.getElementById('modal-preview-brgy').textContent = pet.barangay || 'Paliparan I';
         document.getElementById('modal-preview-loc').textContent = pet.currentLocation || 'DCVS Shelter';
-        document.getElementById('modal-preview-photo').src = pet.image;
+        document.getElementById('modal-preview-photo').src = resolvePetPhotoUrl(pet.image, pet.species);
 
         if (pet.readiness) {
           document.getElementById('readiness-vaccination').value = pet.readiness.vaccination || 'Not specified';
@@ -4559,12 +4675,12 @@ $activePage = 'adoption-pool';
         document.getElementById('edit-readiness-spay-neuter').value = pet.readiness?.spayNeuter || 'Not specified';
         document.getElementById('edit-readiness-temperament').value = pet.readiness?.temperament || 'Not assessed';
         document.getElementById('edit-pool-status').value = pet.adoptionStatus || 'Pending Review';
-        editPetDetailsModal.classList.add('show');
+        editPetDetailsModal.classList.add('open');
       }
 
       function closeEditPetDetails() {
         editPetDetailsId = null;
-        editPetDetailsModal.classList.remove('show');
+        editPetDetailsModal.classList.remove('open');
         editPetDetailsForm.reset();
       }
 
@@ -4624,7 +4740,7 @@ $activePage = 'adoption-pool';
 
       function openAddModal(editPet) {
         if (!editPet) populatePetSelect();
-        addPoolModal.classList.add('show');
+        addPoolModal.classList.add('open');
         statusChanged = false;
         statusCallout.style.display = 'none';
 
@@ -4683,7 +4799,7 @@ $activePage = 'adoption-pool';
       }
 
       function closeAddModal() {
-        addPoolModal.classList.remove('show');
+        addPoolModal.classList.remove('open');
         statusChanged = false;
         statusCallout.style.display = 'none';
         statusSelect.disabled = false;
@@ -4842,7 +4958,7 @@ $activePage = 'adoption-pool';
 
         drawerContent.innerHTML = `
           <div class="drawer-hero-profile">
-            <img src="${pet.image}" alt="${pet.name}" class="drawer-pet-img">
+            <img src="${resolvePetPhotoUrl(pet.image, pet.species)}" alt="${pet.name}" class="drawer-pet-img">
             <div class="drawer-pet-details">
               <span class="drawer-pet-role">For pet adoption</span>
               <h2 class="drawer-pet-name">${pet.name}</h2>
@@ -4852,7 +4968,7 @@ $activePage = 'adoption-pool';
 
           <div class="adoption-progress">${progressHtml}</div>
 
-          <div class="info-card-head"><h3>Pet information</h3>${!isAdopted && !isReserved ? '<button type="button" class="pool-edit-icon" id="drawer-edit-btn" aria-label="Edit pet" title="Edit pet"><img src="assets/images/edit%20icon.png" alt=""></button>' : ''}</div>
+          <div class="info-card-head"><h3>Pet information</h3>${!isAdopted && !isReserved ? '<button type="button" class="pool-edit-icon" id="drawer-edit-btn" aria-label="Edit pet" title="Edit pet"><svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z"/></svg></button>' : ''}</div>
           <div class="drawer-info-grid">
             <div class="drawer-info-item"><span class="drawer-info-label">Rescue Source</span><span class="drawer-info-val">${pet.rescueSource}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Rescue Date</span><span class="drawer-info-val">${pet.fullRescueDate || pet.rescueDate}</span></div>
@@ -4862,7 +4978,7 @@ $activePage = 'adoption-pool';
             <div class="drawer-info-item"><span class="drawer-info-label">Age</span><span class="drawer-info-val">${pet.age}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Availability</span><span class="drawer-info-val">${pet.scheduledDate ? 'Will be available on ' + pet.scheduledDate : (pet.readyDate || '—')}</span></div>
             <div class="drawer-info-item"><span class="drawer-info-label">Adoption Status</span><span class="drawer-info-val">${pet.adoptionStatus}</span></div>
-            ${(pet.adoptionApplicationStatus === 'approved' || pet.adoptionApplicationStatus === 'expired') ? `
+            ${(['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(pet.adoptionApplicationStatus) !== -1) ? `
               <div class="drawer-info-item"><span class="drawer-info-label">Scheduled Pickup</span><span class="drawer-info-val" id="drawer-scheduled-pickup"></span></div>
               <div class="drawer-info-item"><span class="drawer-info-label">Pickup Period</span><span class="drawer-info-val" id="drawer-pickup-period"></span></div>
             ` : ''}
@@ -4890,12 +5006,12 @@ $activePage = 'adoption-pool';
         if (scheduledPickup) {
           const pickupDate = pet.approvedPickupAt ? new Date(String(pet.approvedPickupAt).replace(' ', 'T')) : null;
           scheduledPickup.textContent = pickupDate && !Number.isNaN(pickupDate.getTime())
-            ? pickupDate.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+            ? pickupDate.toLocaleString('en-US', { month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
             : '—';
         }
         const pickupPeriod = document.getElementById('drawer-pickup-period');
         if (pickupPeriod) {
-          pickupPeriod.textContent = window.adoptionPickupPeriodLabel(pet.approvedPickupAt, pet.adoptionApplicationStatus);
+          pickupPeriod.textContent = window.adoptionPickupPeriodLabel(pet.responseDeadline, pet.pickupDeadline, pet.adoptionApplicationStatus);
         }
         const adoptedDate = document.getElementById('drawer-adopted-date');
         if (adoptedDate) adoptedDate.textContent = pet.adoptedDate || '—';
@@ -4922,7 +5038,7 @@ $activePage = 'adoption-pool';
         let footerHtml = '';
         if (isAdopted) {
           footerHtml = `<button type="button" class="sd-btn sd-btn-outline" id="drawer-archive-btn">Archive</button><button type="button" class="sd-btn sd-btn-outline" onclick="closePetDrawer()">Close</button>`;
-        } else if (isReserved && pet.adoptionApplicationStatus === 'approved' && Number(pet.adoptionApplicationId) > 0) {
+        } else if (isReserved && pet.adoptionApplicationStatus === 'confirmed' && Number(pet.adoptionApplicationId) > 0) {
           footerHtml = `<button type="button" class="sd-btn sd-btn-default" id="drawer-finalize-adoption-btn">Mark Adopted</button><button type="button" class="sd-btn sd-btn-outline" onclick="closePetDrawer()">Close</button>`;
         } else if (isPending) {
           footerHtml = `
@@ -5005,7 +5121,7 @@ $activePage = 'adoption-pool';
         formData.set('csrf_token', window.adoptionWorkflowCsrf || '');
         formData.set('staff_action', 'finalize_adoption');
         formData.set('application_id', String(pet.adoptionApplicationId));
-        fetch('adoption-workflow-handler.php', { method: 'POST', body: formData, credentials: 'same-origin' })
+        fetch(APP_BASE_URL + '/api/shared/adoption-workflow-handler.php', { method: 'POST', body: formData, credentials: 'same-origin' })
           .then(response => response.json().then(body => ({ ok: response.ok, body })))
           .then(result => {
             if (!result.ok || !result.body.success) {
@@ -5042,11 +5158,11 @@ $activePage = 'adoption-pool';
         }
         confirmDialogAction = opts.onConfirm || null;
         confirmDialogOnHide = opts.onHide || null;
-        document.getElementById('confirm-dialog').classList.add('show');
+        document.getElementById('confirm-dialog').classList.add('open');
       }
 
       function hideConfirmDialog() {
-        document.getElementById('confirm-dialog').classList.remove('show');
+        document.getElementById('confirm-dialog').classList.remove('open');
         confirmDialogAction = null;
         if (confirmDialogOnHide) {
           var onHideCb = confirmDialogOnHide;
@@ -5152,15 +5268,15 @@ $activePage = 'adoption-pool';
           rescueDropdownMenu.classList.remove('show');
           const type = item.dataset.type;
           if (type === 'single') {
-            rescueModal.classList.add('show');
+            rescueModal.classList.add('open');
           } else {
-            multiRescueModal.classList.add('show');
+            multiRescueModal.classList.add('open');
           }
         });
       });
 
       function closeRescueModal() {
-        rescueModal.classList.remove('show');
+        rescueModal.classList.remove('open');
         rescueForm.reset();
         resetRescuePhoto();
       }
@@ -5207,7 +5323,7 @@ $activePage = 'adoption-pool';
       function resetRescuePhoto() {
         rescuePhotoData = null;
         rescuePhotoInput.value = '';
-        rescuePhotoImg.src = '';
+        rescuePhotoImg.src = resolvePetPhotoUrl('', 'Dog');
         rescuePhotoPlaceholder.style.display = '';
         rescuePhotoPreview.style.display = 'none';
       }
@@ -5218,16 +5334,98 @@ $activePage = 'adoption-pool';
       // RESCUE BATCH DATA
       // ==========================================================================
 
-      function getBatches() {
-        try {
-          const stored = localStorage.getItem(BATCH_KEY_V2);
-          if (stored) return JSON.parse(stored);
-        } catch(e) {}
-        return [];
+      function readBatchStorage(key) {
+        const stored = localStorage.getItem(key);
+        if (!stored) return [];
+        const batches = JSON.parse(stored);
+        return Array.isArray(batches) ? batches : [];
       }
 
-      function saveBatches(batches) {
+      function getBatches() {
+        try {
+          const current = readBatchStorage(BATCH_KEY_V2);
+          const legacy = readBatchStorage(LEGACY_BATCH_KEY);
+          const batchesById = new Map(legacy.filter(batch => batch && batch.id).map(batch => [String(batch.id), batch]));
+          current.forEach(batch => {
+            if (batch && batch.id) batchesById.set(String(batch.id), batch);
+          });
+          return Array.from(batchesById.values());
+        } catch (error) {
+          console.error('Rescue batches could not be read from browser storage.', error);
+          return [];
+        }
+      }
+
+      function saveBatches(batches, markUpdated = true) {
+        if (markUpdated) {
+          const savedAt = new Date().toISOString();
+          batches.forEach(batch => { batch.updatedAt = savedAt; });
+        }
         localStorage.setItem(BATCH_KEY_V2, JSON.stringify(batches));
+        if (markUpdated) queueRescueBatchSave(batches);
+      }
+
+      function reportRescueBatchSaveError(error) {
+        if (rescueBatchSaveWarningShown) return;
+        rescueBatchSaveWarningShown = true;
+        console.error('Rescue batches are only saved in this browser until database storage is available.', error);
+        showToast('Rescue Batches Not Synced', {
+          type: 'error',
+          description: error.message || 'Could not save rescue batches to the database. Refresh and try again.'
+        });
+      }
+
+      function queueRescueBatchSave(batches) {
+        const persistableBatches = batches.filter(batch => Number(batch.rescueIntakeId) > 0);
+        if (!persistableBatches.length) return;
+        const payload = JSON.stringify({
+          csrf_token: window.rescueBatchCsrf || '',
+          batches: persistableBatches
+        });
+        rescueBatchSaveQueue = rescueBatchSaveQueue.catch(() => {}).then(() =>
+          fetch(RESCUE_BATCH_HANDLER, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload
+          }).then(response => response.json().then(result => {
+            if (!response.ok || !result.success) {
+              throw new Error(result.error || 'Rescue batches could not be saved.');
+            }
+            rescueBatchSaveWarningShown = false;
+          }))
+        ).catch(reportRescueBatchSaveError);
+      }
+
+      function loadRescueBatchesFromDatabase() {
+        return fetch(RESCUE_BATCH_HANDLER)
+          .then(response => response.json().then(result => {
+            if (!response.ok || !result.success || !Array.isArray(result.batches)) {
+              throw new Error(result.error || 'Rescue batches could not be loaded.');
+            }
+            const localBatches = getBatches();
+            const merged = new Map(result.batches.filter(batch => batch && batch.id).map(batch => [String(batch.id), batch]));
+            const localOnlyOrNewer = [];
+            localBatches.forEach(batch => {
+              if (!batch || !batch.id) return;
+              const key = String(batch.id);
+              const databaseBatch = merged.get(key);
+              const localUpdatedAt = Date.parse(batch.updatedAt || '') || 0;
+              const databaseUpdatedAt = Date.parse(databaseBatch && databaseBatch.updatedAt || '') || 0;
+              if (!databaseBatch || localUpdatedAt > databaseUpdatedAt) {
+                merged.set(key, batch);
+                localOnlyOrNewer.push(batch);
+              }
+            });
+
+            const batches = Array.from(merged.values());
+            localStorage.setItem(BATCH_KEY_V2, JSON.stringify(batches));
+            renderBatches();
+            if (localOnlyOrNewer.length) queueRescueBatchSave(localOnlyOrNewer);
+          }))
+          .catch(error => {
+            reportRescueBatchSaveError(error);
+            throw error;
+          });
       }
 
       function normalizePoolRescueDate(value) {
@@ -5307,7 +5505,8 @@ $activePage = 'adoption-pool';
         const dd = String(now.getDate()).padStart(2, '0');
         const yyyy = now.getFullYear();
         const seq = String(getBatches().length + 1).padStart(2, '0');
-        return `RB-${yyyy}-${mm}${dd}-${seq}`;
+        const uniqueSuffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+        return `RB-${yyyy}-${mm}${dd}-${seq}-${uniqueSuffix}`;
       }
 
       function formatBatchDate(dateStr) {
@@ -5330,7 +5529,7 @@ $activePage = 'adoption-pool';
       // Render batch cards in the separate section
       function renderBatches() {
         const allBatches = getBatches();
-        let batches = allBatches.filter(b => b.completedCount < b.count);
+        let batches = allBatches;
 
         const bSearch = (document.getElementById('batch-search-input')?.value || '').toLowerCase().trim();
         const bSource = document.getElementById('batch-filter-source')?.value || 'all';
@@ -5379,7 +5578,7 @@ $activePage = 'adoption-pool';
             migrated = true;
           }
         });
-        if (migrated) saveBatches(batches);
+        if (migrated) saveBatches(batches, false);
 
         batches.forEach(batch => {
           const pct = batchProgressPct(batch);
@@ -5430,7 +5629,7 @@ $activePage = 'adoption-pool';
       });
 
       function closeMultiRescueModal() {
-        multiRescueModal.classList.remove('show');
+        multiRescueModal.classList.remove('open');
         multiRescueForm.reset();
         document.getElementById('multi-rescue-date').value = new Date().toISOString().split('T')[0];
         multiRescueSubmitBtn.textContent = 'Record Rescue';
@@ -5494,7 +5693,7 @@ $activePage = 'adoption-pool';
           showToast('Rescue Not Recorded', { type: 'error', description: error.message || 'Could not save the rescue intake.' });
         }).finally(() => {
           multiRescueSubmitBtn.disabled = false;
-          if (multiRescueModal.classList.contains('show')) multiRescueSubmitBtn.textContent = `Record ${count} Animals`;
+          if (multiRescueModal.classList.contains('open')) multiRescueSubmitBtn.textContent = `Record ${count} Animals`;
         });
       });
 
@@ -5518,14 +5717,14 @@ $activePage = 'adoption-pool';
             poolPetId: a.poolPetId || null
           }));
           batch.completedCount = batch.slots.filter(s => s.status === 'completed').length;
-          saveBatches(batches);
+          saveBatches(batches, false);
         }
         if (!batch.slots) {
           batch.slots = [];
           for (let i = 1; i <= (batch.count || 0); i++) {
             batch.slots.push({ index: i, status: 'awaiting', animalName: null, poolPetId: null });
           }
-          saveBatches(batches);
+          saveBatches(batches, false);
         }
 
         currentDossierBatchId = batchId;
@@ -5586,18 +5785,18 @@ $activePage = 'adoption-pool';
           btn.addEventListener('click', () => {
             const bid = btn.dataset.batchId;
             const slotIdx = parseInt(btn.dataset.slotIndex);
-            batchDetailModal.classList.remove('show');
+            batchDetailModal.classList.remove('open');
             openFillProfile(bid, slotIdx);
           });
         });
 
-        batchDetailModal.classList.add('show');
+        batchDetailModal.classList.add('open');
       }
 
-      closeBatchDetailBtn.addEventListener('click', () => batchDetailModal.classList.remove('show'));
-      closeBatchDetailBtnFooter.addEventListener('click', () => batchDetailModal.classList.remove('show'));
+      closeBatchDetailBtn.addEventListener('click', () => batchDetailModal.classList.remove('open'));
+      closeBatchDetailBtnFooter.addEventListener('click', () => batchDetailModal.classList.remove('open'));
       batchDetailModal.addEventListener('click', (e) => {
-        if (e.target === batchDetailModal) batchDetailModal.classList.remove('show');
+        if (e.target === batchDetailModal) batchDetailModal.classList.remove('open');
       });
 
       // Fill Profile: opens single rescue form pre-filled with batch context
@@ -5626,7 +5825,7 @@ $activePage = 'adoption-pool';
         document.getElementById('rescue-notes').value = batch.notes || '';
 
         // Show rescue modal
-        rescueModal.classList.add('show');
+        rescueModal.classList.add('open');
       }
 
       // Patch rescue form submit to handle batch slot completion
@@ -5669,7 +5868,7 @@ $activePage = 'adoption-pool';
             fullRescueDate: date,
             adoptionStatus: 'Pending Review',
             listingStatus: 'Not Listed',
-          image: rescuePhotoData || (species === 'Dog' ? 'aspin4.jpeg' : 'aspin5.webp'),
+          image: resolvePetPhotoUrl(rescuePhotoData || (species === 'Dog' ? 'aspin4.jpeg' : 'aspin5.webp'), species),
             readyDate: shortDate,
             notes: notes || `Rescued via batch ${batchId}. Slot ${slotIdx}.`,
             batchId: batchId,
@@ -5715,7 +5914,7 @@ $activePage = 'adoption-pool';
           refreshCounts();
           renderTable();
           renderBatches();
-          rescueModal.classList.remove('show');
+          rescueModal.classList.remove('open');
           rescueForm.reset();
           resetRescuePhoto();
 
@@ -5771,7 +5970,7 @@ $activePage = 'adoption-pool';
           fullRescueDate: date,
           adoptionStatus: 'Pending Review',
           listingStatus: 'Not Listed',
-          image: rescuePhotoData || (species === 'Dog' ? 'aspin4.jpeg' : 'aspin5.webp'),
+          image: resolvePetPhotoUrl(rescuePhotoData || (species === 'Dog' ? 'aspin4.jpeg' : 'aspin5.webp'), species),
           readyDate: shortDate,
           notes: notes || 'Rescued and checked into DCVS Shelter.',
           readiness: { vaccination: 'Not specified', health: 'Not assessed', spayNeuter: 'Not specified', temperament: 'Not assessed' }
@@ -5861,6 +6060,22 @@ $activePage = 'adoption-pool';
         el.addEventListener('mouseleave', function() { el._timer = setTimeout(function() { dismissToast(el); }, 2000); });
       }
 
+      function syncModalScrollLock() {
+        const modalOpen = !!document.querySelector(
+          '.ab-modal-backdrop.open'
+        );
+        document.body.classList.toggle('staff-modal-open', modalOpen);
+        document.documentElement.classList.toggle('staff-modal-open', modalOpen);
+      }
+
+      syncModalScrollLock();
+      new MutationObserver(syncModalScrollLock).observe(document.body, {
+        attributes: true,
+        attributeFilter: ['class'],
+        childList: true,
+        subtree: true
+      });
+
       // Tab switching
       document.querySelectorAll('.pool-tab').forEach(tab => {
         tab.addEventListener('click', () => {
@@ -5868,6 +6083,14 @@ $activePage = 'adoption-pool';
           document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
           tab.classList.add('active');
           document.getElementById(tab.dataset.tab).classList.add('active');
+          const tabStrip = tab.parentElement;
+          const tabRect = tab.getBoundingClientRect();
+          const stripRect = tabStrip.getBoundingClientRect();
+          if (tabRect.left < stripRect.left) {
+            tabStrip.scrollLeft += tabRect.left - stripRect.left - 12;
+          } else if (tabRect.right > stripRect.right) {
+            tabStrip.scrollLeft += tabRect.right - stripRect.right + 12;
+          }
         });
       });
 
@@ -5929,7 +6152,24 @@ $activePage = 'adoption-pool';
       }
 
       // Refresh adoption status + adopted date from DB (e.g. adopted via resident flow)
-      poolReady.then(() => syncAdoptedFromDB()).then(() => backfillLegacyRescueIntakes()).catch(() => {});
+      poolReady.then(() => refreshAdoptionPool())
+        .catch(reportAdoptionSyncError)
+        .then(() => loadRescueBatchesFromDatabase())
+        .catch(() => {})
+        .then(() => backfillLegacyRescueIntakes())
+        .catch(reportAdoptionSyncError);
+
+      window.setInterval(() => {
+        if (document.visibilityState === 'visible') {
+          refreshAdoptionPool().catch(reportAdoptionSyncError);
+        }
+      }, 60000);
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') {
+          refreshAdoptionPool().catch(reportAdoptionSyncError);
+        }
+      });
 
       // Re-render when page is restored from browser back-forward cache
       window.addEventListener('pageshow', (e) => {
@@ -5939,11 +6179,12 @@ $activePage = 'adoption-pool';
               refreshCounts();
               renderBatches();
               renderTable();
-            });
+            }).then(() => refreshAdoptionPool()).catch(reportAdoptionSyncError);
           } else {
             refreshCounts();
             renderBatches();
             renderTable();
+            refreshAdoptionPool().catch(reportAdoptionSyncError);
           }
         }
       });
@@ -5970,6 +6211,7 @@ $activePage = 'adoption-pool';
     }
     var csrf = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     window.adoptionWorkflowCsrf = csrf;
+    window.rescueBatchCsrf = csrf;
     var documentDialog = document.getElementById('adoption-document-dialog');
     var documentPreview = document.getElementById('adoption-document-preview');
     var actionDialog = document.getElementById('adoption-action-dialog');
@@ -5980,7 +6222,6 @@ $activePage = 'adoption-pool';
     var actionScheduleField = document.getElementById('adoption-action-schedule-field');
     var actionPickupAt = document.getElementById('adoption-action-pickup-at');
     var actionDialogTrigger = null;
-
     function closeDocumentDialog() {
       documentDialog.classList.remove('open');
       documentDialog.setAttribute('aria-hidden', 'true');
@@ -6004,7 +6245,7 @@ $activePage = 'adoption-pool';
       if (event.key === 'Escape') {
         if (actionDialog.classList.contains('open')) closeActionDialog();
         else if (documentDialog.classList.contains('open')) closeDocumentDialog();
-      }
+    }
     });
     function confirmReviewAction(title, description, confirmLabel, danger, trigger, callback, requiresPickupSchedule) {
       actionDialogTitle.textContent = title;
@@ -6074,7 +6315,7 @@ $activePage = 'adoption-pool';
       button.disabled = true;
       notice.hidden = false;
       notice.textContent = 'Saving review...';
-      fetch('adoption-workflow-handler.php', { method: 'POST', body: formData, credentials: 'same-origin' })
+      fetch(APP_BASE_URL + '/api/shared/adoption-workflow-handler.php', { method: 'POST', body: formData, credentials: 'same-origin' })
         .then(function (response) { return response.json().then(function (body) { return { status: response.status, body: body }; }); })
         .then(function (result) {
           notice.textContent = result.body.message || 'Review could not be saved.';
@@ -6090,7 +6331,8 @@ $activePage = 'adoption-pool';
         });
     }
 
-    (queueData.applications || []).forEach(function (item) {
+    var applications = queueData.applications || [];
+    applications.forEach(function (item) {
       var card = document.createElement('article');
       card.className = 'adoption-review-card';
       var cardHeader = document.createElement('div');
@@ -6098,47 +6340,65 @@ $activePage = 'adoption-pool';
       if (item.photo_url) {
         var petPhoto = document.createElement('img');
         petPhoto.className = 'adoption-review-pet-photo';
-        petPhoto.src = item.photo_url;
-        petPhoto.alt = '';
+        petPhoto.src = resolvePetPhotoUrl(item.photo_url, item.species);
+        petPhoto.alt = item.pet_name || 'Pet';
         cardHeader.appendChild(petPhoto);
+      } else {
+        var petPlaceholder = document.createElement('div');
+        petPlaceholder.className = 'adoption-review-pet-placeholder';
+        petPlaceholder.setAttribute('aria-hidden', 'true');
+        addText(petPlaceholder, 'i', '', 'fas fa-paw');
+        cardHeader.appendChild(petPlaceholder);
       }
-      var heading = document.createElement('div');
-      heading.className = 'adoption-review-summary-copy';
-      var petTitle = addText(heading, 'h3', item.pet_name);
-      petTitle.className = 'adoption-review-pet-title';
-      addText(petTitle, 'span', '(' + [item.species, item.breed].filter(Boolean).join(' · ') + ')', 'adoption-review-pet-meta');
+      var summaryCopy = document.createElement('div');
+      summaryCopy.className = 'adoption-review-summary-copy';
       var applicantAge = item.date_of_birth ? calculateAge(item.date_of_birth) + ' yrs' : 'age not provided';
-      addText(heading, 'p', 'Applicant: ' + item.full_name + ' (' + applicantAge + ') · Brgy. ' + (item.barangay_name || 'Not provided'), 'adoption-review-applicant');
-      addText(heading, 'p', 'Submitted: ' + readableDate(item.application_date) + ' · Phone: ' + (item.phone || 'Not provided'), 'adoption-review-submitted');
-      if (item.status === 'approved' || item.status === 'expired') {
-        addText(heading, 'p', 'Pickup period: ' + window.adoptionPickupPeriodLabel(item.approved_pickup_at, item.status), 'adoption-review-submitted');
-      }
-      cardHeader.appendChild(heading);
-
+      var applicantTitle = addText(summaryCopy, 'h3', item.full_name || 'Applicant', 'adoption-review-pet-title');
+      addText(applicantTitle, 'span', '· ' + applicantAge + ' · Brgy. ' + (item.barangay_name || 'Not provided'), 'adoption-review-pet-meta');
+      addText(summaryCopy, 'p', 'For ' + (item.pet_name || 'Pet') + ' (' + [item.species, item.breed].filter(Boolean).join(' · ') + ')', 'adoption-review-pet-line');
+      addText(summaryCopy, 'p', 'Submitted ' + readableDate(item.application_date), 'adoption-review-submitted');
+      cardHeader.appendChild(summaryCopy);
       var summaryActions = document.createElement('div');
       summaryActions.className = 'adoption-review-summary-actions';
-      var statusLabels = {pending: 'Pending Application', under_review: 'Under Review', needs_info: 'Needs Info', approved: 'In Progress', adopted: 'Adopted', expired: 'Expired / Unclaimed'};
+      var statusLabels = {pending: 'Under Review', under_review: 'Under Review', needs_info: 'Action needed', reserved: 'Action needed', confirmed: 'Ready for Pickup', approved: 'Action needed', adopted: 'Adopted', declined: 'Expired', expired: 'Expired', rejected: 'Declined'};
       var statusText = statusLabels[item.status] || item.status.replace(/_/g, ' ');
-      var statusLabel = addText(summaryActions, 'span', statusText, 'adoption-review-status');
+      var statusMeta = document.createElement('div');
+      statusMeta.className = 'adoption-review-status-meta';
+      var statusLabel = addText(statusMeta, 'span', statusText, 'adoption-review-status');
       if (item.status === 'pending') statusLabel.classList.add('pending');
       if (item.status === 'under_review') statusLabel.classList.add('active');
       if (item.status === 'needs_info') statusLabel.classList.add('needs-info');
-      if (item.status === 'approved') statusLabel.classList.add('active');
+      if (item.status === 'reserved' || item.status === 'confirmed' || item.status === 'approved') statusLabel.classList.add('active');
       if (item.status === 'adopted') statusLabel.classList.add('active');
-      if (item.status === 'expired') statusLabel.classList.add('needs-info');
+      if (item.status === 'expired' || item.status === 'declined') statusLabel.classList.add('expired');
+      if (['reserved', 'confirmed', 'approved', 'declined', 'expired'].indexOf(item.status) !== -1) {
+        var deadline = item.status === 'reserved' ? item.response_deadline : item.pickup_deadline || item.response_deadline;
+        var deadlineLabel = item.status === 'reserved' ? 'Respond by: ' : (item.pickup_deadline ? 'Pickup deadline: ' : 'Response deadline: ');
+        if (deadline) addText(statusMeta, 'span', deadlineLabel + readableDate(deadline), 'adoption-review-status-detail');
+      } else if (item.approved_pickup_at) {
+        addText(statusMeta, 'span', 'Visit: ' + readableDate(item.approved_pickup_at), 'adoption-review-status-detail');
+      }
+      summaryActions.appendChild(statusMeta);
       var details = document.createElement('div');
       details.className = 'adoption-review-details';
       details.hidden = true;
-      var detailsToggle = addButton(summaryActions, 'Review Details  ▾', 'adoption-review-toggle', function () {
+      var detailsToggle = addButton(summaryActions, 'Review Details ▾', 'adoption-review-toggle', function () {
         details.hidden = !details.hidden;
-        detailsToggle.textContent = details.hidden ? 'Review Details  ▾' : 'Collapse  ▴';
+        detailsToggle.textContent = details.hidden ? 'Review Details ▾' : 'Collapse ▴';
         detailsToggle.setAttribute('aria-expanded', String(!details.hidden));
       });
       detailsToggle.setAttribute('aria-expanded', 'false');
       cardHeader.appendChild(summaryActions);
       card.appendChild(cardHeader);
 
-      addText(details, 'h4', 'Qualification & compliance verification', 'adoption-review-details-title');
+      if (item.status === 'expired' || (item.status === 'declined' && item.decline_reason === 'expired')) {
+        var expiryNotice = document.createElement('div');
+        expiryNotice.className = 'adoption-review-notice adoption-review-expiry-notice';
+        addText(expiryNotice, 'strong', 'Pickup window closed');
+        addText(expiryNotice, 'div', 'The applicant did not respond or pick up the pet within the allotted period. The application expired and the pet is available in the adoption pool.');
+        details.appendChild(expiryNotice);
+      }
+      addText(details, 'h4', 'VERIFICATION', 'adoption-review-details-title');
       var checks = document.createElement('div');
       checks.className = 'adoption-review-checks';
       function addCheck(label, passed) {
@@ -6151,32 +6411,44 @@ $activePage = 'adoption-pool';
       addCheck(item.agreed_at ? 'Adoption commitments accepted' : 'Agreement not recorded', !!item.agreed_at);
       details.appendChild(checks);
 
-      var facts = document.createElement('div');
-      facts.className = 'adoption-review-facts';
-      function addFact(label, value) {
-        var fact = document.createElement('div');
-        fact.className = 'adoption-review-fact';
-        addText(fact, 'span', label, 'adoption-review-fact-label');
-        addText(fact, 'span', value || 'Not provided', 'adoption-review-fact-value');
-        facts.appendChild(fact);
+      var detailColumns = document.createElement('div');
+      detailColumns.className = 'adoption-review-details-columns';
+      function addDetailSection(title) {
+        var section = document.createElement('section');
+        section.className = 'adoption-review-detail-section';
+        addText(section, 'h4', title, 'adoption-review-details-title');
+        var rows = document.createElement('div');
+        rows.className = 'adoption-review-detail-rows';
+        section.appendChild(rows);
+        detailColumns.appendChild(section);
+        return rows;
       }
-      var housing = (item.housing_type || 'Not provided');
+      function addDetailRow(parent, label, value) {
+        var row = document.createElement('div');
+        row.className = 'adoption-review-detail-row';
+        addText(row, 'span', label, 'adoption-review-detail-label');
+        addText(row, 'span', value || 'Not provided', 'adoption-review-detail-value');
+        parent.appendChild(row);
+      }
+      var homeRows = addDetailSection('HOME AND EXPERIENCE');
+      var contactRows = addDetailSection('CONTACT AND SCHEDULE');
+      var housing = item.housing_type || 'Not provided';
       if (item.housing_type === 'rented') housing += Number(item.landlord_permission) ? ' · Landlord permission confirmed' : ' · No landlord permission';
-      addFact('Housing type & yard', housing + ' · ' + (item.home_type || 'Home type not provided') + ' · ' + (Number(item.has_fenced_yard) ? 'Fenced yard' : 'No fenced yard'));
-      addFact('Household composition', item.household_members ? item.household_members + ' household member(s)' : 'Not provided');
-      addFact('Existing pets', Number(item.has_other_pets) ? (item.other_pets_details || 'Yes') : 'No');
-      addFact('Pet experience', item.pet_care_experience);
-      addFact('Contact details', (item.phone || 'No phone') + ' / ' + (item.email || 'No email'));
-      addFact('Current application status', statusText);
-      if (item.approved_pickup_at) addFact('Scheduled DCVS visit', readableDate(item.approved_pickup_at));
-      if (item.status === 'approved' || item.status === 'expired') {
-        addFact('Pickup period', window.adoptionPickupPeriodLabel(item.approved_pickup_at, item.status));
-      }
-      if (item.finalized_at) addFact('Confirmed/Adopted Date', readableDate(item.finalized_at));
-      details.appendChild(facts);
+      housing += ' · ' + (item.home_type || 'Home type not provided') + ' · ' + (Number(item.has_fenced_yard) ? 'Fenced yard' : 'No fenced yard');
+      addDetailRow(homeRows, 'Housing', housing);
+      addDetailRow(homeRows, 'Household', item.household_members ? item.household_members + ' members' : 'Not provided');
+      addDetailRow(homeRows, 'Existing pets', Number(item.has_other_pets) ? (item.other_pets_details || 'Yes') : 'None');
+      addDetailRow(homeRows, 'Pet experience', item.pet_care_experience || 'No prior experience');
+      addDetailRow(contactRows, 'Phone', item.phone);
+      addDetailRow(contactRows, 'Email', item.email);
+      if (item.approved_pickup_at) addDetailRow(contactRows, 'DCVS visit', readableDate(item.approved_pickup_at));
+      if (item.finalized_at) addDetailRow(contactRows, 'Confirmed/Adopted date', readableDate(item.finalized_at));
+      if (item.decline_reason && item.decline_reason !== 'expired') addDetailRow(contactRows, 'Decision reason', item.decline_reason);
+      details.appendChild(detailColumns);
+
       var reasonSummary = document.createElement('div');
       reasonSummary.className = 'adoption-review-reason';
-      addText(reasonSummary, 'span', 'Reason for adoption & care intentions', 'adoption-review-fact-label');
+      addText(reasonSummary, 'span', "APPLICANT'S REASON FOR ADOPTING", 'adoption-review-fact-label');
       addText(reasonSummary, 'div', item.reason_for_adoption || 'Not provided', 'adoption-review-fact-value');
       details.appendChild(reasonSummary);
       if (item.requested_info) addText(details, 'p', 'Information requested: ' + item.requested_info + ' · Deadline: ' + readableDate(item.info_deadline), 'adoption-review-submitted');
@@ -6250,7 +6522,7 @@ $activePage = 'adoption-pool';
           sendReview(formData, button);
         }, decision === 'approved');
       }
-      if (item.status !== 'approved' && item.status !== 'adopted') {
+      if (['reserved', 'confirmed', 'approved', 'adopted', 'declined', 'expired', 'rejected'].indexOf(item.status) === -1) {
       addButton(actions, 'Approve & Schedule Visit', '', function (event) {
         submitDecision('approved', event.currentTarget);
       });
@@ -6274,13 +6546,16 @@ $activePage = 'adoption-pool';
       confirmRejectButton.style.display = 'none';
       requestButton.addEventListener('click', function () { sendRequestButton.style.display = 'inline-flex'; confirmRejectButton.style.display = 'none'; });
       rejectButton.addEventListener('click', function () { confirmRejectButton.style.display = 'inline-flex'; sendRequestButton.style.display = 'none'; });
-      } else if (item.status === 'approved') {
-        addText(actions, 'span', 'The visit is scheduled. Finalize the adoption from the Adoption Pool drawer after pickup.', 'adoption-review-submitted');
+      } else if (item.status === 'reserved') {
+        addText(actions, 'span', 'The resident must confirm within the response period before pickup can be finalized.', 'adoption-review-submitted');
+      } else if (item.status === 'confirmed') {
+        addText(actions, 'span', 'The resident has confirmed. Mark the animal as adopted from the Adoption Pool drawer after pickup.', 'adoption-review-submitted');
       }
       details.appendChild(actions);
       card.appendChild(details);
       applicationQueue.appendChild(card);
     });
+    if (!applications.length) addText(applicationQueue, 'p', 'No adoption applications found.', 'adoption-review-empty');
 
     function calculateAge(dateOfBirth) {
       if (!dateOfBirth) return 'Unknown';
@@ -6293,5 +6568,6 @@ $activePage = 'adoption-pool';
     }
   })();
   </script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

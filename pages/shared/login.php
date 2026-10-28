@@ -1,21 +1,36 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/auth-routing.php';
 
-ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
-session_set_cookie_params([
-    'lifetime' => 30 * 24 * 60 * 60,
-    'path'     => '/',
-    'domain'   => $_SERVER['HTTP_HOST'] ?? '',
-    'secure'   => !empty($_SERVER['HTTPS']),
-    'httponly' => true,
-    'samesite' => 'Lax',
-]);
+session_name('PHPSESSID');
+dcvsConfigureAuthSession();
 session_start();
+
+if (!empty($_SESSION['logged_in']) && !empty($_SESSION['user_id'])) {
+    $activePortal = dcvsAuthenticatedUserFromSession();
+    if ($activePortal) {
+        header('Location: ' . $activePortal['dashboard']);
+        exit;
+    }
+}
+$existingPortalDashboard = dcvsFindExistingPortalSession();
+if ($existingPortalDashboard) {
+    header('Location: ' . $existingPortalDashboard);
+    exit;
+}
 
 // Auto-login via Remember Me cookie
 $autoUser = autoLoginRememberMe($conn);
 if ($autoUser) {
-    header('Location: dashboard-resident.php');
+    $autoPortal = dcvsStartRoleSession($autoUser);
+    if ($autoPortal) {
+        header('Location: ' . $autoPortal['dashboard']);
+        exit;
+    }
+    $_SESSION['login_error'] = 'This account type cannot sign in through this page.';
+    header('Location: login.php');
     exit;
 }
 
@@ -119,28 +134,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setRememberMe($conn, $user['user_id']);
             }
 
-            // Redirect based on role
-            switch ($user['role']) {
-                case 'admin':
-                    header('Location: role-management.php');
-                    break;
-                case 'staff':
-                    header('Location: dashboard-staff.php');
-                    break;
-                case 'barangay':
-                    header('Location: dashboard-barangay.php');
-                    break;
-                case 'resident':
-                default:
-                    header('Location: dashboard-resident.php');
-                    break;
+            $portal = dcvsStartRoleSession($user);
+            if (!$portal) {
+                $_SESSION['login_error'] = 'This account type cannot sign in through this page.';
+                header('Location: login.php');
+                exit;
             }
+            header('Location: ' . $portal['dashboard']);
             exit;
         } else {
             $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-            if ($_SESSION['login_failures'] >= 5) {
-                $_SESSION['login_lockout_until'] = time() + (10 * 60);
-                $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+            if ($_SESSION['login_failures'] >= 3) {
+                $_SESSION['login_lockout_until'] = time() + (15 * 60);
+                $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 15 minutes.";
             } else {
                 $_SESSION['login_error'] = "Invalid email or password.";
             }
@@ -150,9 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } else {
         $_SESSION['login_failures'] = ($_SESSION['login_failures'] ?? 0) + 1;
-        if ($_SESSION['login_failures'] >= 5) {
-            $_SESSION['login_lockout_until'] = time() + (10 * 60);
-            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 10 minutes.";
+        if ($_SESSION['login_failures'] >= 3) {
+            $_SESSION['login_lockout_until'] = time() + (15 * 60);
+            $_SESSION['login_error'] = "Too many failed login attempts. Your account has been temporarily locked. Please try again in 15 minutes.";
         } else {
             $_SESSION['login_error'] = "Invalid email or password.";
         }
@@ -199,7 +205,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       --error: #ef4444;
       --error-bg: #fef2f2;
       --surface: #ffffff;
-      --bg: #f8fafc;
+      --bg: #ffffff;
     }
 
     body {
@@ -214,6 +220,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     .auth-wrapper {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      align-items: start;
       min-height: 100vh;
       width: 100%;
     }
@@ -224,9 +231,11 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      position: sticky;
+      top: 0;
+      height: 100vh;
       padding: 4rem 4rem 2.5rem;
       background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%);
-      position: relative;
       overflow: hidden;
     }
 
@@ -331,39 +340,14 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
       display: flex;
       align-items: center;
       justify-content: center;
-      padding: 3rem;
-      overflow-y: auto;
-      max-height: 100vh;
+      min-height: 100vh;
+      padding: 2rem clamp(1.5rem, 4vw, 3rem);
       background: var(--bg);
     }
 
     .auth-form-card {
       width: 100%;
       max-width: 440px;
-      background: var(--surface);
-      border: 1px solid var(--border-color);
-      border-radius: 3px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-      padding: 2.5rem 2.5rem 2rem;
-    }
-
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* ── Login Logo ── */
-    .login-logo {
-      display: flex;
-      justify-content: center;
-      padding-top: 0.25rem;
-      margin-bottom: 1.75rem;
-    }
-
-    .login-logo img {
-      width: 80px;
-      height: 80px;
-      object-fit: contain;
     }
 
     /* ── Header ── */
@@ -605,18 +589,23 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
     /* ── Responsive ── */
     @media (max-width: 900px) {
-      .auth-wrapper { grid-template-columns: 1fr; }
-      .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
-      .brand-trust { position: static; margin: 3rem calc(-1 * (4rem + 60px)) 0; }
-      .auth-form-panel { padding: 2rem 1rem; height: auto; max-height: none; }
+      body { background: #ffffff; }
+      .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
+      .auth-brand-panel, .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .brand-title { order: 1; justify-self: center; width: 100%; max-width: 420px; margin-inline: auto; padding: 1.25rem 1rem 0; font-size: clamp(1.65rem, 7vw, 2.15rem); line-height: 1.15; text-align: center; text-wrap: balance; overflow-wrap: normal; }
+      .brand-trust { display: none; }
+      .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
+      .brand-tagline { display: none; }
+      .auth-form-panel { order: 3; min-width: 0; width: 100%; min-height: 0; padding: 1rem 16px; background: #ffffff; }
+      .auth-form-card { width: 100%; max-width: 460px; margin: 0 auto; padding: 0; }
+      .login-header { text-align: center; }
     }
 
     @media (max-width: 480px) {
-      .auth-brand-panel { padding: 2rem 1.5rem 1rem; }
-      .brand-trust { margin: 2rem calc(-1 * (1.5rem + 60px)) 0; }
-      .auth-form-panel { padding: 1.5rem 1rem; }
       .login-header h2 { font-size: 1.25rem; }
     }
+
   </style>
 </head>
 <body>
@@ -627,7 +616,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <p class="brand-tagline">Serving the community through better animal welfare and veterinary services.</p>
       </div>
 
@@ -638,7 +627,7 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
             $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
             for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
               <div class="brand-logo-item">
-                <img src="assets/images/<?php echo rawurlencode($logo); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
               </div>
             <?php endforeach; endfor; ?>
           </div>
@@ -649,10 +638,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
     <!-- Right Panel: Login Form -->
     <div class="auth-form-panel">
       <div class="auth-form-card">
-
-        <div class="login-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" />
-        </div>
 
         <div class="login-header">
           <h2>Welcome Back</h2>
@@ -741,6 +726,6 @@ if (isset($_SESSION['login_lockout_until']) && time() < $_SESSION['login_lockout
 
   </div>
 
-  <script src="assets/js/auth.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

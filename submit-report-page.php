@@ -46,8 +46,8 @@ $pageTitle = 'Submit Report';
 
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/dashboard.css'); ?>" />
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/responsive.css'); ?>" />
   <?php if ($reportPinEnabled): ?>
   <link rel="stylesheet" href="dist/mapcn.css" />
   <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/geo-map/map.css'); ?>" />
@@ -676,9 +676,18 @@ $pageTitle = 'Submit Report';
     .report-location-map .mapcn-container { width: 100%; height: 100%; }
     .report-location-map .mapcn-loading { z-index: 2; }
     .report-location-map.is-expanded { position: fixed; inset: 0; height: 100vh; height: 100dvh; width: 100vw; z-index: 9999; border-radius: 0; }
-    .report-location-status { margin-top: 10px; color: #475569; font-size: 13px; }
+    .report-location-picker .helper-text,
+    .report-location-status,
+    .report-location-fallback-link {
+      font-family: 'Inter', 'Segoe UI', sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .report-location-picker .helper-text,
+    .report-location-status { color: #71717a; font-weight: 400; }
+    .report-location-status { margin-top: 10px; }
     .report-location-status.is-error { color: #B42318; }
-    .report-location-fallback-link { margin-top: 10px; padding: 0; border: 0; background: transparent; color: #166534; text-decoration: underline; font: inherit; cursor: pointer; }
+    .report-location-fallback-link { margin-top: 10px; padding: 0; border: 0; background: transparent; color: #18181b; font-weight: 500; text-decoration: underline; cursor: pointer; }
     .report-location-fallback { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .report-location-fallback[hidden] { display: none; }
     .report-location-map-pin { position: absolute; z-index: 5; display: flex; align-items: flex-start; justify-content: center; width: 48px; height: 60px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; transform: translate(-50%, -100%); filter: drop-shadow(0 3px 4px rgba(0,0,0,.4)); }
@@ -729,8 +738,9 @@ $pageTitle = 'Submit Report';
 
     @keyframes spin { to { transform: rotate(360deg); } }
   </style>
+  <link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/sb2.css'); ?>" />
 </head>
-<body class="resident-portal">
+<body class="resident-portal sb2-active">
 
 <?php include 'includes/resident-sidebar.php'; ?>
 
@@ -1015,12 +1025,12 @@ $pageTitle = 'Submit Report';
               Step 4 of 5
             </div>
             <h2>Upload supporting photos or videos</h2>
-            <p id="upload-requirement-note"><?php echo $reportPinEnabled ? 'Attach photos or a short video of the animal or location to help responders assess the situation. Photos or videos are required if you cannot place an incident pin.' : 'Attach photos or a short video of the animal or location to help responders assess the situation. This step is optional but highly encouraged.'; ?></p>
+            <p id="upload-requirement-note">Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.</p>
           </div>
 
           <div class="form-section">
             <div class="upload-dropzone" id="upload-dropzone" role="button" tabindex="0" aria-label="Upload photos or videos">
-              <input type="file" id="photo-input" multiple accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/ogg,video/x-m4v,video/quicktime" onchange="handleFileUpload(this.files)">
+              <input type="file" id="photo-input" multiple required accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/ogg,video/x-m4v,video/quicktime" onchange="handleFileUpload(this.files)">
               <div class="upload-icon-circle">
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -1219,7 +1229,7 @@ $pageTitle = 'Submit Report';
 
     reportMapLoadPromise = new Promise(function(resolve, reject) {
       var script = document.createElement('script');
-      script.src = 'dist/mapcn.umd.cjs';
+      script.src = 'dist/mapcn.umd.cjs?v=<?php echo (int)filemtime(__DIR__ . '/dist/mapcn.umd.cjs'); ?>';
       script.onload = function() {
         if (window.MapCN && typeof window.MapCN.init === 'function') resolve();
         else reject(new Error('The report map library did not initialize.'));
@@ -1263,18 +1273,57 @@ $pageTitle = 'Submit Report';
     return Number.isFinite(bounds[0][0]) ? bounds : null;
   }
 
-  function reportFeatureAtPoint(point) {
-    if (!reportMapInstance || !reportMapInstance.getLayer('barangay-fill')) return null;
-    var features = reportMapInstance.queryRenderedFeatures(point, { layers: ['barangay-fill'] });
-    var names = {};
-    features.forEach(function(feature) {
-      var name = String(feature.properties.name || '').trim();
-      if (name) names[name.toLocaleLowerCase()] = name;
+  function reportPointOnRingSegment(longitude, latitude, start, end) {
+    var epsilon = 1e-10;
+    var dx = end[0] - start[0];
+    var dy = end[1] - start[1];
+    var px = longitude - start[0];
+    var py = latitude - start[1];
+    if (Math.abs(dx) <= epsilon && Math.abs(dy) <= epsilon) {
+      return px * px + py * py <= epsilon * epsilon;
+    }
+    if (Math.abs(px * dy - py * dx) > epsilon) return false;
+    var dot = px * dx + py * dy;
+    return dot >= -epsilon && dot <= dx * dx + dy * dy + epsilon;
+  }
+
+  function reportPointInRing(longitude, latitude, ring) {
+    if (!Array.isArray(ring) || ring.length < 4) return false;
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      var current = ring[i];
+      var previous = ring[j];
+      if (reportPointOnRingSegment(longitude, latitude, previous, current)) return true;
+      var crossesLatitude = (current[1] > latitude) !== (previous[1] > latitude);
+      if (crossesLatitude) {
+        var intersection = (previous[0] - current[0]) * (latitude - current[1])
+          / (previous[1] - current[1]) + current[0];
+        if (longitude < intersection) inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  function reportPointInPolygon(longitude, latitude, geometry) {
+    var polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
+      : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
+    return polygons.some(function(polygon) {
+      if (!polygon.length || !reportPointInRing(longitude, latitude, polygon[0])) return false;
+      for (var i = 1; i < polygon.length; i++) {
+        if (reportPointInRing(longitude, latitude, polygon[i])) return false;
+      }
+      return true;
     });
-    var matchedNames = Object.keys(names);
-    if (matchedNames.length !== 1) return null;
-    var name = names[matchedNames[0]];
-    return { name: name, code: reportBarangayCodeByName()[name.toLocaleLowerCase()] || '' };
+  }
+
+  function reportFeatureAtCoordinates(longitude, latitude) {
+    if (!reportMapFeatures || !Array.isArray(reportMapFeatures.features)) return null;
+    var matches = reportMapFeatures.features.filter(function(feature) {
+      return feature.geometry && reportPointInPolygon(longitude, latitude, feature.geometry);
+    });
+    if (matches.length !== 1) return null;
+    var name = String(matches[0].properties.name || '').trim();
+    return name ? { name: name, code: reportBarangayCodeByName()[name.toLocaleLowerCase()] || '' } : null;
   }
 
   function updateReportPinMarker() {
@@ -1329,7 +1378,7 @@ $pageTitle = 'Submit Report';
     document.getElementById('report-location-fallback').hidden = true;
     document.getElementById('report-location-fallback-toggle').textContent = "I can't pin the location";
     document.getElementById('upload-requirement-note').textContent =
-      'Attach photos or a short video of the animal or location to help responders assess the situation. Photos or videos are required if you cannot place an incident pin.';
+      'Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.';
 
     reportPinBarangayCode = detected && detected.code ? detected.code : '';
     if (reportMapInstance && reportMapInstance.getSource('report-pin-accuracy')) {
@@ -1418,7 +1467,7 @@ $pageTitle = 'Submit Report';
       }
     });
     map.on('click', function(event) {
-      var detected = reportFeatureAtPoint(event.point);
+      var detected = reportFeatureAtCoordinates(event.lngLat.lng, event.lngLat.lat);
       setReportPin(event.lngLat.lng, event.lngLat.lat, 'resident', detected);
     });
     map.on('render', updateReportPinMarker);
@@ -1434,13 +1483,13 @@ $pageTitle = 'Submit Report';
       event.preventDefault();
       var rect = map.getContainer().getBoundingClientRect();
       var point = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
-      setReportPin(point.lng, point.lat, document.getElementById('report-pin-source').value, reportFeatureAtPoint(map.project([point.lng, point.lat])), false);
+      setReportPin(point.lng, point.lat, document.getElementById('report-pin-source').value, reportFeatureAtCoordinates(point.lng, point.lat), false);
     });
     reportMapPinElement.addEventListener('pointerup', function(event) {
       if (reportPinCoordinates) {
         setReportPin(reportPinCoordinates[0], reportPinCoordinates[1],
           document.getElementById('report-pin-source').value,
-          reportFeatureAtPoint(map.project(reportPinCoordinates)));
+          reportFeatureAtCoordinates(reportPinCoordinates[0], reportPinCoordinates[1]));
       }
       map.dragPan.enable();
       if (reportMapPinElement.hasPointerCapture(event.pointerId)) reportMapPinElement.releasePointerCapture(event.pointerId);
@@ -1694,8 +1743,8 @@ $pageTitle = 'Submit Report';
         return true;
       }
       case 4: {
-        if (reportFallbackMode && uploadedFiles.length === 0) {
-          showToast('Attach at least one photo or video when submitting without an incident pin.');
+        if (uploadedFiles.length === 0) {
+          showToast('Upload at least one photo or video before continuing.');
           return false;
         }
         return true;
@@ -1914,6 +1963,12 @@ $pageTitle = 'Submit Report';
   // SUBMIT REPORT (AJAX)
   // ==========================================================================
   function submitReport() {
+    if (uploadedFiles.length === 0) {
+      showToast('Upload at least one photo or video before submitting your report.');
+      resetSubmitButton();
+      goToStep(4);
+      return;
+    }
     var btn = document.getElementById('btn-next');
     if (btn) {
       btn.disabled = true;
@@ -2223,12 +2278,12 @@ $pageTitle = 'Submit Report';
           document.getElementById('report-longitude').value = '';
           if (reportMapPinElement) reportMapPinElement.hidden = true;
           document.getElementById('upload-requirement-note').textContent =
-            'Photos or videos are required because you are continuing without an incident pin. Describe the location in the Street / Landmark / Specific Location field.';
+            'Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.';
           setReportPinStatus('No pin selected. Describe the incident location and attach photo or video evidence.', false);
         } else {
           document.getElementById('location-barangay').disabled = false;
           document.getElementById('upload-requirement-note').textContent =
-            'Attach photos or a short video of the animal or location to help responders assess the situation. Photos or videos are required if you cannot place an incident pin.';
+            'Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.';
           setReportPinStatus('Place a pin inside Dasmariñas.', false);
         }
       });
@@ -2246,8 +2301,7 @@ $pageTitle = 'Submit Report';
             return;
           }
           var coords = [position.coords.longitude, position.coords.latitude];
-          var point = reportMapInstance.project(coords);
-          setReportPin(coords[0], coords[1], 'gps_assisted', reportFeatureAtPoint(point), true, position.coords.accuracy);
+          setReportPin(coords[0], coords[1], 'gps_assisted', reportFeatureAtCoordinates(coords[0], coords[1]), true, position.coords.accuracy);
           reportMapInstance.flyTo({ center: coords, zoom: 15 });
         }, function(error) {
           console.warn('Incident location GPS request failed:', error.message);

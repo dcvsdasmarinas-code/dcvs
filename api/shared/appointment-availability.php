@@ -28,11 +28,14 @@ $lastDay = date('Y-m-t', strtotime($firstDay));
 
 // Aggregate booked counts per date + time slot for the requested month.
 $capacityStatuses = "'" . implode("','", dcvsCapacityStatuses()) . "'";
-$stmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level, COUNT(*) AS c FROM appointments
-                        WHERE preferred_date >= ? AND preferred_date <= ?
+$stmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                               COALESCE(scheduled_time, preferred_time) AS slot_time,
+                               urgency_level, COUNT(*) AS c FROM appointments
+                        WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
                                                     AND status IN ($capacityStatuses)
                           AND archived_at IS NULL
-                        GROUP BY preferred_date, preferred_time, urgency_level");
+                        GROUP BY COALESCE(scheduled_date, preferred_date),
+                                 COALESCE(scheduled_time, preferred_time), urgency_level");
 $stmt->bind_param("ss", $firstDay, $lastDay);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -41,8 +44,8 @@ $slots = [];
 $routineSlots = [];
 $urgentSlots = [];
 while ($row = $result->fetch_assoc()) {
-    $time = substr($row['preferred_time'], 0, 5);
-    $date = $row['preferred_date'];
+    $time = substr($row['slot_time'], 0, 5);
+    $date = $row['slot_date'];
     $count = (int)$row['c'];
     $slots[$date][$time] = ($slots[$date][$time] ?? 0) + $count;
     if ($row['urgency_level'] === 'urgent') {
@@ -54,23 +57,25 @@ while ($row = $result->fetch_assoc()) {
 $stmt->close();
 
 // Held slots: any active appointment locks the slot against other residents.
-$heldStmt = $conn->prepare("SELECT preferred_date, preferred_time FROM appointments
-                            WHERE preferred_date >= ? AND preferred_date <= ?
-                              AND status IN ('pending','approved','scheduled','rescheduled','in_progress')
+$heldStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                                   COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
+                            WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
+                              AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
                               AND archived_at IS NULL");
 $heldStmt->bind_param("ss", $firstDay, $lastDay);
 $heldStmt->execute();
 $heldResult = $heldStmt->get_result();
 $held = [];
 while ($row = $heldResult->fetch_assoc()) {
-    $held[$row['preferred_date']][substr($row['preferred_time'], 0, 5)] = true;
+    $held[$row['slot_date']][substr($row['slot_time'], 0, 5)] = true;
 }
 $heldStmt->close();
 
 // Locked slots: only confirmed appointments (scheduled/rescheduled/approved) —
 // these staff cannot toggle to unavailable in the Availability page.
-$lockStmt = $conn->prepare("SELECT preferred_date, preferred_time FROM appointments
-                            WHERE preferred_date >= ? AND preferred_date <= ?
+$lockStmt = $conn->prepare("SELECT COALESCE(scheduled_date, preferred_date) AS slot_date,
+                                   COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
+                            WHERE COALESCE(scheduled_date, preferred_date) >= ? AND COALESCE(scheduled_date, preferred_date) <= ?
                               AND status IN ('scheduled','rescheduled','approved')
                               AND archived_at IS NULL");
 $lockStmt->bind_param("ss", $firstDay, $lastDay);
@@ -78,7 +83,7 @@ $lockStmt->execute();
 $lockResult = $lockStmt->get_result();
 $locked = [];
 while ($row = $lockResult->fetch_assoc()) {
-    $locked[$row['preferred_date']][substr($row['preferred_time'], 0, 5)] = true;
+    $locked[$row['slot_date']][substr($row['slot_time'], 0, 5)] = true;
 }
 $lockStmt->close();
 
@@ -97,9 +102,6 @@ $ovrStmt->close();
 $staffCount = dcvsActiveStaffCount($conn);
 $today = date('Y-m-d');
 $availabilityStart = max($firstDay, $today);
-$programStaffing = $availabilityStart <= $lastDay
-    ? dcvsProgramStaffingMap($conn, $availabilityStart, $lastDay)
-    : [];
 $blocked = [];
 $urgentBlocked = [];
 $routineCapacity = [];
@@ -111,7 +113,7 @@ for ($d = 1; $d <= (int)date('j', strtotime($lastDay)); $d++) {
         $dateOverrides = $overrides[$dateKey] ?? [];
         $clinicOpen = dcvsClinicSlotAvailable($conn, $dateKey, $time, $weeklyTemplate, $dateOverrides);
         $routineCapacity[$dateKey][$time] = $clinicOpen
-            ? max(0, $staffCount - (int)($programStaffing[$dateKey][$time] ?? 0))
+            ? max(0, $staffCount)
             : 0;
         $urgentCapacity[$dateKey][$time] = $clinicOpen && $staffCount > 0 ? 1 : 0;
         if ($routineCapacity[$dateKey][$time] === 0) $blocked[$dateKey][$time] = true;
@@ -125,9 +127,14 @@ $programStmt = $conn->prepare("SELECT p.program_id, p.program_name, p.program_ty
     LEFT JOIN program_barangays pb ON pb.program_id = p.program_id
     LEFT JOIN barangays b ON b.barangay_id = pb.barangay_id
     WHERE p.status IN ('scheduled','live') AND p.end_date >= ? AND p.start_date <= ?
-      AND p.program_type IN ('vaccination','rabies_prevention')
     GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
 $programsByDate = [];
+if (!$programStmt) {
+    error_log('Failed to prepare scheduled program availability: ' . $conn->error);
+    http_response_code(500);
+    echo json_encode(['ok' => false, 'error' => 'Could not load program availability.']);
+    exit;
+}
 if ($programStmt) {
     $programStmt->bind_param('ss', $firstDay, $lastDay);
     if ($programStmt->execute()) {
@@ -144,16 +151,24 @@ if ($programStmt) {
                     'program_type' => $program['program_type'],
                     'start_time' => $programStartTime,
                     'end_time' => $programEndTime,
+                    'start_date' => $program['start_date'],
+                    'end_date' => $program['end_date'],
                     'venue' => $program['venue'] ?? '',
                     'barangay_names' => $program['barangay_names'] ?? '',
                 ];
             }
         }
     } else {
-        error_log('Failed to load public vaccination programs: ' . $programStmt->error);
+        error_log('Failed to load scheduled programs: ' . $programStmt->error);
+        $programStmt->close();
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => 'Could not load program availability.']);
+        exit;
     }
     $programStmt->close();
 }
+
+$programDays = array_fill_keys(array_keys($programsByDate), true);
 
 echo json_encode([
     'ok' => true,
@@ -167,6 +182,7 @@ echo json_encode([
     'routineCapacity' => $routineCapacity,
     'urgentCapacity' => $urgentCapacity,
     'programs' => $programsByDate,
+    'programDays' => $programDays,
     'held' => $held,
     'locked' => $locked,
     'overrides' => $overrides,
@@ -175,5 +191,6 @@ echo json_encode([
     'maxPerSlot' => DCVS_MAX_APPOINTMENTS_PER_SLOT,
     'maxPerDay' => DCVS_MAX_APPOINTMENTS_PER_DAY,
     'maxUrgentPerDay' => DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY,
+    'maxRoutinePerProgramDay' => DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY,
 ]);
 $conn->close();

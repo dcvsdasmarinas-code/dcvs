@@ -126,8 +126,11 @@ if ($role === 'resident') {
 
 // ── 3. Reports ──
 if ($role === 'resident') {
-    $rStmt = $conn->prepare("SELECT report_id, reference_id, report_type, location_address, status, urgency_level, incident_at, created_at, updated_at
-        FROM reports WHERE reporter_id = ? AND archived_at IS NULL AND updated_at > ? ORDER BY created_at DESC");
+    $rStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.location_address, r.status, r.urgency_level,
+            r.incident_at, r.created_at, r.updated_at, rw.state AS response_state
+        FROM reports r
+        LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
+        WHERE r.reporter_id = ? AND r.archived_at IS NULL AND r.updated_at > ? ORDER BY r.created_at DESC");
     $rStmt->bind_param("is", $userId, $lastPoll);
     $rStmt->execute();
     $rr = $rStmt->get_result();
@@ -136,12 +139,14 @@ if ($role === 'resident') {
 } elseif ($role === 'staff' || $role === 'admin') {
     $rStmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.barangay_id, r.location_address, r.description,
         r.status, r.urgency_level, r.created_at, r.updated_at, r.validated_at, r.confirmed_at, r.scheduled_at, r.dcvs_notes,
+        rw.state AS response_state,
         u.full_name AS reporter_name, u.phone AS reporter_phone, u.email AS reporter_email, u.avatar_url,
         b.barangay_name, cc.case_id, cc.status AS case_status, cc.confirmed_at AS case_confirmed_at, cc.resolved_at
         FROM reports r
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
         LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id
+        LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
         WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
           AND r.updated_at > ? ORDER BY r.created_at DESC");
     $rStmt->bind_param("s", $lastPoll);

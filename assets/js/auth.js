@@ -7,11 +7,17 @@
 /* ── Terms Modal ── */
 window.openTermsModal = function () {
   const modal = document.getElementById('termsModal');
-  if (modal) modal.classList.add('active');
+  if (modal) {
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+  }
 };
 window.closeTermsModal = function () {
   const modal = document.getElementById('termsModal');
-  if (modal) modal.classList.remove('active');
+  if (modal) {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  }
 };
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,7 +55,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!alert) return;
     alert.style.display = 'flex';
     alert.className = `auth-alert auth-alert-${type}`;
-    if (msg) msg.textContent = message;
+    if (msg) {
+      msg.textContent = message;
+      msg.style.whiteSpace = message.includes('\n') ? 'pre-line' : '';
+    }
     alert.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
@@ -59,6 +68,28 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideAlert(alertId) {
     const alert = document.getElementById(alertId);
     if (alert) alert.style.display = 'none';
+  }
+
+  function showRegistrationValidationSummary(errorIds) {
+    const messages = errorIds
+      .map(id => document.getElementById(id)?.textContent.trim())
+      .filter(Boolean);
+    const missing = messages.filter(message =>
+      /\brequired\b|\bplease select\b|\bplease confirm\b|\bmust agree\b/i.test(message)
+    );
+    const revise = messages.filter(message => !missing.includes(message));
+    const summary = [];
+
+    if (missing.length) {
+      summary.push('Please complete the required fields\nSome information is missing. Please check the highlighted fields below.');
+    }
+    if (revise.length) summary.push(`Please revise: ${revise.join(' ')}`);
+
+    showAlert(
+      'registerAlert',
+      'registerAlertMsg',
+      summary.join(' ') || 'Review the highlighted fields and try again.'
+    );
   }
 
   /**
@@ -161,10 +192,95 @@ document.addEventListener('DOMContentLoaded', () => {
     // Password toggles
     setupPasswordToggle('toggleRegPassword', 'regPassword');
     setupPasswordToggle('toggleConfirmPassword', 'confirmPassword');
+    const phoneInput = document.getElementById('phone');
+    window.DCVSPhilippinePhone?.attach(phoneInput);
+    phoneInput?.addEventListener('input', () => {
+      if (phoneInput.dataset.phoneTouched !== 'true' && phoneInput.dataset.phoneOverflow !== 'true') {
+        clearFieldError('phoneGroup', 'phoneError');
+        return;
+      }
+      const phoneError = window.DCVSPhilippinePhone.error(phoneInput);
+      if (phoneError) showFieldError('phoneGroup', 'phoneError', phoneError);
+      else clearFieldError('phoneGroup', 'phoneError');
+    });
+    phoneInput?.addEventListener('blur', () => {
+      phoneInput.dataset.phoneTouched = 'true';
+      const phoneError = window.DCVSPhilippinePhone.error(phoneInput);
+      if (phoneError) showFieldError('phoneGroup', 'phoneError', phoneError);
+      else clearFieldError('phoneGroup', 'phoneError');
+    });
 
     /* â”€â”€ Step Navigation State â”€â”€ */
     let currentStep = 1;
     const totalSteps = 3;
+    const registrationDraftKey = `dcvs-registration-draft:${window.location.pathname}`;
+
+    function saveRegistrationDraft() {
+      const draft = { step: currentStep, savedAt: Date.now(), fields: {} };
+      registerForm.querySelectorAll('input[name], select[name], textarea[name]').forEach(field => {
+        if (field.type === 'password' || field.type === 'hidden' || field.type === 'file' ||
+            field.type === 'submit' || field.type === 'button' || field.name === 'csrf_token') {
+          return;
+        }
+
+        draft.fields[field.name] = field.type === 'checkbox' || field.type === 'radio'
+          ? { checked: field.checked, value: field.value }
+          : { value: field.value };
+        if (field.name === 'phone') {
+          draft.fields[field.name].overflow = field.dataset.phoneOverflow === 'true';
+        }
+      });
+
+      try {
+        window.sessionStorage.setItem(registrationDraftKey, JSON.stringify(draft));
+      } catch (error) {
+        console.warn('Unable to save registration draft in this tab.', error);
+      }
+    }
+
+    function restoreRegistrationDraft() {
+      let draft;
+      try {
+        draft = JSON.parse(window.sessionStorage.getItem(registrationDraftKey) || 'null');
+      } catch (error) {
+        console.warn('Unable to read registration draft in this tab.', error);
+        return;
+      }
+      if (!draft) return;
+      if (Date.now() - Number(draft.savedAt) > 24 * 60 * 60 * 1000) {
+        try {
+          window.sessionStorage.removeItem(registrationDraftKey);
+        } catch (error) {
+          console.warn('Unable to clear expired registration draft.', error);
+        }
+        return;
+      }
+
+      registerForm.querySelectorAll('input[name], select[name], textarea[name]').forEach(field => {
+        if (field.type === 'password' || field.type === 'hidden' || field.type === 'file' ||
+            field.type === 'submit' || field.type === 'button' || field.name === 'csrf_token') {
+          return;
+        }
+
+        const savedField = draft.fields && draft.fields[field.name];
+        if (!savedField) return;
+        if (field.type === 'checkbox' || field.type === 'radio') {
+          field.checked = savedField.checked === true;
+        } else {
+          field.value = savedField.value || '';
+          field.dispatchEvent(new Event('input', { bubbles: true }));
+          field.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        if (field.name === 'phone') {
+          field.dataset.phoneOverflow = savedField.overflow ? 'true' : 'false';
+        }
+      });
+
+      const savedStep = Number(draft.step);
+      if (Number.isInteger(savedStep) && savedStep >= 1 && savedStep <= totalSteps) {
+        goToStep(savedStep);
+      }
+    }
 
     function goToStep(step) {
       // Hide all steps
@@ -186,6 +302,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       currentStep = step;
+      saveRegistrationDraft();
 
       // Update register button state when step 3 becomes active
       if (step === 3) {
@@ -220,7 +337,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const firstName = document.getElementById('firstName')?.value.trim();
       const lastName  = document.getElementById('lastName')?.value.trim();
-      const phone     = document.getElementById('phone')?.value.trim();
       const birthdate = document.getElementById('birthdate')?.value;
       const gender    = document.getElementById('gender')?.value;
 
@@ -240,11 +356,10 @@ document.addEventListener('DOMContentLoaded', () => {
         valid = false;
       }
 
-      if (!phone) {
-        showFieldError('phoneGroup', 'phoneError', 'Phone number is required.');
-        valid = false;
-      } else if (!/^(\+63|0)[0-9]{10}$/.test(phone.replace(/\s/g, ''))) {
-        showFieldError('phoneGroup', 'phoneError', 'Enter a valid PH number (e.g. 09XX XXX XXXX).');
+      phoneInput.dataset.phoneTouched = 'true';
+      const phoneValidationMessage = window.DCVSPhilippinePhone.error(phoneInput);
+      if (phoneValidationMessage) {
+        showFieldError('phoneGroup', 'phoneError', phoneValidationMessage);
         valid = false;
       }
 
@@ -266,7 +381,11 @@ document.addEventListener('DOMContentLoaded', () => {
         valid = false;
       }
 
-      if (!valid) showAlert('registerAlert', 'registerAlertMsg', 'Please complete all required fields.');
+      if (!valid) {
+        showRegistrationValidationSummary([
+          'firstNameError', 'lastNameError', 'phoneError', 'birthdateError', 'genderError'
+        ]);
+      }
       return valid;
     }
 
@@ -290,7 +409,7 @@ document.addEventListener('DOMContentLoaded', () => {
         valid = false;
       }
 
-      if (!valid) showAlert('registerAlert', 'registerAlertMsg', 'Please complete all required fields.');
+      if (!valid) showRegistrationValidationSummary(['streetError', 'barangayError']);
       return valid;
     }
 
@@ -303,6 +422,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const password        = document.getElementById('regPassword')?.value;
       const confirmPassword = document.getElementById('confirmPassword')?.value;
       const agreeTerms      = document.getElementById('agreeTerms')?.checked;
+      const registrationPhone = document.getElementById('phone');
+      const passwordRules = passwordRequirements(password || '');
 
       clearFieldError('regUsernameGroup',    'regUsernameError');
       clearFieldError('regEmailGroup',       'regEmailError');
@@ -328,22 +449,33 @@ document.addEventListener('DOMContentLoaded', () => {
         valid = false;
       }
 
+      if (registrationPhone) {
+        registrationPhone.dataset.phoneTouched = 'true';
+        const phoneValidationMessage = window.DCVSPhilippinePhone.error(registrationPhone);
+        if (phoneValidationMessage) {
+          showFieldError('phoneGroup', 'phoneError', phoneValidationMessage);
+          valid = false;
+        } else {
+          clearFieldError('phoneGroup', 'phoneError');
+        }
+      }
+
       if (!password) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password is required.');
         valid = false;
-      } else if (password.length < 8) {
+      } else if (!passwordRules.length) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password must be at least 8 characters.');
         valid = false;
-      } else if (!/[A-Z]/.test(password)) {
+      } else if (!passwordRules.uppercase) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password must contain at least one uppercase letter.');
         valid = false;
-      } else if (!/[a-z]/.test(password)) {
+      } else if (!passwordRules.lowercase) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password must contain at least one lowercase letter.');
         valid = false;
-      } else if (!/[0-9]/.test(password)) {
+      } else if (!passwordRules.number) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password must contain at least one number.');
         valid = false;
-      } else if (!/[^A-Za-z0-9]/.test(password)) {
+      } else if (!passwordRules.special) {
         showFieldError('regPasswordGroup', 'regPasswordError', 'Password must contain at least one special character.');
         valid = false;
       }
@@ -365,7 +497,12 @@ document.addEventListener('DOMContentLoaded', () => {
         if (termsErr) termsErr.textContent = '';
       }
 
-      if (!valid) showAlert('registerAlert', 'registerAlertMsg', 'Please fix the errors below.');
+      if (!valid) {
+        showRegistrationValidationSummary([
+          'regUsernameError', 'regEmailError', 'phoneError', 'regPasswordError',
+          'confirmPasswordError', 'termsError'
+        ]);
+      }
       return valid;
     }
 
@@ -376,39 +513,56 @@ document.addEventListener('DOMContentLoaded', () => {
     const strengthFill   = document.getElementById('strengthFill');
     const strengthLabel  = document.getElementById('strengthLabel');
 
+    function passwordRequirements(value) {
+      return {
+        length: Array.from(value).length >= 8,
+        uppercase: /[A-Z]/.test(value),
+        lowercase: /[a-z]/.test(value),
+        number: /[0-9]/.test(value),
+        special: /[^A-Za-z0-9]/.test(value)
+      };
+    }
+
     regPassword?.addEventListener('input', () => {
       const val = regPassword.value;
-      clearFieldError('regPasswordGroup', 'regPasswordError');
+      const requirements = passwordRequirements(val);
+      const firstMissing = Object.keys(requirements).find(key => !requirements[key]);
+      if (!val || !firstMissing) clearFieldError('regPasswordGroup', 'regPasswordError');
 
       if (!val) {
         if (passwordStrength) passwordStrength.style.display = 'none';
+        document.querySelectorAll('#passwordRequirements [data-password-rule]').forEach(item => {
+          item.classList.remove('is-met');
+          item.setAttribute('aria-checked', 'false');
+        });
         return;
       }
 
       if (passwordStrength) passwordStrength.style.display = 'flex';
 
-      let score = 0;
-      if (val.length >= 8)           score++;
-      if (/[A-Z]/.test(val))         score++;
-      if (/[a-z]/.test(val))         score++;
-      if (/[0-9]/.test(val))         score++;
-      if (/[^A-Za-z0-9]/.test(val))  score++;
-
-      const levels = ['', 'weak', 'weak', 'fair', 'good', 'strong'];
-      const labels = ['', 'Weak', 'Weak', 'Fair', 'Good', 'Strong'];
-      const colors = ['', '#ef4444', '#ef4444', '#f97316', '#eab308', '#0e8131'];
+      const score = Object.values(requirements).filter(Boolean).length;
+      const strength = score === 5 ? 'strong' : (score >= 3 ? 'medium' : 'weak');
+      const label = strength === 'strong' ? 'Strong' : (strength === 'medium' ? 'Medium' : 'Weak');
+      const color = strength === 'strong' ? '#0e8131' : (strength === 'medium' ? '#f59e0b' : '#ef4444');
+      const requirementItems = document.querySelectorAll('#passwordRequirements [data-password-rule]');
+      requirementItems.forEach(item => {
+        const isMet = Boolean(requirements[item.dataset.passwordRule]);
+        item.classList.toggle('is-met', isMet);
+        item.setAttribute('aria-checked', isMet ? 'true' : 'false');
+      });
 
       if (strengthFill) {
-        strengthFill.className = `strength-fill ${levels[score]}`;
-        strengthFill.style.background = colors[score];
+        strengthFill.className = `strength-fill ${strength}`;
+        strengthFill.style.background = color;
       }
       if (strengthLabel) {
-        strengthLabel.textContent = labels[score];
-        strengthLabel.style.color = colors[score];
+        strengthLabel.textContent = label;
+        strengthLabel.style.color = color;
       }
     });
 
     /* â”€â”€ Register Form Submit â”€â”€ */
+    registerForm.addEventListener('submit', saveRegistrationDraft);
     registerForm.addEventListener('submit', (e) => {
       e.preventDefault();
       if (!validateStep3()) return;
@@ -457,6 +611,10 @@ document.addEventListener('DOMContentLoaded', () => {
     modal?.addEventListener('click', function (e) {
       if (e.target === this) closeTermsModal();
     });
+
+    restoreRegistrationDraft();
+    registerForm.addEventListener('input', saveRegistrationDraft);
+    registerForm.addEventListener('change', saveRegistrationDraft);
   }
 
 });

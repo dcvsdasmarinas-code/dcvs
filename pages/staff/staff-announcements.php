@@ -12,6 +12,10 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
+require_once __DIR__ . '/../../includes/announcement-event-notifications.php';
+require_once __DIR__ . '/../../includes/facebook-announcements.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -22,59 +26,151 @@ $pageTitle = 'Announcements';
 $activePage = 'announcements';
 
 $announcements = [];
-$autoPublish = $conn->prepare("UPDATE announcements SET status = 'published', updated_at = NOW() WHERE status = 'scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND archived_at IS NULL");
-if ($autoPublish) {
-    $autoPublish->execute();
-    $autoPublish->close();
+$conn->begin_transaction();
+try {
+    $pendingEventNotifications = $conn->query(
+        "SELECT DISTINCT a.announcement_id
+         FROM announcements a
+         JOIN announcement_event_responses r ON r.announcement_id = a.announcement_id
+         WHERE a.is_event = 1 AND a.status = 'published'
+           AND (a.publish_at IS NULL OR a.publish_at <= NOW())
+           AND r.notification_sent_at IS NULL"
+    );
+    if (!$pendingEventNotifications) {
+        throw new RuntimeException('Could not find event notifications to send: ' . $conn->error);
+    }
+    while ($pendingEvent = $pendingEventNotifications->fetch_assoc()) {
+        notifyPublishedAnnouncementEventBarangays($conn, (int)$pendingEvent['announcement_id']);
+    }
+    $pendingEventNotifications->free();
+    $conn->commit();
+} catch (Throwable $exception) {
+    $conn->rollback();
+    throw $exception;
 }
-$aq = $conn->query("SELECT a.*, u.full_name AS creator_name FROM announcements a JOIN users u ON a.created_by = u.user_id ORDER BY a.created_at DESC");
+$facebookPageId = trim((string)env('FB_PAGE_ID', ''));
+$facebookPostingEnabled = filter_var(env('FB_ENABLED', 'false'), FILTER_VALIDATE_BOOLEAN);
+$facebookPageFilter = ctype_digit($facebookPageId)
+    ? "'" . $conn->real_escape_string($facebookPageId) . "'"
+    : "''";
+$aq = $conn->query(
+    "SELECT a.*, u.full_name AS creator_name,
+            sp.status AS facebook_status, sp.page_id AS facebook_page_id,
+            sp.facebook_permalink, sp.graph_error_code AS facebook_error_code,
+            sp.last_error AS facebook_last_error
+     FROM announcements a
+     JOIN users u ON a.created_by = u.user_id
+     LEFT JOIN announcement_social_posts sp
+       ON sp.announcement_id = a.announcement_id
+      AND sp.platform = 'facebook'
+      AND sp.page_id = $facebookPageFilter
+     ORDER BY a.created_at DESC"
+);
 if ($aq) {
     while ($row = $aq->fetch_assoc()) $announcements[] = $row;
 }
 
 $barangays = [];
-$bq = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
-if ($bq) {
-    while ($row = $bq->fetch_assoc()) $barangays[] = ['id' => (int)$row['barangay_id'], 'name' => $row['barangay_name']];
+$bq = $conn->query("SELECT barangay_id, barangay_name FROM barangays WHERE psgc_mapping_approved = 1 AND psgc_code IS NOT NULL ORDER BY barangay_name ASC");
+if (!$bq) {
+    throw new RuntimeException('Could not load approved barangays for event targeting: ' . $conn->error);
+}
+while ($row = $bq->fetch_assoc()) {
+    $barangays[] = ['id' => (int)$row['barangay_id'], 'name' => $row['barangay_name']];
+}
+$bq->free();
+
+$locationBarangays = [];
+$locationBarangayQuery = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
+if (!$locationBarangayQuery) {
+    throw new RuntimeException('Could not load barangays for announcement locations: ' . $conn->error);
+}
+while ($row = $locationBarangayQuery->fetch_assoc()) {
+    $locationBarangays[] = ['id' => (int)$row['barangay_id'], 'name' => $row['barangay_name']];
+}
+$locationBarangayQuery->free();
+
+$eventIds = [];
+foreach ($announcements as $announcement) {
+    if ((int)($announcement['is_event'] ?? 0) === 1) $eventIds[] = (int)$announcement['announcement_id'];
+}
+if ($eventIds) {
+    $eventIdList = implode(',', array_unique($eventIds));
+    $eventData = [];
+    foreach ($eventIds as $eventId) $eventData[$eventId] = ['targets' => [], 'requirements' => [], 'target_index' => []];
+
+    $eventResponseQuery = $conn->query(
+        "SELECT t.announcement_id, t.barangay_id, b.barangay_name, r.status, r.response_note, r.responded_at,
+                q.requirement_id, q.requirement_label, q.quantity, q.is_required, rr.is_ready
+         FROM announcement_event_barangays t
+         JOIN barangays b ON b.barangay_id = t.barangay_id
+         LEFT JOIN announcement_event_responses r
+           ON r.announcement_id = t.announcement_id AND r.barangay_id = t.barangay_id
+         LEFT JOIN announcement_event_requirements q ON q.announcement_id = t.announcement_id
+         LEFT JOIN announcement_event_requirement_responses rr
+           ON rr.announcement_id = t.announcement_id
+          AND rr.barangay_id = t.barangay_id
+          AND rr.requirement_id = q.requirement_id
+         WHERE t.announcement_id IN ($eventIdList)
+         ORDER BY t.announcement_id, b.barangay_name, q.sort_order, q.requirement_id"
+    );
+    if ($eventResponseQuery) {
+        while ($eventRow = $eventResponseQuery->fetch_assoc()) {
+            $eventId = (int)$eventRow['announcement_id'];
+            $barangayId = (int)$eventRow['barangay_id'];
+            if (!isset($eventData[$eventId]['target_index'][$barangayId])) {
+                $target = [
+                    'barangay_id' => $barangayId,
+                    'barangay_name' => $eventRow['barangay_name'],
+                    'status' => $eventRow['status'] ?: 'pending',
+                    'response_note' => $eventRow['response_note'],
+                    'responded_at' => $eventRow['responded_at'],
+                    'checklist' => []
+                ];
+                $eventData[$eventId]['target_index'][$barangayId] = count($eventData[$eventId]['targets']);
+                $eventData[$eventId]['targets'][] = $target;
+            }
+            if ($eventRow['requirement_id'] !== null) {
+                $requirementId = (int)$eventRow['requirement_id'];
+                if (!isset($eventData[$eventId]['requirements'][$requirementId])) {
+                    $eventData[$eventId]['requirements'][$requirementId] = [
+                        'requirement_id' => $requirementId,
+                        'requirement_label' => $eventRow['requirement_label'],
+                        'quantity' => $eventRow['quantity'] === null ? null : (int)$eventRow['quantity'],
+                        'is_required' => (int)$eventRow['is_required']
+                    ];
+                }
+                $targetIndex = $eventData[$eventId]['target_index'][$barangayId];
+                $eventData[$eventId]['targets'][$targetIndex]['checklist'][] = [
+                    'label' => $eventRow['requirement_label'],
+                    'is_required' => (int)$eventRow['is_required'],
+                    'is_ready' => (int)($eventRow['is_ready'] ?? 0) === 1
+                ];
+            }
+        }
+        $eventResponseQuery->free();
+        foreach ($eventData as $eventId => $data) {
+            $eventData[$eventId]['requirements'] = array_values($data['requirements']);
+            unset($eventData[$eventId]['target_index']);
+        }
+    } else {
+        throw new RuntimeException('Could not load staff event response summaries: ' . $conn->error);
+    }
+
+    foreach ($announcements as &$announcement) {
+        $eventId = (int)$announcement['announcement_id'];
+        if ((int)($announcement['is_event'] ?? 0) === 1 && isset($eventData[$eventId])) {
+            $announcement['event_targets'] = $eventData[$eventId]['targets'];
+            $announcement['event_requirements'] = $eventData[$eventId]['requirements'];
+        }
+    }
+    unset($announcement);
 }
 
 $success = $_SESSION['announcement_success'] ?? null;
 $error = $_SESSION['announcement_error'] ?? null;
 unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
 
-$createFromProgram = array_key_exists('create_from_program', $_GET);
-$programAnnouncementPrefill = null;
-$programIdParam = $_GET['create_from_program'] ?? '';
-$programId = is_string($programIdParam) || is_int($programIdParam)
-    ? filter_var($programIdParam, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])
-    : false;
-if ($createFromProgram && $programId !== false) {
-    $programStmt = $conn->prepare("SELECT p.program_name, p.location_mode, p.venue, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY pb.barangay_id SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON pb.program_id = p.program_id LEFT JOIN barangays b ON b.barangay_id = pb.barangay_id WHERE p.program_id = ? GROUP BY p.program_id");
-    if ($programStmt) {
-        $programId = (int)$programId;
-        $programStmt->bind_param('i', $programId);
-        if ($programStmt->execute()) {
-            $programRow = $programStmt->get_result()->fetch_assoc();
-            if ($programRow) {
-                $barangayNames = trim((string)$programRow['barangay_names']);
-                if ($programRow['location_mode'] === 'multiple') {
-                    $programLocation = $barangayNames !== '' ? $barangayNames : (string)$programRow['venue'];
-                } else {
-                    $programLocation = (string)$programRow['venue'];
-                }
-                $programAnnouncementPrefill = [
-                    'name' => $programRow['program_name'],
-                    'location' => $programLocation,
-                ];
-            }
-        } else {
-            error_log('Unable to load program for announcement prefill: ' . $programStmt->error);
-        }
-        $programStmt->close();
-    } else {
-        error_log('Unable to prepare program announcement prefill query: ' . $conn->error);
-    }
-}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -87,8 +183,9 @@ if ($createFromProgram && $programId !== false) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     /* ── Client & Pet Database (CPD) design system ── */
@@ -219,7 +316,10 @@ if ($createFromProgram && $programId !== false) {
     .cpd .row-menu-item.danger{ color:#dc2626!important; }
     .cpd .row-menu-item.danger:hover{ background:#fef2f2!important; }
     .cpd .row-menu-item i,.cpd .row-menu-item svg{ flex-shrink:0!important; width:15px!important; height:15px!important; }
-
+    .cpd .row-menu-item:disabled{ opacity:.55!important; cursor:wait!important; }
+    .cpd .facebook-status-line{ display:block; max-width:180px; color:#71717a; font-size:12px; font-weight:500; line-height:1.45; overflow-wrap:anywhere; }
+    .cpd .facebook-status-line.is-failed{ color:#b42318; }
+    .cpd .facebook-status-line.is-posted{ color:#046b25; }
     .cpd .cards-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }
 
     .cpd .pagination{ display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding-top:14px; border-top:1px solid var(--border); flex-wrap:wrap; gap:10px; }
@@ -360,7 +460,6 @@ if ($createFromProgram && $programId !== false) {
     .acms .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:12px; overflow:hidden; background:var(--ink-100); border:1px solid var(--border); display:flex;align-items:center;justify-content:center; margin-bottom:4px; }
     .acms .acms-preview-stage img{ width:100%; height:100%; object-fit:cover; display:block; }
     .acms .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex;align-items:center;justify-content:center; color:var(--ink-300); font-size:46px; }
-
     .acms .toggle-row{ display:flex; align-items:center; gap:10px; background:var(--ink-50); border:1px solid var(--border); border-radius:10px; padding:11px 13px; cursor:pointer; }
     .acms .toggle-row input{ width:17px;height:17px; accent-color:var(--green-600); cursor:pointer; }
     .acms .toggle-row .t-label{ font-size:13px; font-weight:600; color:var(--ink-800); }
@@ -390,6 +489,22 @@ if ($createFromProgram && $programId !== false) {
       .cpd .db-panel{ border-right:none; }
       .cpd .profile-panel{ position:fixed; top:var(--topbar-h); right:0; bottom:0; left:auto; width:min(440px,94vw); z-index:150; background:var(--white); border-left:1px solid var(--border); box-shadow:-8px 0 40px rgba(15,23,32,.18); transform:translateX(105%); transition:transform .3s cubic-bezier(.32,.72,.25,1); }
       .cpd .profile-panel.open{ transform:translateX(0); }
+      .announcements-cms .cpd-app,
+      .announcements-cms .layout,
+      .announcements-cms .db-panel,
+      .announcements-cms .db-table-area,
+      .announcements-cms #tableWrap{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+      .announcements-cms #tableWrap{
+        overflow-x:auto;
+        overflow-y:hidden;
+        overscroll-behavior-x:contain;
+        -webkit-overflow-scrolling:touch;
+      }
     }
     @media (max-width:1180px){
       .cpd .kpis{ grid-template-columns:repeat(2,1fr); }
@@ -413,6 +528,13 @@ if ($createFromProgram && $programId !== false) {
     #draftModal .sd-dialog-content,
     #publishModal .sd-dialog-content{
       position:relative; width:100%; max-width:420px; background:#fff; border:1px solid rgba(15,23,42,0.08); border-radius:12px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(15,23,42,0.1), 0 4px 6px -4px rgba(15,23,42,0.1); animation:modalIn 0.2s ease;
+    }
+    #archiveModal.modal,
+    #annBulkModal.modal{
+      z-index:1300;
+      align-items:center;
+      justify-content:center;
+      padding:16px;
     }
     .sd-alert-dialog-header, .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
     .sd-alert-dialog-title, .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1.2; letter-spacing:-0.02em; color:#18181b; }
@@ -488,24 +610,176 @@ if ($createFromProgram && $programId !== false) {
     #annProfileModal.modal{ position:fixed; inset:0; background:rgba(0,0,0,0.5); padding:0; z-index:999; display:flex; align-items:stretch; justify-content:flex-end; opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s ease; }
     #annProfileModal.modal.active{ opacity:1; visibility:visible; }
     #annProfileModal .sd-dialog{ height:100%; width:100%; display:flex; justify-content:flex-end; }
-    #annProfileModal .sd-dialog-content{ position:relative; width:100%; max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; overflow-y:auto; background:#ffffff; border:none; border-radius:0; padding:24px 24px 16px; display:flex; flex-direction:column; gap:18px; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; transform:translateX(105%); transition:transform .32s cubic-bezier(.32,.72,.25,1); }
+    #annProfileModal .sd-dialog-content{ position:relative; width:100%; max-width:min(480px,92vw); width:min(480px,92vw); height:100%; max-height:none; overflow-y:auto; background:#ffffff; border:none; border-radius:0; padding:24px 24px 16px; display:flex; flex-direction:column; gap:18px; box-shadow:-8px 0 40px rgba(15,23,32,.18); animation:none; }
     #annProfileModal.active .sd-dialog-content{ transform:translateX(0); }
     #annProfileModal .sd-dialog-close{ position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all .15s ease; z-index:2; }
     #annProfileModal .sd-dialog-close:hover{ background:#f4f4f5; color:#18181b; }
     #annProfileModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
     #annProfileModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #annProfileModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
-    #annProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:16px; }
-    #annProfileModal .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:12px; overflow:hidden; background:var(--ink-100); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; margin-bottom:4px; }
+    #annProfileModal .sd-dialog-content{ overflow:hidden; gap:0; padding:0; }
+    #annProfileModal .sd-dialog-header{ flex:0 0 auto; padding:24px 24px 16px; border-bottom:0; }
+    #annProfileModal .sd-dialog-header .sd-dialog-eyebrow{ display:none; }
+    #annProfileModal .sd-dialog-header .sd-dialog-description{ display:block; }
+    #annProfileModal .sd-field-group{ flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:0; }
+    #annProfileModal .ann-detail-summary{ display:flex; align-items:center; gap:14px; padding:18px 24px; border-bottom:0; }
+    #annProfileModal .ann-detail-summary-image{ width:96px; height:96px; flex:0 0 96px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:10px; background:#f4f4f5; color:#a1a1aa; }
+    #annProfileModal .ann-detail-summary-image img{ width:100%; height:100%; object-fit:cover; }
+    #annProfileModal .ann-detail-summary-copy{ min-width:0; flex:1; }
+    #annProfileModal .ann-detail-status{ display:inline-flex; align-items:center; padding:3px 10px; margin-bottom:5px; border:1px solid #0e8131; border-radius:4px; background:#0e8131; color:#fff; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-detail-status.is-muted{ border-color:#e4e4e7; background:#f3f4f6; color:#6b7280; }
+    #annProfileModal .ann-detail-title{ margin:0 0 7px; color:#18181b; font-size:15px; font-weight:600; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-detail-meta{ display:flex; flex-direction:column; gap:5px; color:#52525b; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-detail-meta span{ display:flex; align-items:center; gap:7px; }
+    #annProfileModal .ann-detail-section{ padding:16px 24px; border-bottom:0; }
+    #annProfileModal .ann-detail-section-title{ display:flex; align-items:center; gap:7px; margin:0 0 10px; color:#18181b; font-size:14px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-glance-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+    #annProfileModal .ann-glance-card{ min-width:0; padding:12px; border:1px solid #e4e4e7; border-radius:8px; background:#f8fafc; }
+    #annProfileModal .ann-glance-label{ display:block; margin-bottom:5px; color:#71717a; font-size:13px; font-weight:600; line-height:1.35; }
+    #annProfileModal .ann-glance-value{ display:block; color:#18181b; font-size:15px; font-weight:400; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-event-coordination{ padding:0 0 14px; border-bottom:0; }
+    #annProfileModal .ann-event-details-card{ display:grid; grid-template-columns:1fr 1fr; gap:14px 16px; padding:16px; border:1px solid #dbe4f0; border-radius:10px; background:#f8fafc; }
+    #annProfileModal .ann-coordination-field.is-wide{ grid-column:1/-1; }
+    #annProfileModal .ann-response-deadline{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-top:12px; border-top:1px solid #e4e4e7; }
+    #annProfileModal .ann-response-deadline-copy{ min-width:0; flex:1 1 auto; }
+    #annProfileModal .ann-deadline-status,
+    #annProfileModal .ann-target-status{ display:inline-flex; align-items:center; gap:5px; flex:0 0 auto; padding:3px 10px; border:1px solid #0e8131; border-radius:4px; background:#0e8131; color:#fff; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-deadline-status.is-muted,
+    #annProfileModal .ann-target-status.is-muted{ border-color:#e4e4e7; background:#fff; color:#71717a; }
+    #annProfileModal .ann-target-status.is-changes{ border-color:#fecaca; background:#fef2f2; color:#991b1b; }
+    #annProfileModal .ann-target-status.is-pending{ border-color:#fde68a; background:#fef3c7; color:#92400e; }
+    #annProfileModal .ann-event-coordination-title,
+    #annProfileModal .ann-event-subsection-title{ display:flex; align-items:center; gap:8px; margin:0 0 10px; color:#18181b; font-size:14px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-coordination-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px 16px; }
+    #annProfileModal .ann-coordination-field{ min-width:0; }
+    #annProfileModal .ann-coordination-label{ display:block; margin-bottom:3px; color:#71717a; font-size:13px; font-weight:600; line-height:1.3; }
+    #annProfileModal .ann-coordination-value{ display:block; color:#18181b; font-size:15px; font-weight:400; line-height:1.4; overflow-wrap:anywhere; }
+    #annProfileModal .ann-event-subsection{ padding:14px 0; border-bottom:0; }
+    #annProfileModal .ann-event-subsection:last-child{ padding-bottom:0; border-bottom:0; }
+    #annProfileModal .ann-event-subsection-title{ justify-content:space-between; margin-bottom:10px; }
+    #annProfileModal .ann-event-subsection-title > span{ display:inline-flex; align-items:center; gap:8px; }
+    #annProfileModal .ann-readiness-badge,
+    #annProfileModal .ann-required-label{ display:inline-flex; align-items:center; flex:0 0 auto; padding:3px 10px; border:1px solid #fde68a; border-radius:4px; background:#fef3c7; color:#92400e; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; line-height:1.4; white-space:nowrap; }
+    #annProfileModal .ann-readiness-badge.is-ready{ border-color:#bbf7d0; background:#dcfce7; color:#166534; }
+    #annProfileModal .ann-requirement-list{ display:flex; flex-direction:column; gap:6px; }
+    #annProfileModal .ann-requirement-row{ display:flex; justify-content:space-between; align-items:center; gap:10px; padding:9px 10px; border:1px solid #e4e4e7; border-radius:7px; background:#fafafa; color:#3f3f46; font-size:15px; line-height:1.4; }
+    #annProfileModal .ann-requirement-quantity{ color:#71717a; font-weight:500; text-align:right; }
+    #annProfileModal .ann-required-label{ border-color:#fecaca; background:#fee2e2; color:#991b1b; }
+    #annProfileModal .ann-response-list{ display:flex; flex-direction:column; gap:8px; }
+    #annProfileModal .ann-response-card{ padding:11px 12px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #annProfileModal .ann-response-card-head{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+    #annProfileModal .ann-response-card-head-copy{ min-width:0; }
+    #annProfileModal .ann-response-card-name{ color:#18181b; font-size:15px; font-weight:400; line-height:1.4; }
+    #annProfileModal .ann-response-card-date{ display:block; margin-top:2px; color:#71717a; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-response-description{ margin:0 0 6px; color:#52525b; font-size:15px; line-height:1.45; }
+    #annProfileModal .ann-response-state{ margin:0; color:#b45309; font-size:12px; font-weight:600; line-height:1.4; }
+    #annProfileModal .ann-response-state.is-ready{ color:#15803d; }
+    #annProfileModal .ann-response-state.is-changes{ color:#b91c1c; }
+    #annProfileModal .ann-response-note{ margin:7px 0 0; color:#71717a; font-size:15px; line-height:1.45; white-space:pre-wrap; }
+    #annProfileModal .ann-checklist{ margin-top:8px; padding-top:0; }
+    #annProfileModal .ann-response-list-intro{ margin:0 0 4px; color:#18181b; font-size:15px; line-height:1.45; }
+    #annProfileModal .ann-checklist ul{ margin:0; padding-left:22px; color:#18181b; font-size:15px; line-height:1.5; }
+    #annProfileModal .ann-checklist-readiness{ color:#71717a; font-size:13px; }
+    #annProfileModal .ann-content-label{ margin:0 0 8px; color:#71717a; font-size:13px; font-weight:600; }
+    #annProfileModal .ann-content-message{ margin:0; color:#27272a; font-size:15px; font-weight:400; line-height:1.55; text-align:justify; white-space:pre-line; overflow:hidden; }
+    #annProfileModal .ann-content-message.is-collapsed{ display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4; }
+    #annProfileModal .ann-content-toggle{ display:inline-flex; align-items:center; gap:6px; margin-top:9px; padding:0; border:0; background:transparent; color:#0e8131; font:500 12px/1.4 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #annProfileModal .ann-content-toggle:hover{ color:#166534; text-decoration:underline; }
+    #annProfileModal .ann-photo-toggle{ display:flex; align-items:center; gap:6px; margin-top:10px; padding:0; border:0; background:transparent; color:#0e8131; font:500 12px/1.4 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #annProfileModal .ann-photo-toggle:hover{ color:#166534; text-decoration:underline; }
+    #annProfileModal .ann-photo-preview[hidden]{ display:none!important; }
+    #annProfileModal .ann-event-public-details{ display:flex; flex-direction:column; gap:7px; margin-top:10px; color:#3f3f46; font-size:12px; line-height:1.4; }
+    #annProfileModal .ann-event-public-details span{ display:flex; align-items:flex-start; gap:7px; }
+    #annProfileModal .ann-event-public-details i{ width:14px; margin-top:2px; color:#71717a; text-align:center; }
+    #annProfileModal .ann-detail-section .acms-preview-stage{ width:100%; aspect-ratio:16/9; max-height:270px; border-radius:10px; overflow:hidden; background:#f4f4f5; border:1px solid #e4e4e7; display:flex; align-items:center; justify-content:center; margin:10px 0 0; }
     #annProfileModal .acms-preview-stage img{ width:100%; height:100%; object-fit:cover; display:block; }
-    #annProfileModal .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:var(--ink-300); font-size:46px; }
+    #annProfileModal .acms-preview-stage .acms-preview-placeholder{ width:100%; height:100%; display:flex; align-items:center; justify-content:center; color:#a1a1aa; font-size:46px; }
     #annProfileModal .type-badge, #annProfileModal .ann-profile-date{ font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
     #annProfileModal .profile-header{ flex-shrink:0; }
-    #annProfileModal .sd-dialog-footer{ flex-shrink:0; display:flex; flex-direction:row; justify-content:flex-end; gap:8px; padding-top:12px; margin-top:4px; padding-left:16px; border-top:1px solid #e4e4e7; }
+    #annProfileModal .sd-dialog-footer{ flex:0 0 auto; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); margin:0; border-top:0; background:#fff; }
+    #annProfileModal .sd-dialog-footer .sd-btn{ width:100%; min-width:0; padding:0 8px; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:500; }
     #annProfileModal .rpt-section-title-action{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
     #annProfileModal .ann-edit-icon{ display:inline-flex; align-items:center; justify-content:center; width:30px; height:30px; flex:0 0 30px; padding:0; border:1px solid #e4e4e7; border-radius:6px; background:#fff; cursor:pointer; }
     #annProfileModal .ann-edit-icon img{ display:block; width:16px; height:16px; object-fit:contain; }
     #annProfileModal .ann-edit-icon:hover{ border-color:#18181b; background:#f4f4f5; }
+    #annProfileModal .ann-event-coordination,
+    #annProfileModal .ann-content-message{ font-family:'Inter','Segoe UI',sans-serif; }
+    #annProfileModal .ann-event-section-title{ font-family:inherit; font-size:14px; font-weight:600; color:#18181b; }
+    #annProfileModal .ann-event-requirement-list,
+    #annProfileModal .ann-event-checklist{ font-family:inherit; font-size:15px; font-weight:400; line-height:1.5; color:#18181b; }
+    #annProfileModal .ann-event-response-name{ font-family:inherit; font-size:15px; font-weight:400; color:#18181b; }
+    #annProfileModal .ann-event-response-status{ font-family:inherit; font-size:12px; font-weight:600; }
+    #annProfileModal .ann-event-response-note{ font-family:inherit; font-size:15px; font-weight:400; line-height:1.5; color:#18181b; }
+    #annProfileModal .ann-content-message{ font-size:15px; font-weight:400; line-height:1.55; color:#18181b; white-space:pre-line; }
+    @media (max-width: 820px){
+      .announcements-cms .db-panel,
+      .announcements-cms .db-table-area,
+      .announcements-cms #tableWrap{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+      }
+      .announcements-cms #tableWrap{
+        overflow:hidden;
+      }
+      .announcements-cms #tableWrap > .announcement-table-scroll{
+        box-sizing:border-box;
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        overflow-x:auto;
+        overflow-y:hidden;
+        contain:paint;
+        overscroll-behavior-x:contain;
+        -webkit-overflow-scrolling:touch;
+      }
+      .announcements-cms #tableWrap .sd-data-table{
+        width:960px !important;
+        min-width:960px !important;
+        table-layout:fixed;
+      }
+      .announcements-cms #tableWrap th,
+      .announcements-cms #tableWrap td{
+        box-sizing:border-box;
+        padding:5px 4px;
+        font-size:11px;
+        line-height:1.3;
+        white-space:normal;
+        overflow-wrap:anywhere;
+        vertical-align:middle;
+      }
+      .announcements-cms .db-toolbar{ align-items:stretch; }
+      .announcements-cms .toolbar-main-controls{
+        width:100%;
+        min-width:0;
+        flex-direction:column;
+        align-items:stretch;
+      }
+      .announcements-cms .search-grow-wrap{
+        box-sizing:border-box;
+        width:100%;
+        min-width:0;
+        flex:1 1 auto;
+      }
+      .announcements-cms .toolbar-filters{
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        width:100%;
+        min-width:0;
+      }
+      .announcements-cms .toolbar-filters select.select-input{
+        box-sizing:border-box;
+        width:100%;
+        min-width:0;
+      }
+      .announcements-cms .db-toolbar > .sd-btn{ width:100%; }
+      #annProfileModal .sd-dialog-content{ width:100%; max-width:100%; }
+      #annProfileModal .ann-event-details-card{ gap:12px; padding:14px; }
+      #annProfileModal .ann-detail-summary,
+      #annProfileModal .ann-detail-section{ padding-left:16px; padding-right:16px; }
+      #annProfileModal .ann-coordination-grid{ gap:10px 12px; }
+    }
     #draftModal .sd-dialog{ width:100%; display:flex; justify-content:center; }
     #draftModal .sd-dialog-content{ position:relative; width:100%; max-width:420px; background:#fff; border:1px solid #e4e4e7; border-radius:8px; padding:24px; display:flex; flex-direction:column; gap:16px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1); animation:modalIn 0.2s ease; }
     #draftModal .sd-dialog-close{ position:absolute; top:16px; right:16px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; border-radius:4px; border:none; background:transparent; color:#71717a; cursor:pointer; transition:all .15s ease; }
@@ -625,19 +899,28 @@ if ($createFromProgram && $programId !== false) {
           </div>
 
           <div class="db-table-area">
-            <div class="db-toolbar announcements-toolbar">
+            <div class="db-toolbar announcements-toolbar staff-mobile-toolbar">
               <div class="toolbar-main-controls">
-                <div class="search-grow-wrap">
+                <div class="staff-toolbar-search-row">
+                <div class="search-grow-wrap staff-toolbar-search">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <input type="text" id="mainSearch" placeholder="Search by title, category, keyword..." oninput="setSearch(this.value)">
+                  <input type="text" id="mainSearch" placeholder="Search announcements..." oninput="setSearch(this.value)">
                 </div>
-                <div class="toolbar-filters">
-                  <select class="select-input tf-select" id="annType" onchange="setPost(this.value)">
+                <div class="staff-date-filter staff-toolbar-filter" data-date-filter="ann">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter announcements by date" title="Filter by date" aria-expanded="false">
+                    <i class="fas fa-filter" aria-hidden="true"></i>
+                  </button>
+                  <input type="hidden" id="annDateFrom" value="">
+                  <input type="hidden" id="annDateTo" value="">
+                </div>
+                </div>
+                <div class="toolbar-filters staff-toolbar-filters">
+                  <select class="select-input tf-select staff-toolbar-select" id="annType" onchange="setPost(this.value)">
                     <option value="all">All Types</option>
                     <option value="announcement">Announcements</option>
                     <option value="advisory">Advisories</option>
                   </select>
-                  <select class="select-input tf-select" id="annBrgy" onchange="setBrgy(this.value)">
+                  <select class="select-input tf-select staff-toolbar-select" id="annBrgy" onchange="setBrgy(this.value)">
                     <option value="">All Barangays</option>
                     <?php foreach ($barangays as $b): ?>
                       <option value="<?php echo (int)$b['id']; ?>"><?php echo htmlspecialchars($b['name']); ?></option>
@@ -645,7 +928,7 @@ if ($createFromProgram && $programId !== false) {
                   </select>
                 </div>
               </div>
-              <button type="button" class="sd-btn sd-btn-default" onclick="openCreate('announcement')">
+              <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openCreate('announcement')">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                 New Announcement
               </button>
@@ -676,10 +959,12 @@ if ($createFromProgram && $programId !== false) {
               </div>
             </div>
             <div id="tableWrap" class="sd-data-table-wrap">
-              <table class="sd-data-table">
-                <thead id="tableHead"></thead>
-                <tbody id="dataRows"></tbody>
-              </table>
+              <div class="announcement-table-scroll">
+                <table class="sd-data-table">
+                  <thead id="tableHead"></thead>
+                  <tbody id="dataRows"></tbody>
+                </table>
+              </div>
             </div>
             <div id="cardsWrap" class="cards-grid rpt-cards" style="display:none;"></div>
           </div>
@@ -731,8 +1016,8 @@ if ($createFromProgram && $programId !== false) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
           <div class="sd-dialog-header">
-            <h2 class="sd-dialog-title">Announcement Details</h2>
-            <p class="sd-dialog-description">Review announcement content and publishing details.</p>
+            <h2 class="sd-dialog-title">Announcement details</h2>
+            <p class="sd-dialog-description">Review content and publishing details.</p>
           </div>
           <div class="sd-field-group">
             <div id="profileContent"></div>
@@ -748,10 +1033,24 @@ if ($createFromProgram && $programId !== false) {
       #announcementModal .sd-dialog{ width:100%; display:flex; justify-content:center; }
       #announcementModal .sd-dialog-content{
         position:relative; width:100%; max-width:560px;
+        max-height:calc(100vh - 2rem); overflow:hidden;
         background:#ffffff; border:1px solid #e4e4e7; border-radius:8px;
         padding:20px; display:flex; flex-direction:column; gap:12px;
         box-shadow:0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
         animation:modalIn 0.2s ease;
+      }
+      #announcementModal .sd-announcement-tabs{
+        display:flex; gap:4px; padding:4px; border:1px solid #e4e4e7;
+        border-radius:6px; background:#f4f4f5;
+      }
+      #announcementModal .sd-announcement-tabs[hidden]{ display:none; }
+      #announcementModal .sd-announcement-tab{
+        flex:1; min-width:0; min-height:32px; padding:0 8px; border:0; border-radius:4px;
+        background:transparent; color:#71717a; font:500 12px 'Inter','Segoe UI',sans-serif;
+        cursor:pointer; transition:background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+      }
+      #announcementModal .sd-announcement-tab[aria-selected="true"]{
+        background:#fff; color:#18181b; box-shadow:0 1px 2px rgba(0,0,0,0.08);
       }
       #announcementModal .sd-dialog-close{
         position:absolute; top:16px; right:16px; width:24px; height:24px;
@@ -763,7 +1062,12 @@ if ($createFromProgram && $programId !== false) {
       #announcementModal .sd-dialog-header{ display:flex; flex-direction:column; gap:6px; text-align:left; }
       #announcementModal .sd-dialog-title{ margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
       #announcementModal .sd-dialog-description{ margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+      #announcementModal .sd-program-prefill-note{ margin:0; padding:8px 10px; border:1px solid #bbf7d0; border-radius:6px; background:#f0fdf4; color:#166534; font-size:12px; }
+      #announcementModal .sd-program-prefill-note[hidden]{ display:none; }
       #announcementModal .sd-field-group{ display:flex; flex-direction:column; gap:12px; }
+      #announcementModal #announcementFormPanels{ flex:1; min-height:0; overflow-y:auto; padding:2px; }
+      #announcementModal .sd-form-panel[hidden]{ display:none; }
+      #announcementModal .sd-field[hidden]{ display:none; }
       #announcementModal .sd-form-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
       #announcementModal .sd-field-full{ grid-column:1 / -1; }
       #announcementModal .sd-field{ display:flex; flex-direction:column; gap:5px; }
@@ -778,6 +1082,21 @@ if ($createFromProgram && $programId !== false) {
       }
       #announcementModal .sd-input::placeholder{ color:#a1a1aa; }
       #announcementModal .sd-input:focus-visible{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #announcementModal .sd-location-picker{ position:relative; }
+      #announcementModal .sd-location-trigger{ display:flex; align-items:center; justify-content:space-between; gap:10px; text-align:left; cursor:pointer; }
+      #announcementModal .sd-location-trigger[aria-expanded="true"]{ border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #announcementModal .sd-location-trigger-label{ min-width:0; overflow:hidden; color:#18181b; text-overflow:ellipsis; white-space:nowrap; }
+      #announcementModal .sd-location-trigger-label.is-placeholder{ color:#a1a1aa; }
+      #announcementModal .sd-location-options{ position:absolute; z-index:20; top:calc(100% + 2px); left:0; right:0; max-height:min(52vh,520px); overflow:auto; padding:2px 0; border:1px solid #8a8a8a; border-radius:0; background:#fff; box-shadow:none; }
+      #announcementModal .sd-location-options[hidden]{ display:none; }
+      #announcementModal .sd-location-option{ position:relative; display:flex; align-items:center; gap:8px; min-height:26px; padding:2px 8px; border-radius:0; color:#18181b; font-size:14px; font-weight:400; cursor:pointer; }
+      #announcementModal .sd-location-option:hover{ background:#e8f0fe; }
+      #announcementModal .sd-location-option.is-selected{ background:#1a73e8; color:#fff; }
+      #announcementModal .sd-location-option:focus-within{ outline:2px solid #18181b; outline-offset:-2px; }
+      #announcementModal .sd-location-option[hidden]{ display:none; }
+      #announcementModal .sd-location-option input{ width:14px; height:14px; flex:0 0 14px; margin:0; accent-color:#1a73e8; cursor:pointer; }
+      #announcementModal .sd-location-custom{ margin:6px 6px 0; padding-top:8px; border-top:1px solid #e4e4e7; }
+      #announcementModal .sd-location-custom-label{ display:block; margin-bottom:5px; color:#52525b; font-size:12px; font-weight:500; }
       #announcementModal select.sd-input{
         appearance:none; -webkit-appearance:none;
         background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
@@ -795,10 +1114,78 @@ if ($createFromProgram && $programId !== false) {
       #announcementModal .sd-photo-upload .upload-placeholder i{ font-size:1.7rem; color:#a1a1aa; display:block; margin-bottom:0.35rem; }
       #announcementModal .sd-photo-upload .upload-placeholder span{ font-size:0.8rem; color:#a1a1aa; }
       #announcementModal .sd-photo-upload input[type="file"]{ position:absolute; inset:0; opacity:0; cursor:pointer; }
-      #announcementModal .sd-barangay-picker{ max-height:150px; overflow-y:auto; border:1px solid #e4e4e7; border-radius:6px; padding:8px 10px; background:#fff; display:grid; grid-template-columns:1fr 1fr; gap:4px 10px; }
-      #announcementModal .sd-barangay-picker label{ font-size:12px; font-weight:500; color:#18181b; display:flex; align-items:center; gap:7px; padding:3px 0; cursor:pointer; }
-      #announcementModal .sd-barangay-picker input{ width:14px;height:14px; accent-color:#18181b; margin:0; }
-      #announcementModal .sd-dialog-footer{ display:flex; flex-direction:column-reverse; gap:8px; }
+      #announcementModal .sd-event-section{ display:flex; flex-direction:column; gap:16px; padding:16px; border:1px solid #e4e4e7; border-radius:0; background:#fff; }
+      #announcementModal .sd-event-section + .sd-event-section{ margin-top:20px; }
+      #announcementModal .sd-event-section-title{ margin:0; color:#18181b; font-size:16px; font-weight:600; line-height:1.35; }
+      #announcementModal .sd-event-help{ margin:4px 0 0; color:#71717a; font-size:12px; line-height:1.45; }
+      #announcementModal .sd-event-fields{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:14px 12px; }
+      #announcementModal .sd-event-fields > .sd-field{ grid-column:span 2; }
+      #announcementModal .sd-event-fields > .sd-field-wide{ grid-column:span 4; }
+      #announcementModal .sd-event-section .sd-label{ color:#52525b; font-size:13px; font-weight:500; }
+      #announcementModal .sd-event-fields > .sd-event-time-range{ grid-column:span 4; }
+      #announcementModal .sd-event-fields input[type="date"]{ box-sizing:border-box; min-width:0; }
+      #announcementModal .sd-event-time-controls{ display:flex; align-items:center; gap:8px; min-width:0; }
+      #announcementModal .sd-event-time-select{
+        flex:1 1 0; width:0; min-width:0; height:36px; padding:0 8px;
+        border:1px solid #e4e4e7; border-radius:6px; background:#fff;
+        color:#18181b; font:500 13px 'Inter','Segoe UI',sans-serif;
+        appearance:auto; cursor:pointer;
+      }
+      #announcementModal .sd-event-time-select:focus{ outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+      #announcementModal .sd-event-time-separator{ color:#71717a; font-size:14px; }
+      #announcementModal .sd-venue-field{ grid-column:1 / -1 !important; gap:6px; }
+      #announcementModal .sd-venue-field > .sd-label{ color:#52525b; font-size:13px; font-weight:500; }
+      #announcementModal .sd-venue-options{
+        display:inline-flex; align-self:flex-start; width:max-content;
+        border:1px solid #e4e4e7; border-radius:5px; background:#fff;
+      }
+      #announcementModal .sd-venue-option{
+        min-height:28px; padding:0 8px; border:0; border-right:1px solid #e4e4e7;
+        border-radius:0; background:#fff; color:#3f3f46;
+        font:400 11px 'Inter','Segoe UI',sans-serif; white-space:nowrap; cursor:pointer;
+      }
+      #announcementModal .sd-venue-option:last-child{ border-right:0; }
+      #announcementModal .sd-venue-option[aria-checked="true"]{ background:#15803d; color:#fff; }
+      #announcementModal .sd-venue-option:focus-visible{ position:relative; z-index:1; outline:2px solid #18181b; outline-offset:-2px; }
+      #announcementModal .sd-event-response{ padding-top:14px; border-top:1px solid #e4e4e7; }
+      #announcementModal .sd-event-picker-tools{ display:flex; align-items:center; gap:12px; color:#71717a; font-size:12px; }
+      #announcementModal .sd-event-picker-actions{ margin-left:auto; display:flex; gap:10px; }
+      #announcementModal .sd-event-picker-actions[hidden]{ display:none; }
+      #announcementModal .sd-event-picker-tools button{ padding:0; border:0; background:none; color:#18181b; font:500 12px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+      #announcementModal .sd-event-picker-tools button:hover{ text-decoration:underline; }
+      #announcementModal .sd-event-picker-list{ max-height:220px; overflow-y:auto; border:1px solid #e4e4e7; border-radius:6px; padding:8px 10px; background:#fff; display:flex; flex-direction:column; gap:3px; }
+      #announcementModal .sd-event-picker-list[hidden]{ display:none; }
+      #announcementModal .sd-event-picker-list label{ min-height:28px; font-size:13px; font-weight:400; color:#27272a; display:flex; align-items:center; gap:8px; cursor:pointer; }
+      #announcementModal .sd-event-picker-list label[hidden]{ display:none; }
+      #announcementModal .sd-event-picker-list input{ width:14px;height:14px; accent-color:#18181b; margin:0; }
+      #announcementModal .sd-event-selected{ display:flex; flex-wrap:wrap; gap:6px; }
+      #announcementModal .sd-event-target-warning{ margin:0; padding:8px 10px; border:1px solid #fed7aa; border-radius:6px; background:#fff7ed; color:#9a3412; font-size:12px; line-height:1.45; }
+      #announcementModal .sd-event-target-warning[hidden]{ display:none; }
+      #announcementModal .sd-event-chip{ display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border:1px solid #e4e4e7; border-radius:999px; background:#f4f4f5; color:#3f3f46; font-size:12px; }
+      #announcementModal .sd-event-chip button{ padding:0; border:0; background:none; color:#71717a; cursor:pointer; line-height:1; }
+      #announcementModal .sd-event-chip button:hover{ color:#dc2626; }
+      #announcementModal .sd-event-requirements[hidden]{ display:none; }
+      #announcementModal .sd-event-requirement-head,
+      #announcementModal .sd-event-requirement{
+        display:grid; grid-template-columns:minmax(0,1fr) 112px 96px 34px;
+        align-items:center; gap:10px; min-width:0;
+      }
+      #announcementModal .sd-event-requirement-head{ margin-bottom:6px; color:#71717a; font-size:12px; font-weight:500; }
+      #announcementModal .sd-event-requirement-head span:last-child{ text-align:center; }
+      #announcementModal .sd-event-requirement-list{ display:flex; flex-direction:column; gap:8px; }
+      #announcementModal .sd-event-requirement-list:empty{ display:none; }
+      #announcementModal .sd-event-empty{ margin:0; color:#71717a; font-size:12px; line-height:1.45; }
+      #announcementModal .sd-event-empty[hidden]{ display:none; }
+      #announcementModal .sd-event-requirement .sd-input{ min-width:0; }
+      #announcementModal .sd-event-requirement [data-field="label"]{ min-width:0; }
+      #announcementModal .sd-event-requirement [data-field="quantity"]{ width:100%; }
+      #announcementModal .sd-event-requirement label{ display:flex; align-items:center; justify-content:flex-start; gap:5px; color:#52525b; font-size:12px; white-space:nowrap; }
+      #announcementModal .sd-event-requirement input[type="checkbox"]{ accent-color:#18181b; }
+      #announcementModal .sd-event-remove{ height:30px; border:1px solid #e4e4e7; border-radius:5px; background:#fff; color:#71717a; cursor:pointer; }
+      #announcementModal .sd-event-remove:hover{ color:#dc2626; border-color:#fecaca; }
+      #announcementModal .sd-event-add{ align-self:flex-start; min-height:30px; padding:0 10px; border:1px solid #e4e4e7; border-radius:5px; background:#fff; color:#18181b; font:500 12px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+      #announcementModal .sd-event-add:hover{ background:#f4f4f5; }
+      #announcementModal .sd-dialog-footer{ display:flex; flex-direction:row; justify-content:flex-end; gap:8px; }
       @media (min-width:640px){ #announcementModal .sd-dialog-footer{ flex-direction:row; justify-content:flex-end; } }
       #announcementModal .sd-btn{
         display:inline-flex; align-items:center; justify-content:center; gap:8px;
@@ -813,39 +1200,88 @@ if ($createFromProgram && $programId !== false) {
       #announcementModal .sd-btn-outline{ background:#ffffff; border-color:#e4e4e7; color:#18181b; }
       #announcementModal .sd-btn-outline:hover{ background:#f4f4f5; }
       #announcementModal .sd-btn i{ font-size:12px; }
-      @media (max-width:560px){ #announcementModal .sd-form-grid{ grid-template-columns:1fr; } }
+      #announcementDiscardDialog.modal{ z-index:1100; background:rgba(0,0,0,0.55); }
+      #announcementDiscardDialog .sd-alert-dialog-content{ max-width:420px; }
+      #facebookUpdateConfirmDialog.modal{ z-index:1200; background:rgba(0,0,0,0.55); }
+      #facebookUpdateConfirmDialog .sd-alert-dialog-content{ max-width:440px; }
+      #facebookUpdateConfirmDialog .sd-btn-default{ background:#18181b; color:#fafafa; }
+      #facebookUpdateConfirmDialog .sd-btn-default:hover{ background:#27272a; }
+      @media (max-width:560px){
+        #announcementModal .sd-form-grid{ grid-template-columns:1fr; }
+        #announcementModal .sd-event-fields{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+        #announcementModal .sd-event-fields > .sd-event-time-range{ grid-column:span 2; }
+        #announcementModal .sd-event-time-controls{ width:100%; }
+        #announcementModal .sd-event-time-select{ flex:1; width:0; }
+        #announcementModal .sd-event-fields > .sd-field,
+        #announcementModal .sd-event-fields > .sd-field-wide{ grid-column:span 2; }
+        #announcementModal .sd-event-requirement-head,
+        #announcementModal .sd-event-requirement{ grid-template-columns:minmax(0,1fr) 82px 32px; gap:8px; }
+        #announcementModal .sd-event-requirement-head span:nth-child(3){ display:none; }
+        #announcementModal .sd-event-requirement label{ grid-column:1 / 3; grid-row:2; }
+        #announcementModal .sd-event-requirement .sd-event-remove{ grid-column:3; grid-row:1 / 3; }
+      }
     </style>
     <div id="announcementModal" class="modal">
-      <form id="announcementForm" method="POST" enctype="multipart/form-data" action="staff-announcements-handler.php" class="sd-dialog">
+      <form id="announcementForm" method="POST" enctype="multipart/form-data" action="staff-announcements-handler.php" class="sd-dialog" data-draft-ignore>
         <input type="hidden" name="action" value="save">
+        <?php echo csrfField(); ?>
+        <input type="hidden" name="save_mode" id="formSaveMode" value="create">
         <input type="hidden" name="id" id="formId" value="0">
         <input type="hidden" name="audience_type" id="formAudienceType" value="all">
         <input type="hidden" name="barangay_id" id="formBarangayId" value="">
         <input type="hidden" name="audience_barangays" id="formAudienceBarangays" value="">
+        <input type="hidden" name="program_id" id="formProgramId" value="">
         <div class="sd-dialog-content" role="dialog" aria-modal="true">
-          <button type="button" class="sd-dialog-close" onclick="closeModal('announcementModal')" aria-label="Close">
+          <button type="button" class="sd-dialog-close" onclick="closeAnnouncementModal()" aria-label="Close">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
           </button>
           <div class="sd-dialog-header">
             <h2 class="sd-dialog-title" id="modalTitle">Create Announcement</h2>
-            <p class="sd-dialog-description">Fill in the announcement details. Click save when you're done.</p>
+            <p class="sd-dialog-description">Create the public post, then optionally add coordination details for the barangay portal.</p>
           </div>
-          <div class="sd-field-group">
+          <p class="sd-program-prefill-note" id="programPrefillNote" hidden>Prefilled from program. You can edit these details before creating the announcement.</p>
+          <div class="sd-announcement-tabs" id="announcementTabs" role="tablist" aria-label="Announcement form sections">
+            <button type="button" class="sd-announcement-tab" id="announcementDetailsTab" role="tab" aria-controls="announcementDetailsPanel" aria-selected="true" onclick="setAnnouncementTab('details')">Public post</button>
+            <button type="button" class="sd-announcement-tab" id="announcementEventTab" role="tab" aria-controls="announcementEventPanel" aria-selected="false" onclick="setAnnouncementTab('event')">Barangay coordination</button>
+          </div>
+          <div class="sd-field-group" id="announcementFormPanels">
+            <div class="sd-form-panel" id="announcementDetailsPanel" role="tabpanel" aria-labelledby="announcementDetailsTab">
             <div class="sd-form-grid">
               <div class="sd-field sd-field-full">
                 <label class="sd-label" for="formTitle">Title <span class="req">*</span></label>
                 <input type="text" name="title" id="formTitle" class="sd-input" required placeholder="e.g. Free Kapon Caravan">
               </div>
-              <div class="sd-field sd-field-full">
-                <label class="sd-label" for="formProgramLocation">Location/s</label>
-                <input type="text" name="location" id="formProgramLocation" class="sd-input" placeholder="e.g. Paliparan 1, Salawag">
+              <div class="sd-field sd-field-full" id="locationField">
+                <span class="sd-label" id="formLocationLabel">Location/s</span>
+                <input type="hidden" name="location" id="formProgramLocation" value="">
+                <div class="sd-location-picker">
+                  <button type="button" class="sd-input sd-location-trigger" id="locationPickerToggle" aria-haspopup="true" aria-expanded="false" aria-controls="locationPickerOptions" aria-labelledby="formLocationLabel locationPickerSummary">
+                    <span class="sd-location-trigger-label is-placeholder" id="locationPickerSummary">Select barangay location/s...</span>
+                    <span aria-hidden="true">&#9662;</span>
+                  </button>
+                  <div class="sd-location-options" id="locationPickerOptions" role="group" aria-label="Announcement locations" hidden>
+                    <div id="locationPickerList">
+                      <?php foreach ($locationBarangays as $locationBarangay): ?>
+                        <label class="sd-location-option" data-location-option>
+                          <input type="checkbox" value="<?php echo htmlspecialchars($locationBarangay['name'], ENT_QUOTES, 'UTF-8'); ?>">
+                          <span><?php echo htmlspecialchars($locationBarangay['name'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        </label>
+                      <?php endforeach; ?>
+                    </div>
+                    <div class="sd-location-custom">
+                      <label class="sd-location-custom-label" for="locationPickerCustom">Other location or venue (optional)</label>
+                      <input type="text" class="sd-input" id="locationPickerCustom" placeholder="Enter another location">
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div class="sd-field">
                 <label class="sd-label" for="formCategory">Content Type <span class="req">*</span></label>
-                <select name="category" id="formCategory" class="sd-input">
+                <select name="category" id="formCategory" class="sd-input" onchange="toggleEventFields()">
                   <option value="announcement">Announcement</option>
                   <option value="advisory">Advisory</option>
+                  <option value="event">Event</option>
                 </select>
               </div>
 
@@ -862,14 +1298,14 @@ if ($createFromProgram && $programId !== false) {
 
               <div class="sd-field">
                 <label class="sd-label" for="formStatus">Status</label>
-                <select name="status" id="formStatus" class="sd-input" onchange="onStatusChange()">
+                <select name="status" id="formStatus" class="sd-input" onchange="syncScheduleField()">
                   <option value="draft">Draft</option>
                   <option value="scheduled">Scheduled</option>
                   <option value="published">Published</option>
                 </select>
               </div>
 
-              <div class="sd-field" id="scheduleField">
+              <div class="sd-field" id="scheduleField" hidden>
                 <label class="sd-label" for="formPublishAt">Schedule Publish Date &amp; Time</label>
                 <input type="datetime-local" name="publish_at" id="formPublishAt" class="sd-input" onchange="onScheduleChange()">
               </div>
@@ -885,9 +1321,9 @@ if ($createFromProgram && $programId !== false) {
               </div>
 
               <div class="sd-field sd-field-full">
-                <label class="sd-label">Poster / Photo</label>
+                <label class="sd-label" for="photoInput">Poster / Photo <span class="req">*</span></label>
                 <div class="sd-photo-upload" id="photoArea">
-                  <input type="file" name="photo" id="photoInput" accept="image/*" onchange="previewImage(this, 'photoPreview', 'photoArea')">
+                  <input type="file" name="photo" id="photoInput" accept="image/*" required onchange="previewImage(this, 'photoPreview', 'photoArea')">
                   <div class="upload-placeholder" id="photoPlaceholder">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <span>Click to upload poster photo</span>
@@ -896,13 +1332,152 @@ if ($createFromProgram && $programId !== false) {
                 </div>
               </div>
             </div>
+            </div>
+            <div class="sd-form-panel" id="announcementEventPanel" role="tabpanel" aria-labelledby="announcementEventTab" hidden>
+              <p class="sd-event-help">For the barangay portal only. Not shown on the public page or Facebook.</p>
+              <div class="sd-event-section">
+                <div>
+                  <h3 class="sd-event-section-title">When and where</h3>
+                  <p class="sd-event-help">Set the event date, hours, and venue.</p>
+                </div>
+                <div class="sd-event-fields">
+                  <div class="sd-field">
+                    <label class="sd-label" for="eventDate">Event date</label>
+                    <input type="date" name="event_date" id="eventDate" class="sd-input">
+                  </div>
+                  <div class="sd-field" id="eventEndDateField" hidden>
+                    <label class="sd-label" for="eventEndDate">End date (optional)</label>
+                    <input type="date" name="end_date" id="eventEndDate" class="sd-input">
+                  </div>
+                  <div class="sd-field sd-event-time-range">
+                    <label class="sd-label" for="eventStartTime">Operating hours</label>
+                    <div class="sd-event-time-controls">
+                      <select name="event_start_time" id="eventStartTime" class="sd-event-time-select" aria-label="Start time">
+                        <option value="">Start time</option>
+                      </select>
+                      <span class="sd-event-time-separator" aria-hidden="true">—</span>
+                      <select name="event_end_time" id="eventEndTime" class="sd-event-time-select" aria-label="End time">
+                        <option value="">End time</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="sd-field sd-field-wide sd-venue-field">
+                    <span class="sd-label">Venue provided by</span>
+                    <input type="hidden" name="venue_provider" id="eventVenueProvider" value="">
+                    <div class="sd-venue-options" id="eventVenueOptions" role="radiogroup" aria-label="Venue provided by">
+                      <button type="button" class="sd-venue-option" role="radio" aria-checked="false" data-value="dcvs_office" onclick="setEventVenueProvider(this)">DCVS Office</button>
+                      <button type="button" class="sd-venue-option" role="radio" aria-checked="false" data-value="barangay_venue" onclick="setEventVenueProvider(this)">Barangay venue</button>
+                      <button type="button" class="sd-venue-option" role="radio" aria-checked="false" data-value="other" onclick="setEventVenueProvider(this)">Other</button>
+                    </div>
+                  </div>
+                  <div class="sd-field sd-field-wide" id="eventVenueNameField">
+                    <label class="sd-label" for="eventVenueName">Venue name</label>
+                    <input type="text" name="venue_name" id="eventVenueName" class="sd-input" maxlength="200" placeholder="e.g. Barangay Hall">
+                  </div>
+                </div>
+              </div>
+
+              <div class="sd-event-section">
+                <div>
+                  <h3 class="sd-event-section-title">Who it applies to</h3>
+                  <p class="sd-event-help">Choose the barangays that should receive this event announcement.</p>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="eventAudience">Barangay audience</label>
+                  <select name="event_audience" id="eventAudience" class="sd-input" onchange="toggleEventTargets()">
+                    <option value="selected">Selected barangays</option>
+                    <option value="all">All barangays</option>
+                  </select>
+                </div>
+                <div class="sd-field" id="eventTargetField">
+                  <div class="sd-event-picker-tools">
+                    <label class="sd-label" for="eventTargetSearch">Select barangays</label>
+                    <span id="eventTargetCount" aria-live="polite">0 selected</span>
+                    <span class="sd-event-picker-actions" id="eventTargetActions" hidden>
+                      <button type="button" onclick="setVisibleEventTargets(true)">Select all</button>
+                      <button type="button" onclick="setVisibleEventTargets(false)">Clear</button>
+                    </span>
+                  </div>
+                  <input type="search" id="eventTargetSearch" class="sd-input" placeholder="Search barangays..." autocomplete="off" aria-controls="eventTargetPicker" aria-expanded="false">
+                  <div class="sd-event-picker-list" id="eventTargetPicker" hidden>
+                    <?php foreach ($barangays as $barangay): ?>
+                      <label data-name="<?php echo htmlspecialchars(strtolower($barangay['name']), ENT_QUOTES, 'UTF-8'); ?>"><input type="checkbox" name="event_targets[]" value="<?php echo (int)$barangay['id']; ?>"> <?php echo htmlspecialchars($barangay['name'], ENT_QUOTES, 'UTF-8'); ?></label>
+                    <?php endforeach; ?>
+                  </div>
+                  <div class="sd-event-selected" id="eventTargetChips" aria-label="Selected barangays"></div>
+                  <p class="sd-event-target-warning" id="eventTargetWarning" role="status" hidden></p>
+                </div>
+                <div class="sd-event-response">
+                  <div class="sd-field">
+                    <label class="sd-label" for="eventResponseDeadline">Response deadline</label>
+                    <input type="datetime-local" name="response_deadline" id="eventResponseDeadline" class="sd-input">
+                    <p class="sd-event-help">Must be before the event starts.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="sd-event-section sd-event-requirements" id="eventRequirementsSection" hidden>
+                <div>
+                  <h3 class="sd-event-section-title">Barangay preparedness requirements</h3>
+                  <p class="sd-event-help">Barangays will check these items before confirming they are ready.</p>
+                </div>
+                <div class="sd-field">
+                  <div class="sd-event-requirement-head" aria-hidden="true">
+                    <span>Requirement</span>
+                    <span>Qty (optional)</span>
+                    <span>Required</span>
+                    <span></span>
+                  </div>
+                  <div class="sd-event-requirement-list" id="eventRequirements"></div>
+                  <p class="sd-event-empty" id="eventRequirementsEmpty">No requirements added yet. Add one if the barangay needs to prepare for this event.</p>
+                  <button type="button" class="sd-event-add" onclick="addEventRequirement()">+ Add requirement</button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="sd-dialog-footer">
-            <button type="button" class="sd-btn sd-btn-outline" onclick="closeModal('announcementModal')">Cancel</button>
+            <button type="button" class="sd-btn sd-btn-outline" onclick="closeAnnouncementModal()">Cancel</button>
             <button type="submit" class="sd-btn sd-btn-default"><span id="submitBtnText">Create</span></button>
           </div>
         </div>
       </form>
+    </div>
+
+    <div id="announcementDiscardDialog" class="modal" aria-hidden="true">
+      <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="announcementDiscardTitle" aria-describedby="announcementDiscardDescription">
+        <div class="sd-alert-dialog-header">
+          <h2 class="sd-alert-dialog-title" id="announcementDiscardTitle">Discard changes?</h2>
+          <p class="sd-alert-dialog-description" id="announcementDiscardDescription">Your edits to this program announcement will be lost.</p>
+        </div>
+        <div class="sd-alert-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-outline" id="announcementDiscardCancel">Cancel</button>
+          <button type="button" class="sd-btn sd-btn-default" id="announcementDiscardConfirm">Discard changes</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="facebookUpdateConfirmDialog" class="modal" aria-hidden="true">
+      <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="facebookUpdateConfirmTitle" aria-describedby="facebookUpdateConfirmDescription">
+        <div class="sd-alert-dialog-header">
+          <h2 class="sd-alert-dialog-title" id="facebookUpdateConfirmTitle">Update Facebook post?</h2>
+          <p class="sd-alert-dialog-description" id="facebookUpdateConfirmDescription">Your announcement has been saved. Replace the text on the existing Facebook post with the updated announcement? The photo already on Facebook will not change.</p>
+        </div>
+        <div class="sd-alert-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-outline" id="facebookUpdateKeepButton">Keep Facebook unchanged</button>
+          <button type="button" class="sd-btn sd-btn-default" id="facebookUpdateConfirmButton">Update post</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="announcementAlertDialog" class="modal" aria-hidden="true">
+      <div class="sd-alert-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="announcementAlertTitle" aria-describedby="announcementAlertDescription">
+        <div class="sd-alert-dialog-header">
+          <h2 class="sd-alert-dialog-title" id="announcementAlertTitle">Could not save announcement</h2>
+          <p class="sd-alert-dialog-description" id="announcementAlertDescription"></p>
+        </div>
+        <div class="sd-alert-dialog-footer">
+          <button type="button" class="sd-btn sd-btn-default" id="announcementAlertCloseButton">OK</button>
+        </div>
+      </div>
     </div>
 
     <!-- Delete Confirmation Modal -->
@@ -1054,6 +1629,13 @@ if ($createFromProgram && $programId !== false) {
 /* ───────────────────────── Data ───────────────────────── */
 const AMS_DATA = <?php echo json_encode($announcements); ?>;
 const BARANGAYS = <?php echo json_encode($barangays); ?>;
+const FACEBOOK_ANNOUNCEMENT_ENDPOINT = <?php echo json_encode(
+  $appBaseUrl . '/api/staff/facebook-announcement.php',
+  JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+); ?>;
+const FACEBOOK_ANNOUNCEMENT_CSRF = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+const FACEBOOK_PAGE_ID = <?php echo json_encode($facebookPageId, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+const FACEBOOK_POSTING_ENABLED = <?php echo $facebookPostingEnabled ? 'true' : 'false'; ?>;
 
 const SUBJECTS = {
   animal_health: { label: 'Animal Health', icon: 'fa-heart-pulse' },
@@ -1086,6 +1668,7 @@ let state = {
   cat: 'all',
   q: '',
   brgy: '',
+  date: '',
   sort: 'newest',
   view: 'table',
   page: 1,
@@ -1094,6 +1677,15 @@ let state = {
   sortCol: '',
   sortDir: ''
 };
+let programPrefillSnapshot = null;
+const facebookActionsInFlight = new Set();
+
+const STAFF_ANNOUNCEMENTS_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+function announcementPhotoUrl(photoUrl) {
+  const photo = String(photoUrl || '').trim();
+  if (!photo || /^(?:https?:|data:|blob:|\/\/)/i.test(photo) || photo.startsWith('/')) return photo;
+  return STAFF_ANNOUNCEMENTS_BASE_URL + '/' + photo.replace(/^(?:\.\/)+/, '');
+}
 
 const DATA = AMS_DATA.map(function(a){
   return {
@@ -1106,6 +1698,17 @@ const DATA = AMS_DATA.map(function(a){
     status: a.status || 'draft',
     photo_url: a.photo_url || '',
     link_url: a.link_url || '',
+    is_event: parseInt(a.is_event || 0, 10) === 1,
+    program_id: a.program_id ? parseInt(a.program_id, 10) : null,
+    event_date: a.event_date || '',
+    event_end_date: a.event_end_date || '',
+    event_start_time: a.event_start_time || '',
+    event_end_time: a.event_end_time || '',
+    venue_provider: a.venue_provider || '',
+    venue_name: a.venue_name || '',
+    response_deadline: a.response_deadline || '',
+    event_targets: Array.isArray(a.event_targets) ? a.event_targets : [],
+    event_requirements: Array.isArray(a.event_requirements) ? a.event_requirements : [],
     barangay_id: a.barangay_id || null,
     audience_type: a.audience_type || 'all',
     audience_barangays: a.audience_barangays ? String(a.audience_barangays) : '',
@@ -1114,7 +1717,14 @@ const DATA = AMS_DATA.map(function(a){
     created_at: a.created_at || '',
     updated_at: a.updated_at || '',
     publish_at: a.publish_at || '',
-    archived_at: a.archived_at || ''
+    archived_at: a.archived_at || '',
+    facebook_posting_mode: a.facebook_posting_mode || 'manual',
+    facebook_opt_out: parseInt(a.facebook_opt_out || 0, 10),
+    facebook_status: a.facebook_status || '',
+    facebook_page_id: a.facebook_page_id || '',
+    facebook_permalink: a.facebook_permalink || '',
+    facebook_error_code: a.facebook_error_code || '',
+    facebook_last_error: a.facebook_last_error || ''
   };
 });
 
@@ -1125,7 +1735,7 @@ const DATA = AMS_DATA.map(function(a){
     if(!raw) return;
     sessionStorage.removeItem('annBulkToast');
     const f = JSON.parse(raw);
-    setTimeout(function(){ annToast(f.m, f.e); }, 250);
+    setTimeout(function(){ annToast(f.m, f.e, f.t); }, 250);
   }catch(e){}
 })();
 
@@ -1189,6 +1799,12 @@ function applyFilters(){
       return false;
     });
   }
+  if(state.date){
+    items = items.filter(a => {
+      const date = String(a.is_event && a.event_date ? a.event_date : (a.status === 'scheduled' ? a.publish_at : a.created_at) || '').slice(0, 10);
+      return date === state.date;
+    });
+  }
   if(state.q){
     const q = state.q.toLowerCase();
     items = items.filter(a =>
@@ -1241,7 +1857,7 @@ function renderCounts(){
 function setCount(id, n){ const el = document.getElementById(id); if(el) el.textContent = n; }
 
 function annColVal(a, col){
-  if(col === 'created') return new Date(a.created_at).getTime() || 0;
+  if(col === 'created') return new Date(a.is_event && a.event_date ? a.event_date : a.created_at).getTime() || 0;
   if(col === 'title') return String(a.title||'').toLowerCase();
   if(col === 'location') return String(a.location||'').toLowerCase();
   if(col === 'type') return String(typeMeta(a.category).label||'').toLowerCase();
@@ -1258,7 +1874,7 @@ function annSortHead(col, label){
   return '<button type="button" class="th-sort' + (active?' th-sorted':'') + '" onclick="annSortBy(\'' + col + '\')">' + label + '<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + icon + '</svg></button>';
 }
 function renderTableHead(){
-  document.getElementById('tableHead').innerHTML = '<tr class="sd-tr"><th class="sd-th sd-table-cb"><input type="checkbox" id="annSelectAll" aria-label="Select all posts" onclick="event.stopPropagation();annToggleSelectAll(this)"></th><th class="sd-th">Photo</th><th class="sd-th">' + annSortHead('title','Title') + '</th><th class="sd-th">' + annSortHead('location','Location/s') + '</th><th class="sd-th">Content</th><th class="sd-th">' + annSortHead('type','Type') + '</th><th class="sd-th">' + annSortHead('category','Category') + '</th><th class="sd-th">' + annSortHead('status','Status') + '</th><th class="sd-th">' + annSortHead('created','Created') + '</th><th class="sd-th sd-th-action"></th></tr>';
+  document.getElementById('tableHead').innerHTML = '<tr class="sd-tr"><th class="sd-th sd-table-cb"><input type="checkbox" id="annSelectAll" aria-label="Select all posts" onclick="event.stopPropagation();annToggleSelectAll(this)"></th><th class="sd-th">Photo</th><th class="sd-th">' + annSortHead('title','Title') + '</th><th class="sd-th">' + annSortHead('location','Location/s') + '</th><th class="sd-th">Content</th><th class="sd-th">' + annSortHead('type','Type') + '</th><th class="sd-th">' + annSortHead('category','Category') + '</th><th class="sd-th">' + annSortHead('status','Status') + '</th><th class="sd-th">' + annSortHead('created','Date / Event date') + '</th><th class="sd-th sd-th-action"></th></tr>';
 }
 function annSortBy(col){
   if(state.sortCol === col){ state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc'; }
@@ -1304,16 +1920,39 @@ function statusDisplay(a){
   return { label: sm.label, detail: detail };
 }
 
+function announcementDateText(a){
+  if (a.is_event && a.event_date) {
+    return fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date
+      ? ' – ' + fmtDate(a.event_end_date)
+      : '');
+  }
+  if (a.status === 'scheduled') return a.publish_at ? fmtDateTime(a.publish_at) : 'Scheduled';
+  return fmtDate(a.created_at);
+}
+
+function facebookStatusLabel(a){
+  if (a && FACEBOOK_PAGE_ID && a.facebook_page_id === FACEBOOK_PAGE_ID && a.facebook_status === 'posted') return 'Posted';
+  if (a && Number(a.facebook_opt_out) === 1) return 'Skipped';
+  if (!a || !FACEBOOK_PAGE_ID || a.facebook_page_id !== FACEBOOK_PAGE_ID) return 'Not posted';
+  if (a.facebook_status === 'failed') return 'Failed';
+  if (a.facebook_status === 'posting') return 'Posting...';
+  return 'Not posted';
+}
+function annReloadWithToast(message, isError, title){
+  try { sessionStorage.setItem('annBulkToast', JSON.stringify({ m: String(message), e: !!isError, t: title || '' })); } catch (e) {}
+  location.reload();
+}
+
 function rowHtml(a){
   const sm = statusMeta(a.status);
-  const tm = typeMeta(a.category);
+  const tm = a.is_event ? { label: 'Event', cls: 'type-announcement' } : typeMeta(a.category);
   const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
   const thumb = a.photo_url
-    ? '<img src="' + esc(a.photo_url) + '" alt="">'
+    ? '<img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="">'
     : '<i class="fas fa-bullhorn"></i>';
   const featured = a.is_featured ? '<i class="fas fa-star"></i>' : '';
   const statusText = statusDisplay(a);
-  const dateText = a.status === 'scheduled' ? (a.publish_at ? fmtDateTime(a.publish_at) : 'Scheduled') : fmtDate(a.created_at);
+  const dateText = announcementDateText(a);
   return '<tr class="sd-tr" data-id="' + a.id + '" onclick="selectPost(' + a.id + ')" style="cursor:pointer;">' +
     '<td class="sd-td sd-table-cb"><input type="checkbox" class="row-cb" data-id="' + a.id + '"' + (annSel.has(a.id) ? ' checked' : '') + ' onclick="event.stopPropagation();annToggleRow(' + a.id + ', this.checked)" aria-label="Select post"></td>' +
     '<td class="sd-td"><div class="post-thumb-sm">' + thumb + '</div></td>' +
@@ -1322,21 +1961,21 @@ function rowHtml(a){
     '<td class="sd-td"><div class="contact-sub">' + esc(a.content) + '</div></td>' +
     '<td class="sd-td"><span class="subj-chip">' + tm.label + '</span></td>' +
     '<td class="sd-td">' + esc(subjectLabel(a.subject)) + '</td>' +
-    '<td class="sd-td"><div class="status-stack"><span class="status-pill ' + sm.cls + '"><span class="st-dot"></span>' + sm.label + '</span><span class="status-date">' + esc(statusText.detail) + '</span></div></td>' +
+    '<td class="sd-td"><div class="status-stack"><span class="status-pill ' + sm.cls + '"><span class="st-dot"></span>' + sm.label + '</span><span class="status-date">' + esc(statusText.detail) + '</span><span class="facebook-status-line' + (facebookStatusLabel(a) === 'Failed' ? ' is-failed' : (facebookStatusLabel(a) === 'Posted' ? ' is-posted' : '')) + '">Facebook: ' + esc(facebookStatusLabel(a)) + '</span></div></td>' +
     '<td class="sd-td"><div class="contact-main">' + dateText + '</div></td>' +
-    '<td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();openRowMenu(event,' + a.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
+    '<td class="sd-td sd-td-action"><button class="sd-row-actions" title="More options" ' + (facebookActionsInFlight.has(a.id) ? 'disabled aria-busy="true"' : '') + ' onclick="event.stopPropagation();openRowMenu(event,' + a.id + ')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
   '</tr>';
 }
 
 function cardHtml(a){
   const sm = statusMeta(a.status);
-  const tm = typeMeta(a.category);
+  const tm = a.is_event ? { label: 'Event', cls: 'type-announcement' } : typeMeta(a.category);
   const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
   const featured = a.is_featured ? '<span class="status-pill" style="background:var(--amber-100);color:var(--amber-700);"><i class="fas fa-star"></i> Featured</span>' : '';
   const img = a.photo_url
-    ? '<img class="card-img" src="' + esc(a.photo_url) + '" alt="">'
+    ? '<img class="card-img" src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="">'
     : '<div class="card-img-placeholder"><i class="fas fa-bullhorn" style="font-size:32px;"></i></div>';
-  const dateText = a.status === 'scheduled' ? (a.publish_at ? fmtDateTime(a.publish_at) : 'Scheduled') : fmtDate(a.created_at);
+  const dateText = announcementDateText(a);
   return '<div class="rpt-card" data-id="' + a.id + '" onclick="selectPost(' + a.id + ')">' +
     img +
     '<div class="rpt-card-head"><span class="rpt-card-ref">#' + a.id + '</span>' + featured + '</div>' +
@@ -1400,6 +2039,11 @@ function setCat(v){
 }
 function setSearch(v){ state.q = v; state.page = 1; render(); }
 function setBrgy(v){ state.brgy = v; state.page = 1; render(); }
+window.annSetDate = function(){
+  state.date = document.getElementById('annDateFrom').value;
+  state.page = 1;
+  render();
+};
 function setSort(v){ state.sort = v; state.page = 1; render(); }
 function setView(v){
   state.view = v; state.page = 1;
@@ -1407,7 +2051,7 @@ function setView(v){
   render();
 }
 function clearFilters(){
-  state.post = 'all'; state.status = 'all'; state.cat = 'all'; state.q = ''; state.brgy = ''; state.page = 1;
+  state.post = 'all'; state.status = 'all'; state.cat = 'all'; state.q = ''; state.brgy = ''; state.date = ''; state.page = 1;
   const ms = document.getElementById('mainSearch');
   const rs = document.getElementById('railSearch');
   if(ms) ms.value = '';
@@ -1416,6 +2060,12 @@ function clearFilters(){
   if(rt) rt.value = 'all';
   const ab = document.getElementById('annBrgy');
   if(ab) ab.value = '';
+  const dateFrom = document.getElementById('annDateFrom');
+  const dateTo = document.getElementById('annDateTo');
+  if(dateFrom) dateFrom.value = '';
+  if(dateTo) dateTo.value = '';
+  const dateButton = document.querySelector('[data-date-filter="ann"] .staff-date-filter-button');
+  if(dateButton) dateButton.classList.remove('has-date');
   document.querySelectorAll('[data-rail="post"],[data-rail="status"],[data-rail="trash"],[data-rail="cat"]').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('[data-rail="post"][data-val="all"],[data-rail="status"][data-val="all"],[data-rail="cat"][data-val="all"]').forEach(el => el.classList.add('active'));
   render();
@@ -1453,10 +2103,20 @@ function openRowMenu(ev, id){
     archive: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
     restore: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-5"/></svg>',
     copy: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
-    delete: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>'
+    delete: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg>',
+    facebook: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.438H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.313 0 2.686.236 2.686.236v2.97h-1.513c-1.49 0-1.955.932-1.955 1.888v2.265h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>'
   };
   items += '<button class="row-menu-item" onclick="closeRowMenu(); selectPost(' + id + ');">' + menuIcons.view + 'View Post</button>';
   items += '<button class="row-menu-item" onclick="closeRowMenu(); openEdit(' + id + ');">' + menuIcons.edit + 'Edit Post</button>';
+  const fbState = facebookStatusLabel(a);
+  const isPublishedNow = a.status === 'published' && (!a.publish_at || new Date(a.publish_at).getTime() <= Date.now());
+  if (isPublishedNow && fbState === 'Not posted') {
+    items += '<button class="row-menu-item" onclick="closeRowMenu(); facebookAnnouncementAction(' + id + ',\'post\');">' + menuIcons.facebook + 'Post to Facebook</button>';
+  } else if (isPublishedNow && fbState === 'Failed') {
+    items += '<button class="row-menu-item" onclick="closeRowMenu(); facebookAnnouncementAction(' + id + ',\'retry\');">' + menuIcons.facebook + 'Retry</button>';
+  } else if (fbState === 'Posted' && a.facebook_permalink) {
+    items += '<button class="row-menu-item" onclick="closeRowMenu(); viewFacebookPost(' + id + ');">' + menuIcons.facebook + 'View on Facebook</button>';
+  }
   if (a.status !== 'published' && a.status !== 'scheduled') items += '<button class="row-menu-item" onclick="closeRowMenu(); confirmPublish(' + id + ');">' + menuIcons.publish + 'Publish Now</button>';
   if (a.status !== 'archived') items += '<button class="row-menu-item" onclick="closeRowMenu(); confirmArchive(' + id + ');">' + menuIcons.archive + 'Archive</button>';
   else items += '<button class="row-menu-item" onclick="closeRowMenu(); setPostStatus(' + id + ',\'draft\');">' + menuIcons.restore + 'Restore from Archive</button>';
@@ -1493,61 +2153,443 @@ function closeProfile(){
   document.getElementById('profileContent').innerHTML =
     '<div class="profile-empty"><i class="fas fa-bullhorn"></i><p>Select a post to view its details</p></div>';
 }
+function toggleAnnouncementContent(button){
+  const message = document.getElementById('annDetailPublicMessage');
+  if(!message) return;
+  const expanded = message.classList.toggle('is-collapsed') === false;
+  button.textContent = expanded ? 'Show less' : 'View full announcement';
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+function toggleAnnouncementPhoto(button){
+  const photo = document.getElementById('annDetailPhoto');
+  if(!photo) return;
+  const isShown = photo.hidden;
+  photo.hidden = !isShown;
+  button.textContent = isShown ? 'Hide attached photo' : 'Show attached photo';
+  button.setAttribute('aria-expanded', isShown ? 'true' : 'false');
+}
 function renderDetail(){
   const a = DATA.find(x => x.id === state.selected);
   const box = document.getElementById('profileContent');
   if(!a){ closeProfile(); return; }
   const sm = statusMeta(a.status);
-  const tm = typeMeta(a.category);
-  const subj = SUBJECTS[a.subject] || { label: a.subject, icon: 'fa-tag' };
-  const pubDate = a.publish_at ? fmtDateTime(a.publish_at) : fmtDate(a.created_at);
-  box.innerHTML =
-    '<div class="profile-header" style="display:flex;align-items:flex-start;justify-content:space-between;padding-top:8px;">' +
-      '<div>' +
-        '<div class="profile-name-row"><h2>' + esc(a.title) + '</h2></div>' +
-        '<span class="ann-profile-date">Posted on: ' + pubDate + '</span>' +
+  const statusIsPublished = a.status === 'published';
+  const displayedDate = a.is_event && a.event_date
+    ? fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date ? ' – ' + fmtDate(a.event_end_date) : '')
+    : (a.publish_at ? fmtDateTime(a.publish_at) : fmtDate(a.created_at));
+  const displayedLocation = a.is_event ? (a.venue_name || a.location || 'Venue not specified') : (a.location || 'Location not specified');
+  const eventTime = [a.event_start_time, a.event_end_time]
+    .filter(Boolean)
+    .map(function(value){ return formatAnnouncementTime(value); })
+    .join('–');
+  const eventTargets = Array.isArray(a.event_targets) ? a.event_targets : [];
+  const eventRequirements = Array.isArray(a.event_requirements) ? a.event_requirements : [];
+  const confirmedCount = eventTargets.filter(function(target){ return target.status === 'confirmed'; }).length;
+  const pendingCount = eventTargets.filter(function(target){ return target.status !== 'confirmed'; }).length;
+  const targetStatusLabels = {
+    confirmed: 'confirmed the preparedness plan',
+    pending: 'has not confirmed the preparedness plan yet',
+    changes_requested: 'requested changes to the preparedness plan'
+  };
+  const targetRows = eventTargets.map(function(target){
+    const status = target.status || 'pending';
+    const barangayName = target.barangay_name || 'Barangay';
+    const statusText = targetStatusLabels[status] || ('provided this response: ' + status.replace(/_/g, ' '));
+    const statusLabel = status === 'confirmed' ? 'Confirmed'
+      : (status === 'changes_requested' ? 'Changes requested' : 'Pending');
+    const statusClass = status === 'confirmed' ? ''
+      : (status === 'changes_requested' ? ' is-changes' : ' is-pending');
+    const responseText = 'The Barangay ' + barangayName + ' ' + statusText + '.';
+    const checklist = Array.isArray(target.checklist) && target.checklist.length
+      ? '<div class="ann-checklist"><p class="ann-response-list-intro">' +
+          (status === 'confirmed' ? 'They will prepare the following:' : 'Preparation checklist:') +
+        '</p><ul>' + target.checklist.map(function(item){
+          return '<li>' + esc(item.label || 'Requirement') +
+            ' <span class="ann-checklist-readiness">(' + (item.is_ready ? 'Ready' : 'Not ready') + ')</span></li>';
+        }).join('') + '</ul></div>'
+      : '';
+    return '<article class="ann-response-card">' +
+      '<div class="ann-response-card-head"><div class="ann-response-card-head-copy">' +
+        '<strong class="ann-response-card-name">Barangay ' + esc(barangayName) + '</strong>' +
+        (target.responded_at ? '<span class="ann-response-card-date">' + esc(fmtDateTime(target.responded_at)) + '</span>' : '') +
+      '</div><span class="ann-target-status' + statusClass + '">' +
+        esc(statusLabel) + '</span></div>' +
+      (target.response_note ? '<p class="ann-response-note"><em>"' + esc(target.response_note) + '"</em></p>' : '') +
+      '<p class="ann-response-description">' + esc(responseText) + '</p>' +
+      checklist +
+      '</article>';
+  }).join('');
+  const requirementRows = eventRequirements.map(function(requirement){
+    const quantity = requirement.quantity ? '× ' + String(requirement.quantity) : '';
+    const isRequired = parseInt(requirement.is_required, 10) === 1;
+    return '<div class="ann-requirement-row"><span>' + esc(requirement.requirement_label || 'Requirement') +
+      (quantity ? ' <span class="ann-requirement-quantity">' + esc(quantity) + '</span>' : '') + '</span>' +
+      (isRequired ? '<span class="ann-required-label">Required</span>' : '') + '</div>';
+  }).join('');
+  const eventDateRange = a.event_date
+    ? fmtDate(a.event_date) + (a.event_end_date && a.event_end_date !== a.event_date ? ' – ' + fmtDate(a.event_end_date) : '')
+    : 'Date not specified';
+  const responseDeadline = a.response_deadline ? fmtDateTime(a.response_deadline) : 'Not specified';
+  const allTargetsRespondedOnTime = eventTargets.length > 0 && eventTargets.every(function(target){
+    if (target.status !== 'confirmed' || !target.responded_at || !a.response_deadline) return false;
+    const respondedAt = new Date(String(target.responded_at).replace(' ', 'T'));
+    const deadline = new Date(String(a.response_deadline).replace(' ', 'T'));
+    return Number.isFinite(respondedAt.getTime()) && Number.isFinite(deadline.getTime()) &&
+      respondedAt.getTime() <= deadline.getTime();
+  });
+  const eventSections = a.is_event
+    ? '<section class="ann-detail-section">' +
+      '<h3 class="ann-detail-section-title">Event details</h3>' +
+      '<div class="ann-event-details-card">' +
+        '<div class="ann-coordination-field"><span class="ann-coordination-label">Date</span><strong class="ann-coordination-value">' + esc(eventDateRange) + '</strong></div>' +
+        '<div class="ann-coordination-field"><span class="ann-coordination-label">Time</span><strong class="ann-coordination-value">' + esc(eventTime || 'Time not specified') + '</strong></div>' +
+        '<div class="ann-coordination-field is-wide"><span class="ann-coordination-label">Venue</span><strong class="ann-coordination-value">' + esc(a.venue_name || a.location || 'Venue not specified') + '</strong></div>' +
+        '<div class="ann-response-deadline ann-coordination-field is-wide">' +
+          '<div class="ann-response-deadline-copy"><span class="ann-coordination-label">Response deadline</span><strong class="ann-coordination-value">' + esc(responseDeadline) + '</strong></div>' +
+          (allTargetsRespondedOnTime ? '<span class="ann-deadline-status">Responded on time</span>' : '') +
+        '</div>' +
       '</div>' +
-      '<span class="status-pill ' + (a.status === 'published' ? 'status-active' : 'status-inactive') + '" style="flex-shrink:0;margin-top:4px;' + (a.status === 'published' ? 'background:#ECFDF3;color:#027A48;border-color:#D1FADF;' : 'background:#FEF3C7;color:#92400E;border-color:#FDE68A;') + '">' + sm.label + '</span>' +
-    '</div>' +
-    '<div class="rpt-section-title rpt-section-title-action" style="margin-top:6px;"><span>Preview</span><button type="button" class="ann-edit-icon" onclick="openEdit(' + a.id + ')" aria-label="Edit announcement" title="Edit announcement"><img src="assets/images/edit%20icon.png" alt=""></button></div>' +
-    '<div class="acms-preview-stage">' + (a.photo_url ? '<img src="' + esc(a.photo_url) + '" alt="">' : '<div class="acms-preview-placeholder"><i class="fas fa-bullhorn"></i></div>') + '</div>' +
-    '<div class="rpt-section-title">Details</div>' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">' +
-      infoRow('tag', 'Type', tm.label) +
-      infoRow('tag2', 'Category', subjectLabel(a.subject)) +
-      infoRow('map-marker-alt', 'Location/s', a.location || '—') +
-      infoRow('pen', 'Last Updated', a.updated_at ? fmtDate(a.updated_at) : '—') +
-    '</div>' +
-    '<div style="margin-top:16px;background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;">' +
-      '<div style="font-size:13px;font-weight:500;color:#18181b;white-space:pre-line;line-height:1.55;">' + esc(a.content) + '</div>' +
-    '</div>';
+      '</section>' +
+      '<section class="ann-detail-section">' +
+        '<h3 class="ann-detail-section-title">Preparedness requirements</h3>' +
+        '<div class="ann-requirement-list">' + (requirementRows || '<div class="ann-requirement-row"><span>No preparedness requirements saved</span></div>') + '</div>' +
+      '</section>' +
+      '<section class="ann-detail-section">' +
+        '<h3 class="ann-detail-section-title">Barangay responses' +
+          '<span class="ann-readiness-badge' + (eventTargets.length > 0 && pendingCount === 0 ? ' is-ready' : '') + '">' +
+            (pendingCount > 0 ? pendingCount + ' pending' : (eventTargets.length ? confirmedCount + ' confirmed' : 'No targets')) +
+          '</span>' +
+        '</h3>' +
+        '<div class="ann-response-list">' + (targetRows || '<p class="ann-response-description">No barangay targets saved.</p>') + '</div>' +
+      '</section>'
+    : '';
+  const image = a.photo_url
+    ? '<img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="' + esc(a.title) + '">'
+    : '';
+  const statusStyle = statusIsPublished || a.status === 'scheduled' ? '' : ' is-muted';
+  box.innerHTML =
+    '<div class="ann-detail-summary"><div class="ann-detail-summary-image">' + image + '</div>' +
+      '<div class="ann-detail-summary-copy"><span class="ann-detail-status' + statusStyle + '">' + esc(sm.label) + '</span>' +
+        '<h3 class="ann-detail-title">' + esc(a.title) + '</h3>' +
+        '<div class="ann-detail-meta">' +
+          '<span>Last updated ' + esc(a.updated_at ? fmtDate(a.updated_at) : '—') + '</span>' +
+        '</div>' +
+      '</div></div>' +
+    '<section class="ann-detail-section">' +
+      '<h3 class="ann-detail-section-title">Announcement</h3>' +
+      '<p class="ann-content-message is-collapsed" id="annDetailPublicMessage">' + esc(a.content || 'No announcement message provided.') + '</p>' +
+      '<button type="button" class="ann-content-toggle" aria-expanded="false" onclick="toggleAnnouncementContent(this)">View full announcement</button>' +
+      (a.photo_url
+        ? '<button type="button" class="ann-photo-toggle" aria-expanded="false" onclick="toggleAnnouncementPhoto(this)">Show attached photo</button>' +
+          '<div class="acms-preview-stage ann-photo-preview" id="annDetailPhoto" hidden><img src="' + esc(announcementPhotoUrl(a.photo_url)) + '" alt="' + esc(a.title) + '"></div>'
+        : '') +
+    '</section>';
+  box.innerHTML += eventSections;
   var footer = document.getElementById('annProfileFooter');
   if (footer) {
-    const showPublish = a.status !== 'published' && a.status !== 'scheduled';
     footer.innerHTML =
-      (a.status !== 'archived' ? '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmArchive(' + a.id + ')"><i class="fas fa-archive"></i> Archive</button>' : '') +
-      (showPublish
-      ? '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmPublish(' + a.id + ')"><i class="fas fa-check-circle"></i> Publish</button>'
-      : '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmDraft(' + a.id + ')"><i class="fas fa-file"></i> Draft</button>') +
-      '<button type="button" class="sd-btn sd-btn-outline" onclick="window.open(\'announcements.php\',\'_blank\')"><i class="fas fa-external-link-alt"></i> View on Public Page</button>';
+      (a.status === 'archived'
+        ? '<button type="button" class="sd-btn sd-btn-outline" onclick="setPostStatus(' + a.id + ',\'draft\')">Restore</button>'
+        : '<button type="button" class="sd-btn sd-btn-outline" onclick="confirmArchive(' + a.id + ')">Archive</button>') +
+      '<button type="button" class="sd-btn sd-btn-outline" onclick="openEdit(' + a.id + ')">Edit Draft</button>' +
+      '<button type="button" class="sd-btn sd-btn-default" onclick="window.open(\'announcements.php\',\'_blank\',\'noopener\')">Public Page</button>';
   }
+}
+function formatAnnouncementTime(value){
+  if(!value) return '';
+  const parts = String(value).split(':');
+  const hour = Number(parts[0]);
+  const minute = Number(parts[1]);
+  if(!Number.isFinite(hour) || !Number.isFinite(minute)) return String(value);
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  return (hour % 12 || 12) + ':' + String(minute).padStart(2, '0') + ' ' + suffix;
 }
 
 /* ───────────────────────── Create / edit modal ───────────────────────── */
+let announcementHasExistingPhoto = false;
+
+function syncPhotoRequirement(){
+  document.getElementById('photoInput').required = !announcementHasExistingPhoto;
+}
+
+function syncAnnouncementLocations(){
+  const hiddenLocation = document.getElementById('formProgramLocation');
+  const summary = document.getElementById('locationPickerSummary');
+  const selected = Array.from(document.querySelectorAll('#locationPickerList input[type="checkbox"]:checked'))
+    .map(function(input){ return input.value; });
+  document.querySelectorAll('#locationPickerList [data-location-option]').forEach(function(option){
+    option.classList.toggle('is-selected', !!option.querySelector('input[type="checkbox"]:checked'));
+  });
+  const customValue = document.getElementById('locationPickerCustom').value;
+  const customLocations = customValue.split(',').map(function(value){ return value.trim(); }).filter(Boolean);
+  const locations = [];
+  const seen = new Set();
+  selected.concat(customLocations).forEach(function(location){
+    const key = location.trim().toLowerCase();
+    if (key && !seen.has(key)) {
+      seen.add(key);
+      locations.push(location.trim());
+    }
+  });
+  hiddenLocation.value = locations.join(', ');
+  summary.textContent = locations.length ? locations.join(', ') : 'Select barangay location/s...';
+  summary.classList.toggle('is-placeholder', locations.length === 0);
+  document.getElementById('locationPickerToggle').title = locations.join(', ');
+}
+
+function setAnnouncementLocations(value){
+  const options = Array.from(document.querySelectorAll('#locationPickerList input[type="checkbox"]'));
+  const byName = new Map(options.map(function(input){ return [input.value.trim().toLowerCase(), input]; }));
+  const customLocations = [];
+  options.forEach(function(input){ input.checked = false; });
+  String(value || '').split(',').map(function(location){ return location.trim(); }).filter(Boolean).forEach(function(location){
+    const option = byName.get(location.toLowerCase());
+    if (option) option.checked = true;
+    else customLocations.push(location);
+  });
+  document.getElementById('locationPickerCustom').value = customLocations.join(', ');
+  syncAnnouncementLocations();
+  closeAnnouncementLocationPicker();
+}
+
+function closeAnnouncementLocationPicker(){
+  const menu = document.getElementById('locationPickerOptions');
+  const toggle = document.getElementById('locationPickerToggle');
+  menu.hidden = true;
+  toggle.setAttribute('aria-expanded', 'false');
+}
+
+document.getElementById('locationPickerToggle').addEventListener('click', function(){
+  const menu = document.getElementById('locationPickerOptions');
+  const isOpening = menu.hidden;
+  menu.hidden = !isOpening;
+  this.setAttribute('aria-expanded', isOpening ? 'true' : 'false');
+});
+document.getElementById('locationPickerList').addEventListener('change', function(event){
+  const option = event.target.closest('[data-location-option]');
+  if (option) option.classList.toggle('is-selected', event.target.checked);
+  syncAnnouncementLocations();
+});
+document.getElementById('locationPickerCustom').addEventListener('input', syncAnnouncementLocations);
+document.addEventListener('click', function(event){
+  if (!event.target.closest('#locationField .sd-location-picker')) closeAnnouncementLocationPicker();
+});
+document.addEventListener('keydown', function(event){
+  if (event.key === 'Escape' && !document.getElementById('locationPickerOptions').hidden) {
+    closeAnnouncementLocationPicker();
+    document.getElementById('locationPickerToggle').focus();
+  }
+});
+
 function openCreate(category){
+  programPrefillSnapshot = null;
+  announcementHasExistingPhoto = false;
+  document.getElementById('formSaveMode').value = 'create';
   document.getElementById('modalTitle').textContent = category === 'advisory' ? 'Create Advisory' : 'Create Announcement';
   document.getElementById('submitBtnText').textContent = 'Create';
   document.getElementById('formId').value = '0';
   document.getElementById('announcementForm').reset();
+  setAnnouncementLocations('');
+  document.getElementById('formProgramId').value = '';
+  document.getElementById('programPrefillNote').hidden = true;
   document.getElementById('formCategory').value = category;
   document.getElementById('formStatus').value = 'draft';
+  syncScheduleField();
+  syncPhotoRequirement();
+  document.getElementById('eventAudience').value = 'selected';
+  document.getElementById('eventEndDate').value = '';
+  document.getElementById('eventEndDateField').hidden = true;
+  document.getElementById('eventTargetWarning').hidden = true;
+  syncEventDateConstraints();
+  document.querySelectorAll('#eventTargetPicker input[type="checkbox"]').forEach(function(input){ input.checked = false; });
+  loadEventRequirements([]);
+  toggleEventFields();
   document.getElementById('photoPreview').style.display = 'none';
   document.getElementById('photoPlaceholder').style.display = '';
   document.getElementById('photoArea').classList.remove('has-image');
-  onStatusChange();
   openModal('announcementModal');
 }
+
+function announcementFormSnapshot(){
+  return JSON.stringify(Array.prototype.map.call(
+    document.querySelectorAll('#announcementForm input:not([type="file"]):not([data-draft-ignore]), #announcementForm select, #announcementForm textarea'),
+    function(field){
+      return [field.name, field.type === 'checkbox' ? field.checked : field.value];
+    }
+  ));
+}
+
+function eventTimeLabel(value){
+  const parts = value.split(':');
+  const hour = parseInt(parts[0], 10);
+  const minute = parts[1] || '00';
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return String(hour12).padStart(2, '0') + ':' + minute + ' ' + period;
+}
+
+function initializeEventTimeSelects(){
+  ['eventStartTime', 'eventEndTime'].forEach(function(id){
+    const select = document.getElementById(id);
+    for (let minutes = 0; minutes < 24 * 60; minutes += 30) {
+      const value = String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0');
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = eventTimeLabel(value);
+      select.appendChild(option);
+    }
+  });
+}
+
+function setEventTime(selectId, rawValue){
+  const select = document.getElementById(selectId);
+  const value = String(rawValue || '').slice(0, 5);
+  if (!value) {
+    select.value = '';
+    return;
+  }
+  let option = Array.prototype.find.call(select.options, function(item){ return item.value === value; });
+  if (!option) {
+    option = document.createElement('option');
+    option.value = value;
+    option.textContent = eventTimeLabel(value);
+    const options = Array.prototype.slice.call(select.options);
+    const insertBefore = options.find(function(item){ return item.value && item.value > value; });
+    select.insertBefore(option, insertBefore || null);
+  }
+  select.value = value;
+}
+
+function closeAnnouncementModal(){
+  if (programPrefillSnapshot !== null && announcementFormSnapshot() !== programPrefillSnapshot) {
+    openAnnouncementDiscardDialog();
+    return;
+  }
+  programPrefillSnapshot = null;
+  closeModal('announcementModal');
+}
+
+let announcementDiscardReturnFocus = null;
+function openAnnouncementDiscardDialog(){
+  announcementDiscardReturnFocus = document.activeElement;
+  const dialog = document.getElementById('announcementDiscardDialog');
+  dialog.setAttribute('aria-hidden', 'false');
+  openModal('announcementDiscardDialog');
+  document.getElementById('announcementDiscardCancel').focus();
+}
+
+function closeAnnouncementDiscardDialog(){
+  const dialog = document.getElementById('announcementDiscardDialog');
+  dialog.classList.remove('active');
+  dialog.style.display = 'none';
+  dialog.setAttribute('aria-hidden', 'true');
+  if (announcementDiscardReturnFocus && announcementDiscardReturnFocus.focus) {
+    announcementDiscardReturnFocus.focus();
+  }
+  announcementDiscardReturnFocus = null;
+}
+
+document.getElementById('announcementDiscardCancel').addEventListener('click', closeAnnouncementDiscardDialog);
+document.getElementById('announcementDiscardConfirm').addEventListener('click', function(){
+  closeAnnouncementDiscardDialog();
+  programPrefillSnapshot = null;
+  closeModal('announcementModal');
+});
+document.getElementById('announcementDiscardDialog').addEventListener('click', function(event){
+  if (event.target === this) {
+    event.stopPropagation();
+    closeAnnouncementDiscardDialog();
+  }
+});
+document.addEventListener('keydown', function(event){
+  if (event.key === 'Escape' && document.getElementById('announcementDiscardDialog').classList.contains('active')) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeAnnouncementDiscardDialog();
+  }
+}, true);
+
+async function openCreateAnnouncement(options){
+  const programId = Number(options && options.programId);
+  if (!Number.isInteger(programId) || programId <= 0) {
+    alert('Could not identify the selected program.');
+    return;
+  }
+  try {
+    const response = await fetch('api/staff/program-announcement-prefill.php?program_id=' + encodeURIComponent(programId), {
+      headers: { 'Accept': 'application/json' }
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      throw new Error(result.message || 'Could not load program details.');
+    }
+    const program = result.data;
+    if (program.existing_announcement) {
+      const existingId = Number(program.existing_announcement.announcement_id);
+      if (DATA.some(function(announcement){ return announcement.id === existingId; })) {
+        selectPost(existingId);
+        return;
+      }
+      alert('An announcement is already linked to this program. Open the Announcements page to view it.');
+      return;
+    }
+
+    openCreate('announcement');
+    document.getElementById('formProgramId').value = String(program.program_id);
+    document.getElementById('formCategory').value = 'event';
+    document.getElementById('formTitle').value = program.title || '';
+    setAnnouncementLocations(program.location || '');
+    document.getElementById('formContent').value = program.content || '';
+    document.getElementById('eventDate').value = program.event_date || '';
+    document.getElementById('eventEndDate').value = program.end_date || '';
+    document.getElementById('eventEndDateField').hidden = !program.end_date;
+    setEventTime('eventStartTime', program.event_start_time);
+    setEventTime('eventEndTime', program.event_end_time);
+    document.getElementById('eventResponseDeadline').value = '';
+    document.getElementById('eventAudience').value = 'selected';
+    document.getElementById('eventVenueProvider').value = '';
+    document.getElementById('eventVenueName').value = '';
+    document.getElementById('eventTargetSearch').value = '';
+    document.getElementById('eventTargetWarning').hidden = true;
+    document.getElementById('eventTargetWarning').textContent = '';
+    document.querySelectorAll('#eventTargetPicker input[type="checkbox"]').forEach(function(input){
+      input.checked = (program.barangays || []).some(function(barangay){
+        return Number(barangay.barangay_id) === Number(input.value);
+      });
+    });
+    const unmatched = program.unmatched_barangays || [];
+    if (unmatched.length) {
+      document.getElementById('eventTargetWarning').textContent =
+        unmatched.length + ' barangays could not be matched: ' + unmatched.join(', ') + '. Please select them manually.';
+      document.getElementById('eventTargetWarning').hidden = false;
+    }
+    const unavailable = program.unavailable_barangays || [];
+    if (unavailable.length) {
+      const warning = unavailable.length + ' barangays cannot be targeted because their PSGC mapping is unresolved: ' + unavailable.join(', ') + '.';
+      const targetWarning = document.getElementById('eventTargetWarning');
+      targetWarning.textContent = targetWarning.hidden ? warning : targetWarning.textContent + ' ' + warning;
+      targetWarning.hidden = false;
+    }
+    loadEventRequirements([]);
+    toggleEventFields();
+    document.getElementById('formSubject').value = program.subject || 'general_notices';
+    syncEventVenueProvider();
+    syncEventDateConstraints();
+    renderEventTargetSelection();
+    syncEventAudienceBarangays();
+    document.getElementById('programPrefillNote').hidden = false;
+    document.getElementById('announcementTabs').hidden = false;
+    setAnnouncementTab('details');
+    openModal('announcementModal');
+    programPrefillSnapshot = announcementFormSnapshot();
+  } catch (error) {
+    alert('Could not create announcement from this program: ' + error.message);
+  }
+}
+
 function openEdit(id){
+  document.getElementById('formSaveMode').value = 'edit';
+  document.getElementById('formId').value = String(id);
   fetch('staff-announcements-handler.php?action=get&id=' + id)
     .then(res => res.json())
     .then(data => {
@@ -1557,21 +2599,42 @@ function openEdit(id){
       document.getElementById('modalTitle').textContent = 'Edit ' + (isAdvisory ? 'Advisory' : 'Announcement');
       document.getElementById('submitBtnText').textContent = 'Update';
       document.getElementById('formId').value = a.announcement_id;
+      document.getElementById('formProgramId').value = a.program_id || '';
       document.getElementById('formTitle').value = a.title;
-      document.getElementById('formProgramLocation').value = a.location || '';
-      document.getElementById('formCategory').value = a.category;
+      setAnnouncementLocations(a.location || '');
+      document.getElementById('formCategory').value = a.is_event ? 'event' : a.category;
       document.getElementById('formSubject').value = a.subject || 'general_notices';
       document.getElementById('formStatus').value = a.status === 'archived' ? 'draft' : a.status;
       document.getElementById('formPublishAt').value = a.publish_at ? toLocalInput(a.publish_at) : '';
+      syncScheduleField();
       document.getElementById('formLinkUrl').value = a.link_url || '';
       document.getElementById('formContent').value = a.content;
       document.getElementById('formAudienceType').value = a.audience_type || 'all';
       document.getElementById('formBarangayId').value = a.barangay_id || '';
-      document.getElementById('formAudienceBarangays').value = a.audience_barangays || '';
-      onStatusChange();
+      document.getElementById('eventDate').value = a.event_date || '';
+      document.getElementById('eventEndDate').value = a.event_end_date || '';
+      document.getElementById('eventEndDateField').hidden = !a.event_end_date;
+      setEventTime('eventStartTime', a.event_start_time);
+      setEventTime('eventEndTime', a.event_end_time);
+      document.getElementById('eventVenueProvider').value = a.venue_provider || 'dcvs_office';
+      document.getElementById('eventVenueName').value = a.venue_name || '';
+      document.getElementById('eventResponseDeadline').value = a.response_deadline ? toLocalInput(a.response_deadline) : '';
+      syncEventDateConstraints();
+      document.getElementById('eventAudience').value = a.audience_type === 'all' ? 'all' : 'selected';
+      const targetIds = Array.isArray(a.event_targets) ? a.event_targets.map(String) : [];
+      document.getElementById('formAudienceBarangays').value = a.is_event
+        ? (a.audience_type === 'all' ? '' : targetIds.join(','))
+        : (a.audience_barangays || '');
+      document.querySelectorAll('#eventTargetPicker input[type="checkbox"]').forEach(function(input){
+        input.checked = targetIds.indexOf(input.value) !== -1;
+      });
+      loadEventRequirements(a.event_requirements || []);
+      toggleEventFields();
       const preview = document.getElementById('photoPreview');
+      announcementHasExistingPhoto = !!a.photo_url;
+      syncPhotoRequirement();
       if(a.photo_url){
-        preview.src = a.photo_url;
+        preview.src = announcementPhotoUrl(a.photo_url);
         preview.style.display = 'block';
         document.getElementById('photoPlaceholder').style.display = 'none';
         document.getElementById('photoArea').classList.add('has-image');
@@ -1586,32 +2649,593 @@ function toLocalInput(iso){
   const pad = n => String(n).padStart(2,'0');
   return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
-function onStatusChange(){
-  // schedule field always visible
+
+function toggleEventFields(){
+  const isEvent = document.getElementById('formCategory').value === 'event';
+  const isEditing = parseInt(document.getElementById('formId').value, 10) > 0;
+  const contentType = document.getElementById('formCategory').value;
+  document.getElementById('locationField').hidden = false;
+  document.getElementById('modalTitle').textContent = (isEditing ? 'Edit ' : 'Create ') +
+    (contentType === 'advisory' ? 'Advisory' : 'Announcement');
+  document.querySelector('#announcementModal .sd-dialog-description').textContent =
+    'Create the public post, then optionally add coordination details for the barangay portal.';
+  document.getElementById('formSubject').value = isEvent ? 'events' : document.getElementById('formSubject').value;
+  syncEventVenueProvider();
+  if (isEvent) {
+    document.getElementById('formAudienceType').value = document.getElementById('eventAudience').value;
+    syncEventAudienceBarangays();
+  }
+  toggleEventTargets();
+  setAnnouncementTab('details');
+}
+
+function setAnnouncementTab(tab){
+  const categoryInput = document.getElementById('formCategory');
+  const isEditing = parseInt(document.getElementById('formId').value, 10) > 0;
+  if (!isEditing && tab === 'event' && categoryInput.value !== 'event') {
+    categoryInput.value = 'event';
+    toggleEventFields();
+  }
+  const isEvent = categoryInput.value === 'event';
+  const showEventTabs = !isEditing || isEvent;
+  const activeTab = showEventTabs && tab === 'event' ? 'event' : 'details';
+  document.getElementById('announcementTabs').hidden = !showEventTabs;
+  document.getElementById('announcementDetailsPanel').hidden = activeTab !== 'details';
+  document.getElementById('announcementEventPanel').hidden = activeTab !== 'event';
+  document.getElementById('announcementDetailsTab').setAttribute('aria-selected', activeTab === 'details' ? 'true' : 'false');
+  document.getElementById('announcementEventTab').setAttribute('aria-selected', activeTab === 'event' ? 'true' : 'false');
+  document.getElementById('formTitle').required = activeTab === 'details';
+  document.getElementById('formContent').required = activeTab === 'details';
+  ['eventDate', 'eventStartTime', 'eventEndTime', 'eventResponseDeadline', 'eventAudience', 'eventVenueName']
+    .forEach(function(id){ document.getElementById(id).required = false; });
+}
+
+function hasEventCoordinationInput(){
+  if (document.getElementById('formCategory').value !== 'event') return false;
+  const values = ['eventDate', 'eventEndDate', 'eventStartTime', 'eventEndTime', 'eventVenueProvider', 'eventVenueName', 'eventResponseDeadline', 'formProgramId'];
+  if (values.some(function(id){ return document.getElementById(id).value.trim() !== ''; })) return true;
+  if (document.getElementById('eventAudience').value === 'all') return true;
+  if (document.querySelectorAll('#eventTargetPicker input[type="checkbox"]:checked').length > 0) return true;
+  return Array.prototype.slice.call(document.querySelectorAll('#eventRequirements [data-field="label"], #eventRequirements [data-field="quantity"]'))
+    .some(function(input){ return input.value.trim() !== ''; });
+}
+
+function eventCoordinationMissingFields(){
+  const missing = [];
+  if (!document.getElementById('eventDate').value.trim()) missing.push('Event date');
+  if (!document.getElementById('eventStartTime').value || !document.getElementById('eventEndTime').value) {
+    missing.push('Operating hours (start and end time)');
+  }
+  const provider = document.getElementById('eventVenueProvider').value;
+  if (!provider) missing.push('Venue provider');
+  if (!document.getElementById('eventVenueName').value.trim()) missing.push('Venue name');
+  if (!document.getElementById('eventResponseDeadline').value.trim()) missing.push('Response deadline');
+  const audience = document.getElementById('eventAudience').value;
+  if (!audience) missing.push('Barangay audience');
+  if (audience === 'selected' && document.querySelectorAll('#eventTargetPicker input[type="checkbox"]:checked').length === 0) {
+    missing.push('At least one target barangay');
+  }
+  const hasRequirement = Array.prototype.slice.call(document.querySelectorAll('#eventRequirements [data-field="label"]'))
+    .some(function(input){ return input.value.trim() !== ''; });
+  if (provider && provider !== 'dcvs_office' && !hasRequirement) {
+    missing.push('At least one preparedness requirement');
+  }
+  return missing;
+}
+
+function toggleEventTargets(){
+  const isSelected = document.getElementById('eventAudience').value === 'selected';
+  document.getElementById('eventTargetField').hidden = !isSelected;
+  if (!isSelected) hideEventTargets();
+  renderEventTargetSelection();
+  if (document.getElementById('formCategory').value === 'event' && hasEventCoordinationInput()) {
+    document.getElementById('formAudienceType').value = isSelected ? 'selected' : 'all';
+    syncEventAudienceBarangays();
+  }
+}
+
+function formatLocalDateTime(date){
+  const pad = function(value){ return String(value).padStart(2, '0'); };
+  return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+    'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+}
+
+function syncEventDateConstraints(){
+  const now = new Date();
+  now.setSeconds(0, 0);
+  now.setMinutes(now.getMinutes() + 1);
+  const eventDate = document.getElementById('eventDate');
+  const eventEndDate = document.getElementById('eventEndDate');
+  const responseDeadline = document.getElementById('eventResponseDeadline');
+  const isEditing = parseInt(document.getElementById('formId').value, 10) > 0;
+  const earliestEventDate = formatLocalDateTime(now).slice(0, 10);
+  eventDate.min = isEditing && eventDate.value && eventDate.value < earliestEventDate
+    ? eventDate.value
+    : earliestEventDate;
+  eventEndDate.min = eventDate.value || eventDate.min;
+  const earliestResponseDeadline = formatLocalDateTime(now);
+  responseDeadline.min = isEditing && responseDeadline.value && responseDeadline.value < earliestResponseDeadline
+    ? responseDeadline.value
+    : earliestResponseDeadline;
+  const eventDateValue = eventDate.value;
+  const eventStartTime = document.getElementById('eventStartTime').value;
+  if (eventDateValue && eventStartTime) {
+    responseDeadline.max = eventDateValue + 'T' + eventStartTime;
+  } else {
+    responseDeadline.removeAttribute('max');
+  }
+}
+
+function syncEventAudienceBarangays(){
+  const selectedIds = Array.prototype.slice.call(document.querySelectorAll('#eventTargetPicker input[type="checkbox"]:checked'))
+    .map(function(input){ return input.value; });
+  document.getElementById('formAudienceBarangays').value = selectedIds.join(',');
+}
+
+function setEventVenueProvider(button){
+  document.getElementById('eventVenueProvider').value = button.getAttribute('data-value');
+  syncEventVenueProvider();
+}
+
+function syncEventVenueProvider(){
+  const provider = document.getElementById('eventVenueProvider').value;
+  const venueName = document.getElementById('eventVenueName');
+  const isDcvsOffice = provider === 'dcvs_office';
+  const hasProvider = ['dcvs_office', 'barangay_venue', 'other'].indexOf(provider) !== -1;
+  if (isDcvsOffice) {
+    venueName.value = 'DCVS Office';
+  } else if (venueName.value === 'DCVS Office') {
+    venueName.value = '';
+  }
+  venueName.readOnly = isDcvsOffice;
+  venueName.required = false;
+  venueName.placeholder = isDcvsOffice ? 'DCVS Office' : (provider === 'barangay_venue' ? 'e.g. Barangay Hall' : 'Enter venue name');
+  document.getElementById('eventVenueNameField').hidden = !hasProvider || isDcvsOffice;
+  document.querySelectorAll('#eventVenueOptions .sd-venue-option').forEach(function(option){
+    option.setAttribute('aria-checked', option.getAttribute('data-value') === provider ? 'true' : 'false');
+  });
+  document.getElementById('eventRequirementsSection').hidden = !hasProvider || isDcvsOffice;
+}
+
+function renderEventTargetSelection(){
+  const picker = document.getElementById('eventTargetPicker');
+  const selected = picker.querySelectorAll('input[type="checkbox"]:checked');
+  document.getElementById('eventTargetCount').textContent = selected.length + ' selected';
+  const chips = document.getElementById('eventTargetChips');
+  chips.replaceChildren();
+  selected.forEach(function(input){
+    const chip = document.createElement('span');
+    chip.className = 'sd-event-chip';
+    const name = document.createElement('span');
+    name.textContent = input.parentElement.textContent.trim();
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.setAttribute('aria-label', 'Remove ' + name.textContent);
+    remove.textContent = '×';
+    remove.addEventListener('click', function(){
+      input.checked = false;
+      renderEventTargetSelection();
+      syncEventAudienceBarangays();
+    });
+    chip.appendChild(name);
+    chip.appendChild(remove);
+    chips.appendChild(chip);
+  });
+}
+
+function filterEventTargets(){
+  const query = document.getElementById('eventTargetSearch').value.trim().toLowerCase();
+  const picker = document.getElementById('eventTargetPicker');
+  picker.hidden = false;
+  document.getElementById('eventTargetSearch').setAttribute('aria-expanded', 'true');
+  document.querySelectorAll('#eventTargetPicker label').forEach(function(label){
+    label.hidden = query !== '' && label.getAttribute('data-name').indexOf(query) === -1;
+  });
+}
+
+function showEventTargets(){
+  const picker = document.getElementById('eventTargetPicker');
+  picker.hidden = false;
+  document.getElementById('eventTargetActions').hidden = false;
+  document.getElementById('eventTargetSearch').setAttribute('aria-expanded', 'true');
+  filterEventTargets();
+}
+
+function hideEventTargets(){
+  document.getElementById('eventTargetPicker').hidden = true;
+  document.getElementById('eventTargetActions').hidden = true;
+  document.getElementById('eventTargetSearch').setAttribute('aria-expanded', 'false');
+}
+
+function setVisibleEventTargets(checked){
+  const selector = checked
+    ? '#eventTargetPicker label:not([hidden]) input[type="checkbox"]'
+    : '#eventTargetPicker input[type="checkbox"]';
+  document.querySelectorAll(selector).forEach(function(input){
+    input.checked = checked;
+  });
+  renderEventTargetSelection();
+  syncEventAudienceBarangays();
+}
+
+document.getElementById('eventTargetSearch').addEventListener('focus', showEventTargets);
+document.getElementById('eventTargetSearch').addEventListener('click', showEventTargets);
+document.getElementById('eventTargetSearch').addEventListener('input', filterEventTargets);
+document.getElementById('eventTargetSearch').addEventListener('keydown', function(event){
+  if (event.key === 'Escape') {
+    hideEventTargets();
+    this.blur();
+  }
+});
+initializeEventTimeSelects();
+document.getElementById('eventDate').addEventListener('input', syncEventDateConstraints);
+document.getElementById('eventStartTime').addEventListener('change', syncEventDateConstraints);
+syncEventDateConstraints();
+document.querySelectorAll('#eventTargetPicker input[type="checkbox"]').forEach(function(input){
+  input.addEventListener('change', function(){
+    renderEventTargetSelection();
+    syncEventAudienceBarangays();
+  });
+});
+renderEventTargetSelection();
+
+function eventRequirementRow(requirement){
+  const row = document.createElement('div');
+  row.className = 'sd-event-requirement';
+  row.innerHTML = '<input type="hidden" data-field="id">' +
+    '<input type="text" class="sd-input" data-field="label" maxlength="200" placeholder="Describe what the barangay should prepare">' +
+    '<input type="number" class="sd-input" data-field="quantity" min="1" placeholder="Optional" aria-label="Optional quantity">' +
+    '<label><input type="checkbox" data-field="required"> Required</label>' +
+    '<button type="button" class="sd-event-remove" aria-label="Remove requirement" title="Remove requirement"><i class="fas fa-xmark"></i></button>';
+  row.querySelector('[data-field="id"]').value = requirement.requirement_id || requirement.id || '';
+  row.querySelector('[data-field="label"]').value = requirement.requirement_label || requirement.label || '';
+  row.querySelector('[data-field="quantity"]').value = requirement.quantity == null ? '' : requirement.quantity;
+  row.querySelector('[data-field="required"]').checked = parseInt(requirement.is_required || requirement.required || 0, 10) === 1 || requirement.required === true;
+  row.querySelector('.sd-event-remove').addEventListener('click', function(){
+    row.remove();
+    reindexEventRequirements();
+    syncEventRequirementEmptyState();
+  });
+  return row;
+}
+
+function syncEventRequirementEmptyState(){
+  document.getElementById('eventRequirementsEmpty').hidden =
+    document.querySelectorAll('#eventRequirements .sd-event-requirement').length > 0;
+}
+
+function reindexEventRequirements(){
+  document.querySelectorAll('#eventRequirements .sd-event-requirement').forEach(function(row, index){
+    row.querySelector('[data-field="id"]').name = 'event_requirements[' + index + '][id]';
+    row.querySelector('[data-field="label"]').name = 'event_requirements[' + index + '][label]';
+    row.querySelector('[data-field="quantity"]').name = 'event_requirements[' + index + '][quantity]';
+    row.querySelector('[data-field="required"]').name = 'event_requirements[' + index + '][required]';
+  });
+}
+
+function loadEventRequirements(requirements){
+  const container = document.getElementById('eventRequirements');
+  container.innerHTML = '';
+  requirements.forEach(function(requirement){
+    container.appendChild(eventRequirementRow(requirement));
+  });
+  reindexEventRequirements();
+  syncEventRequirementEmptyState();
+}
+
+function addEventRequirement(){
+  const container = document.getElementById('eventRequirements');
+  container.appendChild(eventRequirementRow({}));
+  reindexEventRequirements();
+  syncEventRequirementEmptyState();
+  container.lastElementChild.querySelector('[data-field="label"]').focus();
+}
+function updateFacebookRowAfterAction(id, action, result){
+  const announcement = DATA.find(function(item){ return item.id === id; });
+  if (!announcement) return;
+  announcement.facebook_page_id = FACEBOOK_PAGE_ID;
+  if (result.success) {
+    announcement.facebook_status = 'posted';
+    announcement.facebook_permalink = result.facebook_permalink || '';
+    announcement.facebook_error_code = '';
+    announcement.facebook_last_error = '';
+  } else if (action === 'post' || action === 'retry') {
+    announcement.facebook_status = 'failed';
+    announcement.facebook_error_code = result.uncertain ? 'posting_timeout' : '';
+    announcement.facebook_last_error = result.message || '';
+  }
+}
+async function requestFacebookAnnouncementAction(id, action, confirmUncertain){
+  const payload = new FormData();
+  payload.append('action', action);
+  payload.append('announcement_id', String(id));
+  payload.append('csrf_token', FACEBOOK_ANNOUNCEMENT_CSRF);
+  if (confirmUncertain) payload.append('confirm_uncertain', '1');
+  const response = await fetch(FACEBOOK_ANNOUNCEMENT_ENDPOINT, { method: 'POST', body: payload });
+  const result = await response.json();
+  if (result.requires_confirmation && action === 'retry' && !confirmUncertain) {
+    if (!window.confirm('Check Facebook before retrying. Continue only if you verified that the Page has no existing post.')) {
+      return { cancelled: true, result: result };
+    }
+    return requestFacebookAnnouncementAction(id, action, true);
+  }
+  return { ok: response.ok && result.success, result: result };
+}
+let facebookUpdateConfirmResolver = null;
+
+function resolveFacebookUpdateConfirmation(shouldUpdate){
+  const dialog = document.getElementById('facebookUpdateConfirmDialog');
+  closeModal('facebookUpdateConfirmDialog');
+  if (dialog) dialog.setAttribute('aria-hidden', 'true');
+  if (facebookUpdateConfirmResolver) {
+    const resolve = facebookUpdateConfirmResolver;
+    facebookUpdateConfirmResolver = null;
+    resolve(shouldUpdate);
+  }
+}
+
+function confirmFacebookPostUpdate(){
+  const dialog = document.getElementById('facebookUpdateConfirmDialog');
+  dialog.setAttribute('aria-hidden', 'false');
+  openModal('facebookUpdateConfirmDialog');
+  return new Promise(function(resolve){
+    facebookUpdateConfirmResolver = resolve;
+  });
+}
+
+document.getElementById('facebookUpdateKeepButton').addEventListener('click', function(){
+  resolveFacebookUpdateConfirmation(false);
+});
+document.getElementById('facebookUpdateConfirmButton').addEventListener('click', function(){
+  resolveFacebookUpdateConfirmation(true);
+});
+document.getElementById('facebookUpdateConfirmDialog').addEventListener('click', function(event){
+  if (event.target === this) resolveFacebookUpdateConfirmation(false);
+});
+document.addEventListener('keydown', function(event){
+  if (event.key === 'Escape' && facebookUpdateConfirmResolver) {
+    resolveFacebookUpdateConfirmation(false);
+  }
+});
+
+async function facebookAnnouncementAction(id, action){
+  if (facebookActionsInFlight.has(id)) return;
+  facebookActionsInFlight.add(id);
+  render();
+  try {
+    const outcome = await requestFacebookAnnouncementAction(id, action, false);
+    if (outcome.cancelled) return;
+    updateFacebookRowAfterAction(id, action, outcome.result);
+    render();
+    if (state.selected === id) renderDetail();
+    if (outcome.ok) annToast(action === 'retry' ? 'Facebook post published after retry.' : 'Posted to Facebook.');
+    else annToast(outcome.result.warning || outcome.result.message || 'Facebook post failed. You can retry from the menu.', true);
+  } catch (error) {
+    annToast('Facebook post outcome could not be confirmed. Check the Page before retrying.', true);
+  } finally {
+    facebookActionsInFlight.delete(id);
+    render();
+  }
+}
+function viewFacebookPost(id){
+  const announcement = DATA.find(function(item){ return item.id === id; });
+  if (!announcement || !announcement.facebook_permalink) return;
+  window.open(announcement.facebook_permalink, '_blank', 'noopener,noreferrer');
 }
 function onScheduleChange(){
   var val = document.getElementById('formPublishAt').value;
   if(val){
     document.getElementById('formStatus').value = 'scheduled';
-    document.getElementById('scheduleField').style.display = 'block';
   }
+  syncScheduleField();
+}
+
+function syncScheduleField(){
+  const isScheduled = document.getElementById('formStatus').value === 'scheduled';
+  const scheduleField = document.getElementById('scheduleField');
+  const publishAt = document.getElementById('formPublishAt');
+  scheduleField.hidden = !isScheduled;
+  publishAt.required = isScheduled;
+  if (!isScheduled) publishAt.value = '';
 }
 /* ───────────────────────── Form submit ───────────────────────── */
+let announcementSaveInProgress = false;
+let announcementSaveSucceeded = false;
+function showAnnouncementAlert(message, title){
+  document.getElementById('announcementAlertTitle').textContent = title || 'Could not save announcement';
+  document.getElementById('announcementAlertDescription').textContent = message;
+  openModal('announcementAlertDialog');
+  document.getElementById('announcementAlertDialog').setAttribute('aria-hidden', 'false');
+  document.getElementById('announcementAlertCloseButton').focus();
+}
+function closeAnnouncementAlert(){
+  closeModal('announcementAlertDialog');
+  document.getElementById('announcementAlertDialog').setAttribute('aria-hidden', 'true');
+}
+document.getElementById('announcementAlertCloseButton').addEventListener('click', function(){
+  closeAnnouncementAlert();
+});
+document.getElementById('announcementAlertDialog').addEventListener('click', function(event){
+  if (event.target === this) closeAnnouncementAlert();
+});
 document.getElementById('announcementForm').addEventListener('submit', function(e){
   e.preventDefault();
+  if (announcementSaveInProgress) return;
+  const requestedSaveMode = document.getElementById('formSaveMode').value;
+  const requestedAnnouncementId = parseInt(document.getElementById('formId').value, 10) || 0;
+  if ((requestedSaveMode === 'edit' && requestedAnnouncementId < 1)
+    || (requestedSaveMode === 'create' && requestedAnnouncementId !== 0)) {
+    showAnnouncementAlert('This form lost its create/edit record. Close it and reopen the announcement before saving.');
+    return;
+  }
+  if (hasEventCoordinationInput()) {
+    const missingFields = eventCoordinationMissingFields();
+    if (missingFields.length) {
+      setAnnouncementTab('event');
+      showAnnouncementAlert('Complete barangay coordination. Missing: ' + missingFields.join(', ') + '.');
+      return;
+    }
+    const responseDeadline = new Date(document.getElementById('eventResponseDeadline').value);
+    const eventStartsAt = new Date(document.getElementById('eventDate').value + 'T' + document.getElementById('eventStartTime').value);
+    if (responseDeadline > eventStartsAt) {
+      setAnnouncementTab('event');
+      showAnnouncementAlert('The response deadline must be before the event starts.');
+      return;
+    }
+  }
+  announcementSaveSucceeded = false;
+  reindexEventRequirements();
   const fd = new FormData(this);
+  syncAnnouncementLocations();
+  fd.set('location', document.getElementById('formProgramLocation').value);
+  fd.set('save_mode', requestedSaveMode);
+  fd.set('id', String(requestedAnnouncementId));
+  const isNewAnnouncement = requestedSaveMode === 'create';
   const btn = this.querySelector('button[type="submit"]');
   const orig = btn.innerHTML;
+  announcementSaveInProgress = true;
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
   btn.disabled = true;
   fetch('staff-announcements-handler.php', { method: 'POST', body: fd })
     .then(res => res.json())
-    .then(data => {
-      if(data.success){ closeModal('announcementModal'); location.reload(); }
-      else alert('Error: ' + data.message);
+    .then(async data => {
+      if(data.success){
+        if (parseInt(data.id, 10) !== requestedAnnouncementId && !isNewAnnouncement) {
+          announcementSaveSucceeded = false;
+          showAnnouncementAlert('The announcement ID returned after saving did not match the record being edited. Facebook was not updated. Please reload and verify the announcement.');
+          return;
+        }
+        closeModal('announcementModal');
+        announcementSaveSucceeded = true;
+        btn.disabled = true;
+        const savedOnFacebookPage = data.facebook_page_id === FACEBOOK_PAGE_ID;
+        const savedFacebookStatus = savedOnFacebookPage ? data.facebook_status : '';
+        const localAnnouncement = DATA.find(function(item){ return item.id === requestedAnnouncementId; });
+        const localFacebookStatus = facebookStatusLabel(localAnnouncement);
+        if (!isNewAnnouncement
+          && document.getElementById('formStatus').value === 'published'
+          && (savedFacebookStatus === 'posted' || localFacebookStatus === 'Posted')) {
+          const shouldUpdateFacebook = await confirmFacebookPostUpdate();
+          if (!shouldUpdateFacebook) {
+            annReloadWithToast('Announcement updated. The Facebook post was left unchanged.');
+            return;
+          }
+          annToast('Announcement saved. Updating the existing Facebook post...');
+          try {
+            const outcome = await requestFacebookAnnouncementAction(parseInt(data.id, 10), 'update', false);
+            if (outcome.ok) {
+              annReloadWithToast('Announcement updated. The existing Facebook post was updated.');
+            } else {
+              annReloadWithToast(
+                'Announcement saved, but the Facebook post could not be updated: '
+                  + (outcome.result.message || 'Please try again.'),
+                true
+              );
+            }
+          } catch (error) {
+            annReloadWithToast('Announcement saved, but the Facebook post update could not be confirmed. Check the Page.', true);
+          }
+          return;
+        }
+        if (!isNewAnnouncement
+          && document.getElementById('formStatus').value === 'published'
+          && (savedFacebookStatus === 'posting' || localFacebookStatus === 'Posting...')) {
+          annReloadWithToast(
+            'Announcement saved. Its Facebook post is still being published; no additional Facebook post was created. Refresh after posting finishes to update the existing post.',
+            false,
+            'Announcement saved'
+          );
+          return;
+        }
+        if (!isNewAnnouncement
+          && document.getElementById('formStatus').value === 'published'
+          && ((savedFacebookStatus === 'failed' && data.facebook_graph_error_code === 'posting_timeout')
+            || (localFacebookStatus === 'Failed'
+              && localAnnouncement.facebook_error_code === 'posting_timeout'))) {
+          annReloadWithToast(
+            'Announcement saved. Facebook may already have received this post, but the system could not confirm it. Check the Page before retrying to avoid a duplicate.',
+            false,
+            'Announcement saved'
+          );
+          return;
+        }
+        if (!isNewAnnouncement
+          && document.getElementById('formStatus').value === 'published'
+          && savedFacebookStatus === 'failed') {
+          annReloadWithToast(
+            'Announcement saved. Its Facebook post had failed earlier; no new Facebook post was sent. Use Retry only after checking the Page.',
+            false,
+            'Announcement saved'
+          );
+          return;
+        }
+        if (!isNewAnnouncement && data.facebook_tracking_warning) {
+          annReloadWithToast(
+            'Announcement saved, but Facebook status could not be checked. No new Facebook post was sent to avoid a duplicate.',
+            false,
+            'Announcement saved'
+          );
+          return;
+        }
+        if (!isNewAnnouncement && document.getElementById('formStatus').value === 'published') {
+          annReloadWithToast(
+            'Announcement saved. Its Facebook status is not confirmed as Posted, so no new Facebook post was created. Check the Facebook status before posting.',
+            false,
+            'Announcement saved'
+          );
+          return;
+        }
+        if (data.facebook_post_pending) {
+          if (!FACEBOOK_POSTING_ENABLED) {
+            const note = data.facebook_tracking_warning
+              ? 'Saved, but the Facebook status could not be recorded. Facebook posting is turned off, so this was not posted.'
+              : 'Facebook posting is turned off, so this was not posted.';
+            annReloadWithToast(note, false, 'Announcement saved');
+            return;
+          }
+          annToast(isNewAnnouncement
+            ? 'Announcement created. Posting to Facebook...'
+            : 'Announcement published. Posting to Facebook...');
+          try {
+            const outcome = await requestFacebookAnnouncementAction(parseInt(data.id, 10), 'post', false);
+            if (outcome.cancelled) {
+              annReloadWithToast('Announcement saved. Check Facebook before retrying.', true);
+              return;
+            }
+            if (outcome.ok) annReloadWithToast((isNewAnnouncement ? 'Announcement created.' : 'Announcement published.') + ' Facebook post published.');
+            else annReloadWithToast('Announcement saved. Facebook post failed. You can retry from the menu.', true);
+          } catch (error) {
+            annReloadWithToast('Announcement saved. Facebook post failed. You can retry from the menu.', true);
+          }
+          return;
+        }
+        if (data.facebook_tracking_warning) {
+          annReloadWithToast('Saved, but the Facebook status could not be recorded.', false, 'Announcement saved');
+          return;
+        }
+        if (data.facebook_opt_out) {
+          annReloadWithToast('Facebook: Skipped.', false, 'Announcement saved');
+          return;
+        }
+        if (data.facebook_posting_mode === 'automatic'
+          && document.getElementById('formStatus').value === 'scheduled') {
+          annReloadWithToast(FACEBOOK_POSTING_ENABLED
+            ? 'Announcement saved. Facebook post will be sent when it is published.'
+            : 'Facebook posting is turned off, so this was not posted.', false, 'Announcement saved');
+          return;
+        }
+        annReloadWithToast(data.message || 'Announcement saved.');
+      }
+      else showAnnouncementAlert(data.message || 'The announcement could not be saved.');
     })
-    .catch(() => alert('Network error'))
-    .finally(() => { btn.innerHTML = orig; btn.disabled = false; });
+    .catch(() => showAnnouncementAlert('A network error prevented the announcement from being saved. Check your connection and try again.'))
+    .finally(() => {
+      if (!announcementSaveSucceeded) {
+        announcementSaveInProgress = false;
+        btn.innerHTML = orig;
+        btn.disabled = false;
+      }
+    });
 });
 
 /* ───────────────────────── Image preview ───────────────────────── */
@@ -1673,6 +3297,20 @@ function executeArchive(){
 }
 
 /* ───────────────────────── Status / duplicate actions ───────────────────────── */
+async function postPendingFacebookAnnouncementAndReload(id){
+  if (!FACEBOOK_POSTING_ENABLED) {
+    annReloadWithToast('Facebook posting is turned off, so this was not posted.', false, 'Announcement published');
+    return;
+  }
+  annToast('Announcement published. Posting to Facebook...');
+  try {
+    const outcome = await requestFacebookAnnouncementAction(id, 'post', false);
+    if (outcome.ok) annReloadWithToast('Announcement published. Facebook post published.');
+    else annReloadWithToast('Announcement published. Facebook post failed. You can retry from the menu.', true);
+  } catch (error) {
+    annReloadWithToast('Announcement published. Facebook post failed. You can retry from the menu.', true);
+  }
+}
 function togglePublish(id){
   const a = DATA.find(x => x.id === id);
   if(!a) return;
@@ -1683,7 +3321,11 @@ function togglePublish(id){
   fd.append('status', next);
   fetch('staff-announcements-handler.php', { method: 'POST', body: fd })
     .then(res => res.json())
-    .then(data => { if(data.success) location.reload(); else alert('Error: ' + data.message); })
+    .then(data => {
+      if (!data.success) { alert('Error: ' + data.message); return; }
+      if (data.facebook_post_pending) postPendingFacebookAnnouncementAndReload(id);
+      else location.reload();
+    })
     .catch(() => alert('Network error'));
 }
 function setPostStatus(id, status, label){
@@ -1693,7 +3335,11 @@ function setPostStatus(id, status, label){
   fd.append('status', status);
   fetch('staff-announcements-handler.php', { method: 'POST', body: fd })
     .then(res => res.json())
-    .then(data => { if(data.success) location.reload(); else alert('Error: ' + data.message); })
+    .then(data => {
+      if (!data.success) { alert('Error: ' + data.message); return; }
+      if (data.facebook_post_pending) postPendingFacebookAnnouncementAndReload(id);
+      else location.reload();
+    })
     .catch(() => alert('Network error'));
 }
 let draftId = 0;
@@ -1740,7 +3386,11 @@ function executePublish(){
     .then(res => res.json())
     .then(data => {
       if(btn) btn.disabled = false;
-      if(data.success){ closeModal('publishModal'); location.reload(); }
+      if(data.success){
+        closeModal('publishModal');
+        if (data.facebook_post_pending) postPendingFacebookAnnouncementAndReload(publishId);
+        else location.reload();
+      }
       else alert('Error: ' + data.message);
     })
     .catch(() => { if(btn) btn.disabled = false; alert('Network error'); });
@@ -1784,8 +3434,8 @@ const ANN_BULK_META = {
   archive: { title: 'Archive Posts', icon: 'fa-archive' }
 };
 
-function annToast(msg, isError){
-  if(typeof portalToast === 'function'){ portalToast(isError ? 'Error' : 'Success', msg); }
+function annToast(msg, isError, title){
+  if(typeof portalToast === 'function'){ portalToast(title || (isError ? 'Error' : 'Success'), msg); }
 }
 
 function annUpdateBulkBar(){
@@ -2193,19 +3843,25 @@ render();
 /* ── Auto-open Create Announcement from Programs page ── */
 (function(){
   var params = new URLSearchParams(window.location.search);
-  if (!params.has('create_from_program')) return;
-  var programPrefill = <?php echo json_encode($programAnnouncementPrefill, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
-  openCreate('announcement');
-  if (programPrefill) {
-    document.getElementById('formTitle').value = programPrefill.name || '';
-    document.getElementById('formProgramLocation').value = programPrefill.location || '';
+  var programId = Number(params.get('create_from_program'));
+  var announcementId = Number(params.get('view_announcement'));
+  if (params.has('create_from_program') || params.has('view_announcement')) {
+    params.delete('create_from_program');
+    params.delete('view_announcement');
+    var cleanSearch = params.toString();
+    var cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + window.location.hash;
+    history.replaceState(null, '', cleanUrl);
   }
-  params.delete('create_from_program');
-  var cleanSearch = params.toString();
-  var cleanUrl = window.location.pathname + (cleanSearch ? '?' + cleanSearch : '') + window.location.hash;
-  history.replaceState(null, '', cleanUrl);
+  if (Number.isInteger(announcementId) && announcementId > 0) {
+    if (DATA.some(function(announcement){ return announcement.id === announcementId; })) {
+      selectPost(announcementId);
+    }
+  } else if (Number.isInteger(programId) && programId > 0) {
+    openCreateAnnouncement({ programId: programId });
+  }
 })();
 </script>
 
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

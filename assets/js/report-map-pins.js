@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var PIN_FOCUS_ZOOM = 18;
 
   function safeMediaUrl(value) {
@@ -64,11 +72,27 @@
   }
 
   function formatWorkflowDate(value) {
-    var normalized = String(value || '').replace(' ', 'T');
+    var normalized = String(value || '').trim().replace(' ', 'T');
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(normalized)) {
+      normalized += '+08:00';
+    }
     var date = normalized ? new Date(normalized) : null;
     return date && !isNaN(date.getTime())
-      ? new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date)
+      ? new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'Asia/Manila'
+      }).format(date)
       : (value || '—');
+  }
+
+  function formatWorkflowText(value) {
+    return String(value || '').replace(/\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b/g, function(timestamp) {
+      return formatWorkflowDate(timestamp);
+    });
   }
 
   function isBarangayTeamAssigned(properties) {
@@ -79,12 +103,6 @@
 
   function isDcvsTakeover(properties) {
     return ['escalated_to_dcvs', 'dcvs_dispatch', 'dcvs_processing'].indexOf(properties.response_state) !== -1;
-  }
-
-  function routeOriginKey(properties, isBarangayMap) {
-    if (isBarangayTeamAssigned(properties)) return 'barangay:' + properties.barangay_id + ':assigned';
-    if (isBarangayMap && !isDcvsTakeover(properties)) return 'barangay:' + properties.barangay_id + ':preview';
-    return 'dcvs';
   }
 
   function reportTypeLabel(type) {
@@ -162,10 +180,6 @@
     var activePinSource = null;
     var pinFeatures = [];
     var pinInteractionsRegistered = false;
-    var activeRouteReportId = null;
-    var activeRouteData = null;
-    var routeRequestToken = 0;
-    var routeStatusElement = null;
     var pinsRefreshTimer = null;
     var pinsRefreshInFlight = false;
     var isStaffGeoMap = /(?:^|\/)dashboard-staff-geo\.php$/i.test(window.location.pathname);
@@ -181,195 +195,47 @@
       drawer = null;
     }
 
-    function clearRoute() {
-      if (!map) return;
-      ['report-route-guide-circles', 'report-route-guides', 'report-route-start-identity', 'report-route-start-point', 'report-route-line'].forEach(function(layerId) {
-        if (map.getLayer(layerId)) map.removeLayer(layerId);
-      });
-      ['report-route-guides', 'report-route-start-point', 'report-route-line'].forEach(function(sourceId) {
-        if (map.getSource(sourceId)) map.removeSource(sourceId);
-      });
-      activeRouteReportId = null;
-      activeRouteData = null;
+    function placeDrawer() {
+      if (!drawer) return;
+      var parent = window.matchMedia('(max-width: 540px)').matches
+        ? document.body
+        : map.getContainer();
+      if (drawer.parentNode !== parent) parent.appendChild(drawer);
     }
 
-    function addRouteToMap(routeData, reportId) {
-      clearRoute();
-      var coordinates = routeData.route.coordinates;
-      var bounds = coordinates.reduce(function(result, coordinate) {
-        result[0][0] = Math.min(result[0][0], coordinate[0]);
-        result[0][1] = Math.min(result[0][1], coordinate[1]);
-        result[1][0] = Math.max(result[1][0], coordinate[0]);
-        result[1][1] = Math.max(result[1][1], coordinate[1]);
-        return result;
-      }, [[Infinity, Infinity], [-Infinity, -Infinity]]);
-      map.addSource('report-route-line', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {},
-          geometry: { type: 'LineString', coordinates: coordinates }
-        }
-      });
-      var routeLineLayer = {
-        id: 'report-route-line',
-        type: 'line',
-        source: 'report-route-line',
-        paint: {
-          'line-color': '#2563eb',
-          'line-width': 5,
-          'line-opacity': 0.9
-        },
-        layout: { 'line-cap': 'round', 'line-join': 'round' }
-      };
-      if (map.getLayer('report-pins-clusters')) {
-        map.addLayer(routeLineLayer, 'report-pins-clusters');
-      } else {
-        map.addLayer(routeLineLayer);
-      }
-
-      var guideFeatures = (routeData.route.steps || [])
-        .filter(function(step) { return step.is_maneuver; })
-        .map(function(step, index) {
-          return {
-            type: 'Feature',
-            properties: { number: String(index + 1), instruction: step.instruction },
-            geometry: { type: 'Point', coordinates: step.coordinates }
-          };
-        });
-      map.addSource('report-route-guides', {
-        type: 'geojson',
-        data: { type: 'FeatureCollection', features: guideFeatures }
-      });
-      map.addLayer({
-        id: 'report-route-guide-circles',
-        type: 'circle',
-        source: 'report-route-guides',
-        paint: {
-          'circle-radius': 10,
-          'circle-color': '#1d4ed8',
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 2
-        }
-      });
-      map.addLayer({
-        id: 'report-route-guides',
-        type: 'symbol',
-        source: 'report-route-guides',
-        layout: {
-          'text-field': ['get', 'number'],
-          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-size': 11,
-          'text-allow-overlap': true
-        },
-        paint: { 'text-color': '#ffffff' }
-      });
-      map.addSource('report-route-start-point', {
-        type: 'geojson',
-        data: {
-          type: 'Feature',
-          properties: {
-            identity: routeData.origin.identity || 'dcvs',
-            initials: routeData.origin.initials || 'DC',
-            display_name: routeData.origin.display_name || routeData.origin.name || 'DCVS Team',
-            assigned: Boolean(routeData.origin.assigned)
-          },
-          geometry: { type: 'Point', coordinates: routeData.origin.coordinates }
-        }
-      });
-      map.addLayer({
-        id: 'report-route-start-point',
-        type: 'circle',
-        source: 'report-route-start-point',
-        paint: {
-          'circle-radius': 16,
-          'circle-color': ['match', ['get', 'identity'], 'barangay', '#15803d', '#1d4ed8'],
-          'circle-stroke-color': '#ffffff',
-          'circle-stroke-width': 3
-        }
-      });
-      map.addLayer({
-        id: 'report-route-start-identity',
-        type: 'symbol',
-        source: 'report-route-start-point',
-        layout: {
-          'text-field': ['get', 'initials'],
-          'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'],
-          'text-size': 10,
-          'text-allow-overlap': true
-        },
-        paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': ['match', ['get', 'identity'], 'barangay', '#15803d', '#1d4ed8'],
-          'text-halo-width': 1
-        }
-      });
-      map.fitBounds(bounds, { padding: 64, maxZoom: 16, duration: 700 });
-      activeRouteData = routeData;
-      activeRouteReportId = reportId;
-    }
-
-    function showRouteStatus(message, isError, includeAttribution) {
-      var container = map.getContainer();
-      if (!routeStatusElement || !routeStatusElement.isConnected) {
-        routeStatusElement = document.createElement('div');
-        routeStatusElement.className = 'dcvs-report-route-notice';
-        routeStatusElement.setAttribute('role', 'status');
-        routeStatusElement.setAttribute('aria-live', 'polite');
-        container.appendChild(routeStatusElement);
-      }
-      routeStatusElement.classList.toggle('is-error', Boolean(isError));
-      routeStatusElement.textContent = message;
-      if (includeAttribution) {
-        routeStatusElement.appendChild(document.createTextNode(' · '));
-        var attribution = document.createElement('a');
-        attribution.href = 'https://www.openstreetmap.org/copyright';
-        attribution.target = '_blank';
-        attribution.rel = 'noopener noreferrer';
-        attribution.textContent = '© OpenStreetMap contributors';
-        routeStatusElement.appendChild(attribution);
-      }
-    }
-
-    function calculateRoute(properties) {
-      var requestToken = ++routeRequestToken;
-      if (mapElement.getAttribute('data-report-route-enabled') !== '1') {
-        showRouteStatus('Route service is unavailable.', true, false);
-        return;
-      }
-
-      showRouteStatus('Calculating route…', false, false);
-      fetch('geo-map/report-route.php?sess=' + encodeURIComponent(sessionName)
-          + '&report_id=' + encodeURIComponent(properties.report_id), {
+    function loadGoogleMapsDirections(reportId, link) {
+      var directionsUrl = appUrl('geo-map/report-directions.php?sess=' + encodeURIComponent(sessionName)
+        + '&report_id=' + encodeURIComponent(reportId));
+      fetch(directionsUrl, {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/json' }
       }).then(function(response) {
         return response.json().then(function(data) {
-          if (!response.ok) throw new Error(data.error || 'Route request failed.');
+          if (!response.ok) throw new Error(data.error || 'Could not prepare directions.');
           return data;
         });
-      }).then(function(routeData) {
-        if (requestToken !== routeRequestToken) return;
-        if (!routeData.route || !Array.isArray(routeData.route.coordinates)
-            || routeData.route.coordinates.length < 2
-            || !Array.isArray(routeData.origin && routeData.origin.coordinates)) {
-          throw new Error('The routing service returned an invalid route.');
+      }).then(function(data) {
+        if (!link.isConnected || Number(link.getAttribute('data-directions-report-id')) !== reportId) return;
+        var target;
+        try {
+          target = new URL(data.directions_url);
+        } catch (error) {
+          throw new Error('Google Maps returned an invalid directions link.');
         }
-        addRouteToMap(routeData, Number(properties.report_id));
-        var originName = routeData.origin.display_name || routeData.origin.name || 'office';
-        var message = routeData.origin.assigned
-          ? 'Assigned route from ' + originName + '.'
-          : (routeData.origin.identity === 'barangay'
-            ? 'Route preview from ' + originName + '; this report is not assigned to the barangay yet.'
-            : 'Route from ' + originName + (routeData.origin.accuracy === 'approximate' ? '; verify the entrance.' : '.'));
-        if (routeData.origin.accuracy === 'approximate') {
-          message = message.replace(/\.$/, '') + ' (approximate coordinates).';
+        if (target.protocol !== 'https:' || target.hostname !== 'www.google.com'
+            || target.pathname !== '/maps/dir/') {
+          throw new Error('Google Maps returned an untrusted directions link.');
         }
-        showRouteStatus(message, false, true);
+        link.href = target.href;
+        link.textContent = 'Get Directions in Google Maps';
+        link.setAttribute('aria-disabled', 'false');
+        link.removeAttribute('title');
       }).catch(function(error) {
-        if (requestToken !== routeRequestToken) return;
-        console.error('Could not calculate report route:', error);
-        showRouteStatus(error.message || 'Could not calculate the route.', true, false);
+        if (!link.isConnected || Number(link.getAttribute('data-directions-report-id')) !== reportId) return;
+        console.error('Could not prepare Google Maps directions:', error);
+        link.textContent = 'Directions unavailable';
+        link.setAttribute('aria-disabled', 'true');
+        link.title = error.message || 'Could not prepare Google Maps directions.';
       });
     }
 
@@ -387,8 +253,6 @@
       if (completeFeature) feature = completeFeature;
 
       closeDrawer();
-      routeRequestToken += 1;
-      clearRoute();
       var properties = feature.properties || {};
       var coordinates = feature.geometry.coordinates.slice();
       var element = document.createElement('section');
@@ -594,6 +458,15 @@
       locationSection.appendChild(locationHeading);
       addInformationRow(locationSection, 'Barangay', properties.barangay);
       addInformationRow(locationSection, 'Exact Location', exactLocation(properties.location, properties.barangay));
+      var directionsLink = document.createElement('a');
+      directionsLink.className = 'dcvs-report-pin-directions';
+      directionsLink.target = '_blank';
+      directionsLink.rel = 'noopener noreferrer';
+      directionsLink.setAttribute('aria-disabled', 'true');
+      directionsLink.setAttribute('data-directions-report-id', String(properties.report_id));
+      directionsLink.textContent = 'Preparing Google Maps directions…';
+      locationSection.appendChild(directionsLink);
+      loadGoogleMapsDirections(Number(properties.report_id), directionsLink);
       body.appendChild(locationSection);
 
       var incidentSection = document.createElement('section');
@@ -641,16 +514,15 @@
 
       element.appendChild(body);
       element.addEventListener('click', function(event) { event.stopPropagation(); });
-      map.getContainer().appendChild(element);
       drawer = element;
+      placeDrawer();
       closeButton.focus();
       map.easeTo({
         center: coordinates,
         zoom: Math.max(map.getZoom(), PIN_FOCUS_ZOOM),
-        offset: [element.offsetWidth / 2, 0],
+        offset: window.matchMedia('(max-width: 540px)').matches ? [0, 0] : [element.offsetWidth / 2, 0],
         duration: 500
       });
-      calculateRoute(properties);
     }
 
     function updateLiveResponseDetails(section, properties) {
@@ -671,12 +543,43 @@
         : (properties.status === 'pending' || properties.status === 'validated'
           ? (sessionName === 'DCVS_BARANGAY_SESSION' ? 'Barangay review · not assigned yet' : 'Awaiting assignment')
           : (isDcvsTakeover(properties) ? 'DCVS Team' : 'DCVS review'));
-      var latest = properties.latest_response_action
-        ? responseActionLabel(properties.latest_response_action)
-          + (properties.latest_response_actor ? ' · ' + properties.latest_response_actor : '')
-          + (properties.latest_response_reason ? ': ' + properties.latest_response_reason : '')
-          + (properties.latest_response_at ? ' · ' + formatWorkflowDate(properties.latest_response_at) : '')
-        : 'No response update recorded';
+      var latest = 'No response updates have been recorded yet.';
+      if (properties.latest_response_action === 'auto_escalate_overdue') {
+        latest = 'The Barangay response deadline was missed, so the case was automatically escalated to DCVS for dispatch'
+          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '')
+          + '.';
+      } else if (properties.latest_response_action === 'turnover_overdue') {
+        latest = 'The animal turnover deadline'
+          + ((properties.turnover_due_at || properties.latest_response_at)
+            ? ' passed on ' + formatWorkflowDate(properties.turnover_due_at || properties.latest_response_at)
+            : ' has passed')
+          + ', and DCVS has not yet acknowledged receiving the animal involved in this '
+          + reportTypeLabel(properties.type).toLowerCase() + ' report.';
+      } else if (properties.latest_response_action === 'confirm_turnover') {
+        latest = 'The animal was turned over to DCVS Dasmariñas'
+          + ((properties.turnover_received_at || properties.latest_response_at)
+            ? ' on ' + formatWorkflowDate(properties.turnover_received_at || properties.latest_response_at)
+            : '') + '.';
+      } else if (properties.latest_response_action) {
+        var actionDescriptions = {
+          accept_barangay_assignment: 'accepted the Barangay assignment',
+          start_response: 'started responding to the report',
+          update_progress: 'updated the response progress',
+          mark_secured: 'secured the animal',
+          resolve_barangay: 'marked the incident as resolved',
+          confirm_turnover: 'completed the animal turnover',
+          unable_to_secure: 'escalated the case to DCVS',
+          unable_to_locate: 'reported that the animal could not be located',
+          staff_decide: 'dispatched the DCVS team'
+        };
+        var actionDescription = actionDescriptions[properties.latest_response_action]
+          || responseActionLabel(properties.latest_response_action).toLowerCase();
+        latest = (properties.latest_response_actor || 'The response team') + ' ' + actionDescription
+          + (properties.latest_response_at ? ' on ' + formatWorkflowDate(properties.latest_response_at) : '')
+          + (properties.latest_response_reason
+            ? ' and noted that ' + formatWorkflowText(properties.latest_response_reason).replace(/\s+/g, ' ').trim()
+            : '') + '.';
+      }
       var values = {
         stage: stage,
         team: team,
@@ -692,8 +595,7 @@
     function refreshPinData() {
       if (!activePinSource || pinsRefreshInFlight || document.hidden) return;
       pinsRefreshInFlight = true;
-      var previousFeatures = pinFeatures;
-      var pinsUrl = 'geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName);
+      var pinsUrl = appUrl('geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName));
       if (requestedReportId !== null) pinsUrl += '&report_id=' + encodeURIComponent(String(requestedReportId));
       fetch(pinsUrl, {
         credentials: 'same-origin',
@@ -723,14 +625,6 @@
                 badge.textContent = responseStageLabel(properties);
               }
               updateLiveResponseDetails(liveSection, properties);
-              var previous = previousFeatures.find(function(feature) {
-                return Number(feature.properties && feature.properties.report_id) === reportId;
-              });
-              if (activeRouteReportId === reportId && previous
-                  && routeOriginKey(previous.properties || {}, sessionName === 'DCVS_BARANGAY_SESSION')
-                    !== routeOriginKey(properties, sessionName === 'DCVS_BARANGAY_SESSION')) {
-                calculateRoute(properties);
-              }
             }
           }
         }
@@ -749,13 +643,9 @@
         return Number(item.properties && item.properties.report_id) === reportId;
       });
       if (!feature) {
-        showRouteStatus(
-          isStaffGeoMap
-            ? 'This report does not have an available pinned location.'
-            : 'This report has no available pinned location in your barangay.',
-          true,
-          false
-        );
+        announcePinLoad(new Error(isStaffGeoMap
+          ? 'This report does not have an available pinned location.'
+          : 'This report has no available pinned location in your barangay.'));
         return;
       }
       openDrawer(feature);
@@ -772,7 +662,7 @@
 
     function enablePinLayers() {
       if (activePinSource) return Promise.resolve();
-      var pinsUrl = 'geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName);
+      var pinsUrl = appUrl('geo-map/report-pins.php?sess=' + encodeURIComponent(sessionName));
       if (requestedReportId !== null) {
         pinsUrl += '&report_id=' + encodeURIComponent(String(requestedReportId));
       }
@@ -880,9 +770,6 @@
     mapElement.addEventListener('mapcn:load', function(event) {
       map = event.detail && event.detail.map;
       if (!map) return;
-      map.on('style.load', function() {
-        if (activeRouteData) addRouteToMap(activeRouteData, activeRouteReportId);
-      });
       mapElement.addEventListener('dcvs:basemapstyleload', function() {
         activePinSource = map.getSource('report-pins');
         if (!activePinSource) enablePinLayers();
@@ -894,6 +781,7 @@
     document.addEventListener('keydown', function(event) {
       if (event.key === 'Escape' && drawer) closeDrawer();
     });
+    window.addEventListener('resize', placeDrawer);
   }
 
   document.querySelectorAll('[data-report-pins-session]').forEach(initializePins);

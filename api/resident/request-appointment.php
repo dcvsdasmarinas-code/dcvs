@@ -61,21 +61,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (empty($preferredDate)) {
         $errors[] = "Preferred date is required.";
+    } elseif (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferredDate)
+        || !checkdate((int)substr($preferredDate, 5, 2), (int)substr($preferredDate, 8, 2), (int)substr($preferredDate, 0, 4))
+        || $preferredDate < date('Y-m-d')) {
+        $errors[] = "Please choose a valid future appointment date.";
     }
     if (empty($preferredTime)) {
         $errors[] = "Preferred time is required.";
     } elseif (!dcvsIsStandardTime($preferredTime)) {
         $errors[] = "Please select one of the available clinic appointment times.";
     }
+    if (empty($errors) && strtotime($preferredDate . ' ' . dcvsTimeKey($preferredTime)) <= time()) {
+        $errors[] = "Please choose an appointment time that has not passed.";
+    }
 
     // Slot capacity check
     if (empty($errors) && !empty($preferredDate) && !empty($preferredTime)) {
         $preferredTime = dcvsTimeKey($preferredTime) . ':00';
+        dcvsLockAppointmentCapacityDates($conn, [$preferredDate]);
+    }
+
+    if (empty($errors) && !empty($preferredDate) && !empty($preferredTime)) {
         $existingStmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.pet_id, a.created_at, a.status, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.notes, p.photo_url AS pet_photo
             FROM appointments a
             LEFT JOIN pets p ON p.pet_id = a.pet_id AND p.owner_id = a.user_id
-            WHERE a.user_id = ? AND a.preferred_date = ? AND a.preferred_time = ?
-              AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
+            WHERE a.user_id = ? AND COALESCE(a.scheduled_date, a.preferred_date) = ?
+              AND COALESCE(a.scheduled_time, a.preferred_time) = ?
+              AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
               AND a.archived_at IS NULL
             ORDER BY a.appointment_id DESC LIMIT 1");
         $existingStmt->bind_param("iss", $_SESSION['user_id'], $preferredDate, $preferredTime);
@@ -84,7 +96,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $existingStmt->close();
 
         if ($existingRequest) {
-            if ((int)$existingRequest['pet_id'] === $petId && $existingRequest['appointment_type'] === $appointmentType && $existingRequest['urgency_level'] === $urgencyLevel) {
+            if ($existingRequest['preferred_date'] === $preferredDate
+                && dcvsTimeKey($existingRequest['preferred_time']) === dcvsTimeKey($preferredTime)
+                && (int)$existingRequest['pet_id'] === $petId
+                && $existingRequest['appointment_type'] === $appointmentType
+                && $existingRequest['urgency_level'] === $urgencyLevel) {
                 requestAppointmentRespond(true, 'Appointment request already received.', $sec, [
                     'appointment_id' => (int)$existingRequest['appointment_id'],
                     'reference_id' => $existingRequest['reference_id'],
@@ -103,6 +119,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (empty($errors)) {
+            $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $preferredDate, $urgencyLevel);
+            if (!$dailyCapacity['has_program'] && $urgencyLevel === 'urgent') {
+                $errors[] = "Appointment priority is only available on dates with a scheduled program.";
+            } elseif (!$dailyCapacity['available']) {
+                $errors[] = $urgencyLevel === 'urgent'
+                    ? "The urgent appointment slots for this program day are full."
+                    : "This date has reached its appointment limit of " . $dailyCapacity['limit'] . ".";
+            }
+        }
+
+        if (empty($errors)) {
             // Check staff-closed slot (weekly template + per-date overrides)
             $weeklyTemplate = dcvsWeeklyTemplate($conn);
             $clinicOpen = $urgencyLevel === 'urgent'
@@ -112,15 +139,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[] = $urgencyLevel === 'urgent'
                     ? "This clinic time is closed. For urgent care, call (046) 432-1234 or visit the DCVS office."
                     : "No routine staff capacity is available for this time.";
-            }
-        }
-        if (empty($errors)) {
-            $dailyLimit = $urgencyLevel === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-            $dailyCount = dcvsAppointmentDayCount($conn, $preferredDate, 0, $urgencyLevel);
-            if ($dailyCount >= $dailyLimit) {
-                $errors[] = $urgencyLevel === 'urgent'
-                    ? "The urgent appointment slots for this day are full. Call (046) 432-1234 or visit the DCVS office for urgent assistance."
-                    : "This date has reached its routine appointment limit of " . DCVS_MAX_APPOINTMENTS_PER_DAY . ".";
             }
         }
         if (empty($errors) && dcvsSlotHeld($conn, $preferredDate, $preferredTime, 0, $urgencyLevel)) {

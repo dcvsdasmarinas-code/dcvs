@@ -29,7 +29,7 @@ $conn->close();
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
-  <link rel="icon" type="image/x-icon" href="favicon.ico" />
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=<?php echo (int)filemtime(__DIR__ . '/../../favicon.ico'); ?>" />
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -189,7 +189,13 @@ $conn->close();
 
     @media (max-width: 480px) {
       body { padding: 1rem; }
-      .auth-form-card { padding: 1.75rem 1.25rem 1.5rem; }
+      .auth-form-card {
+        padding: 0;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+      }
       .form-header h2 { font-size: 1.2rem; }
     }
   </style>

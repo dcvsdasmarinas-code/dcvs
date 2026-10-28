@@ -40,12 +40,90 @@ $roleCheck->close();
 $today = date('Y-m-d');
 $yesterday = date('Y-m-d', strtotime('-1 day'));
 
-// ── Users table ──
-$r = $conn->query("SELECT COUNT(*) AS c FROM users");
-$totalUsersCount = $r->fetch_assoc()['c'];
+// ── Admin overview data ──
+$userStatsResult = $conn->query("
+    SELECT COUNT(*) AS total_users,
+           COALESCE(SUM(status = 'active' AND archived_at IS NULL), 0) AS active_users,
+           COALESCE(SUM(archived_at IS NOT NULL), 0) AS archived_users,
+           COALESCE(SUM(status = 'inactive' AND archived_at IS NULL), 0) AS inactive_users
+    FROM users
+    WHERE deleted_at IS NULL
+");
+if (!$userStatsResult) {
+    throw new RuntimeException('Could not load admin dashboard user statistics: ' . $conn->error);
+}
+$userStats = $userStatsResult->fetch_assoc();
+$totalUsersCount = (int)$userStats['total_users'];
+$activeUsersCount = (int)$userStats['active_users'];
+$archivedUsersCount = (int)$userStats['archived_users'];
+$inactiveUsersCount = (int)$userStats['inactive_users'];
+
+$supportedRoles = [
+    'admin' => ['label' => 'Administrator', 'description' => 'Manage user accounts, roles, and admin settings.', 'color' => '#18864b'],
+    'staff' => ['label' => 'Staff', 'description' => 'Manage veterinary services, appointments, and reports.', 'color' => '#3b82f6'],
+    'barangay' => ['label' => 'Barangay', 'description' => 'Coordinate barangay reports and event preparedness.', 'color' => '#8b5cf6'],
+    'resident' => ['label' => 'Resident', 'description' => 'Use resident services, reports, and adoption features.', 'color' => '#f4b400'],
+];
+$roleCounts = array_fill_keys(array_keys($supportedRoles), 0);
+$roleCountsResult = $conn->query("SELECT role, COUNT(*) AS user_count FROM users WHERE deleted_at IS NULL GROUP BY role");
+if (!$roleCountsResult) {
+    throw new RuntimeException('Could not load admin dashboard role totals: ' . $conn->error);
+}
+while ($roleRow = $roleCountsResult->fetch_assoc()) {
+    if (array_key_exists($roleRow['role'], $roleCounts)) {
+        $roleCounts[$roleRow['role']] = (int)$roleRow['user_count'];
+    }
+}
+
+$growthStart = new DateTimeImmutable('first day of this month');
+$growthStart = $growthStart->modify('-11 months');
+$growthMonths = [];
+for ($monthOffset = 0; $monthOffset < 12; $monthOffset++) {
+    $month = $growthStart->modify('+' . $monthOffset . ' months');
+    $growthMonths[$month->format('Y-m')] = [
+        'label' => $month->format('M Y'),
+        'count' => 0,
+    ];
+}
+$growthStmt = $conn->prepare("SELECT DATE_FORMAT(created_at, '%Y-%m') AS registration_month, COUNT(*) AS user_count FROM users WHERE deleted_at IS NULL AND created_at >= ? GROUP BY registration_month ORDER BY registration_month");
+if (!$growthStmt) {
+    throw new RuntimeException('Could not prepare admin dashboard growth query: ' . $conn->error);
+}
+$growthStartValue = $growthStart->format('Y-m-d 00:00:00');
+$growthStmt->bind_param('s', $growthStartValue);
+if (!$growthStmt->execute()) {
+    $error = $growthStmt->error;
+    $growthStmt->close();
+    throw new RuntimeException('Could not load admin dashboard registration history: ' . $error);
+}
+$growthResult = $growthStmt->get_result();
+while ($growthRow = $growthResult->fetch_assoc()) {
+    if (isset($growthMonths[$growthRow['registration_month']])) {
+        $growthMonths[$growthRow['registration_month']]['count'] = (int)$growthRow['user_count'];
+    }
+}
+$growthStmt->close();
+$growthLabels = array_column(array_values($growthMonths), 'label');
+$growthCounts = array_column(array_values($growthMonths), 'count');
+
+$recentUsersResult = $conn->query("
+    SELECT user_id, full_name, email, role, status, archived_at, created_at, avatar_url
+    FROM users
+    WHERE deleted_at IS NULL
+    ORDER BY created_at DESC, user_id DESC
+    LIMIT 5
+");
+if (!$recentUsersResult) {
+    throw new RuntimeException('Could not load recent users for the admin dashboard: ' . $conn->error);
+}
+$recentUsers = $recentUsersResult->fetch_all(MYSQLI_ASSOC);
+
 $allUsers = [];
-$result = $conn->query("SELECT u.user_id, u.reference_id, u.full_name, u.email, u.role, u.barangay_id, u.status, u.created_at, u.phone, u.address, u.avatar_url, u.username, b.barangay_name FROM users u LEFT JOIN barangays b ON u.barangay_id = b.barangay_id ORDER BY u.created_at DESC");
-while ($row = $result->fetch_assoc()) {
+$allUsersResult = $conn->query("SELECT u.user_id, u.reference_id, u.full_name, u.email, u.role, u.barangay_id, u.status, u.created_at, u.phone, u.address, u.avatar_url, u.username, b.barangay_name FROM users u LEFT JOIN barangays b ON u.barangay_id = b.barangay_id WHERE u.deleted_at IS NULL ORDER BY u.created_at DESC");
+if (!$allUsersResult) {
+    throw new RuntimeException('Could not load admin user records: ' . $conn->error);
+}
+while ($row = $allUsersResult->fetch_assoc()) {
     $allUsers[] = $row;
 }
 
@@ -139,8 +217,8 @@ $adminAddress = $adminData['address'] ?? '';
 $adminAvatar = $adminData['avatar_url'] ?? '';
 $adminCreated = $adminData['created_at'] ?? '';
 $adminEmail = $adminData['email'] ?? $_SESSION['email'] ?? '';
-$pageTitle = 'User Management';
-$activePage = 'users';
+$pageTitle = 'Admin Dashboard';
+$activePage = 'overview';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -155,6 +233,7 @@ $activePage = 'users';
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="assets/css/dashboard.css" />
   <link rel="stylesheet" href="assets/css/responsive.css" />
+  <script src="assets/js/chart.umd.min.js"></script>
   <style>
     body { --topbar-h: 60px; background:#ffffff; }
 
@@ -547,15 +626,66 @@ $activePage = 'users';
   .profile-settings-wrapper .ps-toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:#1f2328; color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s; z-index:9999; }
   .profile-settings-wrapper .ps-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   #settings.content-section { background:#fff; }
+  .admin-overview { --overview-ink:#18181b; --overview-muted:#71717a; --overview-border:#e4e4e7; color:var(--overview-ink); font-family:'Inter','Segoe UI',sans-serif; }
+  .overview-page-heading { display:flex; align-items:center; justify-content:flex-end; gap:16px; margin-bottom:20px; }
+  .overview-page-heading h1 { margin:0; font-size:24px; font-weight:600; letter-spacing:-.025em; color:var(--overview-ink); }
+  .overview-page-heading p { margin:4px 0 0; color:var(--overview-muted); font-size:14px; line-height:1.5; }
+  .overview-primary-link,.overview-view-all { display:inline-flex; align-items:center; justify-content:center; height:36px; padding:0 14px; border:1px solid transparent; border-radius:6px; font-family:inherit; font-size:14px; font-weight:500; text-decoration:none; white-space:nowrap; transition:background-color .15s ease,border-color .15s ease,color .15s ease; }
+  .overview-primary-link { background:#18181b; color:#fff; border-color:#18181b; }
+  .overview-primary-link:hover { background:#27272a; color:#fff; }
+  .overview-view-all { background:#fff; color:#18181b; border-color:#e4e4e7; }
+  .overview-view-all:hover { background:#f4f4f5; color:#18181b; }
+  .overview-primary-link:focus-visible,.overview-view-all:focus-visible { outline:2px solid #18181b; outline-offset:2px; }
+  .overview-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; margin-bottom:16px; }
+  .overview-stat-card,.overview-panel { min-width:0; border:1px solid var(--overview-border); border-radius:0; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.06); }
+  .overview-stat-card { display:flex; align-items:center; justify-content:center; min-height:112px; padding:14px 16px; text-align:center; }
+  .overview-stat-card > div { display:grid; justify-items:center; gap:3px; min-width:0; }
+  .overview-stat-label { color:var(--overview-ink); font-size:13px; font-weight:500; letter-spacing:.015em; text-transform:uppercase; }
+  .overview-stat-card strong { color:var(--overview-ink); font-size:28px; line-height:1.15; font-weight:500; }
+  .overview-stat-note { color:var(--overview-muted); font-size:14px; line-height:1.4; }
+  .overview-panels { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:14px; }
+  .overview-panel { overflow:hidden; }
+  .overview-panel-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:62px; padding:14px 16px; }
+  .overview-panel-header h2 { margin:0; color:var(--overview-ink); font-size:16px; font-weight:600; letter-spacing:-.01em; }
+  .overview-panel-header p { margin:3px 0 0; color:var(--overview-muted); font-size:13px; line-height:1.4; }
+  .overview-select-wrap select { min-height:36px; padding:0 28px 0 12px; border:1px solid var(--overview-border); border-radius:6px; color:var(--overview-ink); background:#fff; font:500 14px 'Inter','Segoe UI',sans-serif; }
+  .overview-select-wrap select:focus-visible { outline:2px solid #18181b; outline-offset:2px; }
+  .overview-chart-area { height:235px; padding:0 16px 14px; }
+  .overview-role-chart-layout { display:grid; grid-template-columns:minmax(140px,.8fr) minmax(180px,1.2fr); align-items:center; gap:14px; padding:0 18px 18px; }
+  .overview-doughnut-wrap { position:relative; width:min(100%,180px); height:180px; justify-self:center; }
+  .overview-doughnut-wrap canvas { width:100%!important; height:100%!important; }
+  .overview-doughnut-total { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; }
+  .overview-doughnut-total strong { color:var(--overview-ink); font-size:23px; font-weight:600; }
+  .overview-doughnut-total span { color:var(--overview-muted); font-size:12px; }
+  .overview-role-legend { margin:0; padding:0; list-style:none; }
+  .overview-role-legend li { display:grid; grid-template-columns:minmax(0,1fr) 32px 46px; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--overview-border); font-size:13px; }
+  .overview-role-legend li:last-child { border-bottom:0; }
+  .overview-legend-label { display:flex; align-items:center; gap:8px; color:var(--overview-ink); }
+  .overview-legend-label .overview-legend-dot { width:9px; height:9px; flex:0 0 auto; border-radius:50%; background:var(--role-color); }
+  .overview-role-legend li > strong { text-align:right; color:var(--overview-ink); font-weight:500; }
+  .overview-role-legend li > span:last-child { text-align:right; color:var(--overview-muted); }
+  .overview-table-wrap { overflow-x:auto; border-top:1px solid var(--overview-border); }
+  .overview-table { width:100%; border-collapse:collapse; text-align:left; }
+  .overview-table th { padding:10px 12px; color:var(--overview-muted); background:#fafafa; font-size:13px; font-weight:500; white-space:nowrap; }
+  .overview-table td { padding:10px 12px; border-top:1px solid var(--overview-border); color:var(--overview-ink); font-size:14px; }
+  .overview-user-cell { display:flex; align-items:center; gap:9px; min-width:160px; }
+  .overview-user-cell > span:last-child { display:grid; min-width:0; }
+  .overview-user-cell strong { overflow:hidden; color:var(--overview-ink); font-size:14px; font-weight:500; text-overflow:ellipsis; white-space:nowrap; }
+  .overview-user-cell small { overflow:hidden; max-width:190px; color:var(--overview-muted); font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+  .overview-avatar { display:grid; place-items:center; width:30px; height:30px; flex:0 0 auto; border-radius:50%; object-fit:cover; background:#f4f4f5; color:#52525b; font-size:11px; font-weight:600; }
+  .overview-avatar-fallback { display:inline-grid; }
+  .overview-status { display:inline-flex; padding:3px 8px; border:1px solid #bbf7d0; border-radius:6px; background:#f0fdf4; color:#166534; font-size:12px; font-weight:500; }
+  .overview-status.inactive { border-color:#e4e4e7; background:#f4f4f5; color:#52525b; }
+  .overview-status.archived { border-color:#e4e4e7; background:#f4f4f5; color:#52525b; }
+  .overview-role-name { white-space:nowrap; }
+  .overview-role-table td:last-child { min-width:180px; line-height:1.4; }
+  .overview-empty { padding:24px!important; color:var(--overview-muted)!important; text-align:center; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  @media(max-width:1050px) { .overview-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .overview-panels { grid-template-columns:1fr; } }
+  @media(max-width:600px) { .overview-page-heading { align-items:flex-end; flex-direction:column; } .overview-stats { grid-template-columns:1fr 1fr; gap:9px; } .overview-stat-card { min-height:102px; padding:12px 10px; } .overview-stat-card strong { font-size:24px; } .overview-stat-note { font-size:12px; } .overview-role-chart-layout { grid-template-columns:1fr; } .overview-doughnut-wrap { width:165px; height:165px; } }
+  @media(max-width:390px) { .overview-stats { grid-template-columns:1fr; } }
   </style>
-  <script>
-    (function() {
-      var target = window.location.hash.replace('#', '') || localStorage.getItem('adminActiveSection') || 'users';
-      if (target !== 'activity' && target !== 'settings') {
-        window.location.replace('role-management.php');
-      }
-    })();
-  </script>
+  <link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
 </head>
 <body>
 
@@ -563,19 +693,136 @@ $activePage = 'users';
 
 <main class="main-content">
 
-  <section id="users" class="content-section active">
+  <section id="overview" class="content-section active">
+    <div class="admin-overview">
+      <div class="overview-page-heading">
+        <a class="overview-primary-link" href="role-management.php">Manage users</a>
+      </div>
+
+      <div class="overview-stats">
+        <article class="overview-stat-card">
+          <div><span class="overview-stat-label">Total Users</span><strong><?php echo number_format($totalUsersCount); ?></strong><span class="overview-stat-note">Non-deleted accounts</span></div>
+        </article>
+        <article class="overview-stat-card">
+          <div><span class="overview-stat-label">Active Users</span><strong><?php echo number_format($activeUsersCount); ?></strong><span class="overview-stat-note"><?php echo $totalUsersCount > 0 ? number_format(($activeUsersCount / $totalUsersCount) * 100, 1) . '% of total users' : 'No user accounts yet'; ?></span></div>
+        </article>
+        <article class="overview-stat-card">
+          <div><span class="overview-stat-label">Roles</span><strong><?php echo count($supportedRoles); ?></strong><span class="overview-stat-note">Supported portal roles</span></div>
+        </article>
+        <article class="overview-stat-card">
+          <div><span class="overview-stat-label">Archived Users</span><strong><?php echo number_format($archivedUsersCount); ?></strong><span class="overview-stat-note"><?php echo number_format($inactiveUsersCount); ?> inactive · archived accounts can be restored</span></div>
+        </article>
+      </div>
+
+      <div class="overview-panels">
+        <article class="overview-panel">
+          <header class="overview-panel-header">
+            <div><h2>User Growth</h2><p>Registered accounts by month</p></div>
+            <label class="overview-select-wrap"><span class="sr-only">Chart range</span>
+              <select id="userGrowthRange" aria-label="User growth chart range">
+                <option value="6">Last 6 months</option>
+                <option value="10" selected>Last 10 months</option>
+                <option value="12">Last 12 months</option>
+              </select>
+            </label>
+          </header>
+          <div class="overview-chart-area"><canvas id="userGrowthChart" role="img" aria-label="Registered users by month"></canvas></div>
+        </article>
+
+        <article class="overview-panel">
+          <header class="overview-panel-header">
+            <div><h2>Users by Role</h2><p>Current account distribution</p></div>
+          </header>
+          <div class="overview-role-chart-layout">
+            <div class="overview-doughnut-wrap"><canvas id="usersByRoleChart" role="img" aria-label="Users by role"></canvas><div class="overview-doughnut-total"><strong><?php echo number_format($totalUsersCount); ?></strong><span>Total Users</span></div></div>
+            <ul class="overview-role-legend">
+              <?php foreach ($supportedRoles as $roleKey => $roleInfo): ?>
+                <?php $rolePercent = $totalUsersCount > 0 ? ($roleCounts[$roleKey] / $totalUsersCount) * 100 : 0; ?>
+                <li><span class="overview-legend-label"><span class="overview-legend-dot" style="--role-color:<?php echo htmlspecialchars($roleInfo['color'], ENT_QUOTES, 'UTF-8'); ?>" aria-hidden="true"></span><?php echo htmlspecialchars($roleInfo['label'], ENT_QUOTES, 'UTF-8'); ?></span><strong><?php echo number_format($roleCounts[$roleKey]); ?></strong><span><?php echo number_format($rolePercent, 1); ?>%</span></li>
+              <?php endforeach; ?>
+            </ul>
+          </div>
+        </article>
+      </div>
+
+      <div class="overview-panels">
+        <article class="overview-panel">
+          <header class="overview-panel-header">
+            <h2>Recent Users</h2>
+            <a class="overview-view-all" href="role-management.php">View all</a>
+          </header>
+          <div class="overview-table-wrap">
+            <table class="overview-table">
+              <thead><tr><th>Name</th><th>Role</th><th>Status</th><th>Date Added</th></tr></thead>
+              <tbody>
+                <?php foreach ($recentUsers as $user): ?>
+                  <?php
+                    $roleInfo = $supportedRoles[$user['role']] ?? ['label' => ucfirst((string)$user['role'])];
+                    $initials = '';
+                    foreach (preg_split('/\s+/', trim((string)$user['full_name']), -1, PREG_SPLIT_NO_EMPTY) as $namePart) {
+                        $initials .= strtoupper(substr($namePart, 0, 1));
+                        if (strlen($initials) >= 2) break;
+                    }
+                    $rowStatus = !empty($user['archived_at']) ? 'Archived' : ucfirst((string)$user['status']);
+                    $statusClass = !empty($user['archived_at']) ? 'archived' : (string)$user['status'];
+                  ?>
+                  <tr>
+                    <td><div class="overview-user-cell">
+                      <?php if (!empty($user['avatar_url'])): ?><img src="<?php echo htmlspecialchars($user['avatar_url'], ENT_QUOTES, 'UTF-8'); ?>" alt="" class="overview-avatar">
+                      <?php else: ?><span class="overview-avatar overview-avatar-fallback"><?php echo htmlspecialchars($initials ?: '?', ENT_QUOTES, 'UTF-8'); ?></span><?php endif; ?>
+                      <span><strong><?php echo htmlspecialchars($user['full_name'], ENT_QUOTES, 'UTF-8'); ?></strong><small><?php echo htmlspecialchars($user['email'], ENT_QUOTES, 'UTF-8'); ?></small></span>
+                    </div></td>
+                    <td><?php echo htmlspecialchars($roleInfo['label'], ENT_QUOTES, 'UTF-8'); ?></td>
+                    <td><span class="overview-status <?php echo htmlspecialchars($statusClass, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($rowStatus, ENT_QUOTES, 'UTF-8'); ?></span></td>
+                    <td><?php echo htmlspecialchars(date('M d, Y', strtotime((string)$user['created_at'])), ENT_QUOTES, 'UTF-8'); ?></td>
+                  </tr>
+                <?php endforeach; ?>
+                <?php if (!$recentUsers): ?><tr><td colspan="4" class="overview-empty">No user accounts to display yet.</td></tr><?php endif; ?>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="overview-panel">
+          <header class="overview-panel-header">
+            <div><h2>Roles &amp; Access</h2><p>Portal roles supported by the system</p></div>
+            <a class="overview-view-all" href="role-management.php">Manage</a>
+          </header>
+          <div class="overview-table-wrap">
+            <table class="overview-table overview-role-table">
+              <thead><tr><th>Role Name</th><th>Users</th><th>Access Summary</th></tr></thead>
+              <tbody>
+                <?php foreach ($supportedRoles as $roleKey => $roleInfo): ?>
+                  <tr>
+                    <td><span class="overview-role-name"><?php echo htmlspecialchars($roleInfo['label'], ENT_QUOTES, 'UTF-8'); ?></span></td>
+                    <td><?php echo number_format($roleCounts[$roleKey]); ?></td>
+                    <td><?php echo htmlspecialchars($roleInfo['description'], ENT_QUOTES, 'UTF-8'); ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="users" class="content-section" style="display:none;">
     <div class="page-header" style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
       <a href="role-management.php" class="btn-primary" style="padding:8px 18px;font-size:0.8rem;">
         <i class="fas fa-cog"></i> Full Role Management
       </a>
     </div>
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="adminUserSearch" class="appt-search-input" placeholder="Search by name, email, or role...">
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select id="adminRoleFilter" class="appt-status-select">
           <option value="all">All Roles</option>
           <option value="admin">Admin</option>
@@ -588,6 +835,7 @@ $activePage = 'users';
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
         </select>
+        </div>
       </div>
     </div>
 
@@ -636,12 +884,15 @@ $activePage = 'users';
 
   <!-- ── ACTIVITY LOGS ── -->
   <section id="activity" class="content-section" style="display:none;">
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="adminActSearch" class="appt-search-input" placeholder="Search activity, user, or details..." value="<?php echo htmlspecialchars($actSearch); ?>">
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select class="appt-status-select" id="actActionFilter">
           <option value="">All Actions</option>
           <option value="Login" <?php echo $actAction==='Login'?'selected':''; ?>>Login</option>
@@ -672,7 +923,7 @@ $activePage = 'users';
           <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
-        <div style="position:relative;display:inline-block;">
+        <div class="portal-toolbar-icon-filter" style="position:relative;display:inline-block;">
           <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -696,7 +947,10 @@ $activePage = 'users';
           </div>
         </div>
         <input type="hidden" id="actDateFilterHidden" value="<?php echo htmlspecialchars($actDateFrom ?: $actDateTo); ?>">
-        <button class="pet-action-btn" id="actClearBtn" style="display:<?php echo ($actSearch||$actAction||$actUser||$actSource||$actDateFrom||$actDateTo)?'inline-flex':'none'; ?>;" onclick="clearActFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+        </div>
+        <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+          <button class="pet-action-btn portal-toolbar-secondary" id="actClearBtn" style="display:<?php echo ($actSearch||$actAction||$actUser||$actSource||$actDateFrom||$actDateTo)?'inline-flex':'none'; ?>;" onclick="clearActFilters()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+        </div>
       </div>
     </div>
 
@@ -782,6 +1036,7 @@ $activePage = 'users';
                 <i class="fas fa-camera"></i> <span>Change Profile</span>
               </div>
             </div>
+            </div>
           </div>
           <div>
             <div class="ps-profile-name"><?php echo htmlspecialchars($fullName); ?></div>
@@ -844,25 +1099,27 @@ $activePage = 'users';
 
 <script>
 (function() {
-  var target = window.location.hash.replace('#', '') || localStorage.getItem('adminActiveSection') || 'users';
+  var target = window.location.hash.replace('#', '') || localStorage.getItem('adminActiveSection') || 'overview';
+  if (target === 'users') target = 'overview';
+  if (['overview', 'activity', 'settings'].indexOf(target) === -1) target = 'overview';
   if (target && document.getElementById(target)) {
     document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
     document.getElementById(target).style.display = 'block';
-    var labels = {users:'User Management',activity:'Activity Logs',settings:'Settings'};
+    var labels = {overview:'Admin Dashboard',activity:'Activity Logs',settings:'Settings'};
     var bc = document.getElementById('breadcrumbCurrent');
     if (bc) bc.textContent = labels[target] || target;
   } else {
-    document.getElementById('users').style.display = 'block';
+    document.getElementById('overview').style.display = 'block';
   }
 })();
 
-var currentSection = 'users';
+var currentSection = 'overview';
 
 function switchSection(id) {
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   var target = document.getElementById(id);
   if (target) target.style.display = 'block';
-  var labels = {users:'User Management',activity:'Activity Logs',settings:'Settings'};
+  var labels = {overview:'Admin Dashboard',activity:'Activity Logs',settings:'Settings'};
   var bc = document.getElementById('breadcrumbCurrent');
   if (bc) bc.textContent = labels[id] || id;
   document.body.classList.add('white-page');
@@ -1296,6 +1553,55 @@ function confirmRemoveAvatar() {
         window.location.href = 'remove-photo.php';
     }
 }
+</script>
+
+<script>
+(function() {
+  var growthCanvas = document.getElementById('userGrowthChart');
+  var rolesCanvas = document.getElementById('usersByRoleChart');
+  if (!window.Chart || !growthCanvas || !rolesCanvas) return;
+
+  var growthLabels = <?php echo json_encode($growthLabels, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var growthValues = <?php echo json_encode($growthCounts, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var roleLabels = <?php echo json_encode(array_column($supportedRoles, 'label'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var roleValues = <?php echo json_encode(array_values($roleCounts), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var roleColors = <?php echo json_encode(array_column($supportedRoles, 'color'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var growthChart = new Chart(growthCanvas, {
+    type: 'bar',
+    data: {
+      labels: growthLabels.slice(-10),
+      datasets: [{ data: growthValues.slice(-10), backgroundColor: '#2d8b57', borderRadius: 4, maxBarThickness: 34 }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { displayColors: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#64748b', maxRotation: 0 } },
+        y: { beginAtZero: true, ticks: { precision: 0, color: '#64748b' }, grid: { color: '#edf0f2' } }
+      }
+    }
+  });
+  new Chart(rolesCanvas, {
+    type: 'doughnut',
+    data: { labels: roleLabels, datasets: [{ data: roleValues, backgroundColor: roleColors, borderColor: '#fff', borderWidth: 2, hoverOffset: 4 }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '68%',
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) { return ' ' + context.label + ': ' + context.formattedValue; } } } }
+    }
+  });
+  var rangeSelect = document.getElementById('userGrowthRange');
+  if (rangeSelect) {
+    rangeSelect.addEventListener('change', function() {
+      var range = Math.max(1, Math.min(12, Number(rangeSelect.value) || 10));
+      growthChart.data.labels = growthLabels.slice(-range);
+      growthChart.data.datasets[0].data = growthValues.slice(-range);
+      growthChart.update();
+    });
+  }
+})();
 </script>
 
 <!-- Profile Photo Modal -->

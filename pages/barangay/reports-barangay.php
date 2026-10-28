@@ -9,7 +9,9 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['barangay_id']) || ($_SESSI
 
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../env.php';
+require_once __DIR__ . '/../../includes/barangay-app-base.php';
 loadDcvsEnv();
+$appBaseUrl = dcvsBarangayAppBaseUrl();
 $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 $responseTargetHours = max(1, (int)env('DCVS_RESPONSE_TARGET_HOURS', '24'));
 $progressTargetHours = max(1, (int)env('DCVS_PROGRESS_TARGET_HOURS', '48'));
@@ -40,6 +42,33 @@ $statusLabels = [
 ];
 
 $reports = [];
+function dcvsBarangayReportMediaUrl($url) {
+    global $appBaseUrl;
+    $url = trim((string)$url);
+    if ($url === '' || preg_match('~^(?:[a-z][a-z0-9+.-]*:|//)~i', $url)) {
+        return $url;
+    }
+    $path = preg_replace('~^(?:/|\.{1,2}/)+~', '', $url);
+    if ($appBaseUrl !== '' && ($url === $appBaseUrl || strpos($url, $appBaseUrl . '/') === 0)) {
+        return $url;
+    }
+    return $appBaseUrl . '/' . $path;
+}
+
+$turnoverColumns = [];
+$turnoverColumnsQuery = $conn->query("SHOW COLUMNS FROM report_turnover_tasks");
+if ($turnoverColumnsQuery) {
+    while ($column = $turnoverColumnsQuery->fetch_assoc()) {
+        $turnoverColumns[$column['Field']] = true;
+    }
+    $turnoverColumnsQuery->close();
+} else {
+    error_log('Could not inspect turnover task fields for Barangay reports: ' . $conn->error);
+}
+$turnoverColumn = static function (string $column, string $alias, string $fallback = 'NULL') use (&$turnoverColumns): string {
+    return isset($turnoverColumns[$column]) ? 'tt.' . $column . ' AS ' . $alias : $fallback . ' AS ' . $alias;
+};
+
 $rq = $conn->prepare("
     SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior,
            r.barangay_validation_status, r.urgency_level, r.status,
@@ -49,7 +78,15 @@ $rq = $conn->prepare("
            rw.response_deadline, rw.progress_deadline, rw.last_progress_at, rw.turnover_deadline,
            rw.holding_location, rw.animal_condition, rw.secured_at,
            rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at,
-           tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at,
+           tt.status AS turnover_status, tt.due_at AS turnover_due_at,
+           " . $turnoverColumn('handover_method', 'turnover_method') . ",
+           " . $turnoverColumn('planned_at', 'turnover_planned_at') . ",
+           " . $turnoverColumn('handler_name', 'turnover_handler_name') . ",
+           " . $turnoverColumn('contact_number', 'turnover_contact_number') . ",
+           " . $turnoverColumn('pickup_location', 'turnover_pickup_location') . ",
+           " . $turnoverColumn('safe_transport', 'turnover_safe_transport', '0') . ",
+           tt.received_at AS turnover_received_at,
+           turnover_receiver.full_name AS turnover_receiver,
            u.full_name AS reporter_name, u.avatar_url AS reporter_avatar,
            u.reference_id AS reporter_ref, u.phone AS reporter_phone, u.email AS reporter_email,
            v.full_name AS validator_name
@@ -60,9 +97,14 @@ $rq = $conn->prepare("
     LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
     LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
     LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
+    LEFT JOIN users turnover_receiver ON turnover_receiver.user_id = tt.received_by
     WHERE r.barangay_id = ? AND r.archived_at IS NULL
     ORDER BY r.created_at DESC
 ");
+if (!$rq) {
+    error_log('Could not prepare Barangay reports query: ' . $conn->error);
+    throw new RuntimeException('Could not load Barangay reports. Please verify the report workflow database migrations.');
+}
 $rq->bind_param('i', $barangayId);
 $rq->execute();
 $rResult = $rq->get_result();
@@ -80,13 +122,13 @@ while ($rRow = $rResult->fetch_assoc()) {
         'animalBehavior'=> (string)($rRow['animal_behavior'] ?? ''),
         'location'      => $rRow['location_address'],
         'description'   => $rRow['description'],
-        'photo'         => $rRow['photo_url'] ?: '',
-        'video'         => $rRow['video_url'] ?: '',
+        'photo'         => dcvsBarangayReportMediaUrl($rRow['photo_url'] ?: ''),
+        'video'         => dcvsBarangayReportMediaUrl($rRow['video_url'] ?: ''),
         'rejection'     => $rRow['rejection_reason'] ?: '',
         'barangay_notes'=> $rRow['barangay_notes'] ?: '',
         'dcvsNotes'     => (string)($rRow['dcvs_notes'] ?? ''),
         'reporter'      => $rRow['reporter_name'],
-        'avatar'        => $rRow['reporter_avatar'] ?: '',
+        'avatar'        => dcvsBarangayReportMediaUrl($rRow['reporter_avatar'] ?: ''),
         'reporterRef'   => $rRow['reporter_ref'] ?: '',
         'phone'         => (string)($rRow['reporter_phone'] ?? ''),
         'email'         => (string)($rRow['reporter_email'] ?? ''),
@@ -97,13 +139,18 @@ while ($rRow = $rResult->fetch_assoc()) {
         'urgency'       => $rRow['urgency_level'],
         'fieldStatus'   => (string)($rRow['barangay_validation_status'] ?? ''),
         'status'        => ($rRow['response_state'] ?? '') === 'barangay_response_approved'
-            ? (($rRow['barangay_validation_status'] ?? '') === 'site_visit_pending'
-                ? 'Accepted by Barangay · Site visit pending'
-                : 'Accepted by Barangay')
-            : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status'])),
+            ? 'Accepted by Barangay'
+            : (($rRow['response_state'] ?? '') === 'barangay_responding' && $rRow['status'] === 'validated'
+                ? 'Barangay Responding'
+                : ((($rRow['response_state'] ?? '') === 'escalated_to_dcvs')
+                    ? 'Escalated to DCVS'
+                    : ((($rRow['response_state'] ?? '') === 'unable_to_locate')
+                        ? 'Unable to Locate'
+                        : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status']))))),
         'assignedTo'    => $rRow['validator_name'] ?: 'Unassigned',
         'dateResolved'  => $rRow['resolved_at'] ? date('M j, Y g:i A', strtotime($rRow['resolved_at'])) : '-',
         '_created_at'   => $rRow['created_at'],
+        '_resolved_at' => (string)($rRow['resolved_at'] ?: ($rRow['response_resolved_at'] ?? '')),
         '_incident_at'  => $reportedAt,
         '_validated_at' => $rRow['validated_at'],
         '_confirmed_at' => $rRow['confirmed_at'],
@@ -124,15 +171,119 @@ while ($rRow = $rResult->fetch_assoc()) {
         'responseResolvedAt' => (string)($rRow['response_resolved_at'] ?? ''),
         'turnoverStatus' => (string)($rRow['turnover_status'] ?? ''),
         'turnoverDueAt' => (string)($rRow['turnover_due_at'] ?? ''),
+        'turnoverDueAtDisplay' => !empty($rRow['turnover_due_at']) ? date('M j, Y g:i A', strtotime($rRow['turnover_due_at'])) : '',
+        'turnoverMethod' => (string)($rRow['turnover_method'] ?? ''),
+        'turnoverPlannedAt' => !empty($rRow['turnover_planned_at']) ? date('M d, Y h:i A', strtotime($rRow['turnover_planned_at'])) : '',
+        'turnoverPlannedAtRaw' => (string)($rRow['turnover_planned_at'] ?? ''),
+        'turnoverHandlerName' => (string)($rRow['turnover_handler_name'] ?? ''),
+        'turnoverContactNumber' => (string)($rRow['turnover_contact_number'] ?? ''),
+        'turnoverPickupLocation' => (string)($rRow['turnover_pickup_location'] ?? ''),
+        'turnoverSafeTransport' => (bool)($rRow['turnover_safe_transport'] ?? false),
         'turnoverReceivedAt' => (string)($rRow['turnover_received_at'] ?? ''),
+        'turnoverReceivedAtDisplay' => !empty($rRow['turnover_received_at']) ? date('M j, Y g:i A', strtotime($rRow['turnover_received_at'])) : '',
+        'turnoverReceiver' => (string)($rRow['turnover_receiver'] ?? ''),
     ];
 }
 $rq->close();
 
+$reportStatusMetrics = [
+    'pending' => ['total' => 0, 'recent' => 0, 'previous' => 0],
+    'validated' => ['total' => 0, 'recent' => 0, 'previous' => 0],
+    'inProgress' => ['total' => 0, 'recent' => 0, 'previous' => 0],
+    'resolved' => ['total' => 0, 'recent' => 0, 'previous' => 0],
+];
+$pendingPriorityMetrics = ['total' => 0, 'recent' => 0, 'previous' => 0];
+$pendingMonthMetrics = ['current' => 0, 'previous' => 0];
+$resolvedMonthMetrics = ['current' => 0, 'previous' => 0, 'prior' => 0];
+$now = new DateTimeImmutable();
+$currentMonthStart = $now->modify('first day of this month')->setTime(0, 0);
+$previousMonthStart = $currentMonthStart->modify('-1 month');
+$priorMonthStart = $previousMonthStart->modify('-1 month');
+$recentPeriodStart = $now->modify('-30 days')->getTimestamp();
+$previousPeriodStart = $now->modify('-60 days')->getTimestamp();
+foreach ($reports as $report) {
+    $status = (string)$report['_db_status'];
+    $metricKey = in_array($status, ['confirmed', 'scheduled'], true) ? 'inProgress' : $status;
+    $createdAt = strtotime((string)$report['_created_at']);
+    if (isset($reportStatusMetrics[$metricKey])) {
+        $reportStatusMetrics[$metricKey]['total']++;
+        if ($metricKey !== 'resolved' && $createdAt !== false && $createdAt >= $recentPeriodStart) {
+            $reportStatusMetrics[$metricKey]['recent']++;
+        } elseif ($metricKey !== 'resolved' && $createdAt !== false && $createdAt >= $previousPeriodStart) {
+            $reportStatusMetrics[$metricKey]['previous']++;
+        }
+    }
+    if ($status === 'pending') {
+        $isHighPriority = in_array(strtolower((string)$report['urgency']), ['high', 'critical'], true);
+        if ($isHighPriority) {
+            $pendingPriorityMetrics['total']++;
+            if ($createdAt !== false && $createdAt >= $recentPeriodStart) {
+                $pendingPriorityMetrics['recent']++;
+            } elseif ($createdAt !== false && $createdAt >= $previousPeriodStart) {
+                $pendingPriorityMetrics['previous']++;
+            }
+        }
+        if ($createdAt !== false) {
+            $createdDate = (new DateTimeImmutable())->setTimestamp($createdAt);
+            if ($createdDate >= $currentMonthStart) {
+                $pendingMonthMetrics['current']++;
+            } elseif ($createdDate >= $previousMonthStart) {
+                $pendingMonthMetrics['previous']++;
+            }
+        }
+    }
+    if ($status === 'resolved' && !empty($report['_resolved_at'])) {
+        $resolvedAt = strtotime($report['_resolved_at']);
+        if ($resolvedAt !== false) {
+            if ($resolvedAt >= $recentPeriodStart) {
+                $reportStatusMetrics['resolved']['recent']++;
+            } elseif ($resolvedAt >= $previousPeriodStart) {
+                $reportStatusMetrics['resolved']['previous']++;
+            }
+            $resolvedDate = (new DateTimeImmutable())->setTimestamp($resolvedAt);
+            if ($resolvedDate >= $currentMonthStart) {
+                $resolvedMonthMetrics['current']++;
+            } elseif ($resolvedDate >= $previousMonthStart) {
+                $resolvedMonthMetrics['previous']++;
+            } elseif ($resolvedDate >= $priorMonthStart) {
+                $resolvedMonthMetrics['prior']++;
+            }
+        }
+    }
+}
+$makeTrendText = static function (int $current, int $previous, string $period = 'last month'): string {
+    $percentage = $previous > 0
+        ? (int)round(($current - $previous) / $previous * 100)
+        : ($current > 0 ? 100 : 0);
+    $direction = $current >= $previous ? '↑' : '↓';
+    return $direction . ' ' . $percentage . '% vs ' . $period;
+};
+$reportKpiPage = (string)($_GET['status'] ?? '');
+if ($reportKpiPage === 'pending') {
+    $reportKpiCards = [
+        ['label' => 'Pending Barangay Review', 'value' => $reportStatusMetrics['pending']['total'], 'note' => $makeTrendText($reportStatusMetrics['pending']['recent'], $reportStatusMetrics['pending']['previous'])],
+        ['label' => 'High Priority', 'value' => $pendingPriorityMetrics['total'], 'note' => $makeTrendText($pendingPriorityMetrics['recent'], $pendingPriorityMetrics['previous'])],
+        ['label' => 'New This Month', 'value' => $pendingMonthMetrics['current'], 'note' => $makeTrendText($pendingMonthMetrics['current'], $pendingMonthMetrics['previous'])],
+    ];
+} elseif ($reportKpiPage === 'resolved') {
+    $reportKpiCards = [
+        ['label' => 'Resolved Cases', 'value' => $reportStatusMetrics['resolved']['total'], 'note' => $makeTrendText($reportStatusMetrics['resolved']['recent'], $reportStatusMetrics['resolved']['previous'])],
+        ['label' => 'Resolved This Month', 'value' => $resolvedMonthMetrics['current'], 'note' => $makeTrendText($resolvedMonthMetrics['current'], $resolvedMonthMetrics['previous'])],
+        ['label' => 'Resolved Last Month', 'value' => $resolvedMonthMetrics['previous'], 'note' => $makeTrendText($resolvedMonthMetrics['previous'], $resolvedMonthMetrics['prior'])],
+    ];
+} else {
+    $reportKpiCards = [
+        ['label' => 'Pending Barangay Review', 'value' => $reportStatusMetrics['pending']['total'], 'note' => $makeTrendText($reportStatusMetrics['pending']['recent'], $reportStatusMetrics['pending']['previous'])],
+        ['label' => 'Pending DCVS Review', 'value' => $reportStatusMetrics['validated']['total'], 'note' => $makeTrendText($reportStatusMetrics['validated']['recent'], $reportStatusMetrics['validated']['previous'])],
+        ['label' => 'In Progress', 'value' => $reportStatusMetrics['inProgress']['total'], 'note' => $makeTrendText($reportStatusMetrics['inProgress']['recent'], $reportStatusMetrics['inProgress']['previous'])],
+        ['label' => 'Resolved', 'value' => $reportStatusMetrics['resolved']['total'], 'note' => $makeTrendText($reportStatusMetrics['resolved']['recent'], $reportStatusMetrics['resolved']['previous'])],
+    ];
+}
+
 $responseHistoryByReport = [];
 if ($barangayResponseEnabled) {
     $historyQuery = $conn->prepare("
-        SELECT h.report_id, h.actor_role, h.action, h.from_state, h.to_state, h.reason, h.created_at,
+        SELECT h.history_id, h.report_id, h.actor_role, h.action, h.from_state, h.to_state, h.reason, h.created_at,
                u.full_name AS actor_name
         FROM report_response_history h
         JOIN reports r ON r.report_id = h.report_id
@@ -153,6 +304,7 @@ if ($barangayResponseEnabled) {
         $historyReportId = (int)$historyRow['report_id'];
         $historyCreatedAt = strtotime((string)$historyRow['created_at']);
         $responseHistoryByReport[$historyReportId][] = [
+            'id' => (int)$historyRow['history_id'],
             'actorRole' => (string)$historyRow['actor_role'],
             'actorName' => (string)($historyRow['actor_name'] ?: ucfirst((string)$historyRow['actor_role'])),
             'action' => (string)$historyRow['action'],
@@ -164,8 +316,50 @@ if ($barangayResponseEnabled) {
     }
     $historyQuery->close();
 }
+$barangayEvidenceByReport = [];
+$barangayEvidenceQuery = $conn->prepare("SELECT a.attachment_id, a.report_id, a.attachment_type, a.file_url, a.uploaded_by, a.mime_type,
+        a.caption, a.attachment_source, a.response_history_id, a.created_at, b.barangay_name
+    FROM report_attachments a
+    JOIN reports r ON r.report_id = a.report_id
+    LEFT JOIN users u ON u.user_id = a.uploaded_by
+    LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
+    WHERE r.barangay_id = ? AND r.archived_at IS NULL
+      AND a.attachment_source IN ('resident', 'barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action', 'staff_action')
+    ORDER BY a.report_id, a.created_at, a.attachment_id");
+if (!$barangayEvidenceQuery) {
+    error_log('Could not prepare Barangay report evidence query: ' . $conn->error);
+} else {
+    $barangayEvidenceQuery->bind_param('i', $barangayId);
+    if (!$barangayEvidenceQuery->execute()) {
+        error_log('Could not load Barangay report evidence: ' . $barangayEvidenceQuery->error);
+    } else {
+        $evidenceResult = $barangayEvidenceQuery->get_result();
+        while ($evidence = $evidenceResult->fetch_assoc()) {
+            $evidenceRole = in_array((string)$evidence['attachment_source'], ['barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action'], true)
+                ? 'barangay'
+                : ((string)$evidence['attachment_source'] === 'resident' ? 'resident' : 'staff');
+            $barangayEvidenceByReport[(int)$evidence['report_id']][] = [
+                'type' => (string)$evidence['attachment_type'],
+                'url' => in_array((string)$evidence['attachment_source'], ['barangay_action', 'staff_action'], true)
+                    ? $appBaseUrl . '/api/shared/report-evidence-file.php?id=' . (int)$evidence['attachment_id'] . '&sess=DCVS_BARANGAY_SESSION'
+                    : dcvsBarangayReportMediaUrl($evidence['file_url']),
+                'caption' => (string)($evidence['caption'] ?? ''),
+                'source' => (string)$evidence['attachment_source'],
+                'historyId' => (int)($evidence['response_history_id'] ?? 0),
+                'isMine' => (int)($evidence['uploaded_by'] ?? 0) === $userId,
+                'role' => $evidenceRole,
+                'actor' => $evidenceRole === 'barangay'
+                    ? 'Brgy. ' . (string)($evidence['barangay_name'] ?? $barangayName)
+                    : 'DCVS',
+                'createdAt' => date('M j, Y g:i A', strtotime((string)$evidence['created_at'])),
+            ];
+        }
+    }
+    $barangayEvidenceQuery->close();
+}
 foreach ($reports as &$report) {
     $report['responseHistory'] = $responseHistoryByReport[$report['report_id']] ?? [];
+    $report['evidence'] = $barangayEvidenceByReport[$report['report_id']] ?? [];
 }
 unset($report);
 
@@ -175,7 +369,7 @@ if ($aq) {
     $aq->bind_param('i', $userId);
     $aq->execute();
     $aRow = $aq->get_result()->fetch_assoc();
-    if ($aRow) $avatarUrl = $aRow['avatar_url'] ?? '';
+    if ($aRow) $avatarUrl = dcvsBarangayReportMediaUrl($aRow['avatar_url'] ?? '');
     $aq->close();
 }
 
@@ -200,20 +394,22 @@ $activePage = 'reports';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/sb2.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/notification.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { height: 100%; -webkit-font-smoothing: antialiased; }
     body { background: #fff; font-family: 'Inter', 'Segoe UI', sans-serif; }
 
     /* ── App wrapper (mirrors dashboard-barangay.php) ── */
-    .app-wrapper{min-height:100vh;display:flex;flex-direction:column;background:#fff;}
+    .app-wrapper{width:100%;min-width:0;min-height:100vh;display:flex;flex-direction:column;background:#fff;}
     body.sb2-active .app-wrapper{padding-left:var(--sidebar-w);transition:padding-left .2s ease;}
     body.sb2-active .app-wrapper .topbar{left:auto!important;}
     body.sb2-active .app-wrapper .main-content{margin-left:0!important;}
 
     /* ── Topbar ── */
-    .topbar{height:64px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 32px;position:sticky;top:0;z-index:40;}
-    .topbar-left{display:flex;align-items:center;gap:16px;}
+    .topbar{width:100%;min-width:0;height:64px;background:#fff;border-bottom:1px solid #e4e4e7;display:flex;align-items:center;justify-content:space-between;padding:0 32px;position:sticky;top:0;z-index:40;}
+    .topbar-left{display:flex;min-width:0;align-items:center;gap:16px;}
     .topbar-toggle{display:none;align-items:center;justify-content:center;width:38px;height:38px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#18181b;cursor:pointer;}
     @media(max-width:768px){.topbar-toggle{display:flex!important;}}
     .topbar-breadcrumb{display:flex;align-items:center;gap:8px;font-size:0.82rem;color:#94a3b8;}
@@ -222,7 +418,7 @@ $activePage = 'reports';
     .breadcrumb-current{color:#0f172a;font-weight:600;}
     .barangay-selector{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;background:#fff;border:1px solid #e4e4e7;border-radius:999px;font-size:14px;font-weight:500;color:#18181b;cursor:pointer;transition:all .15s;}
     .barangay-selector:hover{background:#f4f4f5;}
-    .topbar-right{display:flex;align-items:center;gap:14px;}
+    .topbar-right{display:flex;min-width:0;align-items:center;gap:14px;}
     .notif-dropdown{position:relative;}
     .notif-btn{background:none;border:none;font-size:1.2rem;color:#475569;cursor:pointer;padding:6px;position:relative;border-radius:8px;transition:background .15s;width:36px;height:36px;display:flex;align-items:center;justify-content:center;}
     .notif-btn:hover{background:#f1f5f9;}
@@ -245,15 +441,21 @@ $activePage = 'reports';
     .notif-time{font-size:.65rem;color:#94a3b8;margin-top:3px;}
     .notif-empty{text-align:center;padding:2rem;color:#94a3b8;font-size:.82rem;}
     @media(max-width:640px){.notif-panel{width:calc(100vw - 2rem)!important;right:.5rem!important;}}
-    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);border:1px solid transparent;}
-    .user-profile:hover{background:#F3F4F6;border-color:#F0F2F5;}
+    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;border:1px solid transparent;}
     .user-avatar{width:34px;height:34px;border-radius:50%;background:#D5ECE0;border:1px solid #B8DEC9;display:flex;align-items:center;justify-content:center;color:#0B4D26;font-weight:700;font-size:12px;overflow:hidden;}
     .user-meta{display:flex;flex-direction:column;line-height:1.25;}
     .user-name{font-size:14px;font-weight:600;color:#18181B;}
     .user-role{font-size:12px;color:#71717A;}
 
     /* ── Main content ── */
-    .main-content { padding: 1.25rem 2rem 1.75rem; margin-top: 0 !important; }
+    .main-content { width:100%; min-width:0; padding: 1.25rem 2rem 1.75rem; margin-top: 0 !important; }
+
+    .report-kpi-grid{display:grid;grid-template-columns:repeat(var(--report-kpi-columns,4),minmax(0,1fr));gap:16px;margin-bottom:24px}
+    .report-kpi-card{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;padding:18px 20px;border:1px solid #e4e4e7;border-radius:10px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.08);font-family:'Inter','Segoe UI',sans-serif;text-align:center;transition:border-color .15s,box-shadow .15s}
+    .report-kpi-card:hover{border-color:#d4d4d8;box-shadow:0 4px 12px -2px rgba(0,0,0,.05),0 2px 4px -1px rgba(0,0,0,.03)}
+    .report-kpi-label{margin:0 0 6px;color:#18181b;font-size:14px;font-weight:500;text-transform:uppercase;letter-spacing:.03em}
+    .report-kpi-value{margin:0 0 6px;color:#18181b;font-size:26px;font-weight:600;line-height:1;letter-spacing:-.02em}
+    .report-kpi-trend{color:#71717a;font-size:14px;font-weight:400}
 
     .page-header{display:flex;justify-content:flex-end;margin-bottom:1rem;}
 
@@ -288,7 +490,7 @@ $activePage = 'reports';
     .bulk-bar .bulk-btn svg{width:14px;height:14px;flex-shrink:0;}
 
     /* ── Table ── */
-    .appt-db-table-area{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow-x:auto;}
+    .appt-db-table-area{width:100%;min-width:0;max-width:100%;contain:paint;background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow-x:auto;}
     .appt-table{width:100%;border-collapse:collapse;font-family:'Inter','Segoe UI',sans-serif;}
     .appt-table thead th{padding:10px 12px;font-size:14px;font-weight:500;color:#71717a;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;white-space:nowrap;}
     .appt-table tbody tr{border-bottom:1px solid #f4f4f5;cursor:default;transition:background .1s;}
@@ -309,6 +511,10 @@ $activePage = 'reports';
     /* ── Client cell (ID + type) ── */
     .client-cell{display:flex;flex-direction:column;gap:2px;}
     .client-name{font-weight:600;color:#18181b;font-size:14px;}
+    .reporter-cell{display:flex;align-items:center;gap:8px;min-width:0;}
+    .reporter-cell-avatar{display:flex;width:36px;height:36px;flex:0 0 36px;align-items:center;justify-content:center;overflow:hidden;border-radius:50%;background:#e4e4e7;color:#52525b;font-size:12.5px;font-weight:600;}
+    .reporter-cell-avatar img{width:100%;height:100%;object-fit:cover;}
+    .reporter-cell-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .report-id-value,.location-value{font-weight:400;color:#18181b;font-size:14px;}
     .contact-main{font-size:14px;font-weight:400;color:#18181b;}
 
@@ -352,6 +558,45 @@ $activePage = 'reports';
     .modal.open{display:flex;}
     #responseWorkflowModal.modal.active{display:flex;}
     #responseWorkflowModal .response-workflow-dialog{width:min(440px,calc(100vw - 32px));max-width:min(440px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:22px;border:1px solid #e4e4e7;border-radius:12px;background:#fff;box-shadow:0 18px 48px rgba(0,0,0,.24);}
+    #responseWorkflowModal.is-handover{z-index:1400;align-items:center;justify-content:center;padding:12px;background:rgba(0,0,0,.45);backdrop-filter:blur(2px);}
+    #responseWorkflowModal .response-workflow-dialog.is-handover{box-sizing:border-box;width:min(460px,calc(100vw - 24px));max-width:min(460px,calc(100vw - 24px));max-height:calc(100vh - 24px);gap:0;overflow-y:auto;padding:24px;border:1px solid rgba(15,23,42,.08);border-radius:12px;background:#fff;color:#18181b;box-shadow:0 10px 15px -3px rgba(15,23,42,.1),0 4px 6px -4px rgba(15,23,42,.1);font-family:'Inter','Segoe UI',sans-serif;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-header{gap:6px;margin-bottom:16px;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-title{font-size:18px;font-weight:600;line-height:1.2;letter-spacing:-.02em;color:#18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-description{font-size:14px;font-weight:400;line-height:1.5;color:#71717a;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover #responseWorkflowForm{display:flex;flex-direction:column;min-height:0;margin:0;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover #responseWorkflowFields{display:flex;flex-direction:column;gap:12px;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options{gap:8px;margin:0;padding:0;border:0;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options legend{margin:0 0 2px;color:#18181b;font-size:14px;font-weight:500;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options label{box-sizing:border-box;min-height:58px;align-items:flex-start;gap:10px;margin:0;padding:11px 12px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;color:#18181b;transition:border-color .15s,background .15s,box-shadow .15s;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options label:hover{background:#fafafa;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options label:has(input:checked){border-color:#18181b;background:#f4f4f5;box-shadow:0 0 0 1px #18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options input{width:16px;height:16px;flex:0 0 16px;margin:3px 0 0;accent-color:#18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options span{gap:2px;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options strong{font-size:14px;font-weight:500;line-height:1.4;color:#18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-method-options small{font-size:13px;font-weight:400;line-height:1.45;color:#71717a;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-plan-preview{box-sizing:border-box;display:grid;grid-template-columns:minmax(90px,.35fr) minmax(0,1fr);gap:6px 12px;margin:0;padding:12px;border:1px solid #f4f4f5;border-radius:8px;background:#f4f4f5;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-preview-item{display:flex;min-width:0;flex-direction:column;gap:1px;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-preview-item span{font-size:13px;color:#71717a;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-preview-item strong{min-width:0;overflow-wrap:anywhere;font-size:14px;font-weight:500;line-height:1.4;color:#18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-preview-due{grid-column:1/-1;margin-top:4px;padding-top:7px;border-top:1px solid #e4e4e7;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-date-time,#responseWorkflowModal .response-workflow-dialog.is-handover .handover-contact-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-field{min-width:0;margin:0;color:#18181b;font-size:14px;font-weight:500;line-height:1.4;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-field input{box-sizing:border-box;width:100%;height:36px;min-height:36px;margin-top:6px;padding:7px 10px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:inherit;font-size:14px;font-weight:400;line-height:1.4;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-field input::placeholder{color:#a1a1aa;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-field input:focus{outline:0;border-color:#18181b;box-shadow:0 0 0 2px rgba(24,24,27,.12);}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .handover-pickup-location[hidden]{display:none;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-check{display:flex;align-items:flex-start;gap:8px;margin:0;color:#3f3f46;font-size:14px;font-weight:400;line-height:1.45;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-check input{width:16px;height:16px;flex:0 0 16px;margin:2px 0 0;accent-color:#18181b;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-help{display:flex;align-items:flex-start;gap:8px;margin:0;padding:10px 12px;border:1px solid #dbeafe;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:13px;line-height:1.5;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-help span{flex:0 0 auto;color:#1d4ed8;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin:16px -24px -24px;padding:14px 24px 18px;border-top:1px solid #e4e4e7;background:#fff;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer .sd-btn{display:inline-flex;min-width:78px;min-height:36px;align-items:center;justify-content:center;padding:0 14px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;line-height:1;cursor:pointer;transition:background .15s,border-color .15s;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer .sd-btn:hover{background:#f4f4f5;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer #responseWorkflowSubmit{border-color:#18181b;background:#18181b;color:#fff;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer #responseWorkflowSubmit:hover{background:#27272a;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer #responseWorkflowSubmit:disabled{border-color:#e4e4e7;background:#f4f4f5;color:#a1a1aa;cursor:not-allowed;}
+    #responseWorkflowModal .response-workflow-dialog.is-handover .response-workflow-required{color:#dc2626;}
+    @media(max-width:420px){#responseWorkflowModal .response-workflow-dialog.is-handover{padding:18px;}#responseWorkflowModal .response-workflow-dialog.is-handover .sd-dialog-footer{margin:16px -18px -18px;padding:12px 18px 14px;}}
     #responseWorkflowModal .response-workflow-dialog.is-alert{width:min(440px,calc(100vw - 32px));max-width:min(440px,calc(100vw - 32px));gap:16px;padding:24px;border-color:rgba(15,23,42,.08);box-shadow:0 10px 15px -3px rgba(15,23,42,.1),0 4px 6px -4px rgba(15,23,42,.1);font-family:'Inter','Segoe UI',sans-serif;}
     #responseWorkflowModal .response-workflow-dialog.is-alert #responseWorkflowForm{margin:0;}
     #responseWorkflowModal .response-workflow-dialog.is-alert #responseWorkflowFields:empty{display:none;}
@@ -371,6 +616,23 @@ $activePage = 'reports';
     #responseWorkflowModal .response-workflow-field{display:block;margin:0 0 12px;font-size:13px;font-weight:600;color:#27272a;}
     #responseWorkflowModal .response-workflow-field textarea,#responseWorkflowModal .response-workflow-field input,#responseWorkflowModal .response-workflow-field select{display:block;width:100%;min-height:38px;margin-top:5px;padding:8px;border:1px solid #d4d4d8;border-radius:7px;background:#fff;color:#18181b;font:inherit;}
     #responseWorkflowModal .response-workflow-field textarea{min-height:82px;resize:vertical;}
+    #responseWorkflowModal .handover-pickup-location[hidden]{display:none;}
+    #responseWorkflowModal .handover-method-options{display:grid;gap:8px;margin:0 0 14px;padding:0;border:0;}
+    #responseWorkflowModal .handover-method-options legend{margin-bottom:6px;font-size:13px;font-weight:600;color:#27272a;}
+    #responseWorkflowModal .handover-method-options label{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid #d4d4d8;border-radius:8px;cursor:pointer;}
+    #responseWorkflowModal .handover-method-options label:has(input:checked){border-color:#16a34a;background:#f0fdf4;box-shadow:inset 0 0 0 1px #16a34a;}
+    #responseWorkflowModal .handover-method-options input{margin:3px 0 0;accent-color:#16a34a;}
+    #responseWorkflowModal .handover-method-options span{display:grid;gap:2px;}
+    #responseWorkflowModal .handover-method-options strong{font-size:13px;font-weight:600;}
+    #responseWorkflowModal .handover-method-options small{font-size:12px;font-weight:400;color:#71717a;}
+    #responseWorkflowModal .handover-plan-preview{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0 0 12px;padding:10px 12px;border-radius:9px;background:#f4f4f5;}
+    #responseWorkflowModal .handover-plan-preview div{display:contents;}
+    #responseWorkflowModal .handover-plan-preview span{font-size:12px;color:#71717a;}
+    #responseWorkflowModal .handover-plan-preview strong{min-width:0;font-size:12px;color:#27272a;overflow-wrap:anywhere;}
+    #responseWorkflowModal .handover-date-time,#responseWorkflowModal .handover-contact-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+    #responseWorkflowModal .handover-date-time .response-workflow-field,#responseWorkflowModal .handover-contact-fields .response-workflow-field{min-width:0;}
+    @media(max-width:420px){#responseWorkflowModal .handover-date-time,#responseWorkflowModal .handover-contact-fields{grid-template-columns:1fr;gap:0;}}
+    #responseWorkflowModal .response-workflow-help{margin:0;padding:10px 12px;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.5;}
     #responseWorkflowModal .response-workflow-dialog .sd-dialog-footer{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid #e4e4e7;}
     .sd-dialog{width:100%;display:flex;justify-content:center;}
     .sd-dialog-content{position:relative;width:100%;max-width:560px;background:#ffffff;border:1px solid #e4e4e7;border-radius:8px;padding:24px;display:flex;flex-direction:column;gap:16px;box-shadow:0 10px 15px -3px rgba(0,0,0,0.1),0 4px 6px -4px rgba(0,0,0,0.1);animation:modalIn 0.2s ease;max-height:90vh;overflow-y:auto;}
@@ -451,13 +713,13 @@ $activePage = 'reports';
     /* Report Details drawer: same proportions and behavior as the Staff Portal drawer. */
     #reportDetailModal.modal{align-items:stretch;justify-content:flex-end;padding:0;background:rgba(0,0,0,.5);backdrop-filter:none;}
     #reportDetailModal .sd-dialog{height:100%;width:100%;display:flex;justify-content:flex-end;}
-    #reportDetailModal .sd-dialog-content{max-width:min(480px,92vw);width:min(480px,92vw);height:100%;max-height:none;border:none;border-radius:0;box-shadow:-8px 0 40px rgba(15,23,32,.18);animation:none;transform:translateX(105%);transition:transform .32s cubic-bezier(.32,.72,.25,1);padding:24px;gap:18px;overflow:hidden;}
+    #reportDetailModal .sd-dialog-content{box-sizing:border-box;min-height:0;max-width:min(480px,92vw);width:min(480px,92vw);height:100%;max-height:none;border:none;border-radius:0;box-shadow:-8px 0 40px rgba(15,23,32,.18);animation:none;transform:translateX(105%);transition:transform .32s cubic-bezier(.32,.72,.25,1);padding:24px;gap:18px;overflow:hidden;}
     #reportDetailModal.open .sd-dialog-content{transform:translateX(0);}
     #reportDetailModal .sd-field-group{flex:1;min-height:0;overflow-y:auto;gap:0;}
     #reportDetailModal .sd-dialog-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;gap:0;scrollbar-gutter:stable;}
     #reportDetailModal .sd-dialog-header{flex-shrink:0;}
     #reportDetailModal .sd-dialog-description{margin:0;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.5;color:#71717a;}
-    #reportDetailModal .sd-dialog-footer{position:relative;flex-shrink:0;width:100%;margin-top:auto;padding:12px 0 0;border-top:1px solid #e4e4e7;justify-content:flex-start;}
+    #reportDetailModal .sd-dialog-footer{position:relative;box-sizing:border-box;display:flex;flex-shrink:0;width:100%;margin-top:auto;padding:12px 0 0;border-top:1px solid #e4e4e7;justify-content:flex-start;}
     .report-details-scope{font-family:'Inter','Segoe UI',sans-serif;}
     .report-details-scope .report-summary{display:flex;align-items:center;gap:10px;min-width:0;margin:0 0 14px;}
     .report-details-scope .report-summary-avatar{width:85px;height:85px;flex:0 0 85px;overflow:hidden;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;color:#64748b;font-size:18px;font-weight:600;}
@@ -472,7 +734,6 @@ $activePage = 'reports';
     .report-details-scope .report-summary-status.is-stack .response-status-chip{padding:4px 9px;border:1px solid;border-radius:6px;font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;}
     .report-details-scope .response-status-chip.is-resolved{padding:5px 8px;border-color:#0E8131;border-radius:6px;background:#0E8131;color:#fff;font-size:12px;font-weight:500;line-height:1.35;}
     .report-details-scope .response-status-chip.is-pending{border-color:#fcd34d;background:#fef3c7;color:#92400e;}
-    .report-details-scope .response-status-chip.is-turned-over{border-color:#86efac;background:#4ade80;color:#fff;}
     .report-details-scope .response-status-chip.is-dcvs{border-color:#fbbf24;background:#fef3c7;color:#92400e;}
     .report-details-scope .rpt-tabs{display:flex;gap:4px;border-bottom:1px solid #e4e4e7;margin-bottom:18px;}
     .report-details-scope .rpt-tab{border:0;border-bottom:2px solid transparent;background:transparent;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;padding:8px 12px;margin-bottom:-1px;cursor:pointer;}
@@ -489,6 +750,24 @@ $activePage = 'reports';
     .report-details-scope .rpt-desc-box{background:#f8f9fa;border:1px solid #e4e4e7;border-radius:8px;padding:12px 14px;font-size:14px;font-weight:500;color:#18181b;line-height:1.5;}
     .report-details-scope .rpt-attachments{display:flex;flex-direction:column;gap:8px;}
     .report-details-scope .rpt-attachments img,.report-details-scope .rpt-attachments video{width:100%;max-height:260px;object-fit:cover;border:1px solid #e4e4e7;border-radius:6px;background:#000;}
+    .report-details-scope .rpt-perspective-attachment-section{margin:0 0 20px;font-family:'Inter','Segoe UI',sans-serif;}
+    .report-details-scope .rpt-perspective-attachment-section h3{display:flex;align-items:center;gap:7px;margin:0 0 10px;color:#18181b;font-size:13px;font-weight:600;}
+    .report-details-scope .rpt-perspective-attachment-section h3 span{color:#71717a;font-size:12px;font-weight:400;}
+    .report-details-scope .rpt-perspective-attachment-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;}
+    .report-details-scope .rpt-perspective-attachment{min-width:0;margin:0;}
+    .report-details-scope .rpt-perspective-attachment-thumb{display:block;width:100%;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer;}
+    .report-details-scope .rpt-perspective-attachment-thumb img,.report-details-scope .rpt-perspective-attachment-thumb video{display:block;width:100%;height:100%;object-fit:cover;}
+    .report-details-scope .rpt-perspective-attachment figcaption{margin-top:4px;color:#52525b;font-size:11px;line-height:1.35;overflow-wrap:anywhere;}
+    .report-details-scope .rpt-perspective-attachment-empty{margin:0;color:#71717a;font-size:12px;line-height:1.5;}
+    .report-evidence-lightbox{position:fixed;inset:0;z-index:1400;display:none;align-items:center;justify-content:center;padding:16px;background:rgba(0,0,0,.58);}
+    .report-evidence-lightbox.open{display:flex;}
+    .report-evidence-lightbox-card{width:min(680px,calc(100vw - 32px));max-height:calc(100vh - 32px);overflow:auto;padding:18px;border:1px solid #e4e4e7;border-radius:12px;background:#fff;font-family:'Inter','Segoe UI',sans-serif;box-shadow:0 18px 48px rgba(0,0,0,.24);}
+    .report-evidence-lightbox-stage{display:flex;align-items:center;justify-content:center;width:100%;height:min(58vh,480px);overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;}
+    .report-evidence-lightbox-stage img,.report-evidence-lightbox-stage video{display:block;width:100%;height:100%;object-fit:contain;}
+    .report-evidence-lightbox-caption{margin:12px 0 3px;color:#18181b;font-size:14px;font-weight:600;}
+    .report-evidence-lightbox-meta{margin:0;color:#71717a;font-size:12px;line-height:1.5;}
+    .report-evidence-lightbox-controls{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;margin-top:14px;}
+    .report-evidence-lightbox-count{text-align:center;color:#71717a;font-size:12px;}
     .report-details-scope .rpt-tabs{display:flex;justify-content:center;gap:28px;border-bottom:1px solid #e4e4e7;margin-bottom:14px;}
     .report-details-scope .rpt-tab{padding:0 0 12px;font-size:14px;font-weight:600;color:#a1a1aa;cursor:pointer;border-bottom:2px solid transparent;background:none;border-top:0;border-left:0;border-right:0;font-family:inherit;margin:0;}
     .report-details-scope .rpt-tab.active{color:#18181b;border-bottom-color:#18181b;}
@@ -500,14 +779,17 @@ $activePage = 'reports';
     .report-details-scope .info-row{display:flex;align-items:flex-start;gap:11px;}
 .report-details-scope .info-row-label{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#71717a;margin-bottom:2px;}
 .report-details-scope .info-row-value{font-family:'Inter','Segoe UI',sans-serif;font-size:15px;font-weight:400;color:#18181b;word-break:break-word;}
+    .report-details-scope .response-history-timeline{position:relative;margin-left:3px;padding-left:14px;border-left:2px solid #e4e4e7;}
     .report-details-scope .response-history{list-style:none;margin:0;padding:0;}
-    .report-details-scope .response-history-item{position:relative;padding:0 0 16px 18px;}
+    .report-details-scope .response-history-item{position:relative;padding:0 0 16px;}
     .report-details-scope .response-history-item:last-child{padding-bottom:0;}
-    .report-details-scope .response-history-item::before{content:"";position:absolute;left:0;top:6px;width:8px;height:8px;border-radius:50%;background:#16a34a;}
+    .report-details-scope .response-history-item::before{content:"";position:absolute;left:-20px;top:3px;width:10px;height:10px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 2px #fff;}
     .report-details-scope .response-history-title{font-size:14px;font-weight:500;color:#18181b;line-height:1.45;}
     .report-details-scope .response-history-meta{margin-top:3px;font-size:14px;font-weight:400;color:#71717a;line-height:1.45;}
     .report-details-scope .response-history-reason{margin-top:5px;font-size:13px;font-weight:400;color:#52525b;line-height:1.45;white-space:pre-wrap;word-break:break-word;}
     .report-details-scope .response-history-empty{margin:0;font-size:14px;font-weight:400;color:#71717a;line-height:1.5;}
+    .report-details-scope .response-history-item .rpt-updates-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;margin-top:10px;}
+    .report-details-scope .response-history-item .rpt-perspective-attachment{padding:0;}
     .report-details-scope .response-card{overflow:hidden;border:1px solid #e4e4e7;border-radius:9px;background:#fff;}
     .report-details-scope .response-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;}
     .report-details-scope .response-card-heading{min-width:0;flex:1;}
@@ -533,13 +815,12 @@ $activePage = 'reports';
     .report-details-scope .response-notice.is-warning{background:#fef3c7;color:#92400e;}
     .report-details-scope .response-notice.is-complete{background:#dcfce7;color:#166534;}
     .report-details-scope .response-route-link{margin:0 12px 12px;padding:0;border:0;background:none;color:#2563eb;font:600 12px 'Inter','Segoe UI',sans-serif;cursor:pointer;}
-    .report-details-scope .response-custody{margin-top:10px;overflow:hidden;border:1px solid #e4e4e7;border-radius:9px;}
-    .report-details-scope .response-custody-title{padding:9px 12px;background:#f4f4f5;font-size:12px;font-weight:600;color:#18181b;}
-    .report-details-scope .response-custody-body{padding:8px 12px;}
-    .report-details-scope .response-custody-row{display:flex;justify-content:space-between;gap:12px;padding:4px 0;font-size:12px;line-height:1.4;}
-    .report-details-scope .response-custody-row span:first-child{color:#71717a;}
-    .report-details-scope .response-custody-row span:last-child{text-align:right;color:#18181b;}
-    .report-details-scope .response-updates{margin:14px 0 12px;}
+    .report-details-scope .response-custody{margin:16px 0 4px;font-family:'Inter','Segoe UI',sans-serif;}
+    .report-details-scope .response-custody-title{margin:0 0 14px;font-size:14px;font-weight:600;line-height:1.4;color:#18181b;}
+    .report-details-scope .response-custody-body{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px 22px;}
+    .report-details-scope .response-custody-row{display:flex;min-width:0;flex-direction:column;gap:4px;font-size:14px;line-height:1.45;}
+    .report-details-scope .response-custody-row span:first-child{font-size:13px;font-weight:600;color:#71717a;}
+    .report-details-scope .response-custody-row span:last-child{overflow-wrap:anywhere;font-size:15px;font-weight:400;color:#18181b;}
     .report-details-scope .response-updates-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0 12px;font-size:14px;font-weight:600;color:#18181b;line-height:1.4;}
     .report-details-scope .response-updates-header button{padding:0;border:0;background:none;color:#2563eb;font:500 12px 'Inter','Segoe UI',sans-serif;cursor:pointer;}
     .response-action-bar{display:flex;width:100%;align-items:center;gap:8px;}
@@ -573,12 +854,15 @@ $activePage = 'reports';
     .toast-notification{position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;box-shadow:0 10px 15px -3px rgba(0,0,0,.2);display:flex;align-items:center;gap:10px;z-index:400;transform:translateY(100px);opacity:0;transition:all .3s cubic-bezier(.4,0,.2,1);}
     .toast-notification.show{transform:translateY(0);opacity:1;}
 
-    @media(max-width:768px){.topbar{padding:0 16px;}.main-content{padding:1rem;}.appt-card-header{flex-direction:column;align-items:stretch;}.appt-header-right{flex-wrap:wrap;}}
+    @media(max-width:900px){.report-kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+    @media(max-width:768px){.topbar,body.sb2-active .topbar{left:0!important;width:100%;margin-left:0;padding:0 16px;}.topbar-breadcrumb{min-width:0;overflow:hidden;white-space:nowrap;}.breadcrumb-root,.breadcrumb-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.topbar-right{flex:0 0 auto;gap:8px;}.main-content{width:100%;min-width:0;padding:1rem;}.appt-card-header{width:100%;min-width:0;flex-direction:column;align-items:stretch;}.appt-header-right{display:grid;width:100%;min-width:0;grid-template-columns:repeat(2,minmax(0,1fr));align-items:stretch;}.appt-search-wrap{grid-column:1/-1;min-width:0;}.appt-search-input{width:100%;min-width:0;}.appt-status-select{width:100%;min-width:0;max-width:100%;}.export-csv-btn{width:100%;}}
+    @media(max-width:520px){.report-kpi-grid{gap:10px}.report-kpi-card{padding:14px 10px}.report-kpi-label{font-size:12px}.report-kpi-value{font-size:23px}}
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
-<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
+<?php $barangaySidebarStylesheetInHead = true; include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
 <div class="app-wrapper">
   <header class="topbar">
@@ -609,8 +893,8 @@ $activePage = 'reports';
         </button>
         <div class="notif-panel" id="notifPanel" data-notification-panel data-portal="barangay"
           data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
-          data-action-url="includes/staff-notification-action.php?portal=barangay"
-          data-load-url="get-notifications.php?limit=30" data-app-base-url="">
+          data-action-url="<?php echo htmlspecialchars($appBaseUrl . '/includes/staff-notification-action.php?portal=barangay', ENT_QUOTES, 'UTF-8'); ?>"
+          data-load-url="<?php echo htmlspecialchars($appBaseUrl . '/get-notifications.php?limit=30', ENT_QUOTES, 'UTF-8'); ?>" data-app-base-url="<?php echo htmlspecialchars($appBaseUrl, ENT_QUOTES, 'UTF-8'); ?>">
           <div class="notif-panel-header">
             <h4>Notifications</h4>
             <button class="notif-mark-all" type="button" <?php echo $unreadNotifs === 0 ? 'disabled' : ''; ?>><i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read</button>
@@ -626,7 +910,7 @@ $activePage = 'reports';
           </div>
         </div>
       </div>
-      <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-profile">
         <div class="user-avatar">
           <?php if ($avatarUrl): ?>
             <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
@@ -647,11 +931,24 @@ $activePage = 'reports';
 
   <main class="main-content">
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <section class="report-kpi-grid" style="--report-kpi-columns:<?php echo count($reportKpiCards); ?>;" aria-label="Report summary">
+      <?php foreach ($reportKpiCards as $kpiCard): ?>
+        <article class="report-kpi-card">
+          <h2 class="report-kpi-label"><?php echo htmlspecialchars($kpiCard['label'], ENT_QUOTES, 'UTF-8'); ?></h2>
+          <p class="report-kpi-value"><?php echo number_format($kpiCard['value']); ?></p>
+          <span class="report-kpi-trend"><?php echo htmlspecialchars($kpiCard['note'], ENT_QUOTES, 'UTF-8'); ?></span>
+        </article>
+      <?php endforeach; ?>
+    </section>
+
+    <div class="appt-card-header portal-mobile-toolbar portal-toolbar-has-primary">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
           <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by ID, category, location..." />
         </div>
+        </div>
+        <div class="portal-toolbar-filter-grid">
         <select class="appt-status-select" id="statusFilter">
           <option value="">All Status</option>
           <option value="pending">Pending Barangay Review</option>
@@ -667,17 +964,20 @@ $activePage = 'reports';
           <option value="injured">Injured</option>
           <option value="dead">Dead</option>
         </select>
-        <select class="appt-status-select" id="priorityFilter">
+        <select class="appt-status-select portal-toolbar-last-filter" id="priorityFilter">
           <option value="">All Priority</option>
           <option value="high">High</option>
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <button class="pet-action-btn" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters
-        </button>
+        </div>
+        <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+          <button class="pet-action-btn portal-toolbar-secondary" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters
+          </button>
+        </div>
       </div>
-      <button class="pet-action-btn export-csv-btn" type="button" onclick="exportAll()"><span>Export CSV</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
+      <button class="pet-action-btn export-csv-btn portal-toolbar-primary" type="button" onclick="exportAll()"><span>Export CSV</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
     </div>
 
     <div class="bulk-bar" id="bulkBar">
@@ -734,6 +1034,22 @@ $activePage = 'reports';
   </div>
 </div>
 
+<div class="report-evidence-lightbox" id="barangayEvidenceLightbox" role="dialog" aria-modal="true" aria-label="Report evidence viewer" onclick="if(event.target===this)closeBarangayEvidence()">
+  <div class="report-evidence-lightbox-card">
+    <div class="report-evidence-lightbox-stage" id="barangayEvidenceStage"></div>
+    <p class="report-evidence-lightbox-caption" id="barangayEvidenceCaption"></p>
+    <p class="report-evidence-lightbox-meta" id="barangayEvidenceMeta"></p>
+    <div class="report-evidence-lightbox-controls">
+      <button type="button" class="sd-btn sd-btn-outline" id="barangayEvidencePrev" onclick="stepBarangayEvidence(-1)">Prev</button>
+      <span class="report-evidence-lightbox-count" id="barangayEvidenceCount" aria-live="polite"></span>
+      <button type="button" class="sd-btn sd-btn-outline" id="barangayEvidenceNext" onclick="stepBarangayEvidence(1)">Next</button>
+    </div>
+    <div class="report-evidence-lightbox-controls" style="grid-template-columns:1fr;">
+      <button type="button" class="sd-btn sd-btn-outline" onclick="closeBarangayEvidence()">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm Modal -->
 <div class="modal" id="confirmModal">
   <div class="sd-dialog">
@@ -761,14 +1077,14 @@ $activePage = 'reports';
       <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>">
       <div class="sd-alert-dialog-header">
         <h3 class="sd-alert-dialog-title" id="validateAlertTitle">Validate Report</h3>
-        <p class="sd-alert-dialog-description" id="validateAlertDesc">Record what you found on site. If the incident has not been visited yet, select Site visit pending.</p>
+        <p class="sd-alert-dialog-description" id="validateAlertDesc">Review the report before forwarding it or accepting responsibility. Record site findings later, after the team visits.</p>
       </div>
       <div class="sd-alert-dialog-body">
         <div class="validation-context" id="validationReportContext"></div>
-        <fieldset style="border:0;padding:0;margin:0;">
+        <fieldset id="validationFieldStatus" style="border:0;padding:0;margin:0;">
           <legend class="validation-field-label" style="margin-bottom:8px;">Field status <span style="color:#dc2626;" aria-hidden="true">*</span></legend>
           <div class="validation-status-grid">
-            <label class="validation-status-option"><input type="radio" name="field_status" value="site_visit_pending" required checked><span class="validation-status-copy"><strong>Site visit pending</strong><span>The incident has not been checked on site yet.</span></span></label>
+            <label class="validation-status-option"><input type="radio" name="field_status" value="site_visit_pending" required><span class="validation-status-copy"><strong>Site visit pending</strong><span>The incident has not been checked on site yet.</span></span></label>
             <label class="validation-status-option"><input type="radio" name="field_status" value="confirmed_on_site" required><span class="validation-status-copy"><strong>Confirmed on site</strong><span>Animal and location were verified.</span></span></label>
             <label class="validation-status-option"><input type="radio" name="field_status" value="urgent_response"><span class="validation-status-copy"><strong>Needs urgent response</strong><span>Immediate assistance is needed.</span></span></label>
             <label class="validation-status-option"><input type="radio" name="field_status" value="animal_already_gone"><span class="validation-status-copy"><strong>Animal already gone</strong><span>Animal was no longer at the location.</span></span></label>
@@ -887,12 +1203,26 @@ $activePage = 'reports';
 <!-- Toast -->
 <div class="toast-notification" id="toast-msg"><i class="fas fa-check-circle"></i><span id="toast-text"></span></div>
 
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/response-workflow.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
 <script>
 var REPORTS_DATA = <?php echo json_encode($reports, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>;
 window.DCVS_RESPONSE_ROLE = 'barangay';
 window.DCVS_RESPONSE_CSRF = <?php echo json_encode(csrfToken()); ?>;
 var currentSelectedReport = null;
+
+function barangayReportNeedsTurnover(report) {
+  if (!report) return false;
+  var status = String(report._db_status || '').toLowerCase();
+  var turnoverStatus = String(report.turnoverStatus || '').toLowerCase();
+  var disposition = String(report.animalDisposition || '').toLowerCase();
+  var reportType = String(report.type || '').toLowerCase();
+  if (turnoverStatus === 'pending' || turnoverStatus === 'receipt_confirmed') return true;
+  return status === 'resolved'
+    && reportType.indexOf('dead') === -1
+    && ['reunited_with_owner', 'transferred_to_shelter', 'disposed_per_local_protocol'].indexOf(disposition) === -1;
+}
 
 function getFilteredList() {
   var s = document.getElementById('searchInput').value.toLowerCase();
@@ -941,7 +1271,11 @@ function renderRows(list) {
       '<td><div class="client-cell"><span class="client-name report-id-value">' + r.id + '</span></div></td>' +
       '<td style="font-size:14px;color:#18181b;">' + r.category + '</td>' +
       '<td class="location-value">' + r.location + '</td>' +
-      '<td style="font-size:14px;color:#18181b;">' + detailEsc(r.reporter || '-') + '</td>' +
+      '<td><div class="reporter-cell"><span class="reporter-cell-avatar">' +
+        (r.avatar
+          ? '<img class="reporter-avatar-image" src="' + detailEsc(r.avatar) + '" alt="" /><span class="reporter-avatar-fallback" style="display:none;">' + detailEsc((r.reporter || '?').split(/\s+/).slice(0, 2).map(function(part) { return part.charAt(0); }).join('').toUpperCase()) + '</span>'
+          : detailEsc((r.reporter || '?').split(/\s+/).slice(0, 2).map(function(part) { return part.charAt(0); }).join('').toUpperCase())) +
+        '</span><span class="reporter-cell-name">' + detailEsc(r.reporter || '-') + '</span></div></td>' +
       '<td><div style="font-size:14px;color:#18181b;line-height:1.4;">' + detailEsc(r.phone || '-') + '</div><div style="font-size:12.5px;color:#71717a;line-height:1.4;margin-top:2px;word-break:break-word;">' + detailEsc(r.email || '-') + '</div></td>' +
       '<td style="font-size:14px;color:#18181b;">' + r.incidentDate + '</td>' +
       '<td><span class="appt-status-pill" style="background:' + pillBg + ';color:' + pillColor + ';border-color:' + pillBorder + ';">' + r.priority + '</span></td>' +
@@ -954,13 +1288,32 @@ function renderRows(list) {
       (r._db_status === 'pending' || r._db_status === 'resolved' ? '<button class="action-menu-item danger" onclick="closeDropdowns();archiveSingle(' + r.report_id + ',\'' + r.id + '\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button><button class="action-menu-item danger" onclick="closeDropdowns();deleteSingle(' + r.report_id + ',\'' + r.id + '\')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>' : '') +
       '</div></div></td>';
     tr.style.cursor = 'pointer';
-    tr.addEventListener('click', function(e) {
-      if (e.target.closest('.sd-table-cb') || e.target.closest('.action-dropdown')) return;
-      openReportDetail(r.id);
-    });
     tbody.appendChild(tr);
   });
 }
+
+document.addEventListener('error', function(event) {
+  var image = event.target;
+  if (!(image instanceof HTMLImageElement)) return;
+  if (image.classList.contains('reporter-avatar-image')) {
+    var fallback = image.nextElementSibling;
+    image.style.display = 'none';
+    if (fallback) fallback.style.display = 'flex';
+  } else if (image.classList.contains('report-summary-avatar-image')) {
+    image.parentNode.textContent = image.getAttribute('data-fallback') || '?';
+  }
+}, true);
+
+document.getElementById('reportsTableBody').addEventListener('click', function(event) {
+  var target = event.target;
+  if (!(target instanceof Element)) return;
+  if (target.closest('.sd-table-cb') || target.closest('.action-dropdown')) return;
+  var row = target.closest('tr[data-rid]');
+  if (!row) return;
+  var reportId = Number(row.getAttribute('data-rid'));
+  var report = REPORTS_DATA.find(function(item) { return item.report_id === reportId; });
+  if (report) openReportDetail(report.id);
+});
 
 /* ── Sort ── */
 var TBL = (function() {
@@ -1277,18 +1630,32 @@ function submitBulkDelete() {
 
 /* ── Action dropdown ── */
 function toggleDropdown(btn) {
-  var menu = btn.parentElement.querySelector('.action-menu');
+  var menu = btn._actionMenu || btn.parentElement.querySelector('.action-menu');
+  if (!menu) return;
   var isOpen = menu.classList.contains('open');
   closeDropdowns();
   if (!isOpen) {
     var rect = btn.getBoundingClientRect();
+    menu._dropdownParent = menu.parentElement;
+    menu._dropdownTrigger = btn;
+    btn._actionMenu = menu;
+    document.body.appendChild(menu);
     menu.style.position = 'fixed';
     menu.style.top = (rect.bottom + 4) + 'px';
     menu.style.left = Math.max(8, rect.right - 210) + 'px';
     menu.classList.add('open');
   }
 }
-function closeDropdowns() { document.querySelectorAll('.action-menu.open').forEach(function(m) { m.classList.remove('open'); }); }
+function closeDropdowns() {
+  document.querySelectorAll('.action-menu.open').forEach(function(menu) {
+    menu.classList.remove('open');
+    var parent = menu._dropdownParent;
+    if (parent && parent.isConnected) parent.appendChild(menu);
+    else menu.remove();
+    menu._dropdownParent = null;
+    menu._dropdownTrigger = null;
+  });
+}
 function viewReportLocation(reportId) {
   window.location.href = 'dashboard-barangay-geo.php?report_id=' + encodeURIComponent(reportId);
 }
@@ -1301,6 +1668,63 @@ document.addEventListener('click', function(e) {
 function detailEsc(value) {
   return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+var barangayEvidenceItems = [];
+var barangayEvidenceIndex = 0;
+function renderBarangayEvidenceViewer() {
+  var item = barangayEvidenceItems[barangayEvidenceIndex];
+  if (!item) return;
+  var stage = document.getElementById('barangayEvidenceStage');
+  stage.textContent = '';
+  var media = document.createElement(item.type === 'video' ? 'video' : 'img');
+  if (item.type === 'video') {
+    media.controls = true;
+    media.playsInline = true;
+    media.preload = 'metadata';
+  } else {
+    media.alt = item.caption || 'Report evidence';
+  }
+  media.src = item.url;
+  stage.appendChild(media);
+  document.getElementById('barangayEvidenceCaption').textContent = item.caption || (item.type === 'video' ? 'Report video' : 'Report photo');
+  document.getElementById('barangayEvidenceMeta').textContent = [item.actor, item.createdAt].filter(Boolean).join(' · ');
+  document.getElementById('barangayEvidenceCount').textContent = (barangayEvidenceIndex + 1) + ' of ' + barangayEvidenceItems.length;
+  document.getElementById('barangayEvidencePrev').disabled = barangayEvidenceIndex === 0;
+  document.getElementById('barangayEvidenceNext').disabled = barangayEvidenceIndex === barangayEvidenceItems.length - 1;
+}
+function openBarangayEvidence(index) {
+  if (index < 0 || index >= barangayEvidenceItems.length) return;
+  barangayEvidenceIndex = index;
+  renderBarangayEvidenceViewer();
+  document.getElementById('barangayEvidenceLightbox').classList.add('open');
+}
+function stepBarangayEvidence(offset) {
+  var nextIndex = barangayEvidenceIndex + offset;
+  if (nextIndex < 0 || nextIndex >= barangayEvidenceItems.length) return;
+  barangayEvidenceIndex = nextIndex;
+  renderBarangayEvidenceViewer();
+}
+function closeBarangayEvidence() {
+  document.getElementById('barangayEvidenceLightbox').classList.remove('open');
+  document.getElementById('barangayEvidenceStage').textContent = '';
+}
+document.addEventListener('keydown', function(event) {
+  if (!document.getElementById('barangayEvidenceLightbox').classList.contains('open')) return;
+  if (event.key === 'Escape') closeBarangayEvidence();
+  else if (event.key === 'ArrowLeft') stepBarangayEvidence(-1);
+  else if (event.key === 'ArrowRight') stepBarangayEvidence(1);
+});
+function barangayCaseEvidence(report) {
+  var evidence = Array.isArray(report.evidence) ? report.evidence.slice() : [];
+  if (report.photo) evidence.push({
+    type: 'photo', url: report.photo, caption: '', source: 'resident', role: 'resident',
+    actor: report.reporter || 'Resident', createdAt: report.submitted || ''
+  });
+  if (report.video) evidence.push({
+    type: 'video', url: report.video, caption: '', source: 'resident', role: 'resident',
+    actor: report.reporter || 'Resident', createdAt: report.submitted || ''
+  });
+  return evidence;
+}
 function barangayInfoRow(label, value) {
   return '<div class="info-row"><div><p class="info-row-label">' + detailEsc(label) + '</p><p class="info-row-value">' + detailEsc(value) + '</p></div></div>';
 }
@@ -1310,11 +1734,16 @@ function buildReportDetailHtml(report) {
   var displayStatus = report._db_status === 'pending' ? 'Pending Barangay Review'
     : (report._db_status === 'validated' ? 'Pending DCVS Review' : report.status);
 
-  var photoHtml = (report.photo || report.video)
+  var evidencePhotos = Array.isArray(report.evidence) ? report.evidence : [];
+  barangayEvidenceItems = barangayCaseEvidence(report);
+  var actionEvidenceHtml = evidencePhotos.map(function(item) {
+    return '<figure style="margin:8px 0;"><img src="' + detailEsc(item.url) + '" alt="' + detailEsc(item.caption || 'Case evidence') + '" style="width:100%;max-height:240px;object-fit:cover;border:1px solid #e4e4e7;border-radius:6px;"><figcaption style="margin-top:4px;font-size:12px;color:#71717a;">' + detailEsc(item.caption || 'Case photo evidence') + ' · ' + detailEsc(item.actor) + '</figcaption></figure>';
+  }).join('');
+  var photoHtml = (report.photo || report.video || actionEvidenceHtml)
     ? '<div class="sd-section">' +
       '<div class="sd-section-title"><span>04</span> ' + (report.video ? 'Attached Photo &amp; Video Evidence' : 'Attached Photo Evidence') + '</div>' +
       (report.photo ? '<img src="' + report.photo + '" alt="Photo" style="width:100%;border-radius:6px;border:1px solid #e4e4e7;max-height:260px;object-fit:cover;" onerror="this.style.display=\'none\'" />' : '') +
-      (report.video ? '<video src="' + report.video + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid #e4e4e7;background:#000;display:block;' + (report.photo ? 'margin-top:8px;' : '') + '"></video>' : '') +
+      (report.video ? '<video src="' + report.video + '" controls playsinline preload="metadata" style="width:100%;border-radius:6px;border:1px solid #e4e4e7;background:#000;display:block;' + (report.photo ? 'margin-top:8px;' : '') + '"></video>' : '') + actionEvidenceHtml +
       '</div>' : '';
 
   var rejectionHtml = isRejected && report.rejection
@@ -1330,48 +1759,121 @@ function buildReportDetailHtml(report) {
   var responseDeadlineTime = responseDeadline ? new Date(responseDeadline.replace(' ', 'T')).getTime() : 0;
   var responseOverdue = !!responseDeadlineTime && responseDeadlineTime < Date.now()
     && (report._db_status !== 'resolved' || report.turnoverStatus === 'pending');
-  var isResolvedWithPendingTurnover = report._db_status === 'resolved' && report.turnoverStatus === 'pending';
   var isEscalatedToDcvs = report.responseState === 'escalated_to_dcvs';
-  var turnoverLabels = { pending: 'For Turnover — awaiting DCVS receipt', receipt_confirmed: 'Turnover Completed', cancelled: 'Turnover Cancelled' };
   var responseHistoryLabels = {
     accept_barangay_assignment: 'Accepted',
     forward_to_dcvs_review: 'Forwarded to DCVS review',
     start_response: 'Barangay response started',
+    record_site_visit: 'Barangay site visit recorded',
     update_progress: 'Progress update',
     mark_secured: 'Animal secured',
     request_pickup: 'DCVS pickup requested',
+    set_handover_plan: 'Handover plan set or updated',
     resolve_barangay: 'Incident resolved by Barangay',
     unable_to_secure: 'Escalated to DCVS',
     unable_to_locate: 'Unable to locate animal',
     confirm_turnover: 'DCVS confirmed animal receipt',
+    turnover_overdue: 'Animal turnover overdue',
     return_to_barangay: 'Returned to Barangay',
     resume_barangay_response: 'Barangay response resumed',
     staff_decide: 'DCVS response decision',
     approve_barangay_response: 'DCVS approved Barangay response',
     authorize_high_risk_barangay_response: 'High-risk override recorded',
     return_to_barangay_for_validation: 'Returned for more information',
+    add_photo_evidence: 'Photo evidence added',
     reject_report: 'Report rejected'
   };
   var responseHistory = Array.isArray(report.responseHistory) ? report.responseHistory : [];
+  var linkedEvidenceIndices = {};
+  function evidenceForHistory(entry) {
+    var legacySources = {
+      accept_barangay_assignment: ['barangay_validation'],
+      forward_to_dcvs_review: ['barangay_validation'],
+      mark_secured: ['barangay_secured'],
+      confirm_turnover: ['barangay_turnover']
+    };
+    return evidencePhotos.map(function(item, index) {
+      var historyId = Number(item.historyId || 0);
+      var linked = historyId > 0
+        ? historyId === Number(entry.id || 0)
+        : (entry.id > 0 && (legacySources[entry.action] || []).indexOf(item.source) !== -1);
+      return linked ? { item: item, index: index } : null;
+    }).filter(Boolean);
+  }
+  function evidenceThumbnail(item, index) {
+    var stageCaptions = {
+      barangay_validation: 'Barangay validation',
+      barangay_secured: 'Animal secured',
+      barangay_turnover: 'Animal turnover'
+    };
+    var caption = item.caption || stageCaptions[item.source] || (item.type === 'video' ? 'Report video' : 'Case photo evidence');
+    var media = item.type === 'video'
+      ? '<video src="' + detailEsc(item.url) + '" muted playsinline preload="metadata" tabindex="-1" aria-hidden="true"></video>'
+      : '<img src="' + detailEsc(item.url) + '" alt="' + detailEsc(caption) + '" loading="lazy">';
+    return '<figure class="rpt-perspective-attachment"><button type="button" class="rpt-perspective-attachment-thumb" onclick="openBarangayEvidence(' + index + ')" aria-label="View attachment: ' + detailEsc(caption) + '">' +
+      media + '</button><figcaption>' + detailEsc(caption) + '</figcaption></figure>';
+  }
+  function attachmentSection(title, items, emptyText) {
+    var content = items.length
+      ? '<div class="rpt-perspective-attachment-grid">' + items.map(function(item) {
+          return evidenceThumbnail(item.item, item.index);
+        }).join('') + '</div>'
+      : '<p class="rpt-perspective-attachment-empty">' + emptyText + '</p>';
+    return '<section class="rpt-perspective-attachment-section"><h3>' + title + ' <span>' + items.length + '</span></h3>' + content + '</section>';
+  }
+  function reportAttachmentsHtml() {
+    var yourItems = [];
+    var residentItems = [];
+    var barangayItems = [];
+    var dcvsItems = [];
+    barangayEvidenceItems.forEach(function(item, index) {
+      var wrapped = { item: item, index: index };
+      if (item.isMine) yourItems.push(wrapped);
+      else if (item.source === 'resident') residentItems.push(wrapped);
+      else if (item.role === 'barangay') barangayItems.push(wrapped);
+      else dcvsItems.push(wrapped);
+    });
+    if (!barangayEvidenceItems.length) return '<p class="response-history-empty">No attachments.</p>';
+    return attachmentSection('Your photos', yourItems, 'You have not added any photos or videos to this report.') +
+      attachmentSection('From the resident', residentItems, 'No photos or videos were submitted with this report.') +
+      attachmentSection('From Brgy. ' + detailEsc(report.brgy || 'Barangay'), barangayItems, 'No attachments have been added by the barangay.') +
+      attachmentSection('From DCVS', dcvsItems, 'No attachments have been added by DCVS.');
+  }
   var responseHistoryHtml = responseHistory.length
     ? '<ol class="response-history">' + responseHistory.slice().reverse().map(function(entry) {
         var title = responseHistoryLabels[entry.action] || String(entry.action || 'Case update').replace(/_/g, ' ');
-        var actor = entry.actorName || entry.actorRole || 'System';
+        var actor = entry.actorName || (entry.actorRole === 'system' ? 'System' : entry.actorRole) || 'System';
         var entryReason = entry.action === 'accept_barangay_assignment'
           ? 'Barangay accepted responsibility'
           : entry.reason;
+        var photos = evidenceForHistory(entry).slice(0, 3);
+        photos.forEach(function(photo) { linkedEvidenceIndices[photo.index] = true; });
+        var photosHtml = photos.length
+          ? '<div class="rpt-updates-photo-grid">' + photos.map(function(photo) {
+              return evidenceThumbnail(photo.item, photo.index);
+            }).join('') + '</div>'
+          : '';
         return '<li class="response-history-item"><div class="response-history-title">' + detailEsc(title) + '</div>' +
           '<div class="response-history-meta">by ' + detailEsc(actor) + (entry.createdAt ? ' - ' + detailEsc(entry.createdAt) : '') + '</div>' +
-          (entryReason ? '<p class="response-history-reason">' + detailEsc(entryReason) + '</p>' : '') +
+          (entryReason ? '<p class="response-history-reason">' + detailEsc(entryReason) + '</p>' : '') + photosHtml +
           '</li>';
       }).join('') + '</ol>'
     : '<p class="response-history-empty">No response updates have been recorded.</p>';
+  var unattachedPhotos = evidencePhotos.map(function(item, index) {
+    return linkedEvidenceIndices[index] ? null : { item: item, index: index };
+  }).filter(Boolean);
+  if (unattachedPhotos.length) {
+    responseHistoryHtml += '<div class="response-history-item"><div class="response-history-title">Additional attachments</div><div class="rpt-updates-photo-grid">' +
+      unattachedPhotos.map(function(photo) { return evidenceThumbnail(photo.item, photo.index); }).join('') +
+      '</div></div>';
+  }
+  responseHistoryHtml = '<div class="response-history-timeline">' + responseHistoryHtml + '</div>';
   var responseStage = report.responseState;
-  var turnoverComplete = report._db_status === 'resolved' && report.turnoverStatus === 'receipt_confirmed';
-  var responseStages = ['Accepted', 'Responding', 'Secured', 'Resolved', 'Turned over'];
+  var responseStages = ['Accepted', 'Responding', 'Secured', 'Resolved'];
   var completedStage = responseStage === 'barangay_response_approved' ? 0
     : (responseStage === 'barangay_responding' || responseStage === 'escalated_to_dcvs' ? 1
-      : (responseStage === 'animal_secured' ? 2 : (report._db_status === 'resolved' ? (turnoverComplete ? 4 : 3) : -1)));
+      : (responseStage === 'animal_secured' ? 2 : (report._db_status === 'resolved'
+        ? 3 : -1)));
   var responseStepsHtml = responseStages.map(function(label, index) {
     var stepClass = index < completedStage ? ' is-complete'
       : (index === completedStage ? (responseOverdue && index === 1 ? ' is-current is-overdue' : ' is-current') : '');
@@ -1380,55 +1882,76 @@ function buildReportDetailHtml(report) {
       : '';
     return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
   }).join('');
-  var deadlineLabel = responseStage === 'barangay_response_approved' ? 'Respond by'
-    : (isResolvedWithPendingTurnover ? 'Turnover by' : 'Next update by');
-  var deadlineText = isEscalatedToDcvs ? 'DCVS is deciding the next action'
-    : (turnoverComplete && report.turnoverReceivedAt
-      ? 'Receipt confirmed ' + new Date(report.turnoverReceivedAt.replace(' ', 'T')).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-      : (responseOverdue ? (report._db_status === 'resolved' ? 'Turnover overdue'
-        : (responseStage === 'barangay_response_approved' ? 'Response overdue' : 'Update overdue'))
-        : (responseDeadline ? deadlineLabel + ' ' + new Date(responseDeadlineTime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-          + (isResolvedWithPendingTurnover ? ' (in ' + Math.ceil((responseDeadlineTime - Date.now()) / 3600000) + 'h)' : '') : '')));
+  var deadlineLabel = responseStage === 'barangay_response_approved' ? 'Respond by' : 'Next update by';
+  var deadlineText = report._db_status === 'resolved' ? ''
+      : (isEscalatedToDcvs ? 'DCVS is deciding the next action'
+        : (responseOverdue
+          ? (responseStage === 'barangay_response_approved' ? 'Response overdue' : 'Update overdue')
+          : (responseDeadline ? deadlineLabel + ' ' + new Date(responseDeadlineTime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')));
   var noticeClass = responseOverdue ? ' is-overdue'
-    : (isResolvedWithPendingTurnover ? ''
-      : (turnoverComplete ? ' is-complete' : (responseStage === 'animal_secured' ? ' is-warning' : '')));
-  var responseNotice = responseOverdue
-    ? (report._db_status === 'resolved'
-    ? 'Animal turnover is overdue. DCVS follow-up is required. The incident remains resolved; it will not close or change automatically.'
-    : (responseStage === 'barangay_response_approved'
-      ? 'Initial response is overdue. DCVS follow-up is required. Start responding or coordinate with DCVS. The case will not close automatically.'
-      : 'Progress update is overdue. DCVS follow-up is required. Post an update to reset the next target. The case will not close automatically.'))
-    : (responseStage === 'barangay_response_approved'
-      ? 'Start your response when the team is heading to the location. The initial response target is ' + <?php echo json_encode($responseTargetHours); ?> + ' hours.'
-      : (responseStage === 'barangay_responding'
-        ? 'Keep updates coming. Post a progress update or mark the animal secured once you have custody.'
-        : (responseStage === 'animal_secured'
-          ? 'Record the resolution when the incident is complete. If the live animal needs turnover, create a separate DCVS task.'
-          : (isResolvedWithPendingTurnover
-            ? 'The incident is resolved. DCVS will confirm receipt of the animal; keep it safe until then.'
-            : (turnoverComplete ? 'Case complete. DCVS confirmed receipt of the animal.' :
-              (isEscalatedToDcvs ? 'Escalated to DCVS. DCVS was notified and will decide whether to take over. Stay available for questions.' : ''))))));
+      : (responseStage === 'animal_secured' ? ' is-warning' : '');
+  var responseNotice = '';
+  if (report._db_status !== 'resolved') {
+    if (responseOverdue) {
+      responseNotice = responseStage === 'barangay_response_approved'
+        ? 'Initial response is overdue. DCVS follow-up is required. Start responding or coordinate with DCVS. The case will not close automatically.'
+        : 'Progress update is overdue. DCVS follow-up is required. Post an update to reset the next target. The case will not close automatically.';
+    } else if (responseStage === 'barangay_response_approved') {
+      responseNotice = 'Start your response when the team is heading to the location. The initial response target is ' + <?php echo json_encode($responseTargetHours); ?> + ' hours.';
+    } else if (responseStage === 'barangay_responding') {
+      responseNotice = 'Keep updates coming. Post a progress update or mark the animal secured once you have custody.';
+    } else if (responseStage === 'animal_secured') {
+      responseNotice = 'Record the resolution when the incident is complete. A separate DCVS handover plan will be required for the live animal.';
+    } else if (isEscalatedToDcvs) {
+      responseNotice = 'Escalated to DCVS. DCVS was notified and will decide whether to take over. Stay available for questions.';
+    }
+  }
   var responseRouteButton = responseStage === 'barangay_response_approved'
     ? '<button type="button" class="response-route-link" onclick="viewReportLocation(' + Number(report.report_id) + ')">View report route on geo map</button>' : '';
-  var custodyHtml = report.holdingLocation || report.animalCondition
-    ? '<div class="response-custody"><div class="response-custody-title">Animal Custody</div><div class="response-custody-body">' +
-      '<div class="response-custody-row"><span>Holding location</span><span>' + detailEsc(report.holdingLocation || '—') + '</span></div>' +
-      '<div class="response-custody-row"><span>Condition</span><span>' + detailEsc(report.animalCondition || '—') + '</span></div>' +
-      (report.securedAt ? '<div class="response-custody-row"><span>Secured</span><span>' + detailEsc(report.securedAt) + '</span></div>' : '') +
-      '</div></div>' : '';
+  var responseStatusLabels = {
+    awaiting_dcvs_decision: 'Awaiting DCVS decision',
+    barangay_response_approved: 'Accepted by Barangay',
+    barangay_responding: 'Barangay responding',
+    animal_secured: 'Animal secured',
+    awaiting_turnover: 'Resolved',
+    turned_over: 'Resolved',
+    resolved: 'Resolved',
+    escalated_to_dcvs: 'Escalated to DCVS',
+    unable_to_locate: 'Unable to locate',
+    returned_to_barangay: 'Returned to Barangay'
+  };
+  var responseModeLabel = report.responseMode === 'barangay_response' ? 'Barangay Response'
+    : (report.responseMode === 'dcvs_dispatch' ? 'DCVS Dispatch' : (report.responseMode || '—'));
+  var lastProgressLabel = report.lastProgressAt
+    ? (function() {
+        var date = new Date(String(report.lastProgressAt).replace(' ', 'T'));
+        return isNaN(date.getTime()) ? report.lastProgressAt : date.toLocaleString([], {year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+      })()
+    : '—';
+  var custodyFields = [
+    ['Response Status', responseStatusLabels[responseStage] || (report._db_status === 'resolved' ? 'Resolved' : '—')],
+    ['Response Mode', responseModeLabel],
+    ['Last Progress Update', lastProgressLabel],
+    ['Holding Location', report.holdingLocation || '—'],
+    ['Animal Condition', report.animalCondition || '—'],
+    ['Resolution Details', report.resolutionDetails || '—'],
+    ['Animal Disposition', String(report.animalDisposition || '—').replace(/_/g, ' ')],
+    ['Secured', report.securedAt || '—']
+  ];
+  var custodyHtml = custodyFields.some(function(field) { return field[1] !== '—'; })
+    ? '<section class="response-custody"><h3 class="response-custody-title">Response &amp; Custody</h3><div class="response-custody-body">' +
+      custodyFields.map(function(field) {
+        return '<div class="response-custody-row"><span>' + detailEsc(field[0]) + '</span><span>' + detailEsc(field[1]) + '</span></div>';
+      }).join('') +
+      '</div></section>' : '';
   var canUpdateProgress = ['barangay_responding', 'animal_secured'].indexOf(responseStage) !== -1;
   var workflowHtml = window.DCVS_BARANGAY_RESPONSE_ENABLED && report.responseMode === 'barangay_response'
     ? '<section class="rpt-col rpt-full-col">' +
       '<div class="response-card"><div class="response-card-header"><div class="response-card-heading"><div class="response-card-title">Barangay Response</div><div class="response-card-subtitle">Handled by Brgy. ' + detailEsc(report.brgy || 'Barangay') + '</div></div>' +
-      (deadlineText ? '<span class="response-deadline' + (responseOverdue ? ' is-overdue' : (report._db_status === 'resolved' && turnoverComplete ? ' is-resolved' : '')) + '">' + detailEsc(deadlineText) + '</span>' : '') +
+      (deadlineText ? '<span class="response-deadline' + (responseOverdue ? ' is-overdue' : '') + '">' + detailEsc(deadlineText) + '</span>' : '') +
       '</div><div class="response-steps">' + responseStepsHtml + '</div>' +
       (responseNotice ? '<div class="response-notice' + noticeClass + '"><span class="response-notice-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></span><span class="response-notice-text">' + detailEsc(responseNotice) + '</span></div>' : '') +
-      responseRouteButton + '</div>' +
-      custodyHtml +
-      (report.resolutionDetails ? '<div class="info-rows" style="margin-top:10px;">' + barangayInfoRow('Resolution details', report.resolutionDetails) + barangayInfoRow('Animal disposition', String(report.animalDisposition || '').replace(/_/g, ' ')) + '</div>' : '') +
-      (report.turnoverStatus ? '<div class="info-rows" style="margin-top:10px;">' + barangayInfoRow('Turnover task', turnoverLabels[report.turnoverStatus] || report.turnoverStatus) + (report.turnoverDueAt && report.turnoverStatus === 'pending' ? barangayInfoRow('Turnover due', report.turnoverDueAt) : '') + (report.turnoverReceivedAt ? barangayInfoRow('Receipt confirmed', report.turnoverReceivedAt) : '') + '</div>' : '') +
-      '</section>' : '';
-
+      responseRouteButton + '</div></section>' : '';
   var pillBg, pillColor, pillBorder;
   switch (report._db_status) {
     case 'pending': pillBg='#fef3c7';pillColor='#92400e';pillBorder='#fde68a';break;
@@ -1446,40 +1969,36 @@ function buildReportDetailHtml(report) {
     default: urgBg='#eff6ff';urgColor='#1e40af';urgBorder='#bfdbfe';
   }
 
-  var hasWorkflowStatusStack = isResolvedWithPendingTurnover || turnoverComplete || isEscalatedToDcvs;
-  var statusBadgeHtml = isResolvedWithPendingTurnover
-    ? '<span class="response-status-chip is-resolved">Resolved</span><span class="response-status-chip is-pending">Turnover pending</span>'
-    : (turnoverComplete
-      ? '<span class="response-status-chip is-resolved">Resolved</span><span class="response-status-chip is-turned-over">Turned over</span>'
-      : (isEscalatedToDcvs
-        ? '<span class="response-status-chip is-dcvs">With DCVS</span>'
-        : (displayStatus === 'Accepted by Barangay · Site visit pending'
-          ? '<span>Accepted by Barangay ·</span><span>Site visit pending</span>'
-          : '<span>' + detailEsc(displayStatus) + '</span>')));
+  var hasWorkflowStatusStack = isEscalatedToDcvs;
+  var statusBadgeHtml = isEscalatedToDcvs
+      ? '<span class="response-status-chip is-dcvs">With DCVS</span>'
+      : '<span>' + detailEsc(displayStatus) + '</span>';
   var statusBadgeClass = hasWorkflowStatusStack
     ? 'report-summary-status is-stack'
     : (report._db_status === 'resolved' || String(displayStatus || '').trim().toLowerCase() === 'in progress'
       ? 'report-summary-status is-compact'
       : 'report-summary-status');
+  var statusBadgeStyle = hasWorkflowStatusStack
+    ? ''
+    : ' style="color:' + pillColor + ';background:' + pillBg + ';border-color:' + pillBorder + ';"';
 
   if (report.structured) {
     return '<div class="rpt-tabs">' +
       '<button class="rpt-tab active" data-tab="details" onclick="barangayDetailTab(\'details\', this)">Details</button>' +
-      '<button class="rpt-tab" data-tab="attachments" onclick="barangayDetailTab(\'attachments\', this)">Attachments</button>' +
-      (workflowHtml ? '<button class="rpt-tab" data-tab="updates" onclick="barangayDetailTab(\'updates\', this)">Progress updates</button>' : '') +
+      '<button class="rpt-tab" data-tab="updates" onclick="barangayDetailTab(\'updates\', this)">Updates</button>' +
     '</div>' +
     '<div class="rpt-detail-body" data-tab="details">' +
       '<div class="report-summary">' +
-        '<div class="report-summary-avatar">' + (report.avatar ? '<img src="' + detailEsc(report.avatar) + '" alt="">' : detailEsc((report.reporter || '?').split(/\s+/).slice(0, 2).map(function(part) { return part.charAt(0); }).join('').toUpperCase())) + '</div>' +
+        '<div class="report-summary-avatar">' + (report.avatar ? '<img class="report-summary-avatar-image" data-fallback="' + detailEsc((report.reporter || '?').split(/\s+/).slice(0, 2).map(function(part) { return part.charAt(0); }).join('').toUpperCase()) + '" src="' + detailEsc(report.avatar) + '" alt="">' : detailEsc((report.reporter || '?').split(/\s+/).slice(0, 2).map(function(part) { return part.charAt(0); }).join('').toUpperCase())) + '</div>' +
         '<div class="report-summary-copy">' +
           '<span class="report-summary-label">Reported by</span>' +
           '<span class="report-summary-name">' + detailEsc(report.reporter || '—') + '</span>' +
         '</div>' +
-        '<span class="' + statusBadgeClass + '" style="color:' + pillColor + ';background:' + pillBg + ';border-color:' + pillBorder + ';">' + statusBadgeHtml + '</span>' +
+        '<span class="' + statusBadgeClass + '"' + statusBadgeStyle + '>' + statusBadgeHtml + '</span>' +
       '</div>' +
       '<div style="margin-bottom:16px;display:flex;align-items:center;gap:6px;"><span style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#71717a;">Priority</span><span class="appt-status-pill" style="background:' + urgBg + ';color:' + urgColor + ';border-color:' + urgBorder + ';">' + detailEsc(report.priority) + '</span></div>' +
       dcvsReturnHtml +
-      workflowHtml +
+      workflowHtml + custodyHtml +
       '<div class="rpt-detail-grid">' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows info-rows-2col">' + barangayInfoRow('Date Submitted', report.submitted) + barangayInfoRow('Incident Date', report.incidentDate) + barangayInfoRow('Location', report.location) + barangayInfoRow('Report Type', report.category) + '</div></div>' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Animal Information</div><div class="info-rows info-rows-2col">' + barangayInfoRow('Animal Type', report.animalType || '-') + barangayInfoRow('Breed / Appearance', report.animalBreed || '-') + barangayInfoRow('Estimated Number of Animals', report.animalCount || '-') + barangayInfoRow('Animal Behavior', report.animalBehavior || '-') + '</div></div>' +
@@ -1487,10 +2006,9 @@ function buildReportDetailHtml(report) {
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Incident Details</div><p class="info-row-label" style="margin:0 0 6px;">Description</p><div class="rpt-desc-box">' + detailEsc(report.description || 'No description provided.') + '</div></div>' +
       '</div>' +
     '</div>' +
-    '<div class="rpt-detail-body" data-tab="attachments" style="display:none;"><div class="rpt-section-title">Attached Photos</div><div class="rpt-attachments">' + (report.photo ? '<img src="' + detailEsc(report.photo) + '" alt="Attached report photo" onerror="this.style.display=\'none\'">' : '<p style="font-size:14px;color:#71717a;">No attachments.</p>') + (report.video ? '<video src="' + detailEsc(report.video) + '" controls playsinline preload="metadata"></video>' : '') + '</div></div>' +
-    (workflowHtml ? '<div class="rpt-detail-body" data-tab="updates" style="display:none;"><div class="response-updates"><div class="response-updates-header"><span>Progress updates (' + responseHistory.length + ')</span>' +
+    '<div class="rpt-detail-body" data-tab="updates" style="display:none;"><div class="response-updates-header"><span>Progress updates (' + responseHistory.length + ')</span>' +
       (canUpdateProgress ? '<button type="button" onclick="responseWorkflowAction(' + Number(report.report_id) + ',\'update_progress\')">+ Add update</button>' : '') +
-      '</div>' + responseHistoryHtml + '</div></div>' : '');
+      '</div>' + responseHistoryHtml + '</div>';
   } else {
   return '<div style="display:flex;gap:10px;">' +
       '<span class="appt-status-pill" style="background:' + pillBg + ';color:' + pillColor + ';border-color:' + pillBorder + ';">Status: ' + displayStatus + '</span>' +
@@ -1526,7 +2044,7 @@ function buildReportDetailHtml(report) {
         '<div class="sd-info-item"><div class="sd-info-label">Resolved</div><div class="sd-info-value">' + detailEsc(report.dateResolved || '-') + '</div></div>' +
       '</div>' +
     '</div>' +
-    workflowHtml + photoHtml + rejectionHtml + dcvsReturnHtml;
+    workflowHtml + custodyHtml + photoHtml + rejectionHtml + dcvsReturnHtml;
   }
 }
 
@@ -1535,6 +2053,7 @@ function openReportDetail(reportId) {
   if (!report) return;
   currentSelectedReport = report;
 
+  document.getElementById('reportDetailModal').classList.add('open');
   document.getElementById('detail-id').textContent = report.id;
   document.getElementById('detail-category').textContent = report.category;
   document.getElementById('detail-body').innerHTML = buildReportDetailHtml(report);
@@ -1559,10 +2078,16 @@ function openReportDetail(reportId) {
         responseAction = { action: 'start_response', label: 'Start Response' };
         responseMenuItems.push({ action: 'unable_to_secure', label: 'Escalate to DCVS', hint: 'Coordinate with DCVS if your team cannot safely handle the case.', danger: true });
       } else if (report.responseState === 'barangay_responding') {
-        responseAction = { action: 'mark_secured', label: 'Mark Animal Secured' };
+        if (report.fieldStatus === 'confirmed_on_site') {
+          responseAction = { action: 'mark_secured', label: 'Mark Animal Secured' };
+        } else {
+          responseAction = { action: 'record_site_visit', label: 'Record Site Visit' };
+        }
         responseMenuItems.push({ action: 'update_progress', label: 'Add progress update', hint: 'Record the latest response activity.' });
-        responseMenuItems.push({ action: 'unable_to_locate', label: 'Unable to locate animal', hint: 'Record that the area was checked and the animal was not found.' });
-        responseMenuItems.push({ action: 'unable_to_secure', label: 'Escalate to DCVS', hint: 'Request DCVS follow-up if the animal cannot be safely handled.', danger: true });
+        if (report.fieldStatus !== 'confirmed_on_site') {
+          responseMenuItems.push({ action: 'unable_to_locate', label: 'Unable to locate animal', hint: 'Record that the area was checked and the animal was not found.' });
+          responseMenuItems.push({ action: 'unable_to_secure', label: 'Escalate to DCVS', hint: 'Request DCVS follow-up if the animal cannot be safely handled.', danger: true });
+        }
       } else if (report.responseState === 'animal_secured') {
         responseAction = { action: 'resolve_barangay', label: 'Record Resolution' };
         responseMenuItems.push({ action: 'update_progress', label: 'Add progress update', hint: 'Record an update before submitting resolution.' });
@@ -1570,7 +2095,23 @@ function openReportDetail(reportId) {
         responseAction = { action: 'resume_barangay_response', label: 'Resume Response' };
       }
     }
-    if (showFinalClose) {
+    var turnoverRequired = barangayReportNeedsTurnover(report);
+    if (window.DCVS_BARANGAY_RESPONSE_ENABLED && turnoverRequired
+        && String(report._db_status || '').toLowerCase() === 'resolved'
+        && report.turnoverStatus !== 'receipt_confirmed') {
+      var planLabel = report.turnoverMethod ? 'Edit handover plan' : 'Set handover plan';
+      footer.innerHTML = '<button type="button" class="sd-btn sd-btn-primary response-action-primary" id="setHandoverPlanButton">' + planLabel + '</button>';
+      var setHandoverPlanButton = document.getElementById('setHandoverPlanButton');
+      if (setHandoverPlanButton) {
+        setHandoverPlanButton.addEventListener('click', function() {
+          if (typeof window.responseWorkflowAction !== 'function') {
+            showToast('Handover plan unavailable. Refresh this page and try again.');
+            return;
+          }
+          window.responseWorkflowAction(report.report_id, 'set_handover_plan');
+        });
+      }
+    } else if (showFinalClose) {
       footer.innerHTML = '<button type="button" class="sd-btn sd-btn-secondary response-action-close" onclick="closeModal(\'reportDetailModal\')">Close</button>';
     } else if (responseAction) {
       var menuItemsHtml = responseMenuItems.map(function(item) {
@@ -1585,12 +2126,9 @@ function openReportDetail(reportId) {
         '</div>' +
         (menuItemsHtml ? '<div class="response-action-menu" id="barangayResponseActionMenu" hidden>' + menuItemsHtml + '</div>' : '');
     } else {
-      footer.innerHTML = '';
-      footer.style.display = 'none';
+      footer.innerHTML = '<button type="button" class="sd-btn sd-btn-secondary response-action-close" onclick="closeModal(\'reportDetailModal\')">Close</button>';
     }
   }
-
-  document.getElementById('reportDetailModal').classList.add('open');
 }
 
 function closeBarangayResponseMenu() {
@@ -1677,7 +2215,7 @@ function selectReportById(rid) {
 
 function doValidate() {
   if (!currentSelectedReport) return;
-  openValidationForm(currentSelectedReport, 'Record what you found on site, then choose who will handle this case.');
+  openValidationForm(currentSelectedReport, 'Review the report before forwarding it or accepting responsibility. Record site findings later, after the team visits.');
 }
 
 function openValidationForm(report, description) {
@@ -1711,8 +2249,17 @@ function updateValidationRoutingChoice() {
   submitButton.textContent = willRespond
     ? 'Validate & Assign to Barangay'
     : 'Validate & Forward to DCVS';
+  var fieldStatus = document.getElementById('validationFieldStatus');
+  if (fieldStatus) {
+    fieldStatus.hidden = willRespond;
+    fieldStatus.querySelectorAll('[name="field_status"]').forEach(function(input) {
+      input.required = !willRespond;
+      input.disabled = willRespond;
+      if (willRespond) input.checked = input.value === 'site_visit_pending';
+    });
+  }
   if (hint) hint.textContent = willRespond
-    ? 'This report will be assigned to your barangay immediately. Start the response separately when the team is heading to the incident.'
+    ? 'Accepting assigns the report to your barangay. Record site confirmation later using Record Site Visit.'
     : 'This report will be forwarded to DCVS for review and personnel assignment.';
   updateValidationRiskCheck(willRespond);
 }
@@ -1816,7 +2363,7 @@ function submitValidate() {
     if (attachments[i].size > 25 * 1024 * 1024) { showToast('Each evidence file must be no larger than 25 MB.'); return; }
   }
   var btn = document.getElementById('validateAlertConfirm');
-  btn.disabled = true; btn.textContent = 'Forwarding...';
+  btn.disabled = true; btn.textContent = 'Saving...';
   var cancel = document.getElementById('validateAlertCancel');
   cancel.disabled = true;
   bvRunning = bvTotal > 0;
@@ -2012,9 +2559,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
 });
 </script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
-<script src="assets/js/response-workflow.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/notification-panel.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
 
+<?php require_once __DIR__ . '/../../includes/reports/photo-evidence-dialog.php'; ?>
 </body>
 </html>

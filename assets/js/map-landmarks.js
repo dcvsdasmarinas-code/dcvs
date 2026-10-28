@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var SOURCE_ID = 'dcvs-landmarks';
   var POINTS_LAYER_ID = 'dcvs-landmark-points';
   var CODES_LAYER_ID = 'dcvs-landmark-codes';
@@ -317,7 +325,7 @@
         return;
       }
 
-      fetch('geo-map/landmarks.php?sess=' + encodeURIComponent(session), {
+      fetch(appUrl('geo-map/landmarks.php?sess=' + encodeURIComponent(session)), {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/geo+json' }
       }).then(function(response) {

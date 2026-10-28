@@ -61,6 +61,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-staff.php');
         exit;
     }
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferred_date)
+        || !checkdate((int)substr($preferred_date, 5, 2), (int)substr($preferred_date, 8, 2), (int)substr($preferred_date, 0, 4))
+        || strtotime($preferred_date . ' ' . dcvsTimeKey($preferred_time)) <= time()) {
+        $_SESSION['appointment_error'] = "Choose a valid future appointment date and time.";
+        header('Location: dashboard-staff.php');
+        exit;
+    }
     if ($waitlist_id > 0) {
         $waitlistStmt = $conn->prepare("SELECT appointment_type, urgency_level, preferred_date, preferred_time
             FROM appointment_waitlist
@@ -119,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pet_name = $pet['pet_name'];
     }
 
-    $capacityStatuses = ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress'];
+    $capacityStatuses = ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress', 'action_needed'];
     $reservesSlot = in_array($status, $capacityStatuses, true);
 
     // Slot capacity check
@@ -131,7 +138,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 // Check duplicate for same resident
     if ($reservesSlot) {
-        $dupStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND preferred_date = ? AND preferred_time = ? AND status IN ($activeStatuses,'in_progress') AND archived_at IS NULL" . $excludeClause);
+        $lockDates = [$preferred_date];
+        if ($oldAppointment && in_array($oldAppointment['status'], $capacityStatuses, true)) {
+            $lockDates[] = $oldAppointment['preferred_date'];
+        }
+        dcvsLockAppointmentCapacityDates($conn, $lockDates);
+        $dupStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND COALESCE(scheduled_date, preferred_date) = ? AND COALESCE(scheduled_time, preferred_time) = ? AND status IN ($activeStatuses,'in_progress','rescheduled','action_needed') AND archived_at IS NULL" . $excludeClause);
         if ($appointment_id) { $dupStmt->bind_param("issi", $user_id, $preferred_date, $preferred_time, $appointment_id); }
         else { $dupStmt->bind_param("iss", $user_id, $preferred_date, $preferred_time); }
         $dupStmt->execute();
@@ -141,8 +153,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $dupStmt->close();
 
-        $dailyLimit = $urgencyLevel === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-        if (dcvsAppointmentDayCount($conn, $preferred_date, $appointment_id ?: 0, $urgencyLevel) >= $dailyLimit) {
+        $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $preferred_date, $urgencyLevel, $appointment_id ?: 0);
+        if ((!$dailyCapacity['has_program'] && $urgencyLevel === 'urgent') || !$dailyCapacity['available']) {
             $_SESSION['appointment_error'] = "This date has reached its " . $urgencyLevel . " appointment limit.";
             header('Location: dashboard-staff.php'); exit;
         }
@@ -154,7 +166,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             header('Location: dashboard-staff.php'); exit;
         }
         $slotCapacity = $urgencyLevel === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $preferred_date, $preferred_time);
-        if (dcvsAppointmentSlotCount($conn, $preferred_date, $preferred_time, $appointment_id ?: 0, $urgencyLevel) >= $slotCapacity) {
+        $slotCountUrgency = $dailyCapacity['has_program'] ? $urgencyLevel : 'all';
+        if (dcvsAppointmentSlotCount($conn, $preferred_date, $preferred_time, $appointment_id ?: 0, $slotCountUrgency) >= $slotCapacity) {
             $_SESSION['appointment_error'] = "This time slot has no remaining " . $urgencyLevel . " capacity.";
             header('Location: dashboard-staff.php'); exit;
         }

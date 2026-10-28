@@ -1,11 +1,22 @@
 <?php
-// Calendar Booking interface — resident portal > Appointments > Calendar Booking
-// Original layout preserved. Text content replaced with DCVS veterinary context.
+// Resident portal appointment calendar and detail panel.
 
 $cbAppointments = [];
-$cbStaffAvatar = '';
+$cbPrograms = [];
 if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
-    $cbStmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.preferred_date, a.preferred_time, a.status, a.notes, a.created_at, COALESCE(NULLIF(a.pet_name,''), p.pet_name, 'N/A') AS pet_name, p.photo_url FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.preferred_date ASC, a.preferred_time ASC");
+    $cbStmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level,
+        COALESCE(a.scheduled_date, a.preferred_date) AS preferred_date,
+        COALESCE(a.scheduled_time, a.preferred_time) AS preferred_time,
+        a.status, a.notes, a.created_at, COALESCE(NULLIF(a.pet_name,''), p.pet_name, 'N/A') AS pet_name,
+        p.photo_url, rr.requested_date AS reschedule_requested_date,
+        rr.requested_time AS reschedule_requested_time, rr.status AS reschedule_request_status
+        FROM appointments a
+        LEFT JOIN pets p ON p.pet_id = a.pet_id
+        LEFT JOIN appointment_reschedule_requests rr
+          ON rr.appointment_id = a.appointment_id AND rr.status IN ('pending','offered')
+          AND a.status IN ('approved','scheduled','rescheduled')
+        WHERE a.user_id = ? AND a.archived_at IS NULL
+        ORDER BY COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)");
     if ($cbStmt) {
         $cbStmt->bind_param("i", $_SESSION['user_id']);
         $cbStmt->execute();
@@ -13,8 +24,24 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
         while ($row = $cbRes->fetch_assoc()) { $cbAppointments[] = $row; }
         $cbStmt->close();
     }
-    $cbSv = $conn->query("SELECT avatar_url FROM users WHERE role = 'staff' AND status = 'active' AND avatar_url IS NOT NULL AND avatar_url != '' ORDER BY user_id ASC LIMIT 1");
-    if ($cbSv && $cbSv->num_rows > 0) { $cbStaffAvatar = $cbSv->fetch_assoc()['avatar_url']; }
+    if ($cbAppointments) {
+        $cbDates = array_column($cbAppointments, 'preferred_date');
+        $cbFirstDate = min($cbDates);
+        $cbLastDate = max($cbDates);
+        $cbProgramStmt = $conn->prepare("SELECT p.program_name, p.program_type, p.description, p.start_date, p.end_date, p.program_start_time, p.program_end_time, p.operating_time, p.venue, p.location_mode, GROUP_CONCAT(DISTINCT b.barangay_name ORDER BY b.barangay_name SEPARATOR ', ') AS barangay_names FROM programs p LEFT JOIN program_barangays pb ON pb.program_id = p.program_id LEFT JOIN barangays b ON b.barangay_id = pb.barangay_id WHERE p.status IN ('scheduled','live') AND p.end_date >= ? AND p.start_date <= ? GROUP BY p.program_id ORDER BY p.start_date, p.program_name");
+        if (!$cbProgramStmt) {
+            throw new RuntimeException('Could not prepare resident calendar program details: ' . $conn->error);
+        }
+        $cbProgramStmt->bind_param('ss', $cbFirstDate, $cbLastDate);
+        if (!$cbProgramStmt->execute()) {
+            $cbProgramError = $cbProgramStmt->error;
+            $cbProgramStmt->close();
+            throw new RuntimeException('Could not load resident calendar program details: ' . $cbProgramError);
+        }
+        $cbProgramResult = $cbProgramStmt->get_result();
+        while ($row = $cbProgramResult->fetch_assoc()) { $cbPrograms[] = $row; }
+        $cbProgramStmt->close();
+    }
 }
 ?>
 <style>
@@ -76,29 +103,41 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-day.cb-today{background:#fefce8;}
   .cb-app .cb-day-num{font-size:14px;font-weight:500;margin-bottom:6px}
   .cb-app .cb-day.cb-dim .cb-day-num{font-weight:400}
-  .cb-app .cb-chip{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;line-height:1.25;border-radius:5px;padding:3px 6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#F4F4F8;color:#18181b;}
-  .cb-app .cb-chip .cb-dot{width:3px;align-self:stretch;border-radius:2px;flex:none}
-  .cb-app .cb-chip.cb-blue .cb-dot{background:#4F8CFF}
-  .cb-app .cb-chip.cb-green .cb-dot{background:#0E8131}
-  .cb-app .cb-chip.cb-purple .cb-dot{background:#8B5CF6}
-  .cb-app .cb-chip.cb-orange .cb-dot{background:#FF9F43}
-  .cb-app .cb-chip.cb-pink .cb-dot{background:#F15BB5}
+  .cb-app .cb-chip{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:400;line-height:1.25;border-radius:0;padding:3px 2px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;color:#18181b;border-bottom:1px solid #e4e4e7;}
+  .cb-app .cb-chip .cb-dot{width:10px;min-width:10px;align-self:auto;border-radius:0;flex:none;color:#15803d;font-size:12px;line-height:1;text-align:center}
+  .cb-app .cb-chip.cb-blue .cb-dot,.cb-app .cb-chip.cb-green .cb-dot{color:#15803d}
+  .cb-app .cb-chip.cb-purple .cb-dot{color:#7c3aed}
+  .cb-app .cb-chip.cb-orange .cb-dot{color:#d97706}
+  .cb-app .cb-chip.cb-pink .cb-dot{color:#dc2626}
+  .cb-app .cb-chip.cb-reschedule-requested{border:1px dashed #71717a;border-radius:4px;padding:2px 4px;color:#52525b;background:#fafafa}
+  .cb-app .cb-chip.cb-reschedule-requested .cb-dot{color:#71717a}
+  .cb-app .cb-chip.cb-pending .cb-dot{color:#d97706}
+  .cb-app .cb-chip.cb-cancelled > span:last-child,.cb-app .cb-chip.cb-rejected > span:last-child{text-decoration:line-through;color:#71717a}
+  .cb-app .cb-mobile-more{display:block;text-align:left;color:#71717a;font-size:11px;font-weight:400;line-height:1.4;padding:2px 2px 0}
 
   /* ============ RIGHT PANEL ============ */
-  .cb-app .cb-event-pane{width:460px;flex:none;display:flex;flex-direction:column;background:#fff;border-left:1px solid #e4e4e7;}
-  .cb-app .cb-panel-body{padding:22px 26px;overflow-y:auto;flex:1}
-  .cb-app .cb-section{margin-bottom:22px}
-  .cb-app .cb-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;}
-  .cb-app .cb-title-input{flex:1;min-width:0;border:none;outline:none;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;letter-spacing:-.025em;line-height:1;color:#18181b;padding:4px 0;background:transparent;}
+  .cb-app .cb-event-pane{width:400px;flex:none;display:flex;flex-direction:column;background:#fff;border-left:1px solid #e4e4e7;}
+  .cb-app .cb-panel-body{padding:28px 26px;overflow-y:auto;flex:1}
+  .cb-app .cb-section{margin-bottom:18px}
+  .cb-app .cb-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:8px;}
+  .cb-app .cb-title-input{flex:1;min-width:0;border:none;outline:none;font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;letter-spacing:-.025em;line-height:1.2;color:#18181b;padding:0;background:transparent;white-space:normal;}
   .cb-app .cb-title-input::placeholder{color:#C3C3D2}
   .cb-app .cb-link-row{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
   .cb-app .cb-link-text{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;}
-  .cb-app .cb-time-row{display:flex;align-items:center;justify-content:space-between;gap:22px;margin-top:20px}
-  .cb-app .cb-time-block{display:flex;flex-direction:column}
-  .cb-app .cb-time-block .cb-t{font-family:'Inter','Segoe UI',sans-serif;font-size:30px;font-weight:700;letter-spacing:-.02em;color:#18181b}
-  .cb-app .cb-time-block .cb-d{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;margin-top:4px}
-  .cb-app .cb-pet-avatar{width:56px;height:56px;border-radius:50%;object-fit:cover;border:1px solid #e4e4e7;background:#f4f4f8;flex-shrink:0;}
-  .cb-app .cb-people{margin-top:22px;border-top:1px solid #e4e4e7;padding-top:18px}
+  .cb-app .cb-time-row{display:flex;align-items:center;justify-content:space-between;gap:22px;margin-top:8px}
+  .cb-app .cb-time-block{display:flex;flex-direction:row;align-items:center;gap:8px;min-width:0}
+  .cb-app .cb-time-block .cb-t{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;letter-spacing:0;color:#18181b}
+  .cb-app .cb-time-block .cb-d{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;margin:0}
+  .cb-app .cb-at-label{font-size:14px;color:#71717a}
+  .cb-app .cb-date-marker{flex:0 0 8px;width:8px;height:8px;border:2px solid #15803d;border-radius:50%}
+  .cb-app .cb-date-marker.is-confirmed{background:#15803d}
+  .cb-app .cb-date-marker.is-completed,.cb-app .cb-date-marker.is-cancelled{width:auto;height:auto;flex:0 0 auto;border:0;font-size:14px;font-weight:600;line-height:1}
+  .cb-app .cb-date-marker.is-completed{color:#15803d}
+  .cb-app .cb-date-marker.is-cancelled{color:#71717a}
+  .cb-app .cb-date-marker.is-pending{border-color:#d97706}
+  .cb-app .cb-pet-avatar{width:60px;height:60px;border-radius:50%;object-fit:cover;border:1px solid #e4e4e7;background:#e8f0ea;flex-shrink:0;}
+  .cb-app .cb-pet-initial{display:grid;place-items:center;color:#15803d;font-family:'Inter','Segoe UI',sans-serif;font-size:23px;font-weight:500}
+  .cb-app .cb-people{margin-top:26px;border-top:1px solid #e4e4e7;padding-top:18px}
   .cb-app .cb-person{display:flex;align-items:center;gap:12px;padding:9px 0}
   .cb-app .cb-person .cb-avatar{width:38px;height:38px}
   .cb-app .cb-p-name{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b}
@@ -106,16 +145,16 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-role{margin-left:auto;font-family:'Inter','Segoe UI',sans-serif;font-size:13px;color:#18181b}
   .cb-app .cb-role.cb-master{color:#18181b;font-weight:600}
   .cb-app .cb-help{margin-top:10px;padding:0 0 6px;}
-  .cb-app .cb-help-txt{font-style:italic;font-size:13px;color:#71717a;}
-  .cb-app .cb-contact{color:#18181b;font-weight:600;text-decoration:none;font-style:normal;}
+  .cb-app .cb-help-txt{font-style:normal;font-size:13px;color:#71717a;line-height:1.6}
+  .cb-app .cb-contact{color:#18181b;font-weight:600;text-decoration:underline;font-style:normal;}
   .cb-app .cb-contact:hover{text-decoration:underline;}
-  .cb-app .cb-reminders{border-top:1px solid #e4e4e7;padding-top:16px;margin-top:12px;}
+  .cb-app .cb-reminders{display:none}
   .cb-app .cb-reminders-head{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#18181b;margin:0 0 8px;}
   .cb-app .cb-reminders-list{margin:0;padding-left:18px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;line-height:1.6;}
   .cb-app .cb-reminders-list li{margin-bottom:4px;}
   .cb-app .cb-reminders-list li:last-child{margin-bottom:0;}
-  .cb-app .cb-appt-details{border-top:1px solid #e4e4e7;padding-top:14px;margin-bottom:22px;}
-  .cb-app .cb-day-appt-picker{display:none;margin:0 0 18px;padding:12px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.05);font-family:'Inter',sans-serif;color:#18181b;}
+  .cb-app .cb-appt-details{border-top:1px solid #e4e4e7;padding-top:14px;margin-bottom:0;}
+  .cb-app .cb-day-appt-picker{display:none;margin:0 0 18px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:none;font-family:'Inter',sans-serif;color:#18181b;}
   .cb-app .cb-day-appt-picker-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;}
   .cb-app .cb-day-appt-count{font-family:'Inter',sans-serif;font-size:12px;font-weight:500;color:#18181b;}
   .cb-app .cb-day-appt-nav{display:flex;gap:4px;}
@@ -128,21 +167,28 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-day-appt-time:hover{background:#f4f4f5;}
   .cb-app .cb-day-appt-time[aria-pressed="true"]{background:#18181b;border-color:#18181b;color:#fafafa;}
   .cb-app .cb-detail-head{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#18181b;margin:0 0 8px;}
-  .cb-app .cb-detail-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;}
+  .cb-app .cb-detail-row{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:4px 0;}
   .cb-app .cb-detail-label{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;}
-  .cb-app .cb-detail-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;text-align:right;}
-  .cb-app .cb-note-head{display:flex;align-items:center;justify-content:space-between;margin-top:20px}
+  .cb-app .cb-detail-value{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;text-align:right;overflow-wrap:anywhere;}
+  .cb-app .cb-note-head{display:flex;align-items:center;justify-content:space-between;margin-top:16px}
   .cb-app .cb-note-head span{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#18181b}
-  .cb-app .cb-note-box{margin-top:12px;border-radius:6px;padding:14px;font-size:14px;line-height:1.5;}
+  .cb-app .cb-note-box{margin-top:8px;border-left:2px solid #e4e4e7;border-radius:0;padding:2px 0 2px 12px;font-size:14px;line-height:1.5;color:#18181b;}
   .cb-app .cb-note-box p{margin:0;}
-  .cb-app .cb-note-pending{background:#fffbeb;border:1px solid #fde68a;color:#92400e;}
-  .cb-app .cb-note-scheduled{background:#dcebe0;border:1px solid #a7f3d0;color:#065f46;}
+  .cb-app .cb-note-pending,.cb-app .cb-note-scheduled{background:transparent;border:0;border-left:2px solid #e4e4e7;color:#18181b;}
   .cb-app .cb-st{display:inline-flex;align-items:center;border-radius:4px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;padding:3px 10px;line-height:1.4;white-space:nowrap;border:1px solid;}
+  .cb-app .cb-notes-section{padding-bottom:14px;border-bottom:1px solid #e4e4e7;margin-bottom:0}
+  .cb-app .cb-program-card{margin-top:14px;}
+  .cb-app .cb-program-hours{font-family:'Inter','Segoe UI',sans-serif;font-size:12px;color:#18181b;}
+  .cb-app .cb-program-name{margin-top:2px;font-family:'Inter','Segoe UI',sans-serif;font-size:16px;font-weight:600;color:#18181b;}
+  .cb-app .cb-program-location{margin-top:2px;font-size:13px;color:#71717a;}
+  .cb-app .cb-program-description{margin-top:8px;border-left:2px solid #e4e4e7;padding-left:12px;font-size:14px;line-height:1.5;color:#18181b;}
+  .cb-app .cb-appointment-link{display:inline-block;margin-top:14px;color:#0e8131;font-size:14px;font-weight:500;text-decoration:underline;text-underline-offset:2px;}
+  .cb-app .cb-appointment-link:hover{color:#086526;}
+  .cb-app .cb-st[hidden]{display:none}
   .cb-app .cb-empty-state{display:flex;align-items:center;justify-content:center;padding:80px 30px;text-align:center;}
   .cb-app .cb-empty-state p{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#71717a;}
   .cb-app .cb-event-backdrop{display:none;}
   .cb-app .cb-panel-close{display:none;}
-  .cb-app .cb-mobile-more{display:none;}
   @media (max-width:1020px){
     .cb-app{flex-direction:column}
     .cb-app .cb-event-pane{width:100%;border-top:1px solid var(--cb-line)}
@@ -166,20 +212,21 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
     .cb-app .cb-dow{padding:7px 1px;text-align:center;font-size:10px}
     .cb-app .cb-day{min-width:0;min-height:68px;height:68px;padding:4px 2px;overflow:hidden}
     .cb-app .cb-day-num{margin-bottom:4px;text-align:center;font-size:12px}
-    .cb-app .cb-chip{height:4px;min-height:0;padding:0;margin:0 0 3px;justify-content:center;border-radius:3px}
-    .cb-app .cb-chip > span:last-child{display:none}
-    .cb-app .cb-chip .cb-dot{width:100%;min-height:4px}
+    .cb-app .cb-chip{height:auto;min-height:0;padding:1px 0;margin:0;border:0;border-bottom:1px solid #e4e4e7;border-radius:0;background:transparent;justify-content:flex-start;gap:3px;font-size:9px;font-weight:400;line-height:1.15}
+    .cb-app .cb-chip > span:last-child{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis}
+    .cb-app .cb-chip .cb-dot{width:8px;min-width:8px;min-height:0;align-self:auto;background:none!important;color:#15803d;font-size:9px;line-height:1}
+    .cb-app .cb-chip.cb-pending .cb-dot,.cb-app .cb-chip.cb-no-show .cb-dot,.cb-app .cb-chip.cb-rejected .cb-dot{color:#71717a}
     .cb-app .cb-mobile-hidden{display:none}
-    .cb-app .cb-mobile-more{display:block;text-align:center;color:#52525b;font-size:9px;font-weight:600;line-height:1.2}
+    .cb-app .cb-mobile-more{font-size:9px;padding-top:2px}
     .cb-app .cb-event-backdrop{position:fixed;inset:0;z-index:1098;background:rgba(15,23,32,.5)}
     .cb-app.cb-dialog-open .cb-event-backdrop{display:block}
-    .cb-app .cb-event-pane{position:fixed;top:50%;left:50%;z-index:1099;width:calc(100vw - 32px);max-width:480px;max-height:calc(100vh - 32px);max-height:calc(100dvh - 32px);border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 16px 48px rgba(15,23,32,.24);transform:translate(-50%,-48%) scale(.98);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,transform .18s ease,visibility .18s ease}
-    .cb-app .cb-event-pane.open{transform:translate(-50%,-50%) scale(1);opacity:1;visibility:visible;pointer-events:auto}
-    .cb-app .cb-panel-body{min-height:0;padding:20px;overflow-y:auto}
-    .cb-app .cb-panel-close{width:28px;height:28px;margin:0 0 12px auto;border:0;border-radius:6px;background:#f4f4f5;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;cursor:pointer}
+    .cb-app .cb-event-pane{position:fixed;inset:0;z-index:1099;width:100%;max-width:none;height:100vh;height:100dvh;max-height:none;border:0;border-radius:0;box-shadow:none;transform:translateY(12px);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .18s ease,transform .18s ease,visibility .18s ease}
+    .cb-app .cb-event-pane.open{transform:translateY(0);opacity:1;visibility:visible;pointer-events:auto}
+    .cb-app .cb-panel-body{width:100%;height:100%;min-height:0;padding:20px;overflow-y:auto}
+    .cb-app .cb-panel-close{position:sticky;top:0;z-index:1;width:32px;height:32px;margin:0 0 12px auto;border:0;border-radius:6px;background:#f4f4f5;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:20px;line-height:1;cursor:pointer}
     .cb-app .cb-panel-close:hover{background:#e4e4e7;color:#18181b}
     .cb-app .cb-empty-state{padding:24px 12px}
-    .cb-app .cb-time-block .cb-t{font-size:26px}
+    .cb-app .cb-time-block .cb-t{font-size:13px}
     body.cb-booking-dialog-open{overflow:hidden}
   }
   @media (max-width:380px){
@@ -245,9 +292,6 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
             </div>
           </div>
         </div>
-        <button class="cb-icon-btn" type="button" title="View">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 4v16"/></svg>
-        </button>
       </div>
     </div>
 
@@ -281,77 +325,67 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
         </div>
         <div class="cb-section">
           <div class="cb-title-row">
-            <input class="cb-title-input" id="cbTitleInput" type="text" value="" placeholder="Add appointment title" readonly />
-            <span class="cb-st cb-st-pending" id="cbStatusPill">Pending</span>
-          </div>
-           <div class="cb-link-row" id="cbRefRow">
-            <span class="cb-link-text" id="cbRefText">#APT-000000</span>
+            <h2 class="cb-title-input" id="cbTitleInput"></h2>
+            <img class="cb-pet-avatar" id="cbPetAvatar" src="" alt="Pet" style="display:none;" />
+            <span class="cb-pet-avatar cb-pet-initial" id="cbPetInitial" aria-hidden="true" style="display:none;"></span>
           </div>
           <div class="cb-time-row">
             <div class="cb-time-block">
-              <div class="cb-t" id="cbStartTime">12:00 AM</div>
+              <span class="cb-date-marker" id="cbDateMarker" aria-hidden="true"></span>
               <div class="cb-d" id="cbDateLabel">Today</div>
+              <span class="cb-at-label">at</span>
+              <div class="cb-t" id="cbStartTime">12:00 AM</div>
             </div>
-            <img class="cb-pet-avatar" id="cbPetAvatar" src="" alt="Pet" style="display:none;" />
           </div>
         </div>
 
         <div class="cb-appt-details" id="cbApptMeta">
-          <p class="cb-detail-head">Appointment Summary Details</p>
+          <p class="cb-detail-head">Appointment details</p>
           <div class="cb-detail-row">
-            <span class="cb-detail-label">Pet Name</span>
+            <span class="cb-detail-label">Pet</span>
             <span class="cb-detail-value" id="cbDetailPet">—</span>
           </div>
           <div class="cb-detail-row">
-            <span class="cb-detail-label">Service Type</span>
+            <span class="cb-detail-label">Service</span>
             <span class="cb-detail-value" id="cbDetailService">—</span>
           </div>
           <div class="cb-detail-row">
-            <span class="cb-detail-label">Requested on</span>
-            <span class="cb-detail-value" id="cbDetailRequested">—</span>
-          </div>
-          <div class="cb-detail-row" id="cbScheduledRow" style="display:none;">
-            <span class="cb-detail-label">Scheduled on</span>
-            <span class="cb-detail-value" id="cbDetailScheduled">—</span>
+            <span class="cb-detail-label">Priority</span>
+            <span class="cb-detail-value" id="cbDetailPriority">—</span>
           </div>
           <div class="cb-detail-row">
             <span class="cb-detail-label">Location</span>
             <span class="cb-detail-value">DCVS Veterinary Clinic</span>
           </div>
+          <div class="cb-detail-row">
+            <span class="cb-detail-label">Requested on</span>
+            <span class="cb-detail-value" id="cbDetailRequested">—</span>
+          </div>
+          <div class="cb-detail-row">
+            <span class="cb-detail-label">Reference</span>
+            <span class="cb-detail-value" id="cbDetailReference">—</span>
+          </div>
         </div>
 
-        <div class="cb-section">
+        <div class="cb-section cb-notes-section">
           <div class="cb-note-head">
-            <span>Appointment Notes</span>
+            <span>Notes</span>
           </div>
           <div class="cb-note-box" id="cbNoteBox">
             <p id="cbNoteMsg">Your appointment request is currently being reviewed by DCVS.</p>
           </div>
         </div>
 
-        <div class="cb-people" id="cbPeopleList">
-          <div class="cb-person">
-            <?php if ($cbStaffAvatar): ?>
-              <img class="cb-avatar" src="<?php echo htmlspecialchars($cbStaffAvatar); ?>" alt="DCVS Staff" />
-            <?php else: ?>
-              <span class="cb-avatar" style="display:flex;align-items:center;justify-content:center;background:#EFEDFD;color:#5B4FE9;font-size:16px;flex:none;"><i class="fas fa-user-md"></i></span>
-            <?php endif; ?>
-            <div><div class="cb-p-name">Dasmari&#241;as City Veterinary Services</div><div class="cb-p-mail">admin@dcvs.gov.ph</div></div>
-            <span class="cb-role cb-master">Admin</span>
-          </div>
-          <div class="cb-help">
-            <p class="cb-help-txt">Need assistance regarding this appointment? <a class="cb-contact" href="contact.php">Contact us</a></p>
-          </div>
+        <div class="cb-program-card" id="cbProgramCard" style="display:none;">
+          <div class="cb-program-hours" id="cbProgramHours"></div>
+          <div class="cb-program-name" id="cbProgramName"></div>
+          <div class="cb-program-location" id="cbProgramLocation"></div>
+          <div class="cb-program-description" id="cbProgramDescription" style="display:none;"></div>
         </div>
-
-        <div class="cb-reminders" id="cbReminders">
-          <p class="cb-reminders-head">Make sure to:</p>
-          <ul class="cb-reminders-list">
-            <li>Arrive at the DCVS office on your scheduled date and time.</li>
-            <li>Bring your pet and required documents.</li>
-            <li>Your pet will undergo the necessary pre-service assessment.</li>
-            <li>Wait for the service completion/update.</li>
-          </ul>
+        <div class="cb-people" id="cbPeopleList">
+          <div class="cb-help">
+            <p class="cb-help-txt">Questions? Call <a class="cb-contact" href="tel:+63464321234">(046) 432-1234</a> or email <a class="cb-contact" href="mailto:admin@dcvs.gov.ph">admin@dcvs.gov.ph</a>.</p>
+          </div>
         </div>
       </div>
     </div>
@@ -405,6 +439,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
 
   /* ---- Real appointment data from PHP ---- */
   var rawAppts = <?php echo json_encode($cbAppointments, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+  var rawPrograms = <?php echo json_encode($cbPrograms, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 
   var statusColor = {
     pending:'cb-orange', scheduled:'cb-green', approved:'cb-blue',
@@ -413,6 +448,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   };
 
   var apptEvents = {};
+  var requestedEvents = {};
   rawAppts.forEach(function(a){
     var dt = a.preferred_date ? new Date(a.preferred_date.replace(/-/g,'/')) : null;
     if (!dt) return;
@@ -420,15 +456,37 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
     if (!apptEvents[key]) apptEvents[key] = [];
     var chipClass = statusColor[a.status] || 'cb-orange';
     var timeStr = a.preferred_time ? fmtTime24(a.preferred_time) : '';
-    var label = a.appointment_type ? a.appointment_type.charAt(0).toUpperCase() + a.appointment_type.slice(1) : 'Appointment';
+    var label = serviceLabel(a.appointment_type);
     apptEvents[key].push({
       chipClass: chipClass, time: timeStr, label: label,
       id: a.appointment_id, type: a.appointment_type, pet: a.pet_name || 'N/A',
       status: a.status, date: a.preferred_date, timeRaw: a.preferred_time,
       notes: a.notes || '', ref: a.reference_id || '', createdAt: a.created_at || '',
-      photoUrl: a.photo_url || ''
+      photoUrl: a.photo_url || '', priority: a.urgency_level || 'routine'
     });
+    if (a.reschedule_request_status && a.reschedule_requested_date) {
+      var requestedDate = new Date(a.reschedule_requested_date.replace(/-/g,'/'));
+      var requestedKey = requestedDate.getFullYear() + '-' + requestedDate.getMonth() + '-' + requestedDate.getDate();
+      if (!requestedEvents[requestedKey]) requestedEvents[requestedKey] = [];
+      requestedEvents[requestedKey].push({
+        date: a.reschedule_requested_date,
+        time: a.reschedule_requested_time ? fmtTime24(a.reschedule_requested_time) : '',
+        status: a.reschedule_request_status
+      });
+    }
   });
+
+  function serviceLabel(type){
+    var labels = {kapon:'Kapon',vaccination:'Vaccination',checkup:'Check-up',deworming:'Deworming',adoption:'Adoption'};
+    var key = String(type || '').toLowerCase();
+    return labels[key] || (key ? key.replace(/[_-]/g,' ').replace(/\b\w/g,function(letter){return letter.toUpperCase();}) : 'Appointment');
+  }
+
+  function statusGlyph(status){
+    if (status === 'completed' || status === 'approved' || status === 'scheduled' || status === 'rescheduled' || status === 'in_progress') return '✓';
+    if (status === 'cancelled' || status === 'rejected' || status === 'no_show') return '—';
+    return '·';
+  }
 
   function getVisibleAppts(key){
     return (apptEvents[key] || []).filter(function(ev){
@@ -475,10 +533,34 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       cell.appendChild(num);
 
       var visibleAppts = getVisibleAppts(key);
-      visibleAppts.forEach(function(ev, apptIndex){
+      visibleAppts.slice(0,2).forEach(function(ev){
         var chip = document.createElement('div');
-        chip.className = 'cb-chip ' + ev.chipClass + (apptIndex >= 2 ? ' cb-mobile-hidden' : '');
-        chip.innerHTML = '<span class="cb-dot"></span><span><b>' + ev.time + '</b> &#183; ' + ev.label + '</span>';
+        chip.className = 'cb-chip ' + ev.chipClass + ' cb-' + String(ev.status || 'pending').replace(/_/g,'-');
+        chip.title = ev.label + (ev.status ? ' — ' + ev.status.replace(/_/g,' ') : '');
+        chip.setAttribute('aria-label', chip.title);
+        var marker = document.createElement('span');
+        marker.className = 'cb-dot';
+        marker.setAttribute('aria-hidden','true');
+        marker.textContent = statusGlyph(ev.status);
+        var label = document.createElement('span');
+        label.textContent = ev.label;
+        chip.appendChild(marker);
+        chip.appendChild(label);
+        cell.appendChild(chip);
+      });
+      (requestedEvents[key] || []).forEach(function(request) {
+        var chip = document.createElement('div');
+        chip.className = 'cb-chip cb-reschedule-requested';
+        chip.title = 'Not reserved yet' + (request.time ? ' · ' + request.time : '');
+        chip.setAttribute('aria-label', 'Requested time. Not reserved yet' + (request.time ? ', ' + request.time : ''));
+        var marker = document.createElement('span');
+        marker.className = 'cb-dot';
+        marker.setAttribute('aria-hidden','true');
+        marker.textContent = '↻';
+        var label = document.createElement('span');
+        label.textContent = 'Requested';
+        chip.appendChild(marker);
+        chip.appendChild(label);
         cell.appendChild(chip);
       });
       if (visibleAppts.length > 2) {
@@ -617,37 +699,28 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   var titleInput   = document.getElementById('cbTitleInput');
   var startTime    = document.getElementById('cbStartTime');
   var dateLabel    = document.getElementById('cbDateLabel');
-  var statusPill   = document.getElementById('cbStatusPill');
-  var refText      = document.getElementById('cbRefText');
-  var refRow       = document.getElementById('cbRefRow');
+  var dateMarker   = document.getElementById('cbDateMarker');
   var noteBox      = document.getElementById('cbNoteBox');
   var noteMsg      = document.getElementById('cbNoteMsg');
   var detailReq    = document.getElementById('cbDetailRequested');
   var detailPet    = document.getElementById('cbDetailPet');
   var detailService = document.getElementById('cbDetailService');
-  var detailScheduled = document.getElementById('cbDetailScheduled');
-  var scheduledRow = document.getElementById('cbScheduledRow');
-  var reminders    = document.getElementById('cbReminders');
+  var detailPriority = document.getElementById('cbDetailPriority');
+  var detailReference = document.getElementById('cbDetailReference');
   var emptyState   = document.getElementById('cbEmptyState');
   var apptDetails  = document.getElementById('cbApptDetails');
   var petAvatar    = document.getElementById('cbPetAvatar');
+  var petInitial   = document.getElementById('cbPetInitial');
+  var programCard  = document.getElementById('cbProgramCard');
+  var programHours = document.getElementById('cbProgramHours');
+  var programName  = document.getElementById('cbProgramName');
+  var programLocation = document.getElementById('cbProgramLocation');
+  var programDescription = document.getElementById('cbProgramDescription');
   var dayApptPicker = document.getElementById('cbDayApptPicker');
   var dayApptCount = document.getElementById('cbDayApptCount');
   var dayApptTimes = document.getElementById('cbDayApptTimes');
   var dayApptPrev = document.getElementById('cbDayApptPrev');
   var dayApptNext = document.getElementById('cbDayApptNext');
-
-  var pillColors = {
-    pending:     { bg:'#fef3c7', color:'#92400e', border:'#fde68a' },
-    scheduled:   { bg:'#0E8131', color:'#ffffff', border:'#0E8131' },
-    approved:    { bg:'#dcebe0', color:'#045e1f', border:'#bbf7d0' },
-    rescheduled: { bg:'#ede9fe', color:'#6d28d9', border:'#ddd6fe' },
-    in_progress: { bg:'#dcebe0', color:'#045e1f', border:'#bbf7d0' },
-    completed:   { bg:'#dbeafe', color:'#1e40af', border:'#bfdbfe' },
-    cancelled:   { bg:'#fee2e2', color:'#991b1b', border:'#fecaca' },
-    rejected:    { bg:'#fee2e2', color:'#991b1b', border:'#fecaca' },
-    no_show:     { bg:'#fef3c7', color:'#92400e', border:'#fde68a' }
-  };
 
   var noteMessages = {
     pending:    'Your appointment request is currently being reviewed by DCVS.',
@@ -667,10 +740,10 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       emptyState.style.display = '';
       apptDetails.style.display = 'none';
       dayApptPicker.style.display = 'none';
-      statusPill.className = 'cb-st';
-      statusPill.textContent = '';
       petAvatar.style.display = 'none';
+      petInitial.style.display = 'none';
       petAvatar.src = '';
+      programCard.style.display = 'none';
       closeApptDialog();
       return;
     }
@@ -696,46 +769,63 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       dayApptPicker.style.display = 'none';
     }
     var isPending = appt.status === 'pending';
-    titleInput.value = appt.type.charAt(0).toUpperCase() + appt.type.slice(1) + ' service for ' + appt.pet;
+    var service = serviceLabel(appt.type);
+    var statusHeadings = {
+      pending:'is under review', scheduled:'is confirmed', approved:'is confirmed',
+      rescheduled:'was rescheduled', in_progress:'is in progress', completed:'was completed',
+      cancelled:'was cancelled', rejected:'was declined', no_show:'was marked as a no-show'
+    };
+    var normalizedStatus = String(appt.status || 'pending').toLowerCase().replace(/[\s-]/g,'_');
+    titleInput.textContent = 'Your ' + service + ' appointment for ' + appt.pet + ' ' + (statusHeadings[normalizedStatus] || 'is ' + normalizedStatus.replace(/_/g,' ')) + '.';
     startTime.textContent = appt.time || '12:00 AM';
     dateLabel.textContent = dt.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric',year:'numeric'});
-    if (appt.photoUrl){ petAvatar.src = appt.photoUrl; petAvatar.style.display = ''; }
-    else { petAvatar.style.display = 'none'; petAvatar.src = ''; }
-    var c = pillColors[appt.status] || pillColors.pending;
-    statusPill.className = 'cb-st';
-    statusPill.style.background = c.bg;
-    statusPill.style.color = c.color;
-    statusPill.style.borderColor = c.border;
-    statusPill.textContent = appt.status.charAt(0).toUpperCase() + appt.status.slice(1).replace('_',' ');
-    /* ref row */
-    refRow.innerHTML = '<span class="cb-link-text" id="cbRefText">' + (appt.ref || '#APT-000000') + '</span>';
+    dateMarker.className = 'cb-date-marker';
+    if (normalizedStatus === 'completed') {
+      dateMarker.classList.add('is-completed');
+      dateMarker.textContent = '✓';
+    } else if (normalizedStatus === 'cancelled' || normalizedStatus === 'rejected' || normalizedStatus === 'no_show') {
+      dateMarker.classList.add('is-cancelled');
+      dateMarker.textContent = '—';
+    } else {
+      dateMarker.textContent = '';
+      if (normalizedStatus === 'scheduled' || normalizedStatus === 'approved' || normalizedStatus === 'rescheduled' || normalizedStatus === 'in_progress') dateMarker.classList.add('is-confirmed');
+      else if (normalizedStatus === 'pending') dateMarker.classList.add('is-pending');
+    }
+    var initial = String(appt.pet || '').trim().charAt(0).toUpperCase() || '?';
+    petInitial.textContent = initial;
+    if (appt.photoUrl){ petAvatar.src = appt.photoUrl; petAvatar.alt = appt.pet || 'Pet'; petAvatar.style.display = ''; petInitial.style.display = 'none'; }
+    else { petAvatar.style.display = 'none'; petAvatar.src = ''; petInitial.style.display = 'grid'; }
     /* note box */
-    noteMsg.textContent = noteMessages[appt.status] || noteMessages.pending;
+    noteMsg.textContent = appt.notes || noteMessages[normalizedStatus] || noteMessages.pending;
     noteBox.className = 'cb-note-box cb-note-' + (isPending ? 'pending' : 'scheduled');
     /* details */
     if (appt.createdAt) {
       var cd = new Date(appt.createdAt.replace(/-/g,'/'));
-      var ms = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-      detailReq.textContent = ms[cd.getMonth()] + ' ' + cd.getDate() + ', ' + cd.getFullYear();
+      detailReq.textContent = cd.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
     } else {
       detailReq.textContent = '—';
     }
     detailPet.textContent = appt.pet || '—';
-    detailService.textContent = appt.type.charAt(0).toUpperCase() + appt.type.slice(1);
-    /* scheduled date - show if status is scheduled */
-    if (appt.status === 'scheduled' || appt.status === 'approved') {
-      scheduledRow.style.display = '';
-      if (appt.date) {
-        var sd = new Date(appt.date.replace(/-/g,'/'));
-        detailScheduled.textContent = ms[sd.getMonth()] + ' ' + sd.getDate() + ', ' + sd.getFullYear();
-      } else {
-        detailScheduled.textContent = '—';
-      }
+    detailService.textContent = service;
+    detailPriority.textContent = String(appt.priority || 'routine').replace(/\b\w/g,function(letter){return letter.toUpperCase();});
+    detailReference.textContent = appt.ref || '—';
+    var matchingProgram = rawPrograms.filter(function(program){
+      return program.start_date <= appt.date && program.end_date >= appt.date &&
+        String(program.program_type || '').toLowerCase() === String(appt.type || '').toLowerCase();
+    })[0];
+    if (matchingProgram) {
+      programHours.textContent = matchingProgram.operating_time ||
+        [matchingProgram.program_start_time, matchingProgram.program_end_time].filter(Boolean).map(fmtTime24).join(' to ');
+      programName.textContent = matchingProgram.program_name || 'Program';
+      programLocation.textContent = matchingProgram.location_mode === 'multiple'
+        ? (matchingProgram.barangay_names || matchingProgram.venue || 'Multiple locations')
+        : (matchingProgram.venue || matchingProgram.barangay_names || 'Location not specified');
+      programDescription.textContent = matchingProgram.description || '';
+      programDescription.style.display = matchingProgram.description ? '' : 'none';
+      programCard.style.display = '';
     } else {
-      scheduledRow.style.display = 'none';
+      programCard.style.display = 'none';
     }
-    /* reminders: only for pending/scheduled */
-    reminders.style.display = (appt.status === 'pending' || appt.status === 'scheduled') ? '' : 'none';
     emptyState.style.display = 'none';
     apptDetails.style.display = '';
     openApptDialog();
