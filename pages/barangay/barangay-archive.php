@@ -17,13 +17,13 @@ $fullName   = $conn->real_escape_string($_SESSION['full_name'] ?? 'Barangay Offi
 $barangayName = 'Barangay';
 $barangayDistrict = '';
 
-$bq = $conn->prepare("SELECT name, district FROM barangays WHERE barangay_id = ?");
+$bq = $conn->prepare("SELECT barangay_name, district FROM barangays WHERE barangay_id = ?");
 if ($bq) {
     $bq->bind_param('i', $barangayId);
     $bq->execute();
     $bRow = $bq->get_result()->fetch_assoc();
     if ($bRow) {
-        $barangayName     = str_replace('±', 'ñ', (string)$bRow['name']);
+        $barangayName     = str_replace('±', 'ñ', (string)$bRow['barangay_name']);
         $barangayDistrict = str_replace('±', 'ñ', (string)$bRow['district']);
     }
     $bq->close();
