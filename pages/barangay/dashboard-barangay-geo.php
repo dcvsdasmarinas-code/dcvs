@@ -57,6 +57,27 @@ $notificationQuery->close();
 
 loadDcvsEnv();
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
+$geoSatelliteStyle = [
+    'version' => 8,
+    'glyphs' => 'https://tiles.basemaps.cartocdn.com/v/20261026-01/fonts/{fontstack}/{range}.pbf',
+    'sources' => [
+        'esri-world-imagery' => [
+            'type' => 'raster',
+            'tiles' => ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            'tileSize' => 256,
+            'maxzoom' => 19,
+            'attribution' => 'Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        ],
+    ],
+    'layers' => [
+        [
+            'id' => 'esri-world-imagery',
+            'type' => 'raster',
+            'source' => 'esri-world-imagery',
+            'paint' => ['raster-brightness-max' => 0.82],
+        ],
+    ],
+];
 $reportPinsEnabled = false;
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
@@ -84,6 +105,7 @@ $barangaySidebarStylesheetInHead = true;
   <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>">
   <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/geo-map/map.css?v=' . (int)filemtime(__DIR__ . '/../../geo-map/map.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/geo-drawer.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/map-place-search.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/map-place-search.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <link rel="stylesheet" href="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/css/sb2.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/dist/mapcn.umd.cjs?v=' . (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'), ENT_QUOTES, 'UTF-8'); ?>"></script>
   <style>
@@ -109,8 +131,11 @@ $barangaySidebarStylesheetInHead = true;
     .user-avatar { width: 34px; height: 34px; display: grid; place-items: center; overflow: hidden; border: 1px solid #b8dec9; border-radius: 50%; background: #d5ece0; color: #0e8131; }
     .user-name { display: block; color: #18181b; font-size: 13px; font-weight: 600; line-height: 1.3; }
     .user-role { display: block; color: #71717a; font-size: 12px; }
-    .geo-page { flex: 1; min-height: 0; min-width: 0; }
-    .geo-map-stage { height: calc(100vh - 70px); min-height: 420px; display: flex; flex-direction: column; }
+    .geo-page { display:flex; flex:1; flex-direction:column; min-height:0; min-width:0; }
+    .geo-page-heading { flex:0 0 auto; padding:9px 20px; }
+    .geo-page-heading h1 { margin:0; color:#18181b; font-size:20px; font-weight:600; line-height:1.25; letter-spacing:-.025em; }
+    .geo-page-heading p { margin:2px 0 0; color:#71717a; font-size:13px; line-height:1.4; }
+    .geo-map-stage { flex:1 1 auto; min-height:420px; display:flex; flex-direction:column; }
     #geoMap { position: relative; flex: 1; width: 100%; height: auto; min-height: 0; }
     .geo-map-error { position: absolute; z-index: 10; bottom: 14px; left: 50%; max-width: calc(100% - 28px); padding: 9px 12px; border: 1px solid #fecaca; border-radius: 7px; background: #fff; color: #991b1b; font-size: 13px; transform: translateX(-50%); }
     .geo-map-error[hidden] { display: none; }
@@ -121,14 +146,13 @@ $barangaySidebarStylesheetInHead = true;
     @media (max-width: 768px) {
       body.sb2-active .app-wrapper { padding-left: 0; }
       .topbar-toggle { display: inline-flex; }
-      .geo-map-stage { height: calc(100dvh - 70px); min-height: 320px; }
+      .geo-map-stage { min-height:320px; }
     }
     @media (max-width: 640px) {
       .topbar { height: 60px; padding: 0 14px; }
       .topbar-right { gap: 6px; }
       .user-meta { display: none; }
       .notif-panel { position: fixed; top: 60px; right: 8px; width: min(380px, calc(100vw - 16px)); }
-      .geo-map-stage { height: calc(100dvh - 60px); }
     }
     @media (max-width: 480px) {
       .topbar { gap: 8px; padding: 0 10px; }
@@ -185,20 +209,46 @@ $barangaySidebarStylesheetInHead = true;
     </div>
   </header>
   <main class="geo-page">
+  <header class="geo-page-heading">
+    <h1>Geo-Mapping</h1>
+    <p>Explore report locations, confirmed activity, and risk patterns across your barangay.</p>
+  </header>
   <section class="geo-map-stage" aria-label="Barangay incident map">
     <div class="geo-summary-bar">
       <span class="geo-summary-item"><i class="fas fa-certificate" style="color:#0E8131;"></i> Confirmed: <strong id="geoBarangayConfirmed">0</strong></span>
       <span class="geo-summary-item"><i class="fas fa-clock" style="color:#eab308;"></i> Pending: <strong id="geoBarangayPending">0</strong></span>
       <span class="geo-summary-item"><i class="fas fa-exclamation-triangle" style="color:#ef4444;"></i> Risk: <strong id="geoBarangayRisk">--</strong></span>
-      <span class="geo-summary-item"><i class="fas fa-sync-alt" style="color:#94a3b8;"></i> Updated: <strong id="geoBarangayUpdated">--</strong></span>
+      <span class="geo-summary-item geo-summary-updated"><i class="fas fa-sync-alt" style="color:#94a3b8;"></i> Updated: <strong id="geoBarangayUpdated">--</strong>
+        <button class="geo-map-refresh" id="geoMapRefresh" type="button" aria-label="Refresh map data"><i class="fas fa-sync-alt" aria-hidden="true"></i></button>
+      </span>
+    </div>
+    <div class="geo-search-wrap dcvs-place-search"
+         data-map-target="geoMap"
+         data-geocode-endpoint="<?php echo htmlspecialchars($barangayAppBaseUrl . '/api/shared/location-geocode.php', ENT_QUOTES, 'UTF-8'); ?>"
+         data-portal="barangay"
+         data-status-target="#geoBarangaySearchStatus">
+      <i class="fas fa-search dcvs-place-search-icon" aria-hidden="true"></i>
+      <input type="search" id="geoBarangaySearch"
+             placeholder="Search barangays, addresses, landmarks, and places..."
+             role="combobox" aria-autocomplete="list"
+             aria-controls="geoBarangaySearchResults" aria-expanded="false"
+             aria-label="Search barangays, addresses, landmarks, and places"
+             autocomplete="off">
+      <div class="dcvs-place-results" id="geoBarangaySearchResults" role="listbox"
+           aria-label="Map search results" hidden></div>
+      <span class="dcvs-place-status geo-search-status" id="geoBarangaySearchStatus" role="status" aria-live="polite"></span>
     </div>
     <div id="geoMap" data-map-landmarks-session="DCVS_BARANGAY_SESSION" data-map-risk-overlay="true"
-         data-mapcn='<?php echo htmlspecialchars(json_encode(["center" => [120.968, 14.306], "zoom" => 12, "barangayOverlay" => true, "geojsonUrl" => $barangayAppBaseUrl . "/geo-map/barangays-public.geojson.php", "style" => "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"], JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>'
+         data-mapcn='<?php echo htmlspecialchars(json_encode(["center" => [120.968, 14.306], "zoom" => 15, "barangayOverlay" => true, "controlsPosition" => "bottom-right", "geojsonUrl" => $barangayAppBaseUrl . "/geo-map/barangays-public.geojson.php", "style" => "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"], JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>'
          data-map-scope="barangay"
          data-map-barangay-id="<?php echo $barangayId; ?>"
          data-map-basemap-toggle="true"
+         data-max-map-zoom="19"
+         data-initial-basemap="street"
+         data-satellite-style='<?php echo htmlspecialchars(json_encode($geoSatelliteStyle, JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>'
+         data-preserve-map-view="true"
          <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_BARANGAY_SESSION"<?php endif; ?>
-         <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?>>
+         <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
       <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
       <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
       <div class="geo-map-error" id="geo-map-error" role="status" <?php if (!isset($_GET['report_id']) || $reportPinsEnabled): ?>hidden<?php endif; ?>>
@@ -206,13 +256,12 @@ $barangaySidebarStylesheetInHead = true;
       </div>
     </div>
     <div class="geo-legend">
-      <span style="font-weight:600;color:#18181b;font-size:12px;">Risk Level:</span>
-      <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#22c55e;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">0 cases</span></div>
-      <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#eab308;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">1–5 cases</span></div>
-      <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#f97316;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">6–15 cases</span></div>
-      <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#ef4444;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">16+ cases</span></div>
-      <div style="margin-left:auto;">
-        <button class="geo-map-refresh" id="geoMapRefresh" type="button"><i class="fas fa-sync-alt"></i> Refresh</button>
+      <div class="geo-legend-title">Confirmed cases per barangay</div>
+      <div class="geo-legend-items">
+        <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#22c55e;"></span><span class="geo-legend-label">0 cases</span></div>
+        <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#eab308;"></span><span class="geo-legend-label">1–5 cases</span></div>
+        <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#f97316;"></span><span class="geo-legend-label">6–15 cases</span></div>
+        <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#ef4444;"></span><span class="geo-legend-label">16+ cases</span></div>
       </div>
     </div>
   </section>
@@ -256,7 +305,7 @@ $barangaySidebarStylesheetInHead = true;
     var source = map.getSource('barangays');
     if (source) source.setData({ type: 'FeatureCollection', features: [feature] });
     var targetId = Number(mapElement.getAttribute('data-map-barangay-id'));
-    ['barangay-fill', 'barangay-outline', 'geo-brgy-label', 'barangay-label'].forEach(function(layerId) {
+    ['barangay-fill', 'barangay-outline', 'barangay-label'].forEach(function(layerId) {
       if (map.getLayer(layerId)) {
         map.setFilter(layerId, ['==', ['to-number', ['get', 'id']], targetId]);
       }
@@ -317,6 +366,7 @@ $barangaySidebarStylesheetInHead = true;
 <?php endif; ?>
 <script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/map-landmarks.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/map-basemap-toggle.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/map-place-search.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-place-search.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="<?php echo htmlspecialchars($barangayAppBaseUrl . '/assets/js/notification-panel.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'), ENT_QUOTES, 'UTF-8'); ?>" defer></script>
 </body>
 </html>

@@ -221,7 +221,40 @@ function renderTableHead(){
   html += '<th class="sd-th sd-th-action"></th>';
   head.innerHTML = html;
 }
+function updateTypeFilterCounts(){
+  var select = document.getElementById('typeFilter');
+  if (!select) return;
+
+  var selectedType = state.type;
+  var rows;
+  state.type = '';
+  try {
+    rows = currentList();
+  } finally {
+    state.type = selectedType;
+  }
+
+  var counts = { '': rows.length, dog: 0, cat: 0 };
+  if (state.mode === 'clients') {
+    rows.forEach(function(client){
+      if (PETS.some(function(pet){ return pet.ownerId === client.id && pet.type === 'dog'; })) counts.dog++;
+      if (PETS.some(function(pet){ return pet.ownerId === client.id && pet.type === 'cat'; })) counts.cat++;
+    });
+  } else {
+    rows.forEach(function(pet){
+      if (Object.prototype.hasOwnProperty.call(counts, pet.type)) counts[pet.type]++;
+    });
+  }
+
+  Array.prototype.forEach.call(select.options, function(option){
+    if (!option.dataset.countLabel) {
+      option.dataset.countLabel = option.textContent.replace(/\s+\(\d+\)$/, '');
+    }
+    option.textContent = option.dataset.countLabel + ' (' + (counts[option.value] || 0) + ')';
+  });
+}
 function render(){
+  updateTypeFilterCounts();
   var list = currentList();
   var total = list.length;
   var per = state.perPage;

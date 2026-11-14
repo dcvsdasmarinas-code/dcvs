@@ -28,6 +28,7 @@
     return 'type-' + String(t || 'stray');
   }
   function statusPill(s, label) {
+    if (/\boverdue\b/i.test(String(label || ''))) s = 'overdue';
     return '<span class="rpt-status ' + esc(s) + '">' + esc(label || (s.charAt(0).toUpperCase() + s.slice(1))) + '</span>';
   }
   function typeBadge(t, label) {
@@ -252,7 +253,34 @@
       if (last) last.disabled = state.page >= pages;
     }
 
+    function updateTypeFilterCounts() {
+      var select = el(p + 'Type');
+      if (!select) return;
+
+      var selectedType = state.type;
+      var rows;
+      state.type = '';
+      try {
+        rows = filtered();
+      } finally {
+        state.type = selectedType;
+      }
+
+      var counts = { '': rows.length };
+      rows.forEach(function (row) {
+        var type = String(row.type || '');
+        if (type) counts[type] = (counts[type] || 0) + 1;
+      });
+      Array.prototype.forEach.call(select.options, function (option) {
+        if (!option.dataset.countLabel) {
+          option.dataset.countLabel = option.textContent.replace(/\s+\(\d+\)$/, '');
+        }
+        option.textContent = option.dataset.countLabel + ' (' + (counts[option.value] || 0) + ')';
+      });
+    }
+
     function render() {
+      updateTypeFilterCounts();
       var rows = filtered();
       var total = rows.length;
       var pageRows = rows.slice((state.page - 1) * state.perPage, state.page * state.perPage);

@@ -127,6 +127,9 @@ if (isset($conn) && !$conn->connect_error) {
   background:var(--ec-bg); border-bottom:1px solid var(--ec-border);
 }
 #dcvsEventsCalendar .ec-header-inner{ padding:16px 24px 0; }
+#dcvsEventsCalendar .ec-page-heading{ margin:0 0 16px; }
+#dcvsEventsCalendar .ec-page-heading h1{ margin:0; color:#0f172a; font-size:1.35rem; font-weight:700; line-height:1.3; }
+#dcvsEventsCalendar .ec-page-heading p{ margin:4px 0 0; color:#64748b; font-size:.88rem; line-height:1.45; }
 #dcvsEventsCalendar .ec-top-row{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
 #dcvsEventsCalendar .ec-title{ font-size:20px; font-weight:700; margin:0; line-height:28px; letter-spacing:-.01em; }
 #dcvsEventsCalendar .ec-title-link{ color:inherit; text-decoration:none; font-weight:500; }
@@ -715,6 +718,10 @@ if (isset($conn) && !$conn->connect_error) {
 
 <header class="ec-header">
   <div class="ec-header-inner">
+    <div class="ec-page-heading">
+      <h1>Calendar Schedule</h1>
+      <p>View appointments, programs, reports, and public events in the annual schedule.</p>
+    </div>
     <div class="ec-controls-row">
       <div class="ec-controls-left">
         <div class="ec-search-wrap">

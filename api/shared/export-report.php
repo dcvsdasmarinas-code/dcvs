@@ -26,11 +26,11 @@ $now = date('F j, Y \a\t g:i A');
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ KPI QUERIES ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 $totalResidents = (int)($conn->query("SELECT COUNT(*) FROM users WHERE role = 'resident' AND status = 'active' AND deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $totalPets = (int)($conn->query("SELECT COUNT(*) FROM pets p JOIN users u ON p.owner_id = u.user_id WHERE p.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
-$totalReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
-$activeRabies = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND r.status IN ('pending','validated') AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
-$confirmedCasesTotal = (int)($conn->query("SELECT COUNT(*) FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id JOIN users u ON r.reporter_id = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
-$resolvedCases = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='resolved' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
-$pendingReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='pending' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$totalReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$activeRabies = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND r.status IN ('pending','validated') AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$confirmedCasesTotal = (int)($conn->query("SELECT COUNT(*) FROM confirmed_cases cc JOIN reports r ON cc.report_id = r.report_id JOIN users u ON r.reporter_id = u.user_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$resolvedCases = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='resolved' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
+$pendingReports = (int)($conn->query("SELECT COUNT(*) FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.status='pending' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $scheduledAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE a.status IN ('approved','pending') AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $completedAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE a.status='completed' AND u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
 $totalAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOIN users u ON a.user_id = u.user_id WHERE u.status = 'active' AND u.deleted_at IS NULL")->fetch_row()[0] ?? 0);
@@ -42,7 +42,7 @@ $completedVaxAppts = (int)($conn->query("SELECT COUNT(*) FROM appointments a JOI
 
 // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ REPORTS BREAKDOWN ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
 $reportsByTypeStatus = [];
-$rbts = $conn->query("SELECT r.report_type, r.status, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY r.report_type, r.status ORDER BY r.report_type, r.status");
+$rbts = $conn->query("SELECT r.report_type, r.status, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY r.report_type, r.status ORDER BY r.report_type, r.status");
 if ($rbts) {
     while ($r = $rbts->fetch_assoc()) {
         $type = $r['report_type'];
@@ -59,13 +59,13 @@ $barangayData = [];
 $bq = $conn->query("
     SELECT
       b.barangay_name,
-      COUNT(DISTINCT r.report_id) as total_reports,
-      COUNT(DISTINCT CASE WHEN r.report_type='rabies' AND r.status IN ('pending','validated') THEN r.report_id END) as active_rabies,
+      COUNT(DISTINCT CASE WHEN r.duplicate_status NOT IN ('merged', 'suspected') THEN r.report_id END) as total_reports,
+      COUNT(DISTINCT CASE WHEN r.duplicate_status NOT IN ('merged', 'suspected') AND r.report_type='rabies' AND r.status IN ('pending','validated') THEN r.report_id END) as active_rabies,
       COUNT(DISTINCT p.pet_id) as registered_pets,
       COUNT(DISTINCT CASE WHEN a.appointment_type='vaccination' AND a.status='completed' THEN a.appointment_id END) as vaccinations
     FROM barangays b
     LEFT JOIN users u ON u.barangay_id = b.barangay_id AND u.role='resident' AND u.status='active' AND u.deleted_at IS NULL
-    LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.reporter_id = u.user_id AND r.archived_at IS NULL
+    LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.reporter_id = u.user_id AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
     LEFT JOIN pets p ON p.owner_id = u.user_id AND p.archived_at IS NULL
     LEFT JOIN appointments a ON a.user_id = u.user_id AND a.appointment_type='vaccination' AND a.status='completed'
     GROUP BY b.barangay_id, b.barangay_name
@@ -101,10 +101,10 @@ $monthlyRabies = array_fill(1, 12, 0);
 $monthlyPets = array_fill(1, 12, 0);
 $monthlyAppts = array_fill(1, 12, 0);
 
-$mrq = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
+$mrq = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
 if ($mrq) { while ($r = $mrq->fetch_assoc()) { $monthlyReports[(int)$r['m']] = (int)$r['c']; } }
 
-$mrb = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
+$mrb = $conn->query("SELECT MONTH(r.created_at) as m, COUNT(*) as c FROM reports r JOIN users u ON r.reporter_id = u.user_id WHERE r.report_type='rabies' AND YEAR(r.created_at)=$currentYear AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(r.created_at)");
 if ($mrb) { while ($r = $mrb->fetch_assoc()) { $monthlyRabies[(int)$r['m']] = (int)$r['c']; } }
 
 $mpq = $conn->query("SELECT MONTH(p.created_at) as m, COUNT(*) as c FROM pets p JOIN users u ON p.owner_id = u.user_id WHERE YEAR(p.created_at)=$currentYear AND p.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL GROUP BY MONTH(p.created_at)");

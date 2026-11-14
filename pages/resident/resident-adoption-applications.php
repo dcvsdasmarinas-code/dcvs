@@ -69,9 +69,9 @@ $pageTitle = 'Adoption Application';
     #adoptionApplicationDialog.modal{z-index:2000;background:rgba(0,0,0,.8);padding:1rem}
     #adoptionApplicationDialog .sd-dialog{width:100%;display:flex;justify-content:center}
     #adoptionApplicationDialog .sd-dialog-content{position:relative;box-sizing:border-box;width:100%;max-width:680px;max-height:90vh;padding:24px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.1);animation:modalIn .2s ease;font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
-    #adoptionApplicationDialog .sd-dialog-header{display:flex;flex-direction:column;gap:6px;padding-right:28px;text-align:left}
-    #adoptionApplicationDialog .sd-dialog-title{margin:0;font-family:'Inter',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-.025em;color:#18181b}
-    #adoptionApplicationDialog .sd-dialog-description{margin:0;font-size:14px;line-height:1.5;color:#71717a}
+    #adoptionApplicationDialog .sd-dialog-header{display:flex;flex-direction:column;gap:4px;padding-right:28px;text-align:left}
+    #adoptionApplicationDialog .sd-dialog-title{margin:0;font-family:'Inter',sans-serif;font-size:20px;font-weight:600;line-height:1.3;letter-spacing:-.025em;color:#14201A}
+    #adoptionApplicationDialog .sd-dialog-description{margin:0;font-size:14px;line-height:1.45;color:#5B675F}
     #adoptionApplicationDialog .sd-dialog-close{position:absolute;top:16px;right:16px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:4px;background:transparent;color:#71717a;cursor:pointer;transition:all .15s ease}
     #adoptionApplicationDialog .sd-dialog-close:hover{background:#f4f4f5;color:#18181b}
     #adoptionApplicationDialog .application-body{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:20px}

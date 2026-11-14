@@ -14,10 +14,13 @@ require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../sms-sender.php';
 require_once __DIR__ . '/../../includes/staff-formatters.php';
 require_once __DIR__ . '/../../includes/reports/staff-data.php';
+require_once __DIR__ . '/../../includes/reports/deadlines.php';
+$reportOverdueSlaSettings = dcvsLoadReportOverdueSlaSettings($conn);
 require_once __DIR__ . '/../../includes/programs/conflicts.php';
 require_once __DIR__ . '/../../includes/availability.php';
 require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
 require_once __DIR__ . '/../../includes/appointment-workflow.php';
+require_once __DIR__ . '/../../includes/appointment-filters.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/staff-app-base.php';
 $appBaseUrl = dcvsStaffAppBaseUrl();
@@ -381,28 +384,17 @@ foreach ($cpdPets as $p) { if ($p['vaxOk']) $petsVax++; else $petsNoVax++; }
 $viewOwner = (int)($_GET['view_owner'] ?? 0);
 $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT;
 
-// Fetch ALL appointments (search + status filter) - CHRONOLOGICAL
+// Fetch appointments using the validated server-side filters.
 $pendingAppts = [];
 $appointmentLoadError = '';
-$apptStatusFilter = trim($_GET['appt_status'] ?? 'all');
-$apptSearchFilter = trim($_GET['appt_search'] ?? '');
+$appointmentFilters = dcvsAppointmentFilterState($_GET);
+$apptStatusFilter = $appointmentFilters['status'];
+$apptServiceFilter = $appointmentFilters['service'];
+$apptSearchFilter = $appointmentFilters['search'];
+$appointmentTableFilter = dcvsAppointmentFilterSql($appointmentFilters);
+$appointmentServiceCountFilter = dcvsAppointmentFilterSql($appointmentFilters, false);
 
-// Build WHERE clause
-$apptWhere = "a.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL";
-if ($apptStatusFilter !== 'all' && $apptStatusFilter !== '') {
-    $safeStatus = $conn->real_escape_string($apptStatusFilter);
-    if ($safeStatus === 'scheduled') {
-        $apptWhere .= " AND a.status IN ('scheduled','approved','in_progress')";
-    } else {
-        $apptWhere .= " AND a.status = '$safeStatus'";
-    }
-}
-if ($apptSearchFilter !== '') {
-    $safeSearch = $conn->real_escape_string($apptSearchFilter);
-    $apptWhere .= " AND (a.appointment_id LIKE '%$safeSearch%' OR u.full_name LIKE '%$safeSearch%' OR a.appointment_type LIKE '%$safeSearch%' OR p.pet_name LIKE '%$safeSearch%')";
-}
-
-$pendingQuery = $conn->query("
+$pendingQuery = dcvsAppointmentExecuteFilteredQuery($conn, "
   SELECT a.appointment_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time,
          COALESCE(a.scheduled_date, a.preferred_date) AS scheduled_date,
          COALESCE(a.scheduled_time, a.preferred_time) AS scheduled_time,
@@ -418,18 +410,56 @@ $pendingQuery = $conn->query("
     LEFT JOIN pets p ON a.pet_id = p.pet_id
     LEFT JOIN appointment_reschedule_requests rr
       ON rr.appointment_id = a.appointment_id AND rr.status IN ('pending','offered')
-    WHERE $apptWhere
+    WHERE {$appointmentTableFilter['where']}
     ORDER BY a.created_at ASC, a.appointment_id ASC
-");
+  ", $appointmentTableFilter);
 if ($pendingQuery) {
-    while($row = $pendingQuery->fetch_assoc()) {
-        $row['avatar_url'] = dcvsStaffReportMediaUrl($row['avatar_url']);
-        $row['photo_url'] = dcvsStaffReportMediaUrl($row['photo_url']);
-        $pendingAppts[] = $row;
+    $pendingResult = $pendingQuery->get_result();
+    if ($pendingResult) {
+        while ($row = $pendingResult->fetch_assoc()) {
+            $row['avatar_url'] = dcvsStaffReportMediaUrl($row['avatar_url']);
+            $row['photo_url'] = dcvsStaffReportMediaUrl($row['photo_url']);
+            $pendingAppts[] = $row;
+        }
+    } else {
+        $appointmentLoadError = 'Appointment requests could not be loaded. Please check the database driver and try again.';
+        error_log('Staff appointment requests result retrieval failed.');
     }
+    $pendingQuery->close();
 } else {
     $appointmentLoadError = 'Appointment requests could not be loaded. Please check the database migrations and try again.';
-    error_log('Staff appointment requests query failed: ' . $conn->error);
+    error_log('Staff appointment requests query failed.');
+}
+
+$apptServiceCounts = ['all' => 0, 'kapon' => 0, 'adoption' => 0, 'checkup' => 0, 'deworming' => 0];
+$appointmentServiceCountError = false;
+$serviceCountsQuery = dcvsAppointmentExecuteFilteredQuery(
+    $conn,
+    "SELECT a.appointment_type, COUNT(DISTINCT a.appointment_id) AS total
+       FROM appointments a
+       JOIN users u ON u.user_id = a.user_id
+      WHERE {$appointmentServiceCountFilter['where']}
+      GROUP BY a.appointment_type",
+    $appointmentServiceCountFilter
+);
+if ($serviceCountsQuery) {
+    $serviceCountsResult = $serviceCountsQuery->get_result();
+    if ($serviceCountsResult) {
+        while ($serviceCountRow = $serviceCountsResult->fetch_assoc()) {
+            $serviceType = (string)$serviceCountRow['appointment_type'];
+            $serviceTotal = (int)$serviceCountRow['total'];
+            $apptServiceCounts['all'] += $serviceTotal;
+            if (isset($apptServiceCounts[$serviceType])) {
+                $apptServiceCounts[$serviceType] = $serviceTotal;
+            }
+        }
+    } else {
+        $appointmentServiceCountError = true;
+        error_log('Staff appointment service-count result retrieval failed.');
+    }
+    $serviceCountsQuery->close();
+} else {
+    $appointmentServiceCountError = true;
 }
 $pendingTotal = count($pendingAppts);
 $rescheduleRequestCount = 0;
@@ -461,7 +491,7 @@ $apptCounts = ['all' => $pendingTotal, 'pending' => 0, 'scheduled' => 0, 'comple
 foreach ($pendingAppts as $ar) {
     $as = $ar['status'] ?? '';
     if ($as === 'pending' || $as === 'action_needed') $apptCounts['pending']++;
-    elseif ($as === 'scheduled' || $as === 'rescheduled') $apptCounts['scheduled']++;
+    elseif (in_array($as, ['approved', 'scheduled', 'rescheduled', 'in_progress'], true)) $apptCounts['scheduled']++;
     elseif ($as === 'completed') $apptCounts['completed']++;
 }
 
@@ -726,9 +756,26 @@ function dcvsStaffReportMediaUrl($url) {
 
 $reportItems = [];
 $rptQ = dcvsStaffReportItemsQuery($conn);
+if (!$rptQ) {
+    throw new RuntimeException('Could not load staff reports: ' . $conn->error);
+}
 if ($rptQ) {
     while ($r = $rptQ->fetch_assoc()) {
     $reportedAt = !empty($r['incident_at']) ? $r['incident_at'] : $r['created_at'];
+        $overdueInfo = dcvsReportOverdueInfo($r, null, $reportOverdueSlaSettings);
+        $statusLabel = (string)($r['response_state'] ?? '') === 'barangay_response_approved'
+            ? 'Accepted by Barangay'
+            : ((string)($r['response_state'] ?? '') === 'barangay_responding' && strtolower((string)$r['status']) === 'validated'
+                ? 'Barangay Responding'
+                : ((string)($r['response_state'] ?? '') === 'escalated_to_dcvs'
+                    ? 'Escalated to DCVS'
+                    : ((string)($r['response_state'] ?? '') === 'unable_to_locate'
+                        ? 'Unable to Locate'
+                        : (strtolower((string)$r['status']) === 'pending'
+                            ? 'Pending Barangay Review'
+                            : (strtolower((string)$r['status']) === 'validated'
+                                ? 'Pending DCVS Review'
+                                : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at'])))))));
         $reportItems[] = [
             'id'       => (int)$r['report_id'],
             'ref'      => $r['reference_id'] ?: '#RPT-' . fallbackRefId('#RPT-', (int)$r['report_id']),
@@ -747,24 +794,13 @@ if ($rptQ) {
             'submittedTs' => strtotime($r['created_at']) * 1000,
             'status'   => rptReportStatus($r['status'], $r['scheduled_at']),
             'statusRaw'=> strtolower((string)$r['status']),
-            'statusLabel' => (string)($r['response_state'] ?? '') === 'barangay_response_approved'
-                ? 'Accepted by Barangay'
-                : ((string)($r['response_state'] ?? '') === 'barangay_responding' && strtolower((string)$r['status']) === 'validated'
-                    ? 'Barangay Responding'
-                : ((string)($r['response_state'] ?? '') === 'escalated_to_dcvs'
-                    ? 'Escalated to DCVS'
-                    : ((string)($r['response_state'] ?? '') === 'unable_to_locate'
-                        ? 'Unable to Locate'
-                        : (strtolower((string)$r['status']) === 'pending'
-                            ? 'Pending Barangay Review'
-                            : (strtolower((string)$r['status']) === 'validated'
-                                ? 'Pending DCVS Review'
-                                : rptStatusLabel(rptReportStatus($r['status'], $r['scheduled_at']))))))),
-'scheduled' => $r['scheduled_at'] ? date('M d, Y h:i A', strtotime($r['scheduled_at'])) : '',
+            'statusLabel' => $overdueInfo['badge'] ?? $statusLabel,
+            'scheduled' => $r['scheduled_at'] ? date('M d, Y h:i A', strtotime($r['scheduled_at'])) : '',
            'validated'=> $r['validated_at'] ? date('M d, Y h:i A', strtotime($r['validated_at'])) : '',
            'vts'      => $r['validated_at'] ? strtotime($r['validated_at']) : 0,
             'urgency'  => rptUrgencyLabel($r['urgency_level']),
             'urgencyRaw' => strtolower((string)($r['urgency_level'] ?: 'medium')),
+            'supportingReports' => (int)($r['supporting_report_count'] ?? 0),
             'photo'    => dcvsStaffReportMediaUrl($r['photo_url']),
             'video'    => dcvsStaffReportMediaUrl($r['video_url']),
             'reporter' => $r['reporter_name'],
@@ -793,6 +829,11 @@ if ($rptQ) {
             'barangayProposed' => (bool)($r['barangay_proposed'] ?? false),
             'responseDeadline' => (string)($r['response_deadline'] ?? ''),
             'progressDeadline' => (string)($r['progress_deadline'] ?? ''),
+            'isOverdue' => $overdueInfo !== null,
+            'overdueReason' => $overdueInfo['reason'] ?? '',
+            'overdueAction' => $overdueInfo['action'] ?? '',
+            'overdueBadge' => $overdueInfo['badge'] ?? '',
+            'overdueDeadline' => $overdueInfo['deadline'] ?? '',
             'lastProgressAt' => (string)($r['last_progress_at'] ?? ''),
             'securedAt' => !empty($r['secured_at']) ? date('M d, Y g:i A', strtotime($r['secured_at'])) : '',
             'turnoverDeadline' => (string)($r['turnover_deadline'] ?? ''),
@@ -836,11 +877,81 @@ if ($rptQ) {
         ];
     }
 }
+$supportingParentIds = [];
+foreach ($reportItems as $reportItem) {
+    if ((int)($reportItem['supportingReports'] ?? 0) > 0) {
+        $supportingParentIds[] = (int)$reportItem['id'];
+    }
+}
+$supportingReportsByParent = [];
+if ($supportingParentIds !== []) {
+    $supportingPlaceholders = implode(',', array_fill(0, count($supportingParentIds), '?'));
+    $supportingQuery = $conn->prepare("
+        SELECT child.parent_report_id, child.report_id, child.reference_id, child.report_type,
+               child.description, child.location_address, child.created_at, child.photo_url
+        FROM reports child
+        WHERE child.parent_report_id IN ($supportingPlaceholders)
+          AND child.duplicate_status = 'merged'
+          AND child.archived_at IS NULL
+        ORDER BY child.parent_report_id, child.created_at, child.report_id
+    ");
+    if (!$supportingQuery) {
+        error_log('Could not prepare supporting report details for staff report drawer: ' . $conn->error);
+        throw new RuntimeException('Could not load supporting report details.');
+    } else {
+        $supportingBindValues = $supportingParentIds;
+        $supportingBindParameters = [str_repeat('i', count($supportingBindValues))];
+        foreach ($supportingBindValues as &$supportingBindValue) {
+            $supportingBindParameters[] = &$supportingBindValue;
+        }
+        unset($supportingBindValue);
+        if (!call_user_func_array([$supportingQuery, 'bind_param'], $supportingBindParameters)
+            || !$supportingQuery->execute()) {
+            $supportingQueryError = $supportingQuery->error;
+            $supportingQuery->close();
+            error_log('Could not load supporting report details for staff report drawer: ' . $supportingQueryError);
+            throw new RuntimeException('Could not load supporting report details.');
+        } else {
+            $supportingResult = $supportingQuery->get_result();
+            while ($supportingReport = $supportingResult->fetch_assoc()) {
+                $supportingReportsByParent[(int)$supportingReport['parent_report_id']][] = [
+                    'id' => (int)$supportingReport['report_id'],
+                    'ref' => (string)($supportingReport['reference_id'] ?: ('Report #' . $supportingReport['report_id'])),
+                    'type' => rptTypeLabel($supportingReport['report_type']),
+                    'description' => (string)$supportingReport['description'],
+                    'location' => (string)$supportingReport['location_address'],
+                    'submitted' => date('M d, Y g:i A', strtotime($supportingReport['created_at'])),
+                    'photo' => dcvsStaffReportMediaUrl($supportingReport['photo_url']),
+                ];
+            }
+        }
+        $supportingQuery->close();
+    }
+}
+foreach ($reportItems as &$reportItem) {
+    $reportItem['supportingReportDetails'] = $supportingReportsByParent[(int)$reportItem['id']] ?? [];
+}
+unset($reportItem);
 $rptCounts = ['all' => 0, 'active' => 0, 'pending' => 0, 'resolved' => 0];
 $activeResidentReportItems = array_filter($reportItems, function($item) { return $item['reporterStatus'] === 'active'; });
 foreach ($activeResidentReportItems as $ri) {
     $rptCounts['all']++;
     if (isset($rptCounts[$ri['status']])) $rptCounts[$ri['status']]++;
+}
+$rptOverdueKpiCounts = ['total' => 0, 'dcvs' => 0, 'review' => 0, 'followup' => 0];
+foreach ($reportItems as $reportItem) {
+    if (empty($reportItem['isOverdue'])) {
+        continue;
+    }
+    $rptOverdueKpiCounts['total']++;
+    $overdueAction = strtolower((string)($reportItem['overdueAction'] ?? ''));
+    if (in_array($overdueAction, ['dispatch', 'scheduling'], true)) {
+        $rptOverdueKpiCounts['dcvs']++;
+    } elseif ($overdueAction === 'review') {
+        $rptOverdueKpiCounts['review']++;
+    } else {
+        $rptOverdueKpiCounts['followup']++;
+    }
 }
 
 $staffBarangayResponseStates = [
@@ -860,6 +971,7 @@ foreach ($activeResidentReportItems as $ri) {
   $awaitingConfirmation = $ri['statusRaw'] === 'validated';
   $ri['status'] = 'pending';
   $ri['statusLabel'] = $awaitingConfirmation ? 'Pending DCVS Review' : 'Pending Barangay Review';
+  if ($ri['isOverdue']) $ri['statusLabel'] = $ri['overdueBadge'];
   $ri['caseId'] = null;
   $pendingItems[] = $ri;
   $pendingCounts['all']++;
@@ -876,12 +988,12 @@ foreach ($activeResidentReportItems as $ri) {
     if (!in_array($responseState, $staffBarangayResponseStates, true)) continue;
     if (in_array($ri['statusRaw'], ['resolved', 'rejected'], true)) continue;
     $ri['status'] = 'active';
-    $ri['statusLabel'] = [
+    $ri['statusLabel'] = $ri['isOverdue'] ? $ri['overdueBadge'] : ([
         'barangay_response_approved' => 'Accepted by Barangay',
         'barangay_responding' => 'Barangay Responding',
         'animal_secured' => 'Animal Secured',
         'returned_to_barangay' => 'Returned to Barangay',
-    ][$responseState];
+    ][$responseState]);
     $ri['caseId'] = $ri['caseId'] ?? (int)$ri['id'];
     $barangayResponseItems[] = $ri;
     $barangayResponseCounts['all']++;
@@ -904,19 +1016,19 @@ foreach ($activeResidentReportItems as $ri) {
     $responseState = (string)($ri['responseState'] ?? '');
     if (in_array($responseState, $staffBarangayResponseStates, true)) continue;
     $ri['status'] = 'active';
-    $ri['statusLabel'] = [
+    $ri['statusLabel'] = $ri['isOverdue'] ? $ri['overdueBadge'] : ([
         'dcvs_dispatch' => 'DCVS Dispatch',
         'dcvs_processing' => 'DCVS Processing',
         'escalated_to_dcvs' => 'Escalated to DCVS',
         'unable_to_locate' => 'Unable to Locate',
         'turned_over' => 'Turned over to DCVS',
-    ][$responseState] ?? 'Active';
+    ][$responseState] ?? 'Active');
     $ri['caseId'] = $ri['caseId'] ?? (int)$ri['id'];
     $activeItems[] = $ri;
     $activeCounts['all']++;
     if (stripos($ri['urgency'], 'high') !== false || stripos($ri['urgency'], 'critical') !== false) $activeCounts['high']++;
     if ($ri['scheduled']) $activeCounts['sched']++;
-    if ($ri['scheduled'] && strtotime($ri['scheduled']) < time()) $activeCounts['overdue']++;
+    if ($ri['isOverdue']) $activeCounts['overdue']++;
 }
 
 // �"?�"? RESOLVED CASES (completed history) �"?�"?
@@ -927,7 +1039,7 @@ $resolvedYearStart = strtotime(date('Y-01-01'));
 foreach ($activeResidentReportItems as $ri) {
     if ($ri['caseStatus'] !== 'resolved') continue;
     $ri['status'] = 'resolved';
-    $ri['statusLabel'] = 'Resolved';
+    $ri['statusLabel'] = $ri['isOverdue'] ? $ri['overdueBadge'] : 'Resolved';
     $ri['caseId'] = $ri['caseId'] ?? (int)$ri['id'];
     $resolvedItems[] = $ri;
     $resolvedCounts['all']++;
@@ -2177,6 +2289,25 @@ if (!empty($_GET['waitlist_booking'])) {
     .cpd .response-step.is-current .response-step-dot{ border-color:#16a34a;background:#fff; }
     .cpd .response-step.is-overdue .response-step-dot{ border-color:#ef4444;background:#fff; }
     .cpd .response-step>span:last-child{ max-width:100%;overflow-wrap:anywhere; }
+    .cpd .response-card{ overflow:hidden;border:1px solid #e4e4e7;border-radius:9px;background:#fff; }
+    .cpd .response-card.is-dcvs .response-card-title{ font-size:12px;letter-spacing:.08em;text-transform:uppercase; }
+    .cpd .response-date-summary{ padding:12px 12px 0;color:#52525b;font-size:12px;line-height:1.45; }
+    .cpd .response-date-summary-main{ display:flex;flex-wrap:wrap;gap:0 4px;color:#71717a; }
+    .cpd .response-date-delay{ margin-top:4px;color:#52525b; }
+    .cpd .response-overdue-alert{ display:flex;align-items:flex-start;gap:8px;margin:12px 12px 0;padding:10px 12px;border:1px solid #fecaca;border-radius:7px;background:#fef2f2;color:#b91c1c;font-size:12px;line-height:1.5; }
+    .cpd .response-overdue-alert .response-notice-icon{ margin-top:2px; }
+    .cpd .response-overdue-alert-title{ display:block;font-size:13px;font-weight:600; }
+    .cpd .response-overdue-alert-detail{ display:block;margin-top:1px; }
+    .cpd .response-card-header{ display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px; }
+    .cpd .response-card-heading{ min-width:0;flex:1; }
+    .cpd .response-card-title{ color:#18181b;font-size:14px;font-weight:600;line-height:1.25; }
+    .cpd .response-card-subtitle{ margin-top:2px;color:#71717a;font-size:12px; }
+    .cpd .response-deadline{ flex:0 1 auto;max-width:58%;border-radius:6px;background:#eff6ff;color:#1d4ed8;padding:4px 7px;font-size:12px;font-weight:500;line-height:1.35;text-align:center;overflow-wrap:anywhere; }
+    .cpd .response-deadline.is-overdue{ background:#fef2f2;color:#b91c1c; }
+    .cpd .response-notice{ display:flex;align-items:flex-start;gap:8px;padding:10px 12px;background:#eff6ff;color:#1d4ed8;font-size:12px;line-height:1.5; }
+    .cpd .response-notice-icon{ flex:0 0 auto;margin-top:2px; }
+    .cpd .response-notice-text{ min-width:0; }
+    .cpd .response-notice.is-overdue{ background:#fef2f2;color:#b91c1c; }
     #brgDetailsModal .brg-drawer-reporter{ display:flex;align-items:center;gap:10px;margin-bottom:14px; }
     #brgDetailsModal .brg-drawer-photo{ width:85px;height:85px;flex:0 0 85px;overflow:hidden;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:600;color:#64748b; }
     #brgDetailsModal .brg-drawer-reporter-copy{ display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:3px; }
@@ -2225,6 +2356,7 @@ if (!empty($_GET['waitlist_booking'])) {
     #penDetailsModal .pen-reporter-avatar img{ width:100%;height:100%;object-fit:cover; }
     #penDetailsModal .pen-reporter-status{ align-self:flex-start;margin:0 0 2px;white-space:nowrap; }
     #penDetailsModal .rpt-status{ display:inline-flex;align-items:center;padding:3px 10px;border-radius:4px;font-family:'Inter',sans-serif;font-size:12px;font-weight:500;white-space:nowrap;line-height:1.4;border:1px solid #e4e4e7; }
+    #penDetailsModal .rpt-status.overdue{ white-space:normal;max-width:180px;overflow-wrap:anywhere; }
     #penDetailsModal .rpt-status.pending{background:#fef3c7;color:#92400e;border-color:#fde68a;}
     #penDetailsModal .rpt-status.validated{background:#dcebe0;color:#045e1f;border-color:#bbf7d0;}
     #penDetailsModal .pen-attachment-count{ display:inline-flex;min-width:18px;height:18px;align-items:center;justify-content:center;margin-left:5px;padding:0 5px;border-radius:999px;background:#eef6f0;color:#045e1f;font-size:11px;font-weight:600;line-height:1;vertical-align:middle; }
@@ -2629,6 +2761,12 @@ if (!empty($_GET['waitlist_booking'])) {
 
   <!-- �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ APPOINTMENTS TAB �f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬�f¢â�,�â�?s¬ -->
   <section id="appointments" class="content-section">
+    <header class="staff-page-heading">
+      <div>
+        <h1>Appointment Requests</h1>
+        <p>Review, schedule, and manage appointment requests from residents.</p>
+      </div>
+    </header>
     <!-- Overview KPIs -->
     <div class="kpis">
       <div class="kpi-card">
@@ -2653,7 +2791,7 @@ if (!empty($_GET['waitlist_booking'])) {
       </div>
     </div>
 
-    <!-- Appointments Table with Search + Status Filter -->
+    <!-- Appointment table with server-side service, status, date, and search filters -->
         <?php if (isset($_SESSION['appointment_error'])): ?>
         <div class="toast toast-error" style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:10px 14px;border-radius:6px;margin-bottom:1rem;"><?php echo htmlspecialchars($_SESSION['appointment_error']); unset($_SESSION['appointment_error']); ?></div>
         <?php endif; ?>
@@ -2661,34 +2799,80 @@ if (!empty($_GET['waitlist_booking'])) {
         <div class="toast toast-success" style="background:#eef6f0;border:1px solid #b8d1c0;color:#045e1f;padding:10px 14px;border-radius:6px;margin-bottom:1rem;"><?php echo htmlspecialchars($_SESSION['appointment_success']); unset($_SESSION['appointment_success']); ?></div>
         <?php endif; ?>
 
+        <?php if (!empty($appointmentFilters['errors'])): ?>
+          <div class="toast toast-error" role="alert" style="margin-bottom:1rem;">
+            <?php echo htmlspecialchars(implode(' ', $appointmentFilters['errors']), ENT_QUOTES, 'UTF-8'); ?>
+          </div>
+        <?php endif; ?>
+        <form method="get" action="dashboard-staff.php#appointments" id="apptServerFilterForm">
+          <?php if ($appointmentFilters['reschedule_only']): ?>
+            <input type="hidden" name="appt_reschedule_only" value="1">
+          <?php endif; ?>
         <div class="appt-card-header staff-mobile-toolbar">
             <div class="appt-header-right">
               <div class="staff-toolbar-search-row">
               <div class="appt-search-wrap staff-toolbar-search">
                 <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search appointments...">
+                <input type="search" name="appt_search" id="apptSearchInput" class="appt-search-input" placeholder="Search appointments..." value="<?php echo htmlspecialchars($apptSearchFilter, ENT_QUOTES, 'UTF-8'); ?>">
               </div>
               <div class="staff-date-filter staff-toolbar-filter" data-date-filter="appt">
                 <button class="staff-date-filter-button" type="button" aria-label="Filter appointment requests by date" title="Filter by date" aria-expanded="false">
                   <i class="fas fa-filter" aria-hidden="true"></i>
                 </button>
-                <input type="hidden" id="apptDateFrom" value="">
-                <input type="hidden" id="apptDateTo" value="">
+                <input type="hidden" name="appt_from" id="apptDateFrom" value="<?php echo htmlspecialchars($appointmentFilters['from'], ENT_QUOTES, 'UTF-8'); ?>">
+                <input type="hidden" name="appt_to" id="apptDateTo" value="<?php echo htmlspecialchars($appointmentFilters['to'], ENT_QUOTES, 'UTF-8'); ?>">
               </div>
               </div>
               <div class="staff-toolbar-filters">
-              <button type="button" class="sd-btn sd-btn-outline" id="rescheduleRequestFilter" aria-pressed="false">
-                Reschedule requests (<?php echo $rescheduleRequestCount; ?>)
-              </button>
-              <select id="apptStatusSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter">
-                <option value="all">All Statuses</option>
-                <option value="pending">Pending</option>
-                <option value="scheduled">Scheduled</option>
-                <option value="completed">Completed</option>
-                <option value="cancelled">Cancelled</option>
-                <option value="rescheduled">Rescheduled</option>
-                <option value="no_show">No Show</option>
-              </select>
+                <?php
+                  $rescheduleFilters = $appointmentFilters;
+                  $rescheduleFilters['reschedule_only'] = !$appointmentFilters['reschedule_only'];
+                  $rescheduleFilterUrl = dcvsAppointmentFilterUrl($rescheduleFilters, $appointmentFilters['service'], 'appointments');
+                ?>
+                <a class="sd-btn <?php echo $appointmentFilters['reschedule_only'] ? 'sd-btn-default' : 'sd-btn-outline'; ?>"
+                   id="rescheduleRequestFilter"
+                   href="<?php echo htmlspecialchars($rescheduleFilterUrl, ENT_QUOTES, 'UTF-8'); ?>"
+                   aria-pressed="<?php echo $appointmentFilters['reschedule_only'] ? 'true' : 'false'; ?>">
+                  Reschedule requests (<?php echo $rescheduleRequestCount; ?>)
+                </a>
+                <select name="appt_status" id="apptStatusSelect" class="appt-status-select staff-toolbar-select" onchange="this.form.submit()">
+                  <?php
+                    $appointmentStatusLabels = [
+                      'all' => 'All Statuses',
+                      'pending' => 'Pending',
+                      'scheduled' => 'Scheduled',
+                      'completed' => 'Completed',
+                      'cancelled' => 'Cancelled',
+                      'rescheduled' => 'Rescheduled',
+                      'no_show' => 'No Show',
+                      'action_needed' => 'Action Needed',
+                      'rejected' => 'Rejected',
+                      'waitlisted' => 'Waitlisted',
+                    ];
+                    foreach ($appointmentStatusLabels as $statusValue => $statusLabel):
+                  ?>
+                    <option value="<?php echo htmlspecialchars($statusValue, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $apptStatusFilter === $statusValue ? 'selected' : ''; ?>>
+                      <?php echo htmlspecialchars($statusLabel, ENT_QUOTES, 'UTF-8'); ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
+                <select name="appt_service" id="apptServiceSelect" class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" onchange="this.form.submit()" aria-label="Filter by service type">
+                  <?php
+                    $appointmentServiceLabels = [
+                      'all' => 'All Services',
+                      'kapon' => 'Kapon',
+                      'adoption' => 'Adoption',
+                      'checkup' => 'Check-up',
+                      'deworming' => 'Deworming',
+                    ];
+                    foreach ($appointmentServiceLabels as $serviceValue => $serviceLabel):
+                      $serviceCountLabel = $appointmentServiceCountError ? '' : ' (' . number_format($apptServiceCounts[$serviceValue]) . ')';
+                  ?>
+                    <option value="<?php echo htmlspecialchars($serviceValue, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $apptServiceFilter === $serviceValue ? 'selected' : ''; ?>>
+                      <?php echo htmlspecialchars($serviceLabel . $serviceCountLabel, ENT_QUOTES, 'UTF-8'); ?>
+                    </option>
+                  <?php endforeach; ?>
+                </select>
               </div>
             </div>
             <div class="appt-primary-actions staff-toolbar-actions" style="display:flex; gap:10px; flex-wrap:wrap; margin-left:auto;">
@@ -2700,6 +2884,12 @@ if (!empty($_GET['waitlist_booking'])) {
               <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openAddAppointmentModal()"><i class="fas fa-clipboard-list"></i> Review Requests</button>
             </div>
           </div>
+          <?php if ($appointmentServiceCountError): ?>
+            <div class="toast toast-error" role="alert" style="margin:0 0 1rem;">
+              Appointment service counts could not be loaded. The filters are still available.
+            </div>
+          <?php endif; ?>
+        </form>
 
           <div id="apptBulkActions" class="bulk-bar" style="display:none;">
             <div class="bulk-actions">
@@ -2876,6 +3066,12 @@ if (!empty($_GET['waitlist_booking'])) {
   <section id="client-pets" class="content-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>All Clients</h1>
+            <p>View resident records and their registered pets in one place.</p>
+          </div>
+        </header>
 
         <!-- Main layout -->
         <div class="layout">
@@ -4018,11 +4214,15 @@ if (!empty($_GET['waitlist_booking'])) {
     #reports-pending .sd-row-actions:hover, #reports-active .sd-row-actions:hover, #reports-resolved .sd-row-actions:hover{ background:#f4f4f5; color:#18181b; }
     #reports-all .type-badge, #reports-pending .type-badge, #reports-active .type-badge, #reports-resolved .type-badge{ font-size:14px; }
     #reports-all .rpt-status, #reports-pending .rpt-status, #reports-accepted .rpt-status, #reports-active .rpt-status, #reports-resolved .rpt-status{ display:inline-flex; align-items:center; padding:3px 10px; border-radius:4px; font-family:'Inter',sans-serif; font-size:12px; font-weight:500; white-space:nowrap; line-height:1.4; border:1px solid #e4e4e7; }
+    #reports-all .rpt-status.overdue, #reports-pending .rpt-status.overdue, #reports-accepted .rpt-status.overdue, #reports-active .rpt-status.overdue, #reports-resolved .rpt-status.overdue{ white-space:normal; max-width:180px; overflow-wrap:anywhere; }
+    .rpt-supporting-count{ display:inline-flex; align-items:center; padding:2px 8px; border:1px solid #fed7aa; border-radius:6px; background:#fff7ed; color:#9a3412; font-family:'Inter','Segoe UI',sans-serif; font-size:11px; font-weight:500; line-height:1.4; white-space:nowrap; }
     #reports-all .rpt-status.pending, #reports-pending .rpt-status.pending, #reports-active .rpt-status.pending, #reports-resolved .rpt-status.pending{ background:#fef3c7; color:#92400e; border-color:#fde68a; }
     #reports-all .rpt-status.validated, #reports-pending .rpt-status.validated, #reports-active .rpt-status.validated, #reports-resolved .rpt-status.validated{ background:#dcebe0; color:#045e1f; border-color:#bbf7d0; }
     #reports-all .rpt-status.active, #reports-pending .rpt-status.active, #reports-accepted .rpt-status.active, #reports-active .rpt-status.active, #reports-resolved .rpt-status.active{ background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; }
     #reports-all .rpt-status.resolved, #reports-pending .rpt-status.resolved, #reports-active .rpt-status.resolved, #reports-resolved .rpt-status.resolved{ background:#0E8131; color:#ffffff; border-color:#0E8131; }
     #reports-all .rpt-status.rejected, #reports-pending .rpt-status.rejected, #reports-active .rpt-status.rejected, #reports-resolved .rpt-status.rejected{ background:#fee2e2; color:#991b1b; border-color:#fecaca; }
+    #reports-all .rpt-status.overdue{ background:#fef2f2; color:#b91c1c; border-color:#fecaca; }
+    .rpt-status.overdue{ background:#fef2f2;color:#b91c1c;border-color:#fecaca; }
 
   </style>
       <div id="editClientModal" class="modal">
@@ -4409,6 +4609,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     </style>
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Reports</h1>
+            <p>Review and manage reports submitted by residents across the city.</p>
+          </div>
+        </header>
 
         <!-- Main layout -->
         <div class="layout">
@@ -4560,6 +4766,168 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
 
           </div>
 
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="reports-overdue" class="content-section staff-report-section">
+    <style>
+      #reports-overdue{background:var(--white);margin:-1.75rem -2rem;width:calc(100% + 4rem);max-width:none;min-height:calc(100vh - var(--topbar-h, 64px));font-family:'Inter','Segoe UI',sans-serif;}
+      #reports-overdue .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px;}
+      #reports-overdue .kpi-card{display:flex;min-width:0;flex-direction:column;align-items:center;justify-content:center;padding:14px 16px;border:1px solid #E5E7EB;border-radius:14px;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.05),0 1px 2px rgba(16,24,40,.03);text-align:center;}
+      #reports-overdue .kpi-label{margin:0 0 6px;color:#18181b;font-size:.85rem;font-weight:500;letter-spacing:.03em;text-transform:uppercase;}
+      #reports-overdue .kpi-value{margin:0 0 6px;color:#18181b;font-size:1.75rem;font-weight:600;line-height:1;}
+      #reports-overdue .kpi-sub{margin:0;color:#71717a;font-size:14px;}
+      #reports-overdue .dt-container{min-height:var(--staff-table-min-height);overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;}
+      #reports-overdue table{width:100%;border-collapse:collapse;color:#18181b;font-size:14px;}
+      #reports-overdue thead tr{border-bottom:1px solid #e4e4e7;}
+      #reports-overdue thead th{height:40px;padding:0 8px;text-align:left;vertical-align:middle;font-size:14px;font-weight:500;color:#71717a;white-space:nowrap;text-transform:none;letter-spacing:normal;background:#fafafa;border-bottom:none;}
+      #reports-overdue tbody tr{border-bottom:1px solid #e4e4e7;transition:background .15s;cursor:pointer;}
+      #reports-overdue tbody tr:last-child{border-bottom:0;}
+      #reports-overdue tbody tr:hover{background:#fafafa;}
+      #reports-overdue tbody td{padding:8px;vertical-align:middle;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;color:#18181b;}
+      #reports-overdue .client-name{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;}
+      #reports-overdue .client-name.report-id{font-weight:400;}
+      #reports-overdue .contact-main{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;}
+      #reports-overdue .contact-sub{font-family:'Inter','Segoe UI',sans-serif;font-size:12.5px;font-weight:400;color:#71717a;line-height:1.4;margin-top:2px;word-break:break-word;}
+      #reports-overdue .sd-td-action{text-align:right;}
+      #reports-overdue .sd-row-actions{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;background:transparent;border:none;color:#71717a;cursor:pointer;}
+      #reports-overdue .sd-row-actions:hover{background:#f4f4f5;color:#18181b;}
+      #reports-overdue .overdue-obligation{color:#b91c1c;font-size:14px;font-weight:500;line-height:1.4;}
+      #reports-overdue .overdue-deadline{margin-top:3px;color:#71717a;font-size:12.5px;line-height:1.4;}
+      #reports-overdue .rpt-status.overdue{display:inline-flex;max-width:180px;padding:3px 10px;border:1px solid #fecaca;border-radius:4px;background:#fef2f2;color:#b91c1c;font-size:12px;font-weight:500;white-space:normal;overflow-wrap:anywhere;}
+      #reports-overdue .dt-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;padding:12px 8px;}
+      #reports-overdue .dt-pagination-right{display:flex;align-items:center;gap:24px;flex-wrap:wrap;}
+      #reports-overdue .dt-rows{display:flex;align-items:center;gap:8px;font-size:14px;color:#71717a;}
+      #reports-overdue .dt-rows select{height:32px;width:70px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;padding:0 8px;font-size:14px;color:#18181b;cursor:pointer;}
+      #reports-overdue .dt-page-label{width:110px;text-align:center;font-size:14px;font-weight:500;color:#18181b;white-space:nowrap;}
+      #reports-overdue .dt-page-btns{display:flex;align-items:center;gap:4px;}
+      #reports-overdue .dt-page-btn{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+      #reports-overdue .dt-page-btn:hover:not(:disabled){background:#f4f4f5;}
+      #reports-overdue .dt-page-btn:disabled{opacity:.5;cursor:not-allowed;}
+      @media(max-width:1024px){#reports-overdue .kpis{grid-template-columns:repeat(2,minmax(0,1fr));}}
+      @media(max-width:480px){#reports-overdue .kpis{gap:10px;}#reports-overdue .dt-pagination{justify-content:center;}#reports-overdue .dt-pagination-right{justify-content:center;gap:12px;}}
+    </style>
+    <div class="cpd reports-fullpage">
+      <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Overdue Reports</h1>
+            <p>Active reports whose current response, turnover, or scheduled DCVS action deadline has passed.</p>
+          </div>
+        </header>
+        <div class="panel db-panel">
+          <div class="kpis" aria-label="Overdue report summary">
+            <div class="kpi-card">
+              <p class="kpi-label">Total Overdue</p>
+              <div class="kpi-value"><?php echo number_format($rptOverdueKpiCounts['total']); ?></div>
+              <p class="kpi-sub">Past the current stage deadline</p>
+            </div>
+            <div class="kpi-card">
+              <p class="kpi-label">Dispatch / Scheduling</p>
+              <div class="kpi-value"><?php echo number_format($rptOverdueKpiCounts['dcvs']); ?></div>
+              <p class="kpi-sub">Awaiting DCVS action</p>
+            </div>
+            <div class="kpi-card">
+              <p class="kpi-label">Barangay Review</p>
+              <div class="kpi-value"><?php echo number_format($rptOverdueKpiCounts['review']); ?></div>
+              <p class="kpi-sub">Awaiting barangay review</p>
+            </div>
+            <div class="kpi-card">
+              <p class="kpi-label">Visit / Follow-up</p>
+              <div class="kpi-value"><?php echo number_format($rptOverdueKpiCounts['followup']); ?></div>
+              <p class="kpi-sub">Visit or case follow-up overdue</p>
+            </div>
+          </div>
+          <div class="db-toolbar staff-report-toolbar staff-mobile-toolbar">
+            <div class="staff-toolbar-search-row">
+              <div class="search-grow-wrap staff-toolbar-search">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="search" id="rptOverdueSearch" placeholder="Search overdue reports..." oninput="rptSetOverdueSearch(this.value)">
+              </div>
+              <div class="staff-date-filter staff-toolbar-filter" data-date-filter="rptOverdue">
+                <button class="staff-date-filter-button" type="button" aria-label="Filter overdue reports by date" title="Filter by date" aria-expanded="false">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                </button>
+                <input type="hidden" id="rptOverdueDateFrom" value="">
+                <input type="hidden" id="rptOverdueDateTo" value="">
+              </div>
+            </div>
+            <div class="toolbar-filters staff-report-filters staff-toolbar-filters">
+              <select class="select-input tf-select staff-toolbar-select" id="rptOverdueType" aria-label="Filter overdue reports by type" onchange="rptSetOverdueFilter()">
+                <option value="">All Types</option>
+                <option value="stray">Stray Animal</option>
+                <option value="rabies">Rabies</option>
+                <option value="injured">Injured Animal</option>
+                <option value="dead">Dead Animal</option>
+                <option value="rescue">Rescue</option>
+              </select>
+              <select class="select-input tf-select staff-toolbar-select" id="rptOverdueBrgy" aria-label="Filter overdue reports by barangay" onchange="rptSetOverdueFilter()">
+                <option value="">All Barangays</option>
+                <?php foreach ($cpdBarangays as $b): ?>
+                  <option value="<?php echo htmlspecialchars($b['barangay_name'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($b['barangay_name']); ?></option>
+                <?php endforeach; ?>
+              </select>
+              <select class="select-input tf-select staff-toolbar-select staff-toolbar-last-filter" id="rptOverdueAction" aria-label="Filter overdue reports by action" onchange="rptSetOverdueFilter()">
+                <option value="">All Overdue Actions</option>
+                <option value="dispatch">Dispatch overdue</option>
+                <option value="scheduling">Scheduling overdue</option>
+                <option value="visit">Visit overdue</option>
+                <option value="review">Review overdue</option>
+                <option value="resolution">Resolution overdue</option>
+                <option value="turnover">Turnover overdue</option>
+              </select>
+            </div>
+            <div class="db-toolbar-actions staff-toolbar-actions staff-toolbar-single-secondary">
+              <button type="button" class="sd-btn sd-btn-outline staff-toolbar-secondary" id="rptOverdueClear" onclick="rptClearOverdueFilters()" style="display:none;">Clear Filters</button>
+              <button type="button" class="sd-btn sd-btn-outline staff-toolbar-secondary" onclick="rptExportOverdueCSV()" title="Export overdue reports as CSV">
+                Export CSV
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="db-table-area staff-report-table-area">
+            <div class="dt-container" id="rptOverdueTableWrap">
+              <div style="overflow-x:auto;">
+                <table>
+                  <thead><tr>
+                    <th>Report</th><th>Reporter</th><th>Contact</th><th>Type</th><th>Barangay</th><th>Location</th><th>Overdue obligation</th><th>Status</th><th style="width:40px;"></th>
+                  </tr></thead>
+                  <tbody id="rptOverdueRows"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="dt-pagination">
+              <div class="dt-pagination-right">
+                <div class="dt-rows">
+                  <span>Rows per page</span>
+                  <select id="rptOverduePerPage" onchange="rptSetOverduePerPage(this.value)">
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="30">30</option>
+                    <option value="40">40</option>
+                    <option value="50">50</option>
+                  </select>
+                </div>
+                <div class="dt-page-label" id="rptOverduePageLabel">Page 1 of 1</div>
+                <div class="dt-page-btns">
+                  <button class="dt-page-btn" id="rptOverduePageFirst" type="button" title="Go to first page">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>
+                  </button>
+                  <button class="dt-page-btn" id="rptOverduePagePrev" type="button" title="Go to previous page">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                  </button>
+                  <button class="dt-page-btn" id="rptOverduePageNext" type="button" title="Go to next page">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                  </button>
+                  <button class="dt-page-btn" id="rptOverduePageLast" type="button" title="Go to last page">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -4748,6 +5116,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     <?php endif; ?>
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Pending Validation</h1>
+            <p>Review new reports and validate their details before taking action.</p>
+          </div>
+        </header>
 
         <!-- Main layout -->
         <div class="layout">
@@ -4996,6 +5370,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     var updates = (Array.isArray(r.responseHistory) ? r.responseHistory : [])
       .filter(function(entry) { return entry.action !== 'report_submitted'; })
       .map(function(entry) { return entry; });
+    var overdueUpdate = typeof window.responseWorkflowOverdueUpdate === 'function'
+      ? window.responseWorkflowOverdueUpdate(r)
+      : null;
+    if (overdueUpdate && !updates.some(function(entry) { return entry.action === 'current_overdue'; })) {
+      updates.push(overdueUpdate);
+    }
     var historyActions = updates.map(function(entry) { return entry.action; });
     var equivalentHistoryActions = {
       report_resolved: ['resolve', 'resolve_barangay'],
@@ -5102,7 +5482,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     var updateHtml = updates.map(function(entry) {
       var historyId = Number(entry.id || 0);
       var action = String(entry.action || '');
-      var title = actionLabels[action] || stateLabels[entry.toState] ||
+      var title = entry.title || actionLabels[action] || stateLabels[entry.toState] ||
         action.replace(/_/g, ' ').replace(/\b\w/g, function(letter) { return letter.toUpperCase(); }) ||
         'Case update';
       var copy = entry.reason || (action === 'report_submitted'
@@ -5161,9 +5541,11 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   }
   window.casReportCaseUpdatesHtml = casReportCaseUpdatesHtml;
 
-  function casResponseWorkflowDetails(r, options) {
-    options = options || {};
-    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return '';
+  function casResponseWorkflowDetails(r) {
+    var progressHtml = typeof window.responseWorkflowProgressHtml === 'function'
+      ? window.responseWorkflowProgressHtml(r)
+      : '';
+    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return progressHtml;
     var labels = {
       awaiting_dcvs_decision: 'Awaiting DCVS response decision', dcvs_dispatch: 'DCVS dispatch',
       barangay_response_approved: 'Barangay response approved', barangay_responding: 'Barangay responding',
@@ -5173,41 +5555,10 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
       returned_to_barangay: 'Returned to barangay', closed_not_actionable: 'Closed — not actionable',
       resolved: 'Resolved'
     };
-    var overdue = (
-      ['barangay_response_approved', 'barangay_responding'].indexOf(r.responseState) !== -1
-      && r.responseDeadline
-      && new Date(r.responseDeadline.replace(' ', 'T')).getTime() < Date.now()
-    ) || (
-      r.responseState === 'awaiting_turnover'
-      && r.turnoverDeadline
-      && new Date(r.turnoverDeadline.replace(' ', 'T')).getTime() < Date.now()
-    );
     var turnoverComplete = r.statusRaw === 'resolved' && r.turnoverStatus === 'receipt_confirmed';
-    var turnoverRequired = typeof window.responseWorkflowNeedsHandover === 'function'
-      && window.responseWorkflowNeedsHandover(r);
-    var overdueTurnover = r.statusRaw === 'resolved' && r.turnoverStatus === 'pending'
-      && r.turnoverDueAt && new Date(r.turnoverDueAt.replace(' ', 'T')).getTime() < Date.now();
-    var stepsHtml = '';
-    if (!options.hideProgress) {
-      var completedStage = r.statusRaw === 'resolved'
-        ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
-        : (r.responseState === 'barangay_response_approved' ? 0
-          : (r.responseState === 'barangay_responding' || r.responseState === 'escalated_to_dcvs' ? 1
-            : (r.responseState === 'animal_secured' ? 2 : -1)));
-      var steps = ['Accepted', 'Responding', 'Secured', 'Resolved'];
-      if (turnoverRequired) steps.push(turnoverComplete ? 'Turned over to DCVS' : 'Turned over');
-      stepsHtml = '<div class="response-steps" aria-label="Barangay response progress">' + steps.map(function(label, index) {
-        var stepClass = index < completedStage ? ' is-complete'
-          : (index === completedStage ? ((overdue && index === 1 || overdueTurnover && index === 4) ? ' is-current is-overdue' : ' is-current') : '');
-        var check = index < completedStage
-          ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-          : '';
-        return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + check + '</span><span>' + label + '</span></div>';
-      }).join('') + '</div>';
-    }
     var handoverHtml = typeof window.responseWorkflowHandoverHtml === 'function'
       ? window.responseWorkflowHandoverHtml(r, { excludeReceipt: turnoverComplete }) : '';
-    return handoverHtml + '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Response &amp; Custody</div>' + stepsHtml + '<div class="info-rows info-rows-2col">' +
+    return progressHtml + handoverHtml + '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Response &amp; Custody</div><div class="info-rows info-rows-2col">' +
       casInfoRow('Response Status', labels[r.responseState] || r.responseState) +
       casInfoRow('Response Mode', r.responseMode === 'barangay_response'
         ? 'Barangay Response'
@@ -5215,7 +5566,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
       (r.holdingLocation ? casInfoRow('Holding Location', r.holdingLocation) : '') +
       (r.animalCondition ? casInfoRow('Animal Condition', r.animalCondition) : '') +
       (r.turnoverRequestedAt ? casInfoRow('Pickup Requested', r.turnoverRequestedAt) : '') +
-      '</div>' + (overdue ? '<div role="alert" style="margin-top:10px;padding:10px 12px;border-radius:8px;background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-size:13px;">Response deadline exceeded — follow up is required.</div>' : '') +
+      '</div>' +
       '</div>';
   }
 
@@ -5346,6 +5697,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   <section id="reports-accepted" class="content-section staff-report-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Accepted by Barangay</h1>
+            <p>Track reports accepted by barangay staff and follow their response updates.</p>
+          </div>
+        </header>
         <div class="layout">
           <div class="panel db-panel">
             <div class="kpis">
@@ -5448,6 +5805,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   <section id="reports-active" class="content-section staff-report-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Active Cases</h1>
+            <p>Monitor reports currently under investigation or resolution.</p>
+          </div>
+        </header>
 
         <!-- Main layout -->
         <div class="layout">
@@ -5574,6 +5937,12 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   <section id="reports-resolved" class="content-section staff-report-section">
     <div class="cpd reports-fullpage">
       <div class="cpd-app">
+        <header class="staff-page-heading staff-page-heading--fullbleed">
+          <div>
+            <h1>Resolved Cases</h1>
+            <p>Review completed cases and their resolution outcomes.</p>
+          </div>
+        </header>
 
         <!-- Main layout -->
         <div class="layout">
@@ -5969,7 +6338,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
     groupMatch: function (r, v) {
       if (v === 'high') return /high|critical/i.test(r.urgency);
       if (v === 'sched') return !!r.scheduled;
-      if (v === 'overdue') return r.scheduled && new Date(r.scheduled.replace(' PM', ' PM')).getTime() < Date.now();
+      if (v === 'overdue') return !!r.isOverdue;
       return true;
     },
     rowHtml: function (r) {
@@ -6001,7 +6370,9 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '</div>';
     },
     drawerHtml: function (r) {
-      var statusColor = '#1E40AF', statusBg = '#EFF6FF', statusBorder = '#BFDBFE';
+      var statusColor = r.isOverdue ? '#B91C1C' : '#1E40AF';
+      var statusBg = r.isOverdue ? '#FEF2F2' : '#EFF6FF';
+      var statusBorder = r.isOverdue ? '#FECACA' : '#BFDBFE';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="actDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="updates" onclick="actDetailGo(\'updates\')">Updates</button>' +
@@ -6023,7 +6394,7 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         casPriorityPill(r.priority || r.urgency) +
         '</div>' +
 
-        casResponseWorkflowDetails(r, { hideProgress: true }) +
+        casResponseWorkflowDetails(r) +
 
         '<div class="rpt-detail-grid">' +
 
@@ -6171,7 +6542,9 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         { t: 'Resolved by DCVS Staff', a: 'DCVS Staff', d: r.resolved }
       ].filter(Boolean);
       history = history.concat(casResponseHistoryEntries(r));
-      var statusColor = '#ffffff', statusBg = '#0E8131', statusBorder = '#0E8131';
+      var statusColor = r.isOverdue ? '#B91C1C' : '#ffffff';
+      var statusBg = r.isOverdue ? '#FEF2F2' : '#0E8131';
+      var statusBorder = r.isOverdue ? '#FECACA' : '#0E8131';
       return '<div class="rpt-tabs">' +
         '<button class="rpt-tab" data-tab="details" onclick="resDetailGo(\'details\')">Details</button>' +
         '<button class="rpt-tab" data-tab="updates" onclick="resDetailGo(\'updates\')">Updates</button>' +
@@ -6192,6 +6565,8 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:500;color:#64748b;">Priority</span>' +
         casPriorityPill(r.priority || r.urgency) +
         '</div>' +
+
+        casResponseWorkflowDetails(r) +
 
         '<div class="rpt-detail-grid">' +
 
@@ -6758,6 +7133,21 @@ var barangayUsers = <?php echo json_encode($composeBarangayUsers, JSON_HEX_TAG |
   }
   .staff-detail-drawer #rptDetailFooter{ flex-wrap:wrap; }
   .staff-detail-drawer #rptDetailFooter .sd-btn{ flex:0 1 auto; white-space:nowrap; }
+  .staff-detail-drawer #actDrawerFooter{
+    display:flex;
+    min-width:0;
+    flex-wrap:wrap;
+    justify-content:flex-start;
+    gap:8px;
+  }
+  .staff-detail-drawer #actDrawerFooter .sd-btn{
+    min-width:0;
+    max-width:100%;
+    flex:1 1 145px;
+    white-space:normal;
+    overflow-wrap:anywhere;
+    text-align:center;
+  }
   .staff-detail-drawer .sd-dialog-footer:empty{ display:none; }
 
   #mainContent > .staff-report-section.content-section{
@@ -7558,7 +7948,7 @@ function updateStaffReportKpis() {
   var high = function(items) { return items.filter(function(item) { return /high|critical/i.test(item.urgency || ''); }).length; };
   var pendingWeek = PENDING_ITEMS.filter(function(item) { return Number(item.vts || 0) >= Date.now() - 7 * 86400000; }).length;
   var activeScheduled = ACTIVE_ITEMS.filter(function(item) { return !!item.scheduled; }).length;
-  var activeOverdue = ACTIVE_ITEMS.filter(function(item) { return item.scheduled && new Date(item.scheduled).getTime() < Date.now(); }).length;
+  var activeOverdue = ACTIVE_ITEMS.filter(function(item) { return !!item.isOverdue; }).length;
   var monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
   var yearStart = new Date(new Date().getFullYear(), 0, 1).getTime();
   var setValues = function(sectionId, values) {
@@ -7787,10 +8177,6 @@ function openRejectionModal(reportId) {
     var allRows = Array.from(tbody.querySelectorAll('tr'));
     allRows = allRows.filter(function(r) { return r.tagName === 'TR' && r.id !== 'apptNoResults'; });
     var currentPage = 1;
-    var filterStatus = 'all';
-    var filterSearch = '';
-    var filterDate = '';
-    var filterRescheduleOnly = false;
 
     function getStatus(row) {
         var st = row.getAttribute('data-status');
@@ -7800,22 +8186,12 @@ function openRejectionModal(reportId) {
     }
 
     function getFiltered() {
-        return allRows.filter(function(r) {
-            var status = getStatus(r);
-            var text = r.textContent.toLowerCase();
-            var matchS = filterStatus === 'all' || status === filterStatus;
-            var matchQ = !filterSearch || text.includes(filterSearch);
-            var rowDate = (r.getAttribute('data-date-key') || '').slice(0, 10);
-            var matchD = !filterDate || rowDate === filterDate;
-            var matchR = !filterRescheduleOnly || r.getAttribute('data-reschedule-request') === 'pending';
-            return matchS && matchQ && matchD && matchR;
-        });
+        return allRows;
     }
 
     window.apptSetDate = function() {
-        filterDate = document.getElementById('apptDateFrom').value;
-        currentPage = 1;
-        renderTable();
+        var filterForm = document.getElementById('apptServerFilterForm');
+        if (filterForm) filterForm.submit();
     };
 
     function setAppointmentResidentCell(cell, appt) {
@@ -8115,39 +8491,6 @@ function openRejectionModal(reportId) {
         renderTable();
     };
 
-    var apptSearch = document.getElementById('apptSearchInput');
-    if (apptSearch) {
-        apptSearch.addEventListener('keyup', function() {
-            filterSearch = this.value.toLowerCase().trim();
-            currentPage = 1;
-            renderTable();
-        });
-    }
-
-    var apptStatus = document.getElementById('apptStatusSelect');
-    if (apptStatus) {
-        apptStatus.addEventListener('change', function() {
-            filterStatus = this.value;
-            currentPage = 1;
-            renderTable();
-        });
-    }
-    var rescheduleFilter = document.getElementById('rescheduleRequestFilter');
-    if (rescheduleFilter) {
-        rescheduleFilter.addEventListener('click', function() {
-            filterRescheduleOnly = !filterRescheduleOnly;
-            if (filterRescheduleOnly && apptStatus) {
-                apptStatus.value = 'all';
-                filterStatus = 'all';
-            }
-            rescheduleFilter.setAttribute('aria-pressed', filterRescheduleOnly ? 'true' : 'false');
-            rescheduleFilter.classList.toggle('sd-btn-default', filterRescheduleOnly);
-            rescheduleFilter.classList.toggle('sd-btn-outline', !filterRescheduleOnly);
-            currentPage = 1;
-            renderTable();
-        });
-    }
-
     renderTable();
 })();
 
@@ -8278,8 +8621,6 @@ function viewMedicalHistory(petId) {
     // Remove empty text nodes / non-tr rows
     allRows = allRows.filter(function(r) { return r.tagName === 'TR'; });
     var currentPage = 1;
-    var filterStatus = 'all';
-    var filterSearch = '';
     var sortCol = '';
     var sortDir = 'asc';
 
@@ -8324,22 +8665,8 @@ function viewMedicalHistory(petId) {
         renderTable();
     };
 
-    function getStatus(row) {
-        var st = row.getAttribute('data-status');
-        if (st) return st.trim().toLowerCase().replace(/\s+/g, '_');
-        var cells = row.querySelectorAll('td');
-        return cells.length >= 9 ? (cells[8].textContent || '').trim().toLowerCase().replace(/\s+/g, '_') : '';
-    }
-
     function getFiltered() {
-        return allRows.filter(function(r) {
-            if (r.id === 'apptNoResults') return false;
-            var status = getStatus(r);
-            var text = r.textContent.toLowerCase();
-            var matchS = filterStatus === 'all' || status === filterStatus;
-            var matchQ = !filterSearch || text.includes(filterSearch);
-            return matchS && matchQ;
-        });
+        return allRows.filter(function(row) { return row.id !== 'apptNoResults'; });
     }
 
     window.exportAppointmentsCSV = function() {
@@ -8411,24 +8738,6 @@ function viewMedicalHistory(petId) {
         currentPage = 1;
         renderTable();
     };
-
-    var apptSearch = document.getElementById('apptSearchInput');
-    if (apptSearch) {
-        apptSearch.addEventListener('keyup', function() {
-            filterSearch = this.value.toLowerCase().trim();
-            currentPage = 1;
-            renderTable();
-        });
-    }
-
-    var apptStatus = document.getElementById('apptStatusSelect');
-    if (apptStatus) {
-        apptStatus.addEventListener('change', function() {
-            filterStatus = this.value;
-            currentPage = 1;
-            renderTable();
-        });
-    }
 
     renderTable();
 })();
@@ -11040,7 +11349,7 @@ window.applyStaffRealtimeReport = function(source) {
   var highCount = function(items) { return items.filter(function(item) { return /high|critical/i.test(item.urgency || ''); }).length; };
   var pendingWeek = pendingItems.filter(function(item) { return Number(item.vts || 0) >= Date.now() - 7 * 86400000; }).length;
   var activeScheduled = activeItems.filter(function(item) { return !!item.scheduled; }).length;
-  var activeOverdue = activeItems.filter(function(item) { return item.scheduled && new Date(item.scheduled).getTime() < Date.now(); }).length;
+  var activeOverdue = activeItems.filter(function(item) { return !!item.isOverdue; }).length;
   var kpiValues = {
     'reports-pending':[pendingItems.length, highCount(pendingItems), pendingWeek, pendingItems.length],
     'reports-active':[activeItems.length, highCount(activeItems), activeScheduled, activeOverdue],

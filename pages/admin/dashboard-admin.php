@@ -12,6 +12,7 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/activity-log-format.php';
+require_once __DIR__ . '/../../includes/reports/deadlines.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
     header('Location: login-admin.php');
@@ -35,6 +36,7 @@ if ($roleRow = $roleResult->fetch_assoc()) {
     }
 }
 $roleCheck->close();
+$reportOverdueSlaSettings = dcvsLoadReportOverdueSlaSettings($conn);
 
 // ── Today / Yesterday date helpers (used by activity logs) ──
 $today = date('Y-m-d');
@@ -1016,8 +1018,40 @@ $activePage = 'overview';
     <?php if (isset($_SESSION['profile_success'])): ?>
       <div id="profileSuccess" style="text-align:center;margin:0 auto 14px;font-size:13px;color:#065f46;"><?php echo htmlspecialchars($_SESSION['profile_success']); unset($_SESSION['profile_success']); ?></div>
     <?php endif; ?>
+    <?php if (isset($_SESSION['sla_settings_error'])): ?>
+      <div style="text-align:center;margin:0 auto 14px;font-size:13px;color:#991b1b;"><?php echo htmlspecialchars($_SESSION['sla_settings_error']); unset($_SESSION['sla_settings_error']); ?></div>
+    <?php endif; ?>
+    <?php if (isset($_SESSION['sla_settings_success'])): ?>
+      <div style="text-align:center;margin:0 auto 14px;font-size:13px;color:#065f46;"><?php echo htmlspecialchars($_SESSION['sla_settings_success']); unset($_SESSION['sla_settings_success']); ?></div>
+    <?php endif; ?>
 
     <div class="profile-settings-wrapper">
+      <form action="update-report-overdue-sla.php" method="POST">
+        <?php echo csrfField(); ?>
+        <div class="ps-card">
+          <div class="ps-card-header">
+            <h2>DCVS Overdue SLA</h2>
+          </div>
+          <p>Unscheduled active cases use the later of their DCVS escalation or assignment time. A scheduled case uses its scheduled date and time instead. Critical uses the High SLA. Medium and Low use calendar hours because the system has no working-hours calendar.</p>
+          <div class="ps-form-row">
+            <div class="ps-field">
+              <label for="highSlaHours">High / Critical priority (hours)</label>
+              <input id="highSlaHours" type="number" name="high_sla_hours" min="1" max="720" required value="<?php echo (int)$reportOverdueSlaSettings['high_sla_hours']; ?>">
+            </div>
+            <div class="ps-field">
+              <label for="mediumSlaHours">Medium priority (hours)</label>
+              <input id="mediumSlaHours" type="number" name="medium_sla_hours" min="1" max="720" required value="<?php echo (int)$reportOverdueSlaSettings['medium_sla_hours']; ?>">
+            </div>
+            <div class="ps-field">
+              <label for="lowSlaHours">Low priority (hours)</label>
+              <input id="lowSlaHours" type="number" name="low_sla_hours" min="1" max="720" required value="<?php echo (int)$reportOverdueSlaSettings['low_sla_hours']; ?>">
+            </div>
+          </div>
+          <div class="ps-footer-actions">
+            <button type="submit" class="ps-btn ps-btn-primary">Save SLA Settings</button>
+          </div>
+        </div>
+      </form>
 
       <!-- Profile summary -->
       <div class="ps-card ps-profile-card">

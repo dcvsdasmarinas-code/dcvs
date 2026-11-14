@@ -30,6 +30,7 @@ $query = $conn->query("SELECT r.coordinates_long, r.coordinates_lat,
     FROM reports r
     LEFT JOIN barangays b ON b.barangay_id = r.barangay_id
     WHERE r.archived_at IS NULL
+      AND r.duplicate_status NOT IN ('merged', 'suspected')
       AND r.coordinates_lat IS NOT NULL
       AND r.coordinates_long IS NOT NULL
     ORDER BY r.created_at DESC");

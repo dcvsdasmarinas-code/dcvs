@@ -121,14 +121,14 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
     .waitlist-kpi-value { margin:0 0 6px; color:#18181b; font-size:26px; font-weight:600; letter-spacing:-.02em; line-height:1; }
     .waitlist-kpi-sub { margin:0; color:#71717a; font-size:14px; font-weight:400; }
     .waitlist-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
-    .waitlist-toolbar input,.waitlist-toolbar select { height:36px; box-sizing:border-box; padding:0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    .waitlist-toolbar input[name=search],.waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter { height:36px; box-sizing:border-box; padding:0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px rgba(0,0,0,.05); }
     .waitlist-toolbar input[name=search] { flex:0 1 280px; width:280px; min-width:180px; }
-    .waitlist-toolbar select { min-width:150px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; appearance:none; -webkit-appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; }
-    .waitlist-toolbar select:focus,.waitlist-toolbar input:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    .waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter { min-width:150px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; appearance:none; -webkit-appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; }
+    .waitlist-toolbar .waitlist-service-filter:focus,.waitlist-toolbar .waitlist-status-filter:focus,.waitlist-toolbar input[name=search]:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .waitlist-date-filter { position:relative; display:inline-flex; }
     .waitlist-date-filter input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-    .waitlist-toolbar button,.waitlist-action { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-    .waitlist-toolbar button:hover,.waitlist-action:hover { background:#f4f4f5; }
+    .waitlist-toolbar .waitlist-date-button,.waitlist-toolbar .waitlist-date-clear,.waitlist-action { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    .waitlist-toolbar .waitlist-date-button:hover,.waitlist-toolbar .waitlist-date-clear:hover,.waitlist-action:hover { background:#f4f4f5; }
     .waitlist-toolbar .waitlist-date-button { width:36px; min-width:36px; padding:0; justify-content:center; }
     .waitlist-toolbar .waitlist-date-button.has-date { border-color:#18181b; }
     .waitlist-date-clear { width:30px; min-width:30px; padding:0 !important; margin-left:-7px; }
@@ -198,7 +198,7 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
       .waitlist-toolbar .waitlist-date-clear { grid-column:2; justify-self:start; }
       .waitlist-toolbar .waitlist-service-filter { grid-column:1; grid-row:3; }
       .waitlist-toolbar .waitlist-status-filter { grid-column:2; grid-row:3; }
-      .waitlist-toolbar select {
+      .waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter {
         width:100%;
         min-width:0;
       }
@@ -240,6 +240,12 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
   <div class="waitlist-page">
+    <header class="staff-page-heading">
+      <div>
+        <h1>Waitlist</h1>
+        <p>Monitor residents waiting for appointment openings and manage slot notifications.</p>
+      </div>
+    </header>
     <section class="waitlist-kpis" aria-label="Waitlist summary">
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Total Entries</p><p class="waitlist-kpi-value"><?php echo $totalWaitlistEntries; ?></p><p class="waitlist-kpi-sub">All waitlist requests</p></article>
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Pending</p><p class="waitlist-kpi-value"><?php echo $kpis['waiting']; ?></p><p class="waitlist-kpi-sub">Waiting for an open slot</p></article>

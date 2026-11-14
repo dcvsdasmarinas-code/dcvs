@@ -1,0 +1,1750 @@
+{
+    "type": "FeatureCollection",
+    "metadata": {
+        "source": "User-provided major landmarks coordinates CSV",
+        "source_file": "dasmarinas_major_landmarks_coordinates.csv",
+        "updated_at": "2026-11-14T11:32:46+00:00",
+        "feature_count": 69,
+        "unassigned_feature_count": 7,
+        "category_counts": {
+            "shopping": 9,
+            "education": 12,
+            "healthcare": 13,
+            "worship": 8,
+            "government": 8,
+            "recreation": 4,
+            "food": 15
+        }
+    },
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955438,
+                    14.301438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:2",
+                "csv_row": 2,
+                "name": "SM City Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Governor's Drive cor. Aguinaldo Hwy, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XW4+H5"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955688,
+                    14.302938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:3",
+                "csv_row": 3,
+                "name": "Robinsons Place Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Governor's Drive cor. Aguinaldo Hwy, Sitio Pala-Pala, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX4+57"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.945078,
+                    14.317563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:4",
+                "csv_row": 4,
+                "name": "Vista Mall Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Aguinaldo Hwy, San Agustin II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8W9W+22G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936938,
+                    14.365063
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:5",
+                "csv_row": 5,
+                "name": "The District Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Aguinaldo Hwy cor. Molino-Paliparan Rd, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W8P+2Q"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936813,
+                    14.360438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:6",
+                "csv_row": 6,
+                "name": "Central Mall Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+5P"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.965328,
+                    14.317163
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:7",
+                "csv_row": 7,
+                "name": "Ventura Mall",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Congressional Ave cor. Fatima Rd, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Luzviminda I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X88+V49"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.941063,
+                    14.325813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:8",
+                "csv_row": 8,
+                "name": "WalterMart Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Aguinaldo Hwy, Burol Main, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGR+8C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961188,
+                    14.320438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:9",
+                "csv_row": 9,
+                "name": "SM Hypermarket Kadiwa",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC6+5F"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935813,
+                    14.326688
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:10",
+                "csv_row": 10,
+                "name": "Unitop Mall Dasmariñas",
+                "category": "shopping",
+                "category_label": "Shopping & markets",
+                "type_label": "Mall or commercial center",
+                "address": "Don Placido Campos Ave, Poblacion (Dasma Bayan), Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+M8"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.959859,
+                    14.322488
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:11",
+                "csv_row": 11,
+                "name": "De La Salle University - Dasmariñas (DLSU-D)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "DBB-B, West Ave, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC5+XWF"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.949563,
+                    14.318188
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:12",
+                "csv_row": 12,
+                "name": "Emilio Aguinaldo College - Cavite (EAC)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Congressional East Ave, Burol Main, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8W9X+7R"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.957078,
+                    14.302163
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:13",
+                "csv_row": 13,
+                "name": "National University - Dasmariñas (NU)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "SM City Dasmariñas Complex, Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X24+VR9"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.985688,
+                    14.340313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:14",
+                "csv_row": 14,
+                "name": "Technological University of the Philippines - Cavite (TUP)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Carlos Q. Trinidad Ave, Salawag, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salawag",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XRP+47"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.956813,
+                    14.303438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:15",
+                "csv_row": 15,
+                "name": "Philippine Christian University - Dasmariñas (PCU)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Emilio Aguinaldo Hwy, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X34+9P"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9505396,
+                    14.3339785
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:16",
+                "csv_row": 16,
+                "name": "Kolehiyo ng Lungsod ng Dasmariñas (KLD)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Burol Main, Dasmariñas, Cavite",
+                "source": "OpenStreetMap",
+                "accuracy": "feature-center",
+                "barangay": "Burol",
+                "prominent": true,
+                "osm_url": "https://www.openstreetmap.org/relation/9467534"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.937063,
+                    14.358438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:17",
+                "csv_row": 17,
+                "name": "STI College Dasmariñas",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salitran I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "9W5P+9R"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.941438,
+                    14.320438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:18",
+                "csv_row": 18,
+                "name": "AMA Computer College Dasmariñas",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Aguinaldo Hwy, San Agustin I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WCR+5H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.938813,
+                    14.350688
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:19",
+                "csv_row": 19,
+                "name": "PHINMA St. Jude College Dasmariñas",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "URV Ave, Salitran IV, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salitran I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "9W2Q+7G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.959063,
+                    14.317938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:20",
+                "csv_row": 20,
+                "name": "Dasmariñas Integrated High School (DIHS)",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Congressional South Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Emmanuel Bergado I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X95+5J"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935563,
+                    14.326563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:21",
+                "csv_row": 21,
+                "name": "Dasmariñas Elementary School",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Don Placido Campos Ave, Zone I (Poblacion), Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+J6"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.991688,
+                    14.308313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:22",
+                "csv_row": 22,
+                "name": "Paliparan National High School",
+                "category": "education",
+                "category_label": "Schools & universities",
+                "type_label": "School or university",
+                "address": "Paliparan III, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Paliparan III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X5R+8M"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.957313,
+                    14.320438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:23",
+                "csv_row": 23,
+                "name": "De La Salle University Medical Center (DLSUMC)",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Antonio De Padua I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC4+5W"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9615863,
+                    14.3230212
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:24",
+                "csv_row": 24,
+                "name": "Pagamutan ng Dasmariñas",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Aklatan Drive, Burol 2, DBB-B, Dasmariñas, Cavite",
+                "source": "OpenStreetMap",
+                "accuracy": "feature-center",
+                "barangay": "Burol II",
+                "prominent": true,
+                "osm_url": "https://www.openstreetmap.org/relation/8541125"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.986563,
+                    14.335688
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:25",
+                "csv_row": 25,
+                "name": "Dasmariñas City Medical Center",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Salawag, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salawag",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XPP+7J"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.956688,
+                    14.315938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:26",
+                "csv_row": 26,
+                "name": "St. Paul Hospital Cavite",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Burol II, Congressional Ave, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Santa Cruz II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X84+9M"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.956813,
+                    14.302563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:27",
+                "csv_row": 27,
+                "name": "Asia Medic Family Hospital & Medical Center",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Old Pala-Pala Rd, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX4+2P"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936938,
+                    14.358063
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:28",
+                "csv_row": 28,
+                "name": "Emilio Aguinaldo College Medical Center - Cavite",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Hospital or medical center",
+                "address": "Salitran II, Aguinaldo Hwy, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salitran I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "9W5P+6Q"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.931578,
+                    14.329363
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:29",
+                "csv_row": 29,
+                "name": "City Health Office 1 - Dasmariñas",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "City health office",
+                "address": "Zone IV, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WHJ+PJW"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.959953,
+                    14.312488
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:30",
+                "csv_row": 30,
+                "name": "Dasmariñas City Health Office 2",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "City health office",
+                "address": "DBB-C / San Simon, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Santa Cruz I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X65+XXJ"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935688,
+                    14.326438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:31",
+                "csv_row": 31,
+                "name": "Immaculate Conception Parish Church (Dasma Bayan Church)",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Don Placido Campos Ave, Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+H7"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.957953,
+                    14.304313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:32",
+                "csv_row": 32,
+                "name": "Parish of the Good Shepherd",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Governor's Drive (Juanito R. Remulla Sr. Rd), Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX5+P5G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961063,
+                    14.312813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:33",
+                "csv_row": 33,
+                "name": "Sacred Heart of Jesus Parish Church",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "San Simon (Barangay 7), DBB-C, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Santa Cruz I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X76+4C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.938938,
+                    14.360313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:34",
+                "csv_row": 34,
+                "name": "Our Lady of Fatima Parish Church",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salitran I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "9W6Q+4H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.986688,
+                    14.340938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:35",
+                "csv_row": 35,
+                "name": "Mary Immaculate Parish Church",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Salawag, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salawag",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XRP+9M"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.967813,
+                    14.322063
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:36",
+                "csv_row": 36,
+                "name": "Our Mother of Perpetual Help Parish",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "DBB-E / San Andres, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Andres II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC9+R4"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.991188,
+                    14.307563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:37",
+                "csv_row": 37,
+                "name": "Christ the King Parish Church",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Paliparan III, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Paliparan II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X5R+2F"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.941313,
+                    14.320813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:38",
+                "csv_row": 38,
+                "name": "Iglesia Ni Cristo - Lokal ng Dasmariñas",
+                "category": "worship",
+                "category_label": "Churches & worship",
+                "type_label": "Church or religious place",
+                "address": "Aguinaldo Hwy, San Agustin I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WCR+8G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935813,
+                    14.326188
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:39",
+                "csv_row": 39,
+                "name": "Dasmariñas City Hall",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "City hall",
+                "address": "Don Placido Campos Ave, Zone I (Poblacion), Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+F8"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9538141,
+                    14.3321345
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:40",
+                "csv_row": 40,
+                "name": "Dasmariñas Arena",
+                "category": "recreation",
+                "category_label": "Parks & recreation",
+                "type_label": "Civic or recreation place",
+                "address": "Arena Way, Burol, Dasmariñas, Cavite",
+                "source": "OpenStreetMap",
+                "accuracy": "feature-center",
+                "barangay": "Burol",
+                "prominent": true,
+                "osm_url": "https://www.openstreetmap.org/way/832189771"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.949563,
+                    14.317938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:41",
+                "csv_row": 41,
+                "name": "Dasmariñas City Track and Field Oval / Grandstand",
+                "category": "recreation",
+                "category_label": "Parks & recreation",
+                "type_label": "Civic or recreation place",
+                "address": "Burol Main, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "San Agustin II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8W9X+5R"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961438,
+                    14.317813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:42",
+                "csv_row": 42,
+                "name": "Dasmariñas Promenade / Butterfly Garden",
+                "category": "recreation",
+                "category_label": "Parks & recreation",
+                "type_label": "Civic or recreation place",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Fatima I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X96+4H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961438,
+                    14.320813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:43",
+                "csv_row": 43,
+                "name": "Kadiwa Park",
+                "category": "recreation",
+                "category_label": "Parks & recreation",
+                "type_label": "Civic or recreation place",
+                "address": "Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC6+8H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935938,
+                    14.325938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:44",
+                "csv_row": 44,
+                "name": "Dasmariñas City Police Station (PNP)",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Police station",
+                "address": "Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+D9"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935813,
+                    14.325813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:45",
+                "csv_row": 45,
+                "name": "Bureau of Fire Protection (BFP) Dasmariñas Central Fire Station",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Fire station",
+                "address": "Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+C8"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.938938,
+                    14.363063
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:46",
+                "csv_row": 46,
+                "name": "LTO Dasmariñas District Office",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Government or civic office",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W7P+6H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936813,
+                    14.360438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:47",
+                "csv_row": 47,
+                "name": "SSS Dasmariñas Branch",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Government or civic office",
+                "address": "2F Central Mall, Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+5P"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955688,
+                    14.302938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:48",
+                "csv_row": 48,
+                "name": "Pag-IBIG Fund Dasmariñas Branch",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Government or civic office",
+                "address": "Robinsons Place Dasmariñas, Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX4+57"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955438,
+                    14.301438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:49",
+                "csv_row": 49,
+                "name": "PhilHealth Local Health Insurance Office Dasmariñas",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Government or civic office",
+                "address": "SM City Dasmariñas, Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XW4+H5"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.962578,
+                    14.323663
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:50",
+                "csv_row": 50,
+                "name": "City Social Welfare and Development Office (CSWDO)",
+                "category": "government",
+                "category_label": "Government & barangay halls",
+                "type_label": "Government or civic office",
+                "address": "Burol III / DBB, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XF7+F2G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936328,
+                    14.326313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:51",
+                "csv_row": 51,
+                "name": "Jollibee Dasma Bayan",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Lot 75 Don Placido Campos Ave, Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+GG9"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.937063,
+                    14.287813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:52",
+                "csv_row": 52,
+                "name": "Jollibee Governor's Drive Dasmariñas",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "60 Juanito R. Remulla Sr. Rd, Langkaan I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Langkaan I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7WQP+4R"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.989688,
+                    14.308438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:53",
+                "csv_row": 53,
+                "name": "Jollibee Paliparan Dasma",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Pintong Gubat, Molino - Paliparan Rd, Paliparan III, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Paliparan III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X5Q+9V"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936938,
+                    14.360688
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:54",
+                "csv_row": 54,
+                "name": "Jollibee Salitran",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+7Q"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.941063,
+                    14.325813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:55",
+                "csv_row": 55,
+                "name": "Jollibee WalterMart Dasmariñas",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Aguinaldo Hwy, Burol Main, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGR+8C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955438,
+                    14.301438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:56",
+                "csv_row": 56,
+                "name": "Jollibee SM City Dasmariñas",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "GF SM City Dasmariñas, Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XW4+H5"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.986563,
+                    14.338313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:57",
+                "csv_row": 57,
+                "name": "Jollibee Salawag",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Molino - Paliparan Rd, Salawag, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salawag",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XQP+8J"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961188,
+                    14.320438
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:58",
+                "csv_row": 58,
+                "name": "Jollibee Kadiwa (SM Hypermarket)",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC6+5F"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936438,
+                    14.326563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:59",
+                "csv_row": 59,
+                "name": "McDonald's Dasmariñas Bayan",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "75 Bautista St, Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+JH"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.965328,
+                    14.317163
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:60",
+                "csv_row": 60,
+                "name": "McDonald's Congressional Ave (Ventura Mall)",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Luzviminda I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X88+V49"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.956063,
+                    14.302688
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:61",
+                "csv_row": 61,
+                "name": "McDonald's Pala-Pala",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Aguinaldo Hwy cor. Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX4+3C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.941063,
+                    14.325563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:62",
+                "csv_row": 62,
+                "name": "McDonald's WalterMart / Burol",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Aguinaldo Hwy, Burol Main, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone IV",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGR+6C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936938,
+                    14.360938
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:63",
+                "csv_row": 63,
+                "name": "McDonald's Salitran",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+9Q"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.989813,
+                    14.308313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:64",
+                "csv_row": 64,
+                "name": "McDonald's Paliparan",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Molino - Paliparan Rd, Paliparan III, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Paliparan III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X5Q+8W"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.986438,
+                    14.338063
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:65",
+                "csv_row": 65,
+                "name": "McDonald's Salawag",
+                "category": "food",
+                "category_label": "Food & dining",
+                "type_label": "Fast food",
+                "address": "Molino - Paliparan Rd, Salawag, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Salawag",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XQP+6H"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.935813,
+                    14.326313
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:66",
+                "csv_row": 66,
+                "name": "Mercury Drug Dasma Bayan",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Pharmacy",
+                "address": "Don Placido Campos Ave, Zone I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Zone III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8WGP+G8"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.955938,
+                    14.302813
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:67",
+                "csv_row": 67,
+                "name": "Mercury Drug Pala-Pala",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Pharmacy",
+                "address": "Governor's Drive, Sampaloc I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Sampaloc I",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "7XX4+49"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.936813,
+                    14.360563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:68",
+                "csv_row": 68,
+                "name": "Mercury Drug Salitran",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Pharmacy",
+                "address": "Aguinaldo Hwy, Salitran II, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+6P"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.961313,
+                    14.320563
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:69",
+                "csv_row": 69,
+                "name": "Mercury Drug Kadiwa",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Pharmacy",
+                "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Burol II",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8XC6+6G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.989688,
+                    14.308188
+                ]
+            },
+            "properties": {
+                "id": "user:major-landmark:70",
+                "csv_row": 70,
+                "name": "Mercury Drug Paliparan",
+                "category": "healthcare",
+                "category_label": "Healthcare & pharmacies",
+                "type_label": "Pharmacy",
+                "address": "Molino - Paliparan Rd, Paliparan III, Dasmariñas, Cavite",
+                "source": "User-provided major landmarks coordinates CSV",
+                "accuracy": "user-provided",
+                "barangay": "Paliparan III",
+                "prominent": true,
+                "coordinate_source": "Coordinates supplied in major landmarks CSV",
+                "plus_code": "8X5Q+7V"
+            }
+        }
+    ]
+}

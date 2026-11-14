@@ -298,6 +298,7 @@ if ($action === 'mark_secured') {
     $storedPhoto = ['path' => $relativePath, 'mime' => $mimeType, 'location' => $location, 'condition' => $condition];
 }
 
+$stageChangedAt = (new DateTimeImmutable('now', $workflowTimezone))->format('Y-m-d H:i:s');
 if (!$conn->begin_transaction()) {
     if ($storedPhoto && is_file(__DIR__ . '/' . $storedPhoto['path']) && !unlink(__DIR__ . '/' . $storedPhoto['path'])) {
         error_log('Could not remove secured-animal photo after transaction start failed.');
@@ -374,12 +375,13 @@ try {
         $reportUpdate->close();
         $newState = 'dcvs_dispatch';
         $workflow = $conn->prepare("UPDATE report_response_workflow
-            SET response_mode = ?, state = ?, approved_by = NULL, approved_at = NULL, response_deadline = NULL,
+            SET response_mode = ?, state = ?, escalated_at = ?, assigned_at = ?,
+                approved_by = NULL, approved_at = NULL, response_deadline = NULL,
                 turnover_deadline = NULL, dispatch_officer_id = ?,
                 high_risk_override_by = NULL, high_risk_override_at = NULL, high_risk_override_reason = NULL
             WHERE report_id = ? AND state = 'awaiting_dcvs_decision'");
         if (!$workflow) throw new RuntimeException('Could not prepare the DCVS assignment.');
-        $workflow->bind_param('ssii', $mode, $newState, $dispatchOfficerId, $reportId);
+        $workflow->bind_param('ssssii', $mode, $newState, $stageChangedAt, $stageChangedAt, $dispatchOfficerId, $reportId);
         if (!$workflow->execute() || $workflow->affected_rows !== 1) throw new RuntimeException('Response workflow was already processed.');
         $workflow->close();
         $target = $newState;
@@ -580,10 +582,18 @@ try {
         } elseif ($action === 'revoke_approval' || $action === 'reopen_unable_to_locate' || $action === 'dispatch_escalation') {
             $update = $conn->prepare("UPDATE report_response_workflow
                 SET state = ?, response_mode = 'dcvs_dispatch',
+                    escalated_at = ?, assigned_at = NULL, dispatch_officer_id = NULL,
                     response_deadline = NULL, progress_deadline = NULL
                 WHERE report_id = ? AND state = ?");
-            $update->bind_param('sis', $target, $reportId, $state);
-        } elseif (in_array($action, ['unable_to_secure', 'unable_to_locate'], true)) {
+            $update->bind_param('ssis', $target, $stageChangedAt, $reportId, $state);
+        } elseif ($action === 'unable_to_secure') {
+            $update = $conn->prepare("UPDATE report_response_workflow
+                SET state = ?, response_mode = 'dcvs_dispatch',
+                    escalated_at = ?, assigned_at = NULL, dispatch_officer_id = NULL,
+                    response_deadline = NULL, progress_deadline = NULL
+                WHERE report_id = ? AND state = ?");
+            $update->bind_param('ssis', $target, $stageChangedAt, $reportId, $state);
+        } elseif ($action === 'unable_to_locate') {
             $update = $conn->prepare("UPDATE report_response_workflow
                 SET state = ?, response_deadline = NULL, progress_deadline = NULL
                 WHERE report_id = ? AND state = ?");

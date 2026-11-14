@@ -16,6 +16,8 @@ require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
 require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
 require_once __DIR__ . '/../../includes/appointment-workflow.php';
+require_once __DIR__ . '/../../includes/reports/deadlines.php';
+require_once __DIR__ . '/../../includes/reports/resident-presentation.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -29,6 +31,7 @@ if ($_SESSION['role'] !== 'resident') {
     exit;
 }
 
+$reportOverdueSlaSettings = dcvsLoadReportOverdueSlaSettings($conn);
 expireAdoptionReservations($conn);
 dcvsExpireAppointmentRescheduleOffers($conn);
 dcvsMarkOverdueAppointmentsNoShow($conn);
@@ -96,11 +99,55 @@ $stmt->close();
 
 // Fetch user's reports from database (excluding archived)
 $reports = [];
-$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address, r.status, r.created_at, r.updated_at, r.photo_url, r.video_url, r.urgency_level, rw.response_mode, rw.state AS response_state, rw.response_deadline, rw.progress_deadline, rw.turnover_deadline, rw.holding_location, rr.resolution_details, rr.animal_disposition, rr.turnover_required, rr.resolved_at AS response_resolved_at, tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at FROM reports r LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
+$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.status ELSE r.status END AS status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.duplicate_status ELSE r.duplicate_status END AS duplicate_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.scheduled_at ELSE r.scheduled_at END AS scheduled_at,
+    r.created_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN GREATEST(r.updated_at, primary_report.updated_at) ELSE r.updated_at END AS updated_at,
+    r.photo_url, r.video_url, r.urgency_level, r.parent_report_id,
+    primary_report.reference_id AS primary_reference_id,
+    (primary_report.report_id IS NOT NULL) AS is_supporting_report,
+    COALESCE(primary_barangay.barangay_name, report_barangay.barangay_name) AS barangay_name,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_case.status ELSE cc.status END AS case_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.response_mode ELSE rw.response_mode END AS response_mode,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.state ELSE rw.state END AS response_state,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.response_deadline ELSE rw.response_deadline END AS response_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.progress_deadline ELSE rw.progress_deadline END AS progress_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.turnover_deadline ELSE rw.turnover_deadline END AS turnover_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.escalated_at ELSE rw.escalated_at END AS escalated_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.assigned_at ELSE rw.assigned_at END AS assigned_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.holding_location ELSE rw.holding_location END AS holding_location,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.resolution_details ELSE rr.resolution_details END AS resolution_details,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.animal_disposition ELSE rr.animal_disposition END AS animal_disposition,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.turnover_required ELSE rr.turnover_required END AS turnover_required,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.resolved_at ELSE rr.resolved_at END AS response_resolved_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.status ELSE tt.status END AS turnover_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.due_at ELSE tt.due_at END AS turnover_due_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.received_at ELSE tt.received_at END AS turnover_received_at
+    FROM reports r
+    LEFT JOIN reports primary_report ON r.duplicate_status = 'merged' AND primary_report.report_id = r.parent_report_id
+    LEFT JOIN barangays report_barangay ON report_barangay.barangay_id = r.barangay_id
+    LEFT JOIN barangays primary_barangay ON primary_barangay.barangay_id = primary_report.barangay_id
+    LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id
+    LEFT JOIN confirmed_cases primary_case ON primary_case.report_id = primary_report.report_id
+    LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
+    LEFT JOIN report_response_workflow primary_workflow ON primary_workflow.report_id = primary_report.report_id
+    LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
+    LEFT JOIN report_response_resolutions primary_resolution ON primary_resolution.report_id = primary_report.report_id
+    LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
+    LEFT JOIN report_turnover_tasks primary_turnover ON primary_turnover.report_id = primary_report.report_id
+    WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
 while ($row = $result->fetch_assoc()) {
+    $isSimilarReportReview = strtolower((string)($row['duplicate_status'] ?? '')) === 'suspected';
+    $overdueInfo = $isSimilarReportReview
+        ? null
+        : dcvsReportOverdueInfo($row, null, $reportOverdueSlaSettings);
+    $row['overdue_info'] = $overdueInfo;
+    $row['resident_presentation'] = dcvsResidentReportPresentation($row, $overdueInfo);
     $reports[] = $row;
 }
 $stmt->close();
@@ -160,14 +207,17 @@ if (!$mediaStmt) {
 }
 
 $reportUpdatesById = [];
-$historyStmt = $conn->prepare("SELECT h.report_id, h.history_id, h.actor_role, h.action, h.to_state,
+$historyStmt = $conn->prepare("SELECT resident_report.report_id AS display_report_id, h.history_id, h.actor_role, h.action, h.to_state,
         h.created_at, u.full_name AS actor_name, b.barangay_name
     FROM report_response_history h
-    JOIN reports r ON r.report_id = h.report_id
+    JOIN reports resident_report ON h.report_id = CASE
+        WHEN resident_report.duplicate_status = 'merged' THEN resident_report.parent_report_id
+        ELSE resident_report.report_id
+    END
     LEFT JOIN users u ON u.user_id = h.actor_id
     LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
-    WHERE r.reporter_id = ? AND r.archived_at IS NULL
-    ORDER BY h.report_id, h.created_at, h.history_id");
+    WHERE resident_report.reporter_id = ? AND resident_report.archived_at IS NULL
+    ORDER BY resident_report.report_id, h.created_at, h.history_id");
 if (!$historyStmt) {
     error_log('Could not prepare resident report updates query: ' . $conn->error);
 } else {
@@ -181,7 +231,7 @@ if (!$historyStmt) {
             $agency = $actor === 'barangay' && !empty($entry['barangay_name'])
                 ? 'Brgy. ' . $entry['barangay_name']
                 : ($actor === 'staff' ? 'DCVS' : ($actor === 'resident' ? 'You' : ($actor === 'system' ? 'System' : 'DCVS')));
-            $reportUpdatesById[(int)$entry['report_id']][] = [
+            $reportUpdatesById[(int)$entry['display_report_id']][] = [
                 'id' => (int)$entry['history_id'],
                 'action' => (string)$entry['action'],
                 'state' => (string)$entry['to_state'],
@@ -431,6 +481,7 @@ $alq->close();
 $residentAdoptionApplications = [];
 $applicationStmt = $conn->prepare("
     SELECT aa.application_id, aa.application_date, aa.status, aa.pet_listing_id, aa.resulting_pet_id,
+           aa.requested_info, aa.resident_response, aa.residency_proof_file,
            pl.name AS pet_name, pl.species, pl.breed, pl.age, pl.gender, pl.photo_url,
            aa.approved_pickup_at, aa.reserved_at, aa.response_deadline, aa.confirmed_at,
            aa.pickup_deadline, aa.decline_reason, aa.rejection_reason, aa.finalized_at, aa.reviewed_at,
@@ -449,6 +500,7 @@ $applicationStmt->bind_param('i', $userId);
 $applicationStmt->execute();
 $applicationResult = $applicationStmt->get_result();
 while ($row = $applicationResult->fetch_assoc()) {
+    $row['residency_proof_available'] = adoptionPrivateDocumentExists($row['residency_proof_file'] ?? '');
     $residentAdoptionApplications[] = $row;
 }
 $applicationStmt->close();
@@ -589,9 +641,12 @@ $annResult = $annStmt->get_result();
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
-    .page-title { font-size:1.5rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.025em; }
-    .page-subtitle { font-size:0.9rem; color:#71717a; margin:4px 0 0; font-family:'Inter',sans-serif; }
+    .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
+    .page-title { font-size:20px; font-weight:600; color:#14201A; line-height:1.3; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.025em; }
+    .page-subtitle { font-size:14px; color:#5B675F; line-height:1.45; margin:4px 0 0; font-family:'Inter',sans-serif; }
+    .resident-section-heading { margin:0 0 1.5rem; font-family:'Inter','Segoe UI',sans-serif; }
+    .resident-section-heading h1 { margin:0; color:#14201A; font-size:20px; font-weight:600; letter-spacing:-0.025em; line-height:1.3; }
+    .resident-section-heading p { margin:4px 0 0; color:#5B675F; font-size:14px; line-height:1.45; }
     .header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .dashboard-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .card-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
@@ -874,8 +929,8 @@ $annResult = $annStmt->get_result();
 @media (max-width:640px){ .bk-page{padding:16px 20px;} .bk-card2{padding:20px 18px;} }
 /* Two-column body: LEFT = calendar, RIGHT = pet/service/time */
 .bk-heading{font-family:'Inter',sans-serif;}
-.bk-heading-title{font-family:'Inter',sans-serif;font-size:27px;font-weight:700;color:#18181b;letter-spacing:-0.025em;line-height:1.15;margin:0;}
-.bk-heading-sub{font-family:'Inter',sans-serif;font-size:16px;color:#71717a;line-height:1.5;margin:8px 0 0;}
+.bk-heading-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:600;color:#14201A;letter-spacing:-0.025em;line-height:1.3;margin:0;}
+.bk-heading-sub{font-family:'Inter',sans-serif;font-size:14px;color:#5B675F;line-height:1.45;margin:4px 0 0;}
 /* Two-column body: LEFT ~45% (calendar), RIGHT ~55% (fields) */
 .bk-body{display:grid;grid-template-columns:minmax(320px,390px) minmax(0,1fr);gap:36px;align-items:start;margin-top:28px;}
 .bk-col{min-width:0;}
@@ -977,7 +1032,7 @@ $annResult = $annStmt->get_result();
 .bk-slot-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8;color:#18181b;}
 .bk-slot-btn.bk-slot-selected{background:#18181b;color:#fff;border-color:#18181b;font-weight:700;}
 .bk-slot-btn.bk-slot-unavailable,.bk-slot-btn:disabled{color:#a1a1aa;cursor:not-allowed;background:#f8f8f8;border-color:#ececec;font-weight:500;}
-@media (max-width:480px){ .bk-heading-title{font-size:23px;} .bk-slots-heading{flex-wrap:wrap;gap:4px 12px;} .bk-slots-title{font-size:19px;} .bk-cal-legend{gap:7px;} }
+@media (max-width:480px){ .bk-slots-heading{flex-wrap:wrap;gap:4px 12px;} .bk-slots-title{font-size:19px;} .bk-cal-legend{gap:7px;} }
 /* Bottom actions */
 .bk-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:28px;padding-top:20px;border-top:1px solid #eef2f6;}
 .bk-btn-ghost{height:42px;padding:0 20px;border-radius:10px;border:1px solid #e4e4e7;background:#fff;color:#525252;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background 0.15s,border-color 0.15s;}
@@ -1204,11 +1259,11 @@ $annResult = $annStmt->get_result();
   /* ========== RESIDENT DASHBOARD REWORK - SCOPED STYLES ========== */
   .resident-rework{--primary-green:#0B4D26;--primary-green-hover:#07381B;--primary-green-light:#EBF7EE;--primary-green-soft:#D1F0DA;--accent-green:#107C41;--bg-body:#FFFFFF;--bg-card:#FFFFFF;--bg-subtle:#F9FBF9;--bg-hover:#F1F5F1;--border-color:#E6ECE6;--border-light:#F0F4F0;--border-dark:#D4DDD4;--text-main:#111827;--text-secondary:#4B5563;--text-muted:#6B7280;--text-faint:#9CA3AF;--badge-green-bg:#ECFDF3;--badge-green-text:#027A48;--badge-green-border:#D1FADF;--badge-amber-bg:#FEF0C7;--badge-amber-text:#B54708;--badge-amber-border:#FEDF89;--badge-blue-bg:#E0F2FE;--badge-blue-text:#0284C7;--badge-blue-border:#BAE6FD;--badge-purple-bg:#F4EBFF;--badge-purple-text:#6941C6;--badge-purple-border:#E9D7FE;--radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-full:9999px;--shadow-sm:0 1px 2px 0 rgba(16,24,40,0.04);--shadow-card:0 1px 3px 0 rgba(16,24,40,0.05),0 1px 2px -1px rgba(16,24,40,0.04);--shadow-popover:0 12px 28px -4px rgba(15,23,42,0.12),0 4px 10px -2px rgba(15,23,42,0.05);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-main);line-height:1.5;-webkit-font-smoothing:antialiased}
   .resident-rework *,.resident-rework *::before,.resident-rework *::after{box-sizing:border-box;margin:0;padding:0}
-  .resident-rework .dashboard-content{padding:24px 28px 60px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1440px;margin:0 auto}
+  .resident-rework .dashboard-content{padding:16px 20px 48px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1440px;margin:0 auto}
   .resident-rework .greeting-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
   .resident-rework .greeting-date{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;margin-bottom:4px}
-  .resident-rework .greeting-headline{font-family:'Inter',sans-serif;font-size:28px;font-weight:700;color:#18181b;letter-spacing:-0.025em;line-height:1.2}
-  .resident-rework .greeting-subtext{font-family:'Inter',sans-serif;font-size:15px;color:#71717a;margin-top:4px}
+  .resident-rework .greeting-headline{font-family:'Inter',sans-serif;font-size:20px;font-weight:600;color:#14201A;letter-spacing:-0.025em;line-height:1.3}
+  .resident-rework .greeting-subtext{font-family:'Inter',sans-serif;font-size:14px;color:#5B675F;line-height:1.45;margin-top:4px}
   .resident-rework .greeting-actions{display:flex;align-items:center;gap:10px}
   .resident-rework .btn-secondary-white{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid #e4e4e7;background:#ffffff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background 0.15s ease,border-color 0.15s ease}
   .resident-rework .btn-secondary-white:hover{background:#f4f4f5;border-color:#d4d4d8}
@@ -1262,6 +1317,7 @@ $annResult = $annStmt->get_result();
   .resident-rework .badge-reviewing{background-color:#dbeafe;color:#1d4ed8;border-color:#bfdbfe}
   .resident-rework .badge-confirmed{background-color:#dcebe0;color:#045e1f;border-color:#bbf7d0}
   .resident-rework .badge-scheduled{background-color:#0E8131;color:#ffffff;border-color:#0E8131}
+  .resident-rework .badge-closed{background-color:#fee2e2;color:#991b1b;border-color:#fecaca}
   .resident-rework .badge-completed{background-color:#dbeafe;color:#1e40af;border-color:#bfdbfe}
   .resident-rework .appointment-chevron{color:var(--text-faint);margin-left:8px;flex-shrink:0}
   .resident-rework .card-bottom-link-center{text-align:center;padding-top:4px;margin-top:auto}
@@ -1445,6 +1501,797 @@ $annResult = $annStmt->get_result();
       grid-template-columns: minmax(0, 1fr);
     }
   }
+
+  .resident-portal .resident-rework .attention-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) repeat(2, minmax(0, 1.1fr));
+    align-items: stretch;
+    background: #fffaf0;
+    border: 1px solid #f1dfb8;
+    border-left: 3px solid #d99014;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .resident-rework .attention-summary-main,
+  .resident-rework .attention-summary-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    padding: 13px 15px;
+  }
+  .resident-rework .attention-summary-main { flex-direction: column; justify-content: center; gap: 3px; }
+  .resident-rework .attention-summary-kicker {
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .resident-rework .attention-summary-main strong,
+  .resident-rework .attention-summary-item strong {
+    color: #292524;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .resident-rework .attention-summary-note { color: #78716c; font-size: 11px; line-height: 1.35; }
+  .resident-rework .attention-summary-item { border-left: 1px solid #efdfc0; align-items: center; }
+  .resident-rework .attention-summary-item > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .resident-rework .attention-summary-item a {
+    color: #166534;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .resident-rework .attention-summary-item a:hover { text-decoration: underline; }
+  .resident-rework .attention-summary-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border-radius: 50%;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .resident-rework .attention-summary-icon-report { background: #e0f2fe; color: #075985; }
+
+  .resident-portal .resident-rework .dashboard-workflow-layout {
+    grid-template-columns: minmax(0, 1.75fr) minmax(0, .95fr) !important;
+    grid-template-areas: "next pets" "schedule pets" "reports help";
+    gap: 16px;
+    align-items: start;
+  }
+  .resident-rework .primary-vertical-column,
+  .resident-rework .secondary-vertical-column { display: contents; }
+  .resident-rework .dashboard-workflow-layout .card-box {
+    min-height: 0 !important;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+  .resident-rework .dashboard-next-card { grid-area: next; }
+  .resident-rework .dashboard-schedule-card { grid-area: schedule; }
+  .resident-rework .dashboard-reports-card { grid-area: reports; }
+  .resident-rework .dashboard-pet-health-card { grid-area: pets; }
+  .resident-rework .dashboard-help-card { grid-area: help; }
+  .resident-rework .card-header-bar { margin-bottom: 12px; }
+  .resident-rework .card-meta-tag { font-size: 10px; letter-spacing: .07em; }
+  .resident-rework .card-title-text { font-size: 16px; }
+
+  .resident-rework .next-visit-hero-card { gap: 10px; padding: 12px; margin-bottom: 12px; }
+  .resident-rework .next-visit-pet-avatar { display: none; }
+  .resident-rework .date-big-badge { min-width: 50px; padding: 8px; border-radius: 8px; }
+  .resident-rework .date-big-num { font-size: 22px; }
+  .resident-rework .next-visit-title { font-size: 14px; }
+  .resident-rework .visit-details-row { gap: 8px; margin-bottom: 12px; }
+  .resident-rework .visit-detail-item { gap: 5px; }
+  .resident-rework .visit-detail-item svg { width: 14px; height: 14px; }
+  .resident-rework .detail-item-label { font-size: 10px; }
+  .resident-rework .detail-item-value { font-size: 11px; }
+  .resident-rework .next-step-callout { display: none; }
+  .resident-rework .visit-action-buttons { gap: 8px; }
+  .resident-rework .visit-action-buttons .btn-primary-green,
+  .resident-rework .visit-action-buttons .btn-secondary-white { height: 34px; padding: 0 10px; font-size: 12px; }
+
+  .resident-rework .appointment-table-header,
+  .resident-rework .appointment-item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  .resident-rework .appointment-table-header {
+    padding: 0 10px 8px;
+    color: #71717a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .resident-rework .appointment-items-list { gap: 0; margin: 0; }
+  .resident-rework .appointment-item-row {
+    min-width: 0;
+    padding: 9px 10px;
+    border: 0;
+    border-top: 1px solid #f0f0f1;
+    border-radius: 0;
+    background: #fff;
+    cursor: pointer;
+  }
+  .resident-rework .appointment-item-row:hover,
+  .resident-rework .appointment-item-row.active-visit { background: #f8faf8; }
+  .resident-rework .appointment-item-row.active-visit { border-left: 2px solid var(--primary-green); }
+  .resident-rework .appointment-time-col { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  .resident-rework .appointment-schedule-date { color: #27272a; font-size: 11px; font-weight: 600; }
+  .resident-rework .appointment-schedule-time { color: #71717a; font-size: 10px; }
+  .resident-rework .appointment-details-col { display: block; min-width: 0; padding: 0; }
+  .resident-rework .appointment-pet-name { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .appointment-service-col { overflow: hidden; color: #52525b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .appointment-status-col { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .resident-rework .appointment-status-col .status-pill-badge { padding: 2px 6px; font-size: 9px; }
+  .resident-rework .appointment-row-view { color: #166534; font-size: 10px; font-weight: 600; }
+  .resident-rework .dashboard-schedule-card .rework-empty,
+  .resident-rework .dashboard-reports-card .rework-empty { padding: 18px 0; }
+
+  .resident-rework .report-table-header,
+  .resident-rework .report-table-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(65px, .7fr) minmax(76px, .85fr) 30px;
+    align-items: center;
+    gap: 8px;
+  }
+  .resident-rework .report-table-header {
+    padding: 0 8px 8px;
+    color: #71717a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .resident-rework .report-table-row { padding: 9px 8px; border-top: 1px solid #f0f0f1; }
+  .resident-rework .report-table-description { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .resident-rework .report-table-description strong { overflow: hidden; color: #27272a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-description span { overflow: hidden; color: #71717a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-description small { overflow: hidden; color: #a1a1aa; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-date { color: #52525b; font-size: 10px; white-space: nowrap; }
+  .resident-rework .report-table-row .status-pill-badge { padding: 2px 6px; font-size: 9px; }
+  .resident-rework .report-table-action { color: #166534; font-size: 10px; font-weight: 600; text-decoration: none; }
+  .resident-rework .report-table-action:hover { text-decoration: underline; }
+
+  .resident-rework .pet-health-summary { margin: 0 0 8px; }
+  .resident-rework .pet-health-summary-text { display: flex; flex-direction: column; gap: 3px; }
+  .resident-rework .pet-health-summary-text strong { color: #27272a; font-size: 12px; }
+  .resident-rework .pet-health-summary-text span { color: #71717a; font-size: 10px; }
+  .resident-rework .pet-health-progress { height: 6px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: #f1f5f9; }
+  .resident-rework .pet-health-progress span { display: block; height: 100%; border-radius: inherit; background: #16803c; }
+  .resident-rework .pets-list-rework { margin-top: 8px; }
+  .resident-rework .pet-row-rework {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-areas: "avatar info" "avatar vaccine";
+    gap: 3px 8px;
+    padding: 8px 0;
+  }
+  .resident-rework .pet-avatar-rework { grid-area: avatar; width: 32px; height: 32px; font-size: 13px; }
+  .resident-rework .pet-info-rework { grid-area: info; gap: 2px; }
+  .resident-rework .pet-name-rework { font-size: 11px; }
+  .resident-rework .pet-meta-rework { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .pet-vax-pill-rework { grid-area: vaccine; justify-self: start; max-width: 100%; padding: 1px 5px; font-size: 9px; white-space: nowrap; }
+  .resident-rework .pet-row-rework > svg { display: none; }
+
+  .resident-rework .dashboard-help-card { align-self: start; }
+  .resident-rework .dashboard-help-card .card-title-text { margin-top: 4px; }
+  .resident-rework .dashboard-help-copy { margin: 6px 0 12px; color: #71717a; font-size: 11px; line-height: 1.45; }
+  .resident-rework .dashboard-help-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .resident-rework .dashboard-help-actions .btn-primary-green,
+  .resident-rework .dashboard-help-actions .btn-secondary-white {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    text-align: center;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .resident-rework .need-help-footer { display: none; }
+
+  @media (max-width: 600px) {
+    .resident-portal .resident-rework .attention-summary { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary-main,
+    .resident-rework .attention-summary-item { padding: 11px 13px; }
+    .resident-rework .attention-summary-item { border-top: 1px solid #efdfc0; border-left: 0; }
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: "next" "pets" "schedule" "reports" "help";
+      gap: 12px;
+    }
+    .resident-rework .appointment-table-header,
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .appointment-item-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "date status" "pet status" "service status";
+      gap: 4px 10px;
+      padding: 10px 8px;
+    }
+    .resident-rework .appointment-time-col { grid-area: date; }
+    .resident-rework .appointment-details-col { grid-area: pet; }
+    .resident-rework .appointment-service-col { grid-area: service; }
+    .resident-rework .appointment-status-col { grid-area: status; align-items: flex-end; justify-content: center; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "description status" "date action";
+      gap: 5px 8px;
+    }
+    .resident-rework .report-table-description { grid-area: description; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > span:nth-child(3) { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+  }
+  .resident-portal .resident-rework .dashboard-content { gap: 10px; }
+  @media (max-width: 860px) {
+    .resident-rework .dashboard-content { padding-top: 0; }
+  }
+  .resident-rework .greeting-headline { color: #18181b; font-size: 24px; line-height: 1.25; letter-spacing: -.025em; }
+  .resident-rework .greeting-date { margin-bottom: 4px; color: #71717a; font-size: 11px; }
+  .resident-rework .greeting-subtext { margin-top: 4px; color: #71717a; font-size: 13px; line-height: 1.45; }
+  .resident-rework .greeting-actions { gap: 8px; }
+  .resident-rework .greeting-actions .btn-secondary-white,
+  .resident-rework .btn-action-primary {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .resident-rework .btn-action-primary,
+  .resident-rework .btn-primary-green {
+    background: #176b3a;
+    color: #fff;
+  }
+  .resident-rework .btn-action-primary:hover,
+  .resident-rework .btn-primary-green:hover { background: #14532d; }
+
+  .resident-portal .resident-rework .attention-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-height: 78px;
+    border-radius: 8px;
+    border-left-width: 1px;
+  }
+  .resident-rework .attention-summary-main,
+  .resident-rework .attention-summary-item { justify-content: center; gap: 4px; padding: 11px 16px; }
+  .resident-rework .attention-summary-main { flex-direction: column; }
+  .resident-rework .attention-summary-kicker {
+    color: #8a5200;
+    font-size: 10px;
+    line-height: 1.25;
+    letter-spacing: .06em;
+  }
+  .resident-rework .attention-summary-main strong,
+  .resident-rework .attention-summary-item strong {
+    color: #18181b;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .resident-rework .attention-summary-note { display: none; }
+  .resident-rework .attention-summary-item { border-left: 0; }
+  .resident-rework .attention-summary-item > div { gap: 5px; }
+  .resident-rework .attention-summary-link,
+  .resident-rework .attention-summary-item a {
+    color: #176b3a;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .resident-portal .resident-rework .dashboard-workflow-layout {
+    grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr) !important;
+    grid-template-areas: none;
+    gap: 16px;
+    align-items: start;
+  }
+  .resident-rework .primary-vertical-column,
+  .resident-rework .secondary-vertical-column {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+  .resident-rework .dashboard-workflow-layout .card-box {
+    min-height: 0 !important;
+    padding: 16px;
+    border: 1px solid #e4e4e7;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  }
+  .resident-rework .dashboard-next-card { padding: 0 !important; overflow: hidden; }
+  .resident-rework .dashboard-schedule-card { grid-area: auto; }
+  .resident-rework .dashboard-reports-card { grid-area: auto; }
+  .resident-rework .dashboard-pet-health-card { grid-area: auto; }
+  .resident-rework .dashboard-help-card { grid-area: auto; }
+  .resident-rework .dashboard-workflow-layout .card-header-bar { margin-bottom: 10px; }
+  .resident-rework .dashboard-workflow-layout .card-meta-tag { display: none; }
+  .resident-rework .dashboard-workflow-layout .card-title-text { color: #18181b; font-size: 16px; line-height: 1.3; }
+  .resident-rework .dashboard-workflow-layout .card-action-link { gap: 4px; color: #18181b; font-size: 12px; }
+  .resident-rework .next-appointment-header {
+    padding: 8px 16px;
+    background: #edf6ef;
+    color: #176b3a;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.45;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .resident-rework .next-appointment-row {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 98px;
+    padding: 12px 16px;
+  }
+  .resident-rework .next-appointment-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 58px;
+    height: 58px;
+    border: 1px solid #dce8df;
+    border-radius: 7px;
+    background: #fff;
+    color: #176b3a;
+  }
+  .resident-rework .next-appointment-date span { font-size: 9px; line-height: 1.25; }
+  .resident-rework .next-appointment-date strong { font-size: 22px; line-height: 1.05; }
+  .resident-rework .next-appointment-date span:last-child { color: #71717a; font-size: 9px; }
+  .resident-rework .next-appointment-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+  .resident-rework .next-appointment-copy > strong { color: #18181b; font-size: 14px; line-height: 1.35; }
+  .resident-rework .next-appointment-location,
+  .resident-rework .next-appointment-step { color: #71717a; font-size: 11px; line-height: 1.35; }
+  .resident-rework .next-appointment-copy .status-pill-badge { padding: 2px 7px; font-size: 10px; line-height: 1.35; }
+  .resident-rework .visit-action-buttons { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .resident-rework .visit-action-buttons button {
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .resident-rework .appointment-table-header,
+  .resident-rework .appointment-item-row {
+    grid-template-columns: minmax(100px, 1.15fr) minmax(68px, .8fr) minmax(78px, 1fr) minmax(88px, .9fr);
+    gap: 8px;
+  }
+  .resident-rework .appointment-table-header { padding: 0 0 6px; color: #71717a; font-size: 11px; }
+  .resident-rework .appointment-item-row { padding: 9px 8px; border-top: 1px solid #f0f0f1; }
+  .resident-rework .appointment-schedule-date { color: #18181b; font-size: 13px; }
+  .resident-rework .appointment-schedule-time,
+  .resident-rework .appointment-pet-name,
+  .resident-rework .appointment-service-col { color: #52525b; font-size: 13px; }
+  .resident-rework .appointment-schedule-time { font-size: 12px; }
+  .resident-rework .appointment-status-col { flex-direction: row; align-items: center; justify-content: space-between; gap: 6px; }
+  .resident-rework .appointment-status-col .status-pill-badge { padding: 3px 8px; font-size: 10px; }
+  .resident-rework .appointment-row-view { color: #166534; font-size: 12px; }
+
+  .resident-rework .report-table-header,
+  .resident-rework .report-table-row {
+    grid-template-columns: minmax(64px, 1fr) minmax(67px, 1.05fr) minmax(90px, 1.4fr) minmax(65px, 1fr) minmax(68px, 1.05fr) minmax(24px, .4fr);
+    gap: 10px;
+  }
+  .resident-rework .report-table-header { padding: 0 0 6px; color: #71717a; font-size: 10px; }
+  .resident-rework .report-table-row { padding: 9px 0; border-top: 1px solid #f0f0f1; }
+  .resident-rework .report-table-id,
+  .resident-rework .report-table-type,
+  .resident-rework .report-table-location,
+  .resident-rework .report-table-date { color: #3f3f46; font-size: 12px; line-height: 1.4; }
+  .resident-rework .report-table-id { color: #71717a; font-size: 11px; }
+  .resident-rework .report-table-location { color: #52525b; }
+  .resident-rework .report-table-location { min-width: 0; overflow-wrap: anywhere; }
+  .resident-rework .report-table-status .status-pill-badge { padding: 2px 7px; font-size: 10px; }
+  .resident-rework .report-table-action { color: #166534; font-size: 12px; }
+
+  .resident-rework .pet-health-summary { margin: 0 0 4px; }
+  .resident-rework .pet-health-summary-text strong { color: #3f3f46; font-size: 13px; font-weight: 400; line-height: 1.4; }
+  .resident-rework .pet-health-progress {
+    display: flex;
+    gap: 4px;
+    height: 6px;
+    margin: 8px 0 10px;
+    overflow: visible;
+    background: transparent;
+  }
+  .resident-rework .pet-health-progress span { flex: 1 1 0; min-width: 0; border-radius: 99px; background: #e0524d; }
+  .resident-rework .pet-health-progress span.is-current { background: #2f9a61; }
+  .resident-rework .pets-list-rework { margin-top: 0; }
+  .resident-rework .pet-row-rework {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-areas: none;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 0;
+    border-top: 1px solid #f0f0f1;
+  }
+  .resident-rework .pet-avatar-rework { grid-area: auto; width: 32px; height: 32px; background: #f4f4f5; color: #52525b; font-size: 12px; }
+  .resident-rework .pet-info-rework { grid-area: auto; gap: 2px; }
+  .resident-rework .pet-name-rework { color: #18181b; font-size: 13px; line-height: 1.3; }
+  .resident-rework .pet-meta-rework { color: #71717a; font-size: 11px; line-height: 1.35; }
+  .resident-rework .pet-vax-pill-rework { grid-area: auto; max-width: 96px; padding: 2px 6px; font-size: 10px; line-height: 1.3; }
+
+  .resident-rework .dashboard-help-card { width: 100%; align-self: stretch; }
+  .resident-rework .dashboard-help-card .card-title-text { margin: 0; font-size: 16px; }
+  .resident-rework .dashboard-help-copy { margin: 6px 0 12px; color: #71717a; font-size: 13px; line-height: 1.5; }
+  .resident-rework .dashboard-help-actions { gap: 8px; }
+  .resident-rework .dashboard-help-actions .btn-primary-green,
+  .resident-rework .dashboard-help-actions .btn-secondary-white {
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  @media (max-width: 600px) {
+    .resident-portal .resident-rework .attention-summary { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary { min-height: 0; }
+    .resident-rework .attention-summary-main,
+    .resident-rework .attention-summary-item { padding: 10px 12px; }
+    .resident-rework .attention-summary-item { border-top: 1px solid #efdfc0; }
+    .resident-rework .attention-summary-kicker { font-size: 9px; }
+    .resident-rework .attention-summary-main strong,
+    .resident-rework .attention-summary-item strong { font-size: 12px; }
+    .resident-rework .attention-summary-link,
+    .resident-rework .attention-summary-item a { font-size: 11px; }
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: none;
+      gap: 12px;
+    }
+    .resident-rework .dashboard-workflow-layout .card-box { padding: 14px; }
+    .resident-rework .dashboard-next-card { padding: 0 !important; }
+    .resident-rework .next-appointment-header { padding: 8px 12px; font-size: 10px; }
+    .resident-rework .appointment-item-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "date status" "pet status" "service status";
+      gap: 5px 10px;
+      padding: 10px 8px;
+    }
+    .resident-rework .appointment-time-col { grid-area: date; }
+    .resident-rework .appointment-details-col { grid-area: pet; }
+    .resident-rework .appointment-service-col { grid-area: service; }
+    .resident-rework .appointment-status-col { grid-area: status; align-items: flex-end; justify-content: center; }
+    .resident-rework .appointment-schedule-date,
+    .resident-rework .appointment-pet-name,
+    .resident-rework .appointment-service-col { font-size: 12px; }
+    .resident-rework .appointment-schedule-time { font-size: 11px; }
+    .resident-rework .appointment-status-col .status-pill-badge { font-size: 10px; }
+    .resident-rework .appointment-row-view { font-size: 11px; }
+    .resident-rework .next-appointment-row {
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 10px;
+      min-height: 0;
+      padding: 12px;
+    }
+    .resident-rework .next-appointment-date { width: 48px; height: 52px; }
+    .resident-rework .next-appointment-copy > strong { font-size: 13px; }
+    .resident-rework .next-appointment-location,
+    .resident-rework .next-appointment-step { font-size: 10px; }
+    .resident-rework .visit-action-buttons { grid-column: 2; gap: 6px; }
+    .resident-rework .visit-action-buttons button { height: 34px; padding: 0 10px; font-size: 11px; }
+    .resident-rework .dashboard-help-card { width: 100%; align-self: stretch; }
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "id status" "type date" "location action";
+      gap: 6px 8px;
+      padding: 9px 0;
+    }
+    .resident-rework .report-table-id { grid-area: id; }
+    .resident-rework .report-table-type { grid-area: type; }
+    .resident-rework .report-table-row > span.report-table-location { grid-area: location; justify-self: start; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > .report-table-status { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+    .resident-rework .report-table-id,
+    .resident-rework .report-table-type,
+    .resident-rework .report-table-date,
+    .resident-rework .report-table-location { font-size: 11px; }
+    .resident-rework .report-table-location { line-height: 1.4; }
+    .resident-rework .report-table-status .status-pill-badge { font-size: 9px; }
+    .resident-rework .report-table-action { font-size: 11px; }
+    .resident-rework .pet-row-rework { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 9px; padding: 8px 0; }
+    .resident-rework .pet-avatar-rework { width: 32px; height: 32px; font-size: 12px; }
+    .resident-rework .pet-name-rework { font-size: 12px; }
+    .resident-rework .pet-meta-rework { font-size: 10px; }
+    .resident-rework .pet-vax-pill-rework { max-width: 96px; padding: 2px 6px; font-size: 9px; }
+    .resident-rework .dashboard-help-card .card-title-text { font-size: 16px; }
+    .resident-rework .dashboard-help-copy { font-size: 12px; }
+    .resident-rework .dashboard-help-actions .btn-primary-green,
+    .resident-rework .dashboard-help-actions .btn-secondary-white { min-height: 36px; font-size: 11px; }
+  }
+  @media (min-width: 601px) and (max-width: 860px) {
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) !important;
+    }
+    .resident-rework .next-appointment-row {
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px;
+    }
+    .resident-rework .visit-action-buttons { grid-column: 2; justify-content: flex-start; }
+    .resident-rework .dashboard-help-actions { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .report-table-header,
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(50px, .9fr) minmax(58px, 1fr) minmax(60px, 1.2fr) minmax(58px, 1fr) minmax(58px, 1fr) minmax(22px, .5fr);
+      gap: 6px;
+    }
+    .resident-rework .appointment-schedule-date,
+    .resident-rework .appointment-pet-name,
+    .resident-rework .appointment-service-col { font-size: 12px; }
+    .resident-rework .appointment-schedule-time { font-size: 11px; }
+    .resident-rework .report-table-id,
+    .resident-rework .report-table-type,
+    .resident-rework .report-table-date,
+    .resident-rework .report-table-location { font-size: 11px; }
+    .resident-rework .pet-name-rework { font-size: 12px; }
+    .resident-rework .pet-meta-rework { font-size: 10px; }
+    .resident-rework .dashboard-help-copy { font-size: 12px; }
+  }
+  @media (min-width: 601px) and (max-width: 680px) {
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: none;
+    }
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "id status" "type date" "location action";
+      gap: 6px 8px;
+      padding: 9px 0;
+    }
+    .resident-rework .report-table-id { grid-area: id; }
+    .resident-rework .report-table-type { grid-area: type; }
+    .resident-rework .report-table-row > span.report-table-location { grid-area: location; justify-self: start; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > .report-table-status { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+  }
+  .resident-portal .resident-rework .attention-summary {
+    display: block;
+    min-height: 0;
+    background: #fff;
+    border: 1px solid #e4e4e7;
+    border-top: 2px solid #d97706;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .resident-rework .attention-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 16px;
+    border-bottom: 1px solid #f0f0f1;
+  }
+  .resident-rework .attention-summary-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    color: #18181b;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -.02em;
+  }
+  .resident-rework .attention-summary-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: #18181b;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .resident-rework .attention-summary-overview {
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .resident-rework .attention-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .resident-rework .attention-summary-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 0;
+    min-height: 126px;
+    padding: 14px 16px;
+    border-right: 1px solid #f0f0f1;
+  }
+  .resident-rework .attention-summary-card:last-child { border-right: 0; }
+  .resident-rework .attention-summary-card.is-action-required { background: #fffaf0; }
+  .resident-rework .attention-summary-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #71717a;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .resident-rework .attention-summary-card.is-action-required .attention-summary-status { color: #92400e; }
+  .resident-rework .attention-summary-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 6px;
+    border-radius: 50%;
+    background: #a1a1aa;
+  }
+  .resident-rework .attention-summary-card.is-action-required .attention-summary-dot { background: #d97706; }
+  .resident-rework .attention-summary-card > strong {
+    color: #18181b;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -.01em;
+  }
+  .resident-rework .attention-summary-card > p {
+    margin: 0;
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .resident-rework .attention-summary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    margin-top: auto;
+    padding: 0 12px;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    background: #fff;
+    color: #18181b;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .resident-rework .attention-summary-button:hover { background: #f4f4f5; }
+  .resident-rework .attention-summary-button.is-primary {
+    border-color: #176b3a;
+    background: #176b3a;
+    color: #fff;
+  }
+  .resident-rework .attention-summary-button.is-primary:hover { background: #14532d; }
+  @media (max-width: 600px) {
+    .resident-rework .attention-summary-header {
+      flex-wrap: wrap;
+      gap: 4px 10px;
+      padding: 9px 14px;
+    }
+    .resident-rework .attention-summary-overview { flex-basis: 100%; }
+    .resident-rework .attention-summary-grid { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary-card {
+      min-height: 0;
+      padding: 13px 14px;
+      border-right: 0;
+      border-bottom: 1px solid #f0f0f1;
+    }
+    .resident-rework .attention-summary-card:last-child { border-bottom: 0; }
+    .resident-rework .attention-summary-card > strong { font-size: 14px; }
+    .resident-rework .attention-summary-card > p { font-size: 12px; }
+  }
+  .resident-rework .dashboard-pet-health-card {
+    padding: 18px;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .resident-rework .dashboard-pet-health-card .card-title-text {
+    color: #18181b;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+  }
+  .resident-rework .dashboard-pet-health-card .card-action-link { font-size: 13px; }
+  .resident-rework .pet-health-summary-text strong {
+    color: #3f3f46;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
+  }
+  .resident-rework .pet-health-progress { height: 8px; margin: 10px 0 12px; }
+  .resident-rework .pet-row-rework {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px 0;
+  }
+  .resident-rework .pet-avatar-rework {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: #f4f4f5;
+    font-size: 18px;
+  }
+  .resident-rework .pet-avatar-rework > span {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .resident-rework .pet-avatar-rework img {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .resident-rework .pet-info-rework { gap: 3px; }
+  .resident-rework .pet-name-rework {
+    overflow: hidden;
+    color: #18181b;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .resident-rework .pet-meta-rework {
+    overflow: hidden;
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .resident-rework .pet-vax-pill-rework {
+    max-width: 100px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 1.35;
+    text-align: center;
+  }
+  @media (max-width: 600px) {
+    .resident-rework .dashboard-pet-health-card { padding: 16px; }
+    .resident-rework .pet-row-rework { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; padding: 11px 0; }
+  }
+  @media (max-width: 860px) {
+    .resident-rework .pet-row-rework {
+      grid-template-columns: 48px minmax(0, 1fr);
+      grid-template-areas: "avatar info" "avatar vaccine";
+      gap: 4px 12px;
+      align-items: center;
+    }
+    .resident-rework .pet-avatar-rework { grid-area: avatar; }
+    .resident-rework .pet-info-rework { grid-area: info; }
+    .resident-rework .pet-vax-pill-rework {
+      grid-area: vaccine;
+      justify-self: start;
+      max-width: 100%;
+    }
+  }
 </style>
 </head>
 <body class="dashboard resident-portal sb2-active" data-realtime-page="resident">
@@ -1516,12 +2363,42 @@ include __DIR__ . '/../../includes/portal-toast.php';
          $firstAppt = null;
          if (!empty($todayAppts)) { $firstAppt = $todayAppts[0]; }
          elseif (!empty($upcomingAppts)) { $firstAppt = $upcomingAppts[0]; }
+         $pendingAppointments = array_values(array_filter($todayAppts, fn($appointment) => strtolower((string)$appointment['status']) === 'pending'));
+         $pendingAppointmentCount = count($pendingAppointments);
+         $pendingAppointmentSummary = implode(' and ', array_map(static function ($appointment) {
+             return ucfirst((string)($appointment['appointment_type'] ?? 'Appointment'))
+                 . ' · ' . (string)($appointment['pet_name'] ?? '-');
+         }, $pendingAppointments));
+         $attentionReport = null;
+         foreach ($reports as $report) {
+             if (!in_array(strtolower((string)$report['status']), ['resolved', 'rejected'], true)) {
+                 $attentionReport = $report;
+                 break;
+             }
+         }
+         $attentionReportPresentation = $attentionReport['resident_presentation'] ?? null;
+         $petCount = count($pets);
+         $upToDatePetIds = [];
+         $petNeedingVaccination = null;
+         foreach ($pets as $pet) {
+             $vaccinationStatus = strtolower(trim((string)($pet['vaccination_status'] ?? '')));
+             if (in_array($vaccinationStatus, ['vaccinated', 'complete', 'fully vaccinated', 'up to date'], true)) {
+                 $upToDatePetIds[(int)$pet['pet_id']] = true;
+             } elseif ($petNeedingVaccination === null) {
+                 $petNeedingVaccination = $pet;
+             }
+         }
+         $upToDatePetCount = count($upToDatePetIds);
+         $petVaccineStatus = strtolower(trim((string)($petNeedingVaccination['vaccination_status'] ?? '')));
+         $attentionActionCount = $petNeedingVaccination ? 1 : 0;
+         $attentionWaitingCount = ($pendingAppointmentCount > 0 ? 1 : 0) + ($attentionReport ? 1 : 0);
+         $attentionCardCount = $attentionActionCount + $attentionWaitingCount;
          ?>
 
          <section class="greeting-banner">
            <div>
              <div class="greeting-date" id="rework-live-date"><?php echo date('l, F j, Y'); ?></div>
-             <h2 class="greeting-headline"><?php echo $greetingWord . ', ' . htmlspecialchars($firstName); ?>.</h2>
+             <h2 class="greeting-headline"><?php echo $greetingWord; ?>, <?php echo htmlspecialchars($firstName); ?>.</h2>
              <p class="greeting-subtext">Here's what needs your attention today.</p>
            </div>
             <div class="greeting-actions">
@@ -1553,63 +2430,105 @@ include __DIR__ . '/../../includes/portal-toast.php';
             </div>
          </section>
 
-         <section class="metrics-grid">
-           <div class="metric-card">
-             <div class="metric-icon-box icon-box-green">
-               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-             </div>
-             <div class="metric-info">
-               <span class="metric-label">Upcoming appointments</span>
-               <span class="metric-value"><?php echo $upcomingApptCount; ?></span>
-               <span class="metric-subtext"><?php echo $upcomingApptCount > 0 ? 'Scheduled' : 'No appointments'; ?></span>
-             </div>
+         <section class="attention-summary" aria-labelledby="attention-summary-title">
+           <div class="attention-summary-header">
+             <h2 id="attention-summary-title">
+               Needs your attention
+               <span class="attention-summary-count"><?php echo $attentionCardCount; ?></span>
+             </h2>
+             <span class="attention-summary-overview">
+               <?php if ($attentionCardCount > 0): ?>
+                 <?php echo $attentionActionCount; ?> action<?php echo $attentionActionCount === 1 ? '' : 's'; ?> required
+                 &middot; <?php echo $attentionWaitingCount; ?> waiting for updates
+               <?php else: ?>
+                 You're all caught up
+               <?php endif; ?>
+             </span>
            </div>
-            <div class="metric-card">
-              <div class="metric-icon-box icon-box-blue">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
-              </div>
-              <div class="metric-info">
-                <span class="metric-label">Reports submitted</span>
-                <span class="metric-value"><?php echo count($reports); ?></span>
-                <span class="metric-subtext">Total filed</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon-box icon-box-amber">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              </div>
-              <div class="metric-info">
-                <span class="metric-label">Pending reports</span>
-                <span class="metric-value"><?php echo $activeCases; ?></span>
-                <span class="metric-subtext">Awaiting review</span>
-              </div>
-            </div>
-           <div class="metric-card">
-             <div class="metric-icon-box icon-box-purple">
-               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-             </div>
-             <div class="metric-info">
-               <span class="metric-label">Active care plans</span>
-               <span class="metric-value"><?php echo count($pets); ?></span>
-               <span class="metric-subtext">Across <?php echo count($pets); ?> pet<?php echo count($pets) !== 1 ? 's' : ''; ?></span>
-             </div>
+           <div class="attention-summary-grid">
+             <article class="attention-summary-card <?php echo $petNeedingVaccination ? 'is-action-required' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo $petNeedingVaccination ? 'Action required' : 'Pet health'; ?>
+               </div>
+               <?php if ($petNeedingVaccination): ?>
+                 <strong><?php echo htmlspecialchars($petNeedingVaccination['pet_name']); ?> <?php echo $petVaccineStatus === 'not vaccinated' ? 'is not vaccinated' : 'needs a vaccine update'; ?></strong>
+                 <p>Book a vaccination appointment for <?php echo htmlspecialchars($petNeedingVaccination['pet_name']); ?>.</p>
+                 <a href="#" class="attention-summary-button is-primary" onclick="reworkBookVaccination(<?php echo (int)$petNeedingVaccination['pet_id']; ?>);return false;">Book vaccination</a>
+               <?php else: ?>
+                 <strong>Your pets are up to date</strong>
+                 <p>There are no vaccination actions to take right now.</p>
+                 <a href="#" class="attention-summary-button" onclick="switchSection('my-pets');return false;">View pets</a>
+               <?php endif; ?>
+             </article>
+             <article class="attention-summary-card <?php echo $pendingAppointmentCount > 0 ? 'is-waiting' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo $pendingAppointmentCount > 0 ? 'Waiting on DCVS' : 'Appointments'; ?>
+               </div>
+               <strong><?php echo $pendingAppointmentCount; ?> appointment<?php echo $pendingAppointmentCount === 1 ? '' : 's'; ?> awaiting confirmation</strong>
+               <p><?php echo $pendingAppointmentCount > 0 ? htmlspecialchars($pendingAppointmentSummary) : 'No appointments awaiting confirmation.'; ?></p>
+               <a href="#" class="attention-summary-button" onclick="switchSection('appointments');return false;">View appointments</a>
+             </article>
+             <article class="attention-summary-card <?php echo $attentionReport ? 'is-waiting' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo htmlspecialchars($attentionReportPresentation['statusLabel'] ?? 'Reports'); ?>
+               </div>
+               <strong><?php echo htmlspecialchars($attentionReportPresentation['statusMessage'] ?? 'No reports are awaiting review'); ?></strong>
+               <p>
+                 <?php if ($attentionReportPresentation): ?>
+                   Next: <?php echo htmlspecialchars($attentionReportPresentation['nextStep']); ?>
+                 <?php else: ?>
+                   Your submitted reports will appear here.
+                 <?php endif; ?>
+               </p>
+               <a href="#" class="attention-summary-button" onclick="switchSection('my-reports');return false;">View report</a>
+             </article>
            </div>
-
          </section>
 
          <div class="dashboard-workflow-layout">
            <div class="primary-vertical-column">
 
-             <div class="card-box">
+             <div class="card-box dashboard-next-card">
+               <div class="next-appointment-header">Next appointment</div>
+               <?php if ($firstAppt): ?>
+                 <div class="next-appointment-row">
+                   <div class="next-appointment-date">
+                     <span id="rework-visit-weekday"><?php echo strtoupper(date('D', strtotime($firstAppt['preferred_date']))); ?></span>
+                     <strong id="rework-visit-day"><?php echo date('d', strtotime($firstAppt['preferred_date'])); ?></strong>
+                     <span id="rework-visit-month"><?php echo strtoupper(date('M Y', strtotime($firstAppt['preferred_date']))); ?></span>
+                   </div>
+                   <div class="next-appointment-copy">
+                     <strong><span id="rework-visit-title"><?php echo htmlspecialchars(ucfirst($firstAppt['appointment_type'])); ?></span> &middot; <span id="rework-visit-pet"><?php echo htmlspecialchars($firstAppt['pet_name']); ?></span></strong>
+                     <span class="next-appointment-location"><span id="rework-visit-time"><?php echo date('g:i A', strtotime($firstAppt['preferred_time'])); ?></span> &middot; DCVS, Dasmari&ntilde;as City</span>
+                     <span class="status-pill-badge <?php echo strtolower($firstAppt['status']) === 'pending' ? 'badge-pending' : 'badge-confirmed'; ?>" id="rework-visit-status"><?php echo ucfirst($firstAppt['status']); ?></span>
+                     <span class="next-appointment-step">Next step: <span id="rework-visit-instruction">bring your pet records.</span></span>
+                   </div>
+                   <div class="visit-action-buttons">
+                     <button class="btn-primary-green" id="rework-view-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" onclick="reworkViewAppointment()">View appointment</button>
+                     <button class="btn-secondary-white" id="rework-reschedule-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" data-appt-type="<?php echo htmlspecialchars($firstAppt['appointment_type']); ?>" data-appt-pet="<?php echo (int)($firstAppt['pet_id'] ?? 0); ?>" data-appt-date="<?php echo htmlspecialchars($firstAppt['preferred_date']); ?>" data-appt-time="<?php echo htmlspecialchars($firstAppt['preferred_time']); ?>" data-appt-notes="<?php echo htmlspecialchars($firstAppt['notes'] ?? ''); ?>" onclick="reworkRescheduleVisit()">Reschedule</button>
+                   </div>
+                 </div>
+               <?php else: ?>
+                 <div class="rework-empty">No upcoming appointments.</div>
+               <?php endif; ?>
+             </div>
+
+             <div class="card-box dashboard-schedule-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag"><?php echo $upcomingApptCount; ?> appointment<?php echo $upcomingApptCount !== 1 ? 's' : ''; ?></div>
-                   <h3 class="card-title-text">Upcoming Appointments</h3>
+                   <div class="card-meta-tag">Your schedule</div>
+                   <h3 class="card-title-text">Upcoming schedule</h3>
                  </div>
                   <a href="#" class="card-action-link" onclick="switchSection('calendar-booking');return false;">
                     <span>View calendar</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                   </a>
+                </div>
+                <div class="appointment-table-header" aria-hidden="true">
+                  <span>Date &amp; time</span><span>Pet</span><span>Service</span><span>Status</span>
                 </div>
                 <div class="appointment-items-list" id="rework-appointments-container">
                  <?php if (empty($todayAppts)): ?>
@@ -1618,32 +2537,35 @@ include __DIR__ . '/../../includes/portal-toast.php';
                    <?php foreach (array_slice($todayAppts, 0, 3) as $apt): ?>
                      <?php
                      $aptIsPending = strtolower($apt['status']) === 'pending';
-                     $aptDotClass = $aptIsPending ? 'dot-amber' : 'dot-green';
                      $aptBadgeClass = $aptIsPending ? 'badge-pending' : (strtolower($apt['status']) === 'completed' ? 'badge-completed' : 'badge-scheduled');
                      $aptDay = date('d', strtotime($apt['preferred_date']));
                      $aptMonth = date('M Y', strtotime($apt['preferred_date']));
+                     $aptWeekday = strtoupper(date('D', strtotime($apt['preferred_date'])));
+                     $aptTimeLabel = date('g:i A', strtotime($apt['preferred_time']));
                      ?>
-                     <div class="appointment-item-row" onclick="reworkSelectVisit(this,{apptId:<?php echo (int)$apt['appointment_id']; ?>,type:'<?php echo htmlspecialchars(addslashes($apt['appointment_type'])); ?>',petId:<?php echo (int)($apt['pet_id'] ?? 0); ?>,date:'<?php echo htmlspecialchars($apt['preferred_date']); ?>',timeRaw:'<?php echo htmlspecialchars($apt['preferred_time']); ?>',notes:'<?php echo htmlspecialchars(addslashes($apt['notes'] ?? '')); ?>',pet:'<?php echo htmlspecialchars(addslashes($apt['pet_name'])); ?>',service:'<?php echo htmlspecialchars(addslashes(ucfirst($apt['appointment_type']))); ?>',time:'<?php echo date('g:i A', strtotime($apt['preferred_time'])); ?>',status:'<?php echo ucfirst($apt['status']); ?>',day:'<?php echo $aptDay; ?>',month:'<?php echo $aptMonth; ?>',nextStep:'Bring your pet records'})">
+                     <div class="appointment-item-row" data-live-appt-id="<?php echo (int)$apt['appointment_id']; ?>" onclick="reworkSelectVisit(this,{apptId:<?php echo (int)$apt['appointment_id']; ?>,type:'<?php echo htmlspecialchars(addslashes($apt['appointment_type'])); ?>',petId:<?php echo (int)($apt['pet_id'] ?? 0); ?>,date:'<?php echo htmlspecialchars($apt['preferred_date']); ?>',timeRaw:'<?php echo htmlspecialchars($apt['preferred_time']); ?>',notes:'<?php echo htmlspecialchars(addslashes($apt['notes'] ?? '')); ?>',pet:'<?php echo htmlspecialchars(addslashes($apt['pet_name'])); ?>',service:'<?php echo htmlspecialchars(addslashes(ucfirst($apt['appointment_type']))); ?>',time:'<?php echo $aptTimeLabel; ?>',status:'<?php echo ucfirst($apt['status']); ?>',day:'<?php echo $aptDay; ?>',weekday:'<?php echo $aptWeekday; ?>',month:'<?php echo $aptMonth; ?>',nextStep:'bring your pet records.'})">
                        <div class="appointment-time-col">
-                         <span><?php echo date('g:i A', strtotime($apt['preferred_time'])); ?></span>
-                         <span class="status-dot-indicator <?php echo $aptDotClass; ?>"></span>
+                         <span class="appointment-schedule-date"><?php echo date('D, M d', strtotime($apt['preferred_date'])); ?></span>
+                         <span class="appointment-schedule-time"><?php echo $aptTimeLabel; ?></span>
                        </div>
                        <div class="appointment-details-col">
                          <span class="appointment-pet-name"><?php echo htmlspecialchars($apt['pet_name']); ?></span>
-                         <span class="appointment-reason-meta"><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?> &bull; <?php echo $aptIsPending ? 'Awaiting confirmation' : 'Veterinary Services'; ?></span>
                        </div>
-                        <span class="status-pill-badge <?php echo $aptBadgeClass; ?>"><?php echo ucfirst($apt['status']); ?></span>
-                       <svg class="appointment-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                       <span class="appointment-service-col"><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?></span>
+                       <span class="appointment-status-col">
+                         <span class="status-pill-badge <?php echo $aptBadgeClass; ?>"><?php echo ucfirst($apt['status']); ?></span>
+                         <span class="appointment-row-view">View</span>
+                       </span>
                      </div>
                    <?php endforeach; ?>
                  <?php endif; ?>
                 </div>
               </div>
 
-             <div class="card-box">
+             <div class="card-box dashboard-reports-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag">Service Requests</div>
+                   <div class="card-meta-tag">Recent activity</div>
                    <h3 class="card-title-text">My reports</h3>
                  </div>
                  <a href="#" class="card-action-link" onclick="switchSection('my-reports');return false;">
@@ -1654,33 +2576,31 @@ include __DIR__ . '/../../includes/portal-toast.php';
                <?php if (empty($reports)): ?>
                  <div class="rework-empty">No reports submitted yet.</div>
                <?php else: ?>
-                 <div class="reports-cards-grid">
+                 <div class="report-table-header" aria-hidden="true">
+                   <span>Report</span><span>Type</span><span>Location</span><span>Submitted</span><span>Status</span><span></span>
+                 </div>
+                 <div class="report-table">
                    <?php foreach (array_slice($reports, 0, 4) as $r): ?>
                      <?php
                      $rStatus = strtolower($r['status']);
-                      if ($rStatus === 'pending') { $rBadge = 'badge-pending'; $rBadgeText = 'Pending'; $rProgress = 20; $rBarColor = 'fill-blue'; }
-                      elseif ($rStatus === 'validated') { $rBadge = 'badge-reviewing'; $rBadgeText = 'Reviewing'; $rProgress = 40; $rBarColor = 'fill-blue'; }
-                      elseif ($rStatus === 'active') { $rBadge = 'badge-scheduled'; $rBadgeText = 'Active'; $rProgress = 70; $rBarColor = 'fill-purple'; }
-                      else { $rBadge = 'badge-confirmed'; $rBadgeText = 'Resolved'; $rProgress = 100; $rBarColor = 'fill-blue'; }
+                     $reportReference = (string)$r['reference_id'];
+                     $referenceForDisplay = preg_replace('/-\d+$/', '', $reportReference);
+                     $reportReferenceSuffix = substr($referenceForDisplay ?? $reportReference, -4);
+                     $rTypeLabel = ucfirst((string)$r['report_type']);
+                     if (strtolower((string)$r['report_type']) === 'stray') { $rTypeLabel = 'Stray animal'; }
+                     elseif (strtolower((string)$r['report_type']) === 'injured') { $rTypeLabel = 'Injured animal'; }
+                     $residentPresentation = $r['resident_presentation'];
+                     $tableStatusPresentation = dcvsResidentReportTableStatusPresentation($r);
+                     $rBadge = $tableStatusPresentation['badgeClass'];
+                     $rBadgeText = dcvsResidentReportTableStatusLabel($r);
                      ?>
-                     <div class="report-item-box">
-                       <div class="report-header-row">
-                         <span class="report-id-code"><?php echo htmlspecialchars($r['reference_id']); ?></span>
-                       <span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span>
-                       </div>
-                       <h4 class="report-title-heading"><?php echo htmlspecialchars(ucfirst($r['report_type'])); ?></h4>
-                        <div class="report-sub-meta">
-                          <span><?php echo htmlspecialchars($r['location_address']); ?></span>
-                          <span>Submitted <?php echo date('M d, Y', strtotime($r['created_at'])); ?></span>
-                        </div>
-                       <div class="report-progress-wrapper">
-                         <div class="progress-header"><span>Progress</span><span><?php echo $rProgress; ?>%</span></div>
-                         <div class="progress-track"><div class="progress-bar-fill <?php echo $rBarColor; ?>" style="width:<?php echo $rProgress; ?>%"></div></div>
-                       </div>
-                       <a href="#" class="report-link-footer" onclick="switchSection('my-reports');return false;">
-                         <span>View report</span>
-                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                       </a>
+                     <div class="report-table-row">
+                       <span class="report-table-id" title="<?php echo htmlspecialchars($reportReference); ?>">RPT-...<?php echo htmlspecialchars($reportReferenceSuffix); ?></span>
+                       <span class="report-table-type"><?php echo htmlspecialchars($rTypeLabel); ?></span>
+                       <span class="report-table-location"><?php echo htmlspecialchars($r['location_address']); ?></span>
+                       <span class="report-table-date"><?php echo date('M j, Y', strtotime($r['created_at'])); ?></span>
+                       <span class="report-table-status"><span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span></span>
+                       <a href="#" class="report-table-action" onclick="switchSection('my-reports');return false;" aria-label="View report <?php echo htmlspecialchars($r['reference_id']); ?>">View</a>
                      </div>
                    <?php endforeach; ?>
                  </div>
@@ -1691,138 +2611,75 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
             <div class="secondary-vertical-column">
 
-             <div class="card-box">
+             <div class="card-box dashboard-pet-health-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag">Next Appointment</div>
-                   <h3 class="card-title-text">Your next visit</h3>
-                 </div>
-               </div>
-
-               <?php if ($firstAppt): ?>
-                 <div class="next-visit-hero-card">
-                    <div class="date-big-badge">
-                      <span class="date-big-num" id="rework-visit-day"><?php echo date('d', strtotime($firstAppt['preferred_date'])); ?></span>
-                      <span class="date-big-month" id="rework-visit-month"><?php echo date('M Y', strtotime($firstAppt['preferred_date'])); ?></span>
-                    </div>
-                    <div class="next-visit-pet-avatar">
-                      <?php if (!empty($firstAppt['pet_photo'])): ?>
-                        <img src="<?php echo htmlspecialchars($firstAppt['pet_photo']); ?>" alt="">
-                      <?php else: ?>
-                        <span><?php echo strtoupper(substr($firstAppt['pet_name'], 0, 1)); ?></span>
-                      <?php endif; ?>
-                    </div>
-                    <div class="next-visit-hero-info">
-                      <span class="status-pill-badge <?php echo strtolower($firstAppt['status']) === 'pending' ? 'badge-pending' : 'badge-confirmed'; ?>" id="rework-visit-status" style="align-self:flex-start;margin-bottom:2px"><?php echo ucfirst($firstAppt['status']); ?></span>
-                     <span class="next-visit-title" id="rework-visit-title"><?php echo htmlspecialchars(ucfirst($firstAppt['appointment_type'])); ?></span>
-                     <span class="next-visit-pet" id="rework-visit-pet">For <?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
-                   </div>
-                 </div>
-
-                 <div class="visit-details-row">
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Time</span>
-                       <span class="detail-item-value" id="rework-visit-time"><?php echo date('g:i A', strtotime($firstAppt['preferred_time'])); ?></span>
-                     </div>
-                   </div>
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Pet</span>
-                       <span class="detail-item-value"><?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
-                     </div>
-                   </div>
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Date</span>
-                       <span class="detail-item-value"><?php echo date('M d, Y', strtotime($firstAppt['preferred_date'])); ?></span>
-                     </div>
-                   </div>
-                 </div>
-
-                 <div class="next-step-callout">
-                    <div class="next-step-text-group">
-                      <span class="next-step-label">Next step</span>
-                      <span class="next-step-instruction" id="rework-visit-instruction">Bring your pet records</span>
-                    </div>
-                  </div>
-
-                 <div class="visit-action-buttons" style="margin-top:auto">
-                    <button class="btn-primary-green" id="rework-view-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" onclick="reworkViewAppointment()">View appointment</button>
-                    <button class="btn-secondary-white" id="rework-reschedule-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" data-appt-type="<?php echo htmlspecialchars($firstAppt['appointment_type']); ?>" data-appt-pet="<?php echo (int)($firstAppt['pet_id'] ?? 0); ?>" data-appt-date="<?php echo htmlspecialchars($firstAppt['preferred_date']); ?>" data-appt-time="<?php echo htmlspecialchars($firstAppt['preferred_time']); ?>" data-appt-notes="<?php echo htmlspecialchars($firstAppt['notes'] ?? ''); ?>" onclick="reworkRescheduleVisit()">Reschedule</button>
-                 </div>
-               <?php else: ?>
-                 <div class="rework-empty">No upcoming appointments.</div>
-               <?php endif; ?>
-             </div>
-
-             <div class="card-box">
-               <div class="card-header-bar">
-                 <div>
-                   <div class="card-meta-tag">Registered Pets</div>
-                   <h3 class="card-title-text">My Pets</h3>
+                   <h3 class="card-title-text">Pet health</h3>
                  </div>
                  <a href="#" class="card-action-link" onclick="switchSection('my-pets');return false;">
-                   <span>View all pets</span>
+                   <span>All pets</span>
                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                  </a>
                </div>
                <?php if (empty($pets)): ?>
                  <div class="rework-empty">No pets registered yet.</div>
                <?php else: ?>
+                 <div class="pet-health-summary">
+                   <div class="pet-health-summary-text">
+                     <strong><?php echo $upToDatePetCount; ?> of <?php echo $petCount; ?> pets are up to date on vaccines</strong>
+                   </div>
+                 </div>
+                 <div class="pet-health-progress" role="progressbar" aria-label="Pets up to date on vaccines" aria-valuemin="0" aria-valuemax="<?php echo $petCount; ?>" aria-valuenow="<?php echo $upToDatePetCount; ?>">
+                   <?php foreach ($pets as $pet): ?>
+                     <span class="<?php echo isset($upToDatePetIds[(int)$pet['pet_id']]) ? 'is-current' : 'is-due'; ?>" title="<?php echo htmlspecialchars($pet['pet_name'] . ': ' . ($pet['vaccination_status'] ?: 'Not vaccinated')); ?>"></span>
+                   <?php endforeach; ?>
+                 </div>
                  <div class="pets-list-rework">
                    <?php foreach (array_slice($pets, 0, 4) as $pet): ?>
                      <?php
                        $pVaxText = !empty($pet['vaccination_status']) ? $pet['vaccination_status'] : 'Not vaccinated';
-                       $pVaxLower = strtolower($pVaxText);
-                       if (in_array($pVaxLower, ['vaccinated', 'complete', 'fully vaccinated'])) { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
-                       elseif ($pVaxLower === 'up to date') { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
+                       $pVaxLower = strtolower(trim($pVaxText));
+                       if (isset($upToDatePetIds[(int)$pet['pet_id']])) { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
                        elseif ($pVaxLower === 'due soon') { $pVaxBg = '#fef3c7'; $pVaxColor = '#92400e'; $pVaxBorder = '#fde68a'; }
                        else { $pVaxBg = '#fee2e2'; $pVaxColor = '#991b1b'; $pVaxBorder = '#fecaca'; }
-                       $pPhoto = $pet['photo_url'] ?? '';
                        $pInitial = strtoupper(substr($pet['pet_name'], 0, 1));
+                       $petPhotoUrl = trim((string)($pet['photo_url'] ?? ''));
+                       if ($petPhotoUrl !== '' && !preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $petPhotoUrl)) {
+                         $mediaBasePath = rtrim($appBaseUrl, '/');
+                         if ($mediaBasePath === '' || ($petPhotoUrl !== $mediaBasePath && strpos($petPhotoUrl, $mediaBasePath . '/') !== 0)) {
+                           $petPhotoUrl = $mediaBasePath . '/' . ltrim($petPhotoUrl, '/');
+                         }
+                       }
                      ?>
                      <div class="pet-row-rework" onclick="window.location.href='pet-profile.php?id=<?php echo (int)$pet['pet_id']; ?>&ref=resident'">
                        <div class="pet-avatar-rework">
-                         <?php if ($pPhoto): ?>
-                           <img src="<?php echo htmlspecialchars($pPhoto); ?>" alt="">
-                         <?php else: ?>
-                           <span><?php echo $pInitial; ?></span>
+                         <?php if ($petPhotoUrl !== ''): ?>
+                           <img src="<?php echo htmlspecialchars($petPhotoUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                          <?php endif; ?>
+                         <span aria-hidden="true"><?php echo $pInitial; ?></span>
                        </div>
                        <div class="pet-info-rework">
                          <span class="pet-name-rework"><?php echo htmlspecialchars($pet['pet_name']); ?></span>
-                         <span class="pet-meta-rework"><?php echo ucfirst(htmlspecialchars($pet['pet_type'])); ?> &bull; <?php echo htmlspecialchars($pet['breed'] ?: '-'); ?> &bull; <?php echo ucfirst(htmlspecialchars($pet['gender'] ?: '-')); ?> &bull; <?php echo htmlspecialchars($pet['age'] ? $pet['age'].' year'.((int)$pet['age']!==1?'s':'') : '-'); ?></span>
+                         <span class="pet-meta-rework"><?php echo ucfirst(htmlspecialchars($pet['pet_type'])); ?> &bull; <?php echo ucfirst(htmlspecialchars($pet['gender'] ?: '-')); ?> &bull; <?php echo htmlspecialchars($pet['age'] ? $pet['age'].' yr'.((int)$pet['age']!==1?'s':'') : '-'); ?></span>
                        </div>
                        <span class="pet-vax-pill-rework" style="background:<?php echo $pVaxBg; ?>;color:<?php echo $pVaxColor; ?>;border-color:<?php echo $pVaxBorder; ?>"><?php echo htmlspecialchars(ucfirst($pVaxText)); ?></span>
-                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                      </div>
                    <?php endforeach; ?>
                  </div>
                <?php endif; ?>
              </div>
 
+             <div class="card-box dashboard-help-card">
+               <h3 class="card-title-text">Need help?</h3>
+               <p class="dashboard-help-copy">Contact the DCVS team about an appointment or a report.</p>
+               <div class="dashboard-help-actions">
+                 <a href="contact.php" class="btn-primary-green">Message DCVS</a>
+                 <a href="tel:+63464321234" class="btn-secondary-white">Call the office</a>
+               </div>
+             </div>
+
             </div>
           </div>
-
-          <div class="need-help-footer">
-            <div class="need-help-banner-card">
-              <div>
-                <span class="help-tag-label">Need Help?</span>
-                <h3 class="help-headline">We're here for you and your pets.</h3>
-                <p class="help-subtext">Contact the DCVS team for appointment or report assistance.</p>
-              </div>
-              <a href="contact.php" class="help-cta-link">
-                <span>Contact support</span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-              </a>
-            </div>
-          </div>
-
-
 
        </div>
      </div>
@@ -2555,6 +3412,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
   <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY PETS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-pets" class="content-section">
+    <header class="resident-section-heading">
+      <h1>My Pets</h1>
+      <p>View and manage your registered pets, health details, and records.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="pets-kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
       <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
@@ -3116,6 +3977,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
   <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY REPORTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-reports" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Reports</h1>
+      <p>Track your submitted reports and follow their latest status updates.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="rpt-kpis">
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
@@ -3241,17 +4106,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $rType = $report['report_type'];
             $rTypeLabel = $knownReportTypes[strtolower($rType)] ?? ucfirst($rType);
             $rStatus = $report['status'];
-            $rResponseState = $report['response_state'] ?? '';
-            $rStatusLabel = rptStatusLabel($rStatus, $rResponseState);
-            $rStatusClass = rptStatusClass($rStatus, $rResponseState);
-            $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
-            if (in_array($rResponseState, [
-                'barangay_response_approved', 'barangay_responding', 'animal_secured',
-                'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
-                'escalated_to_dcvs', 'returned_to_barangay',
-            ], true)) {
-                $rsc = ['bg' => '#EFF6FF', 'color' => '#1E40AF', 'border' => '#BFDBFE'];
-            }
+            $rStatusLabel = dcvsResidentReportTableStatusLabel($report);
+            $tableStatusPresentation = dcvsResidentReportTableStatusPresentation($report);
+            $rStatusClass = $tableStatusPresentation['class'];
+            $rsc = $tableStatusPresentation['style'];
             $incidentAt = !empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'];
             $rDate = date('M d, Y', strtotime($incidentAt));
             $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
@@ -3310,10 +4168,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
     #rptDrawer .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin:0; }
     #rptDrawer .rpt-photo-none { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:0; }
-    #rptDrawer .rpt-latest-update,#rptDrawer .rpt-update-card { padding:14px;border:1px solid #e4e4e7;border-radius:8px;background:#fff;margin:0 0 12px;font-family:'Inter','Segoe UI',sans-serif; }
-    #rptDrawer .rpt-update-title { color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;margin:0 0 5px; }
     #rptDrawer .rpt-update-meta { color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.5;margin:0 0 8px; }
-    #rptDrawer .rpt-update-copy { color:#3f3f46;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;line-height:1.5;margin:0 0 10px; }
     #rptDrawer .rpt-evidence-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px; }
     #rptDrawer .rpt-evidence-thumb { width:100%;aspect-ratio:1;border:1px solid #e4e4e7;border-radius:7px;overflow:hidden;background:#f4f4f5;padding:0;cursor:pointer; }
     #rptDrawer .rpt-evidence-thumb img { width:100%;height:100%;object-fit:cover;display:block; }
@@ -3325,9 +4180,9 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .response-step.is-complete:not(:last-child)::after { background:#22c55e; }
     #rptDrawer .response-step-dot { position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
     #rptDrawer .response-step.is-complete .response-step-dot { border-color:#16a34a;background:#16a34a; }
-    #rptDrawer .response-step.is-current { color:#18181b;font-weight:600; }
-    #rptDrawer .response-step.is-current .response-step-dot { border-color:#16a34a;background:#fff; }
-    #rptDrawer .response-step.is-overdue .response-step-dot { border-color:#ef4444;background:#fff; }
+    #rptDrawer .response-step.is-current { color:#2563eb;font-weight:600; }
+    #rptDrawer .response-step.is-current .response-step-dot { border-color:#2563eb;background:#fff; }
+    #rptDrawer .response-step.is-overdue .response-step-dot { border-color:#2563eb;background:#fff; }
     #rptDrawer .response-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
     #apptDrawer .appt-status-steps { display:flex;align-items:flex-start;padding:8px 28px 16px;font-family:'Inter','Segoe UI',sans-serif; }
     #apptDrawer .appt-status-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
@@ -3346,7 +4201,6 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .rpt-updates-entry-head { display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px; }
     #rptDrawer .rpt-updates-entry-title { color:#09090b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;line-height:1.35; }
     #rptDrawer .rpt-updates-entry-date { flex:0 0 auto;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.4;text-align:right; }
-    #rptDrawer .rpt-updates-entry-actor { display:inline-block;margin:0 0 6px;padding:1px 7px;border:1px solid #e4e4e7;border-radius:4px;background:#fafafa;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.35; }
     #rptDrawer .rpt-updates-entry-copy { margin:0 0 8px;color:#27272a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.45; }
     #rptDrawer .rpt-updates-photo-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;margin-top:10px; }
     #rptDrawer .rpt-updates-photo { width:100%;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer; }
@@ -3488,14 +4342,11 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #apptDrawer .rpt-drawer-foot { align-items:flex-start; flex-direction:column; gap:8px; }
     #apptDrawer .appt-footer-actions { display:flex; align-items:center; justify-content:flex-start; gap:8px; width:100%; }
     #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 1 auto; min-width:0; white-space:nowrap; }
-    /* drawer status badge + timeline */
-    .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border:1px solid transparent; border-radius:20px; white-space:nowrap; }
-    .rpt-status-badge .st-dot { width:7px; height:7px; border-radius:50%; }
-    .rpt-status-badge.st-pending { background:#FEF3C7; color:#92400E; border-color:#FDE68A; } .rpt-status-badge.st-pending .st-dot { background:#92400E; }
-    .rpt-status-badge.st-awaiting { background:#dcebe0; color:#045e1f; border-color:#bbf7d0; } .rpt-status-badge.st-awaiting .st-dot { background:#045e1f; }
-    .rpt-status-badge.st-review { background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; } .rpt-status-badge.st-review .st-dot { background:#1E40AF; }
-    .rpt-status-badge.st-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; } .rpt-status-badge.st-resolved .st-dot { background:#ffffff; }
-    .rpt-status-badge.st-rejected { background:#FEE2E2; color:#991B1B; border-color:#FECACA; } .rpt-status-badge.st-rejected .st-dot { background:#991B1B; }
+    /* drawer status + timeline */
+    #rptDrawer .rpt-resident-status { margin-bottom:14px; padding:12px 14px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #rptDrawer .rpt-resident-status-heading { margin:0; color:#18181b; font-size:16px; font-weight:600; line-height:1.35; }
+    #rptDrawer .rpt-resident-status-message { margin:8px 0 0; color:#3f3f46; font-size:14px; line-height:1.5; }
+    #rptDrawer .rpt-resident-status-updated { margin:8px 0 0; color:#71717a; font-size:12px; line-height:1.4; }
     #my-reports #reportTable .appt-status-pill.report-status-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; }
     .rpt-timeline { display:flex; align-items:center; gap:8px; }
     .tl-step { display:inline-flex; align-items:center; gap:5px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#a1a1aa; }
@@ -3506,8 +4357,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .rpt-timeline-rejected .tl-step.done { color:#991b1b; }
     .rpt-next { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; padding:16px 20px; }
     .rpt-next-title { font-family:'Inter',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:8px; }
-    .rpt-next ol { margin:0; padding-left:1.15rem; }
-    .rpt-next li { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    .rpt-next p { margin:0; font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
     #apptDrawer .appt-status-notice { margin:-2px 0 22px; padding:0; font-family:'Inter','Segoe UI',sans-serif; }
     #apptDrawer .appt-status-notice[hidden] { display:none; }
     #apptDrawer .appt-status-notice strong { display:block; margin-bottom:3px; color:#18181b; font-size:14px; font-weight:600; }
@@ -3733,9 +4583,17 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
 <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? APPOINTMENTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="calendar-booking" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Calendar Booking</h1>
+      <p>View your appointments on the calendar and select a date to review details.</p>
+    </header>
     <?php include __DIR__ . '/../../calendar-booking.php'; ?>
   </section>
   <section id="my-waitlist" class="content-section">
+    <header class="resident-section-heading">
+      <h1>My Waitlist</h1>
+      <p>Track your waitlist requests and check when a preferred slot becomes available.</p>
+    </header>
     <section class="resident-waitlist-kpis" aria-label="My waitlist summary">
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Total Entries</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['total']; ?></p><p class="resident-waitlist-kpi-sub">All your waitlist requests</p></article>
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Pending</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['waiting']; ?></p><p class="resident-waitlist-kpi-sub">Waiting for an open slot</p></article>
@@ -3832,6 +4690,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
     </div>
   </section>
   <section id="appointments" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Appointments</h1>
+      <p>View your upcoming and past veterinary appointments.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="appt-kpis">
       <div class="appt-kpi-card">
@@ -4651,6 +5513,9 @@ foreach ($residentAdoptionApplications as $application) {
         'statusLabel' => $statusMeta[$applicationStatus]['key'] === 'expired' ? 'Expired' : ($statusMeta[$applicationStatus]['key'] === 'declined' ? 'Declined' : ($statusMeta[$applicationStatus]['key'] === 'cancelled' ? 'Cancelled' : null)),
         'applicationProgress' => $statusMeta[$applicationStatus]['progress'],
         'declineReason' => $declineReason,
+        'requestedInfo' => (string)($application['requested_info'] ?? ''),
+        'residentResponse' => (string)($application['resident_response'] ?? ''),
+        'residencyProofAvailable' => !empty($application['residency_proof_available']),
         'applicationStatus' => $resultingPetId > 0 ? 'adopted' : $applicationStatus,
         'reviewedAt' => !empty($application['reviewed_at']) ? date('F j, Y', strtotime($application['reviewed_at'])) : '',
         'reservedAt' => !empty($application['reserved_at']) ? date('F j, Y', strtotime($application['reserved_at'])) : '',
@@ -4776,6 +5641,10 @@ foreach ($residentAdoptionApplications as $application) {
 
 <!-- adoption table -->
 <section id="adoption" class="content-section">
+  <header class="resident-section-heading">
+    <h1>Adoption Listings</h1>
+    <p>Browse pets available for adoption and review your applications.</p>
+  </header>
 
   <div class="appt-card-header resident-list-toolbar">
     <div class="appt-header-right resident-toolbar-controls">
@@ -5097,6 +5966,22 @@ foreach ($residentAdoptionApplications as $application) {
     function rdOk(v){return !!v && v!=='Not specified' && v!=='Not assessed' && v!=='Not vaccinated';}
     var ready=rdOk(rd.vaccination) && rd.health==='Cleared' && rdOk(rd.spayNeuter) && rdOk(rd.temperament);
     function rdRow(label,val){var v=val||'Not specified';return '<tr><td>'+esc(label)+'</td><td>'+esc(v)+(rdOk(v)?' \u2713':'')+'</td></tr>';}
+    var infoResponseSection='';
+    if(p.applicationStatus==='needs_info'){
+      var missingProof=!p.residencyProofAvailable;
+      infoResponseSection=sec('Respond to Staff')+
+        '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;color:#3f3f46;line-height:1.5;margin:0 0 12px;"><strong>Requested information:</strong> '+esc(p.requestedInfo||'Please provide the information requested by DCVS staff.')+'</p>'+
+        (missingProof?'<p role="alert" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;">Your previously submitted proof of residency is unavailable. Upload it again to continue the review.</p>':'')+
+        '<form id="adoption-info-response-form" style="display:grid;gap:10px;margin-bottom:18px;">'+
+          '<input type="hidden" name="action" value="respond"><input type="hidden" name="application_id" value="'+Number(p.applicationId||0)+'">'+
+          '<label style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#3f3f46;">Your response<textarea class="cv-textarea" name="response" maxlength="5000" required style="display:block;width:100%;min-height:84px;margin-top:5px;" placeholder="Reply to the information request"></textarea></label>'+
+          '<label style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#3f3f46;">'+(missingProof?'Replacement proof of residency':'Replacement proof of residency (optional)')+
+            '<input class="cv-input" name="residency_proof" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" '+(missingProof?'required':'')+' style="display:block;width:100%;margin-top:5px;">'+
+            '<small style="display:block;margin-top:4px;font-weight:400;color:#71717a;">JPG, PNG, WebP, or PDF; maximum 10 MB.</small></label>'+
+          '<div id="adoption-info-response-notice" role="status" hidden style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;padding:9px 11px;border:1px solid #e4e4e7;border-radius:6px;"></div>'+
+          '<button class="sd-btn sd-btn-primary" type="submit" style="justify-self:start;">Send Response</button>'+
+        '</form>';
+    }
     var body=
       (p.applicationStatus ? sec('Application Progress')+applicationTimelineHTML(p) : '')+
       sec('Pet Information')+
@@ -5118,6 +6003,7 @@ foreach ($residentAdoptionApplications as $application) {
         ir('Location',esc(p.location))+
         ir('Health Status',esc(ready?'Cleared':'For review'))+
       '</div>'+
+      infoResponseSection+
       sec('About')+
       '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:400;color:#71717a;line-height:1.6;margin:0 0 20px;">'+esc(p.about||'No description available.')+'</p>'+
       sec('Vaccination Records')+
@@ -5147,6 +6033,37 @@ foreach ($residentAdoptionApplications as $application) {
       '<span class="cv-pet-summary-status">'+adoptPill+'</span>'+
     '</div>';
     els.drawerBody.innerHTML=header+body;
+    var infoResponseForm=els.drawerBody.querySelector('#adoption-info-response-form');
+    if(infoResponseForm){
+      infoResponseForm.addEventListener('submit',function(event){
+        event.preventDefault();
+        var submitButton=infoResponseForm.querySelector('button[type="submit"]');
+        var responseNotice=infoResponseForm.querySelector('#adoption-info-response-notice');
+        var formData=new FormData(infoResponseForm);
+        formData.append('csrf_token',ADOPTION_CSRF);
+        submitButton.disabled=true;
+        responseNotice.hidden=false;
+        responseNotice.style.color='#3f3f46';
+        responseNotice.textContent='Sending your response...';
+        fetch('../../api/shared/adoption-workflow-handler.php',{method:'POST',body:formData,credentials:'same-origin',headers:{'Accept':'application/json'}})
+          .then(function(response){return response.json().then(function(data){return {ok:response.ok,data:data};});})
+          .then(function(result){
+            responseNotice.textContent=result.data.message||'Your response could not be sent.';
+            if(!result.ok||!result.data.success){
+              responseNotice.style.color='#991b1b';
+              submitButton.disabled=false;
+              return;
+            }
+            responseNotice.style.color='#166534';
+            window.location.reload();
+          })
+          .catch(function(){
+            responseNotice.style.color='#991b1b';
+            responseNotice.textContent='Your response could not be sent. Check your connection and try again.';
+            submitButton.disabled=false;
+          });
+      });
+    }
     els.drawerFoot.innerHTML='<button type="button" class="sd-btn sd-btn-outline" onclick="window.__cvCloseDrawer()">Close</button>'+
       (p.status==='reserved' ? '<button type="button" class="sd-btn sd-btn-primary" onclick="window.openAdoptionConfirm(\''+esc(p.id)+'\')">Yes, I\'m In</button>' : '')+
       (p.applicationPending?'':'<button type="button" class="sd-btn sd-btn-danger" onclick="window.__cvArchive(\''+esc(p.id)+'\',\''+esc(p.name)+'\')"><i class="fas fa-archive"></i> Archive</button>');
@@ -6155,7 +7072,13 @@ window.__petList = <?php
     </div>
 
     <div class="rpt-detail-body active" data-tab="details">
+      <div class="rpt-resident-status" role="status">
+        <p class="rpt-resident-status-heading" id="rdStatusHeading">Your report is being reviewed</p>
+        <p class="rpt-resident-status-message" id="rdStatusMessage">Your report is being reviewed.</p>
+        <p class="rpt-resident-status-updated" id="rdLastUpdated"></p>
+      </div>
       <div id="rdTimeline" style="margin-bottom:1rem;"></div>
+      <p id="rdSupportingNotice" hidden style="margin:-6px 0 16px;padding:10px 12px;border:1px solid #d4d4d8;border-radius:7px;background:#fafafa;color:#52525b;font-size:13px;line-height:1.45;"></p>
       <p class="pet-drawer-section-title">Report Information</p>
       <div class="pet-drawer-info">
         <div class="pet-drawer-info-item"><div class="k">Date Submitted</div><div class="v" id="rdDate"></div></div>
@@ -6177,29 +7100,22 @@ window.__petList = <?php
         <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Description</div><div class="v" id="rdIncident"></div></div>
       </div>
 
-      <p class="pet-drawer-section-title">Latest update</p>
-      <div id="rdLatestUpdate"></div>
       <div class="rpt-detail-block" id="rdResolution" style="display:none;margin-top:0.75rem;">
         <div class="pet-drawer-info-item"><div class="k">Resolution</div><div class="v" id="rdResolutionText"></div></div>
       </div>
 
       <div class="rpt-next">
-        <div class="rpt-next-title" id="rdNextTitle"><i class="fas fa-info-circle"></i> What happens next?</div>
-        <ol id="rdNextList">
-          <li>Your report is submitted to your barangay for review.</li>
-          <li>DCVS reviews the report and validates the case.</li>
-          <li>The case is handled or scheduled for action.</li>
-          <li>You receive an update when the report is resolved.</li>
-        </ol>
+        <div class="rpt-next-title"><i class="fas fa-info-circle"></i> What happens next?</div>
+        <p id="rdNextMessage"></p>
       </div>
     </div>
 
     <div class="rpt-detail-body" data-tab="updates">
       <p class="pet-drawer-section-title">Case updates</p>
       <div id="rdUpdates"></div>
-      <p class="pet-drawer-section-title">Your photos</p>
+      <p class="pet-drawer-section-title">Report photos</p>
       <div class="rpt-photos" id="rdYourPhotos"></div>
-      <p class="pet-drawer-section-title" style="margin-top:22px;">From DCVS</p>
+      <p class="pet-drawer-section-title" style="margin-top:22px;">Shared case photos</p>
       <div class="rpt-photos" id="rdStaffPhotos"></div>
     </div>
   </div>
@@ -6259,8 +7175,11 @@ window.__reportList = <?php
           'typeKey' => $rt,
           'urgency' => $report['urgency_level'] ?? 'medium',
           'createdRaw' => date('Y-m-d\TH:i', strtotime($report['created_at'])),
+          'updatedAt' => (string)($report['updated_at'] ?? $report['created_at']),
           'incidentRaw' => !empty($report['incident_at']) ? date('Y-m-d\TH:i', strtotime($report['incident_at'])) : date('Y-m-d\TH:i', strtotime($report['created_at'])),
           'location' => $report['location_address'] ?? '-',
+          'supportingReport' => (bool)($report['is_supporting_report'] ?? false),
+          'primaryReference' => (string)($report['primary_reference_id'] ?? ''),
           'date' => date('F d, Y', strtotime($report['created_at'])),
           'incidentDate' => date('F d, Y', strtotime(!empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'])),
           'description' => $rawDescription,
@@ -6272,11 +7191,20 @@ window.__reportList = <?php
           'photo' => $report['photo_url'] ?? '',
           'video' => $report['video_url'] ?? '',
           'status' => $report['status'],
-          'statusLabel' => rptStatusLabel($report['status'], $report['response_state'] ?? ''),
-          'statusClass' => rptStatusClass($report['status'], $report['response_state'] ?? ''),
+          'statusHeading' => $report['resident_presentation']['statusHeading'],
+          'statusMessage' => $report['resident_presentation']['statusMessage'],
+          'nextStep' => $report['resident_presentation']['nextStep'],
           'resolution' => (string)($report['resolution_details'] ?? ''),
+          'duplicateStatus' => (string)($report['duplicate_status'] ?? ''),
+          'barangayName' => (string)($report['barangay_name'] ?? ''),
+          'isOverdue' => $report['overdue_info'] !== null,
+          'overdueAction' => (string)($report['overdue_info']['action'] ?? ''),
+          'overdueBadge' => (string)($report['overdue_info']['badge'] ?? ''),
+          'overdueDeadline' => (string)($report['overdue_info']['deadline'] ?? ''),
           'responseState' => (string)($report['response_state'] ?? ''),
           'responseMode' => (string)($report['response_mode'] ?? ''),
+          'caseStatus' => (string)($report['case_status'] ?? ''),
+          'scheduledAt' => (string)($report['scheduled_at'] ?? ''),
           'responseDeadline' => (string)($report['response_deadline'] ?? ''),
           'progressDeadline' => (string)($report['progress_deadline'] ?? ''),
           'turnoverDeadline' => (string)($report['turnover_deadline'] ?? ''),
@@ -6329,17 +7257,19 @@ window.__reportList = <?php
     var turnoverRequired = !!report.turnoverRequired
       || report.turnoverStatus === 'pending'
       || report.turnoverStatus === 'receipt_confirmed';
-    var completedStage = state === 'barangay_response_approved' ? 0
-      : (state === 'barangay_responding' || state === 'escalated_to_dcvs'
-        || state === 'dcvs_dispatch' || state === 'dcvs_processing' ? 1
-        : (state === 'animal_secured' ? 2
-          : (report.status === 'resolved'
-            ? (turnoverRequired ? (turnoverComplete ? 5 : 4) : 3)
-            : (report.status === 'pending' || report.status === 'validated' ? 0
+    var completedStage = report.status === 'resolved'
+      ? (turnoverRequired ? (turnoverComplete ? 6 : 5) : 4)
+      : (state === 'escalated_to_dcvs' ? 1
+        : (state === 'barangay_responding' || state === 'dcvs_dispatch'
+          || state === 'dcvs_processing' || state === 'turned_over' ? 2
+          : (state === 'animal_secured' || state === 'awaiting_turnover' ? 3
+            : (state === 'barangay_response_approved' || report.status === 'pending'
+              || report.status === 'validated' ? 0
               : (report.status === 'confirmed' || report.status === 'scheduled' ? 1 : -1)))));
     var labels = [
       completedStage > 0 ? 'Accepted'
-        : (report.status === 'pending' || report.status === 'validated' ? 'Barangay review' : 'Accepted'),
+        : (report.status === 'pending' ? 'Barangay review' : 'Accepted'),
+      'Arranging',
       'Responding',
       'Secured',
       'Resolved'
@@ -6347,53 +7277,12 @@ window.__reportList = <?php
     if (turnoverRequired) labels.push(turnoverComplete ? 'Turned over to DCVS' : 'Turned over');
     return '<div class="response-steps" aria-label="Barangay response progress">' + labels.map(function(label, index) {
       var stepClass = index < completedStage ? ' is-complete'
-        : (index === completedStage ? (deadlineOverdue && (index === 1 || index === 4) ? ' is-current is-overdue' : ' is-current') : '');
+        : (index === completedStage ? (deadlineOverdue ? ' is-current is-overdue' : ' is-current') : '');
       var checkIcon = index < completedStage
         ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
         : '';
       return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
     }).join('') + '</div>';
-  }
-
-  function applyNextSteps(status) {
-    var title = document.getElementById('rdNextTitle');
-    var list = document.getElementById('rdNextList');
-    if (!title || !list) return;
-    var items = [];
-    var titleText = 'What happens next?';
-    if (status === 'resolved') {
-      titleText = 'What happened to this case?';
-      items = [
-        'Your report has been reviewed and the necessary action has been completed.',
-        'The reported concern has been addressed by the concerned barangay or DCVS.',
-        'The case has been marked as resolved based on the action taken.',
-        'You can view the case details and resolution information in your report history.'
-      ];
-    } else if (['validated','confirmed','scheduled'].indexOf(status) !== -1) {
-      items = [
-        'Your report has been reviewed and the case is currently being handled.',
-        'DCVS or the concerned barangay is taking the necessary action based on the report.',
-        'The case may be scheduled for field action, monitoring, rescue, treatment, or other appropriate intervention.',
-        'You\u2019ll receive an update once there is significant progress or when the case is resolved.'
-      ];
-    } else if (status === 'rejected') {
-      titleText = 'What happened to this report?';
-      items = [
-        'Your report was reviewed but was not validated for further action.',
-        'The barangay or DCVS assessed the information provided in the report.',
-        'The report has been closed without further action.',
-        'You may submit a new report if the concern still exists.'
-      ];
-    } else {
-      items = [
-        'Your report has been submitted and is awaiting review by your barangay.',
-        'The barangay will verify the report and assess the information provided.',
-        'Once validated, the report will be forwarded to DCVS for further review when necessary.',
-        'You\u2019ll receive an update when the case moves to the next stage.'
-      ];
-    }
-    title.innerHTML = '<i class="fas fa-info-circle"></i> ' + titleText;
-    list.innerHTML = items.map(function(t) { return '<li>' + t + '</li>'; }).join('');
   }
 
   var evidenceLightboxItems = [];
@@ -6405,44 +7294,46 @@ window.__reportList = <?php
   function reportUpdateTitle(update) {
     var titles = {
       report_submitted: 'Report submitted',
-      accept_barangay_assignment: 'Accepted by Barangay',
-      forward_to_dcvs_review: 'Forwarded to DCVS',
-      start_response: 'Response started',
-      record_site_visit: 'Site visit recorded',
-      update_progress: 'Progress update',
-      mark_secured: 'Animal secured',
-      resolve_barangay: 'Resolved by Barangay',
-      resolve_case: 'Resolved by DCVS',
-      staff_decide: 'DCVS response decision',
-      unable_to_secure: 'Escalated to DCVS',
-      unable_to_locate: 'Unable to locate animal',
-      confirm_turnover: 'Turnover update',
-      turnover_overdue: 'Animal turnover overdue',
+      accept_barangay_assignment: 'Review started',
+      forward_to_dcvs_review: 'Review forwarded',
+      start_response: 'Responding',
+      record_site_visit: 'Responding',
+      update_progress: 'Responding',
+      mark_secured: 'Secured',
+      resolve_barangay: 'Resolved',
+      resolve_case: 'Resolved',
+      staff_decide: 'Response plan updated',
+      unable_to_secure: 'Dispatch needed',
+      unable_to_locate: 'Follow-up needed',
+      confirm_turnover: 'Case transferred',
+      turnover_overdue: 'Transfer delayed',
+      dispatch_escalation: 'Team on the way',
       add_photo_evidence: 'Photo evidence added',
-      auto_escalate_overdue: 'Escalated to DCVS'
+      auto_escalate_overdue: 'Escalated for follow-up'
     };
-    return titles[update.action] || 'Case status updated';
+    return titles[update.action] || update.title || 'Case status updated';
   }
   function reportUpdateCopy(update) {
     var copy = {
-      report_submitted: 'You submitted this report to your barangay.',
-      accept_barangay_assignment: 'The barangay accepted this report for handling.',
-      forward_to_dcvs_review: 'The report was forwarded to DCVS for review.',
-      start_response: 'The response team started working on the report.',
-      record_site_visit: 'The barangay recorded what the team found at the incident location.',
-      update_progress: 'The response team recorded a progress update.',
-      mark_secured: 'The animal was secured by the response team.',
-      resolve_barangay: 'The barangay recorded a resolution for this report.',
-      resolve_case: 'DCVS recorded a resolution for this report.',
-      staff_decide: 'DCVS updated the response plan for this report.',
-      unable_to_secure: 'The case was escalated to DCVS for follow-up.',
-      unable_to_locate: 'The response team could not locate the animal.',
-      confirm_turnover: 'DCVS recorded an animal turnover update.',
-      turnover_overdue: 'The planned animal turnover date has passed without DCVS confirming receipt.',
+      report_submitted: 'The report was submitted to your barangay.',
+      accept_barangay_assignment: 'The barangay accepted your report and is preparing to respond.',
+      forward_to_dcvs_review: 'DCVS is reviewing your report.',
+      start_response: 'The response team has started working on your report.',
+      record_site_visit: 'The barangay recorded a visit to the incident location.',
+      update_progress: 'The response team shared a progress update.',
+      mark_secured: 'The response team has secured the animal.',
+      resolve_barangay: 'The barangay has resolved your report.',
+      resolve_case: 'DCVS has resolved your report.',
+      staff_decide: 'DCVS updated the response plan for your report.',
+      unable_to_secure: 'DCVS is arranging a response team.',
+      unable_to_locate: 'DCVS is coordinating the next step for your report.',
+      confirm_turnover: 'DCVS has received the animal and is handling the case.',
+      turnover_overdue: 'The handover is taking longer than usual. DCVS is following up.',
+      dispatch_escalation: 'DCVS has dispatched a response team. The team is on the way.',
       add_photo_evidence: 'Photo evidence was added to this case.',
-      auto_escalate_overdue: 'The response target was missed and the case was escalated to DCVS.'
+      auto_escalate_overdue: 'DCVS is arranging a response team.'
     };
-    return copy[update.action] || 'The case status was updated.';
+    return update.copy || copy[update.action] || 'The case status was updated.';
   }
   function evidenceThumb(item, index) {
     var caption = item.caption || (item.source === 'resident'
@@ -6458,7 +7349,7 @@ window.__reportList = <?php
       return evidenceThumb(item, index);
     }).join('') + '</div>' + items.map(function(item) {
       return '<p class="rpt-evidence-caption">' + escapeReportHtml(item.caption || 'Case photo evidence') + '</p>' +
-        '<p class="rpt-update-meta">' + escapeReportHtml(item.actor || 'DCVS') + ' &middot; ' + escapeReportHtml(item.createdAt || '') + '</p>';
+        (item.createdAt ? '<p class="rpt-update-meta">Added ' + escapeReportHtml(reportDateTime(item.createdAt)) + '</p>' : '');
     }).join('');
   }
   function reportDateTime(value) {
@@ -6467,8 +7358,21 @@ window.__reportList = <?php
   }
   function renderReportUpdates(report) {
     var updates = Array.isArray(report.updates) ? report.updates.slice() : [];
-    updates.unshift({id:0,action:'report_submitted',actor:'You',createdAt:report.createdRaw});
-    updates.reverse();
+    updates.unshift({id:0,action:'report_submitted',createdAt:report.createdRaw});
+    if (report.isOverdue && !updates.some(function(update) { return update.action === 'resident_overdue'; })) {
+      updates.push({
+        id: 0,
+        action: 'resident_overdue',
+        title: report.overdueBadge || 'Overdue follow-up',
+        copy: report.statusMessage,
+        createdAt: report.overdueDeadline,
+        createdAtRaw: report.overdueDeadline
+      });
+    }
+    updates.sort(function(a, b) {
+      return new Date(b.createdAtRaw || b.createdAt || 0).getTime()
+        - new Date(a.createdAtRaw || a.createdAt || 0).getTime();
+    });
     var casePhotos = (Array.isArray(report.media) ? report.media : []).filter(function(item) {
       return item.type === 'photo' && item.source !== 'resident';
     });
@@ -6489,7 +7393,6 @@ window.__reportList = <?php
       return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">' +
         '<span class="rpt-updates-entry-title">' + escapeReportHtml(reportUpdateTitle(update)) + '</span>' +
         '<time class="rpt-updates-entry-date">' + escapeReportHtml(reportDateTime(update.createdAt)) + '</time></div>' +
-        '<span class="rpt-updates-entry-actor">' + escapeReportHtml(update.actor || 'DCVS') + '</span>' +
         '<p class="rpt-updates-entry-copy">' + escapeReportHtml(reportUpdateCopy(update)) + '</p>' +
         (linkedPhotos.length ? '<div class="rpt-updates-photo-grid">' + linkedPhotos.map(function(item) {
           var index = evidenceLightboxItems.indexOf(item);
@@ -6502,13 +7405,6 @@ window.__reportList = <?php
     document.getElementById('rdUpdates').innerHTML = timelineHtml
       ? '<div class="rpt-updates-timeline">' + timelineHtml + '</div>'
       : '<p class="rpt-photo-none">No case updates have been recorded yet.</p>';
-    var latest = updates.length ? updates[0] : null;
-    document.getElementById('rdLatestUpdate').innerHTML = latest
-      ? '<div class="rpt-latest-update"><p class="rpt-update-title">' + escapeReportHtml(reportUpdateTitle(latest)) + '</p>' +
-        '<p class="rpt-update-meta">' + escapeReportHtml(latest.actor || 'DCVS') + ' &middot; ' + escapeReportHtml(reportDateTime(latest.createdAt)) + '</p>' +
-        '<p class="rpt-update-copy">' + escapeReportHtml(reportUpdateCopy(latest)) + '</p>' +
-        renderEvidenceItems(photosForUpdate(latest), '') + '</div>'
-      : '<div class="rpt-latest-update"><p class="rpt-photo-none">There are no case updates yet.</p></div>';
 
     var residentMedia = (report.media || []).filter(function(item) { return item.source === 'resident'; });
     var ownPhotoHtml = residentMedia.map(function(item) {
@@ -6519,8 +7415,8 @@ window.__reportList = <?php
       return evidenceThumb(item, imageIndex);
     }).join('');
     var staffPhotos = casePhotos.filter(function(item) { return item.role !== 'barangay'; });
-    document.getElementById('rdYourPhotos').innerHTML = ownPhotoHtml || '<p class="rpt-photo-none">You have not attached any photos.</p>';
-    document.getElementById('rdStaffPhotos').innerHTML = renderEvidenceItems(staffPhotos, 'No photos have been shared by DCVS.');
+    document.getElementById('rdYourPhotos').innerHTML = ownPhotoHtml || '<p class="rpt-photo-none">No photos were attached to this report.</p>';
+    document.getElementById('rdStaffPhotos').innerHTML = renderEvidenceItems(staffPhotos, 'No case photos have been shared.');
   }
 
   window.openEvidenceLightbox = function(index) {
@@ -6529,10 +7425,10 @@ window.__reportList = <?php
     document.getElementById('rdLightboxImage').src = item.url;
     document.getElementById('rdLightboxImage').alt = item.caption || 'Shared case photo';
     document.getElementById('rdLightboxCaption').textContent = item.caption || 'Case photo evidence';
-    document.getElementById('rdLightboxMeta').textContent = (item.actor || (item.source === 'resident' ? 'You' : 'DCVS')) + ' · ' + reportDateTime(item.createdAt);
+    document.getElementById('rdLightboxMeta').textContent = item.createdAt ? 'Added ' + reportDateTime(item.createdAt) : '';
     document.getElementById('rdLightboxPrivacy').textContent = item.source === 'resident'
-      ? 'Photo submitted with your report'
-      : (item.role === 'barangay' ? 'Shared with you by the barangay' : 'Shared with you by DCVS');
+      ? 'Submitted with this report'
+      : 'Shared for this case';
     document.getElementById('rdLightboxCount').textContent = (index + 1) + ' of ' + evidenceLightboxItems.length;
     document.getElementById('rdLightboxPrev').disabled = index <= 0;
     document.getElementById('rdLightboxNext').disabled = index >= evidenceLightboxItems.length - 1;
@@ -6582,15 +7478,23 @@ window.__reportList = <?php
     set('rdAnimalCount', orDash(r.animalCount));
     set('rdAnimalBehavior', orDash(r.animalBehavior));
     set('rdIncident', orDash(r.incidentDescription));
-    var badge = document.getElementById('rdBadge');
-    if (badge) badge.className = 'rpt-status-badge ' + r.statusClass;
-    set('rdBadgeText', r.statusLabel);
+    set('rdStatusHeading', r.statusHeading || r.statusMessage || '');
+    set('rdStatusMessage', r.statusMessage || '');
+    set('rdLastUpdated', 'Last updated ' + reportDateTime(r.updatedAt || r.createdRaw));
+    set('rdNextMessage', r.nextStep || '');
+    set('rdHeadType', r.typeLabel || 'Report');
+    var supportingNotice = document.getElementById('rdSupportingNotice');
+    if (supportingNotice) {
+      supportingNotice.hidden = !r.supportingReport;
+      supportingNotice.textContent = r.supportingReport
+        ? 'This report was merged as supporting information for '
+          + (r.primaryReference ? 'primary report ' + r.primaryReference : 'the primary incident')
+          + '. The status shown here follows that incident.'
+        : '';
+    }
     var tlEl = document.getElementById('rdTimeline');
     if (tlEl) {
-      var nextDeadline = r.responseDeadline || r.progressDeadline
-        || (r.status === 'resolved' && r.turnoverStatus === 'pending' ? r.turnoverDueAt : '');
-      var deadlineOverdue = nextDeadline && new Date(nextDeadline.replace(' ', 'T')).getTime() < Date.now();
-      tlEl.innerHTML = buildStatusSteps(r, deadlineOverdue);
+      tlEl.innerHTML = buildStatusSteps(r, !!r.isOverdue);
     }
     var resolved = r.status === 'resolved';
     var res = document.getElementById('rdResolution');
@@ -6600,7 +7504,6 @@ window.__reportList = <?php
     } else {
       res.style.display = 'none';
     }
-    applyNextSteps(r.status);
     renderReportUpdates(r);
     rdTab = activeTab;
     rdRefreshTabs();
@@ -8533,6 +9436,20 @@ function openBookApptModal() {
     if (typeof switchSection === 'function') switchSection('book-appt');
 }
 
+function reworkBookVaccination(petId) {
+    openBookApptModal();
+    var petSelect = document.getElementById('petSelect');
+    var serviceSelect = document.getElementById('apptTypeSelect');
+    if (!petSelect || !serviceSelect) {
+        console.error('The vaccination booking form is unavailable.');
+        return;
+    }
+    petSelect.value = String(petId);
+    serviceSelect.value = 'vaccination';
+    petSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    serviceSelect.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
 function toggleCustomSpecies(selectId, inputId) {
     const sel = document.getElementById(selectId);
     const inp = document.getElementById(inputId);
@@ -9649,25 +10566,52 @@ document.addEventListener('DOMContentLoaded', function() {
                     var dateTime = new Date(d + 'T' + t);
                     var timeColumn = document.createElement('div');
                     timeColumn.className = 'appointment-time-col';
+                    var dateLabel = document.createElement('span');
+                    dateLabel.className = 'appointment-schedule-date';
+                    dateLabel.textContent = dateTime.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'2-digit' });
                     var timeLabel = document.createElement('span');
+                    timeLabel.className = 'appointment-schedule-time';
                     timeLabel.textContent = dateTime.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
-                    var dot = document.createElement('span');
-                    dot.className = 'status-dot-indicator dot-amber';
-                    timeColumn.append(timeLabel, dot);
+                    timeColumn.append(dateLabel, timeLabel);
                     var detailColumn = document.createElement('div');
                     detailColumn.className = 'appointment-details-col';
                     var petLabel = document.createElement('span');
                     petLabel.className = 'appointment-pet-name';
                     petLabel.textContent = petName;
-                    var serviceLabel = document.createElement('span');
-                    serviceLabel.className = 'appointment-reason-meta';
+                    detailColumn.append(petLabel);
+                    var serviceColumn = document.createElement('span');
+                    serviceColumn.className = 'appointment-service-col';
                     var serviceNames = { adoption:'Adoption', kapon:'Kapon', vaccination:'Vaccination', checkup:'Check-up' };
-                    serviceLabel.textContent = (serviceNames[ty] || ty) + ' · Awaiting confirmation';
-                    detailColumn.append(petLabel, serviceLabel);
+                    var serviceName = serviceNames[ty] || ty;
+                    serviceColumn.textContent = serviceName;
                     var badge = document.createElement('span');
                     badge.className = 'status-pill-badge badge-pending';
                     badge.textContent = 'Pending';
-                    item.append(timeColumn, detailColumn, badge);
+                    var statusColumn = document.createElement('span');
+                    statusColumn.className = 'appointment-status-col';
+                    var viewLabel = document.createElement('span');
+                    viewLabel.className = 'appointment-row-view';
+                    viewLabel.textContent = 'View';
+                    statusColumn.append(badge, viewLabel);
+                    item.append(timeColumn, detailColumn, serviceColumn, statusColumn);
+                    item.addEventListener('click', function() {
+                      reworkSelectVisit(item, {
+                        apptId: parseInt(data.appointment_id, 10),
+                        type: ty,
+                        petId: data.pet_id || 0,
+                        date: d,
+                        timeRaw: t,
+                        notes: (form.querySelector('[name="notes"]') || {}).value || '',
+                        pet: petName,
+                        service: serviceName,
+                        time: dateTime.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }),
+                        status: 'Pending',
+                        day: dateTime.toLocaleDateString('en-US', { day:'2-digit' }),
+                        weekday: dateTime.toLocaleDateString('en-US', { weekday:'short' }).toUpperCase(),
+                        month: dateTime.toLocaleDateString('en-US', { month:'short', year:'numeric' }).toUpperCase(),
+                        nextStep: 'bring your pet records.'
+                      });
+                    });
                     overviewList.prepend(item);
                   }
                   if (typeof window.resetBookingForm === 'function') window.resetBookingForm();
@@ -10072,41 +11016,19 @@ document.addEventListener('dcvs:realtime', function(e) {
               'pending': 'Pending Barangay Review', 'validated': 'Pending DCVS Review', 'confirmed': 'In Progress',
               'scheduled': 'In Progress', 'resolved': 'Resolved', 'rejected': 'Closed'
             };
-            var responseStateLabels = {
-              barangay_response_approved: 'Accepted by Barangay',
-              barangay_responding: 'Barangay Responding',
-              animal_secured: 'Animal Secured',
-              awaiting_turnover: 'Awaiting Turnover',
-              turned_over: 'Turned Over to DCVS',
-              dcvs_processing: 'DCVS Processing',
-              dcvs_dispatch: 'DCVS Dispatched',
-              escalated_to_dcvs: 'Escalated to DCVS',
-              returned_to_barangay: 'Returned to Barangay',
-              closed_not_actionable: 'Closed - Not Actionable'
-            };
-            var activeResponseStates = [
-              'barangay_response_approved', 'barangay_responding', 'animal_secured',
-              'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
-              'escalated_to_dcvs', 'returned_to_barangay'
-            ];
             var realtimeStatusClasses = {
               pending:'st-pending', validated:'st-awaiting', confirmed:'st-review',
               scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected'
             };
             function realtimeReportStatusLabel(report) {
-              return responseStateLabels[report.response_state]
-                || rLabels[report.status]
+              return rLabels[report.status]
                 || (report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : '');
             }
-            function realtimeReportStatusClass(report) {
-              return activeResponseStates.indexOf(report.response_state) !== -1
-                ? 'st-review'
-                : (realtimeStatusClasses[report.status] || 'st-pending');
+            function realtimeReportTableStatusClass(report) {
+              return realtimeStatusClasses[report.status] || 'st-pending';
             }
             function realtimeReportStatusStyle(report) {
-              return activeResponseStates.indexOf(report.response_state) !== -1
-                ? ['#EFF6FF', '#1E40AF', '#BFDBFE']
-                : (rColors[report.status] || ['#f1f5f9', '#64748b', '#e4e4e7']);
+              return rColors[report.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
             }
             var rKnownTypes = {'stray':'Stray Animal','rabies':'Rabies Case','injured':'Injured Animal','dead':'Dead Animal','other':'Other'};
             data.reports.forEach(function(rpt) {
@@ -10116,7 +11038,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                 var existingColor = realtimeReportStatusStyle(rpt);
                 var existingLabel = realtimeReportStatusLabel(rpt);
                 existing.setAttribute('data-status', rpt.status);
-                existing.setAttribute('data-statuscls', realtimeReportStatusClass(rpt));
+                existing.setAttribute('data-statuscls', realtimeReportTableStatusClass(rpt));
                 if (existingStatus) {
                   existingStatus.classList.toggle('report-status-resolved', rpt.status === 'resolved');
                   existingStatus.textContent = existingLabel;
@@ -10131,10 +11053,30 @@ document.addEventListener('dcvs:realtime', function(e) {
                 var reportItem = (window.__reportList || []).find(function(item) { return Number(item.id) === Number(rpt.report_id); });
                 if (reportItem) {
                   reportItem.status = rpt.status;
-                  reportItem.statusLabel = existingLabel;
-                  reportItem.responseState = rpt.response_state || reportItem.responseState;
-                  reportItem.statusClass = realtimeReportStatusClass(rpt);
-                  if (rpt.status === 'resolved') reportItem.resolution = 'This report has been resolved by DCVS.';
+                  reportItem.statusHeading = rpt.resident_status_heading || reportItem.statusHeading;
+                  reportItem.responseState = rpt.response_state || '';
+                  reportItem.statusMessage = rpt.resident_status_message || '';
+                  reportItem.nextStep = rpt.resident_next_step || '';
+                  reportItem.updatedAt = rpt.updated_at || reportItem.updatedAt;
+                  reportItem.isOverdue = !!rpt.is_overdue;
+                  reportItem.overdueAction = rpt.overdue_action || '';
+                  reportItem.overdueDeadline = rpt.overdue_deadline || '';
+                  reportItem.duplicateStatus = rpt.duplicate_status || '';
+                  reportItem.barangayName = rpt.barangay_name || '';
+                  reportItem.supportingReport = !!rpt.is_supporting_report;
+                  reportItem.primaryReference = rpt.primary_reference_id || '';
+                  reportItem.responseMode = rpt.response_mode || '';
+                  reportItem.responseDeadline = rpt.response_deadline || '';
+                  reportItem.progressDeadline = rpt.progress_deadline || '';
+                  reportItem.turnoverDeadline = rpt.turnover_deadline || '';
+                  reportItem.holdingLocation = rpt.holding_location || '';
+                  reportItem.resolution = rpt.resolution_details || (rpt.status === 'resolved' ? 'This report has been resolved by DCVS.' : '');
+                  reportItem.animalDisposition = rpt.animal_disposition || '';
+                  reportItem.turnoverRequired = !!rpt.turnover_required;
+                  reportItem.responseResolvedAt = rpt.response_resolved_at || '';
+                  reportItem.turnoverStatus = rpt.turnover_status || '';
+                  reportItem.turnoverDueAt = rpt.turnover_due_at || '';
+                  reportItem.turnoverReceivedAt = rpt.turnover_received_at || '';
                 }
                 if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
                 if (window.RPT && typeof window.RPT.refreshSummary === 'function') window.RPT.refreshSummary();
@@ -10163,7 +11105,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                 rtr.className = 'sd-tr';
                 rtr.setAttribute('data-id', rpt.report_id);
                 rtr.setAttribute('data-status', rpt.status);
-                rtr.setAttribute('data-statuscls', realtimeReportStatusClass(rpt));
+                rtr.setAttribute('data-statuscls', realtimeReportTableStatusClass(rpt));
                 rtr.setAttribute('data-type', typeLabel.toLowerCase());
                 rtr.setAttribute('data-location', (rpt.location_address || '').toLowerCase());
                 rtr.setAttribute('data-date', String(incidentAt ? Math.floor(new Date(incidentAt.replace(' ', 'T')).getTime() / 1000) : '0'));
@@ -10267,6 +11209,7 @@ function reworkSelectVisit(el, data) {
   document.querySelectorAll('.appointment-item-row').forEach(function(row) { row.classList.remove('active-visit'); });
   if (el) el.classList.add('active-visit');
   var dayEl = document.getElementById('rework-visit-day');
+  var weekdayEl = document.getElementById('rework-visit-weekday');
   var monthEl = document.getElementById('rework-visit-month');
   var statusEl = document.getElementById('rework-visit-status');
   var titleEl = document.getElementById('rework-visit-title');
@@ -10274,9 +11217,10 @@ function reworkSelectVisit(el, data) {
   var timeEl = document.getElementById('rework-visit-time');
   var instrEl = document.getElementById('rework-visit-instruction');
   if (dayEl && data.day) dayEl.textContent = data.day;
+  if (weekdayEl && data.weekday) weekdayEl.textContent = data.weekday;
   if (monthEl && data.month) monthEl.textContent = data.month;
   if (titleEl) titleEl.textContent = data.service;
-  if (petEl) petEl.textContent = 'For ' + data.pet;
+  if (petEl) petEl.textContent = data.pet;
   if (timeEl) timeEl.textContent = data.time;
   if (instrEl) instrEl.textContent = data.nextStep || 'Bring your pet records';
   if (statusEl) {

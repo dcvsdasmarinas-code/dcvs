@@ -856,6 +856,12 @@ unset($_SESSION['announcement_success'], $_SESSION['announcement_error']);
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 
 <main class="main-content announcements-cms">
+  <header class="staff-page-heading">
+    <div>
+      <h1>Announcements</h1>
+      <p>Create and manage public updates, advisories, and community events.</p>
+    </div>
+  </header>
 
   <?php if ($error || $success): ?>
     <div class="acms-alerts">
@@ -1856,6 +1862,31 @@ function renderCounts(){
 }
 function setCount(id, n){ const el = document.getElementById(id); if(el) el.textContent = n; }
 
+function updateAnnouncementTypeCounts(){
+  const select = document.getElementById('annType');
+  if(!select) return;
+
+  const selectedType = state.post;
+  let items;
+  state.post = 'all';
+  try {
+    items = applyFilters();
+  } finally {
+    state.post = selectedType;
+  }
+
+  const counts = { all: items.length, announcement: 0, advisory: 0 };
+  items.forEach(function(item){
+    if(Object.prototype.hasOwnProperty.call(counts, item.category)) counts[item.category]++;
+  });
+  Array.prototype.forEach.call(select.options, function(option){
+    if(!option.dataset.countLabel) {
+      option.dataset.countLabel = option.textContent.replace(/\s+\(\d+\)$/, '');
+    }
+    option.textContent = option.dataset.countLabel + ' (' + (counts[option.value] || 0) + ')';
+  });
+}
+
 function annColVal(a, col){
   if(col === 'created') return new Date(a.is_event && a.event_date ? a.event_date : a.created_at).getTime() || 0;
   if(col === 'title') return String(a.title||'').toLowerCase();
@@ -1884,6 +1915,7 @@ function annSortBy(col){
 }
 
 function render(){
+  updateAnnouncementTypeCounts();
   const items = applyFilters();
   const total = items.length;
   const pages = Math.max(1, Math.ceil(total / state.per));

@@ -68,7 +68,9 @@ $sbModules = [
                 'items' => [
                     sbItem('All Reports', 'fa-list', ['href' => 'reports-barangay.php']),
                     sbItem('Pending Validation', 'fa-hourglass-half', ['href' => 'reports-barangay.php?status=pending']),
+                    sbItem('Overdue', 'fa-exclamation-circle', ['href' => 'reports-barangay.php?status=overdue', 'initialActive' => $activePage === 'reports' && (($_GET['status'] ?? '') === 'overdue')]),
                     sbItem('Resolved Cases', 'fa-check-circle', ['href' => 'reports-barangay.php?status=resolved']),
+                    sbItem('Similar Reports', 'fa-clone', ['href' => 'possible-duplicates.php?portal=barangay', 'initialActive' => $activePage === 'report-duplicates']),
                     sbItem('Turnover', 'fa-exchange-alt', ['href' => 'turnover-barangay.php', 'initialActive' => $activePage === 'turnover']),
                 ],
             ],

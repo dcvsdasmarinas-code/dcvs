@@ -190,9 +190,23 @@
       if (Number.isSafeInteger(reportIdFromUrl) && reportIdFromUrl > 0) requestedReportId = reportIdFromUrl;
     }
 
+    function setDrawerSearchState(isOpen) {
+      if (!map) return;
+      var mapCard = map.getContainer().closest('.geo-map-card');
+      if (!mapCard) return;
+      mapCard.classList.toggle('has-report-pin-drawer', isOpen);
+      if (!isOpen) return;
+
+      var searchInput = mapCard.querySelector('.geo-search-wrap input[type="search"]');
+      if (searchInput) searchInput.setAttribute('aria-expanded', 'false');
+      var searchResults = mapCard.querySelector('.geo-search-wrap .dcvs-place-results');
+      if (searchResults) searchResults.hidden = true;
+    }
+
     function closeDrawer() {
       if (drawer && drawer.parentNode) drawer.remove();
       drawer = null;
+      setDrawerSearchState(false);
     }
 
     function placeDrawer() {
@@ -516,6 +530,7 @@
       element.addEventListener('click', function(event) { event.stopPropagation(); });
       drawer = element;
       placeDrawer();
+      setDrawerSearchState(true);
       closeButton.focus();
       map.easeTo({
         center: coordinates,
@@ -716,12 +731,15 @@
           filter: ['!', ['has', 'point_count']],
           paint: {
             'circle-color': [
-              'match', ['get', 'priority'],
-              'critical', '#7f1d1d',
-              'high', '#ef4444',
-              'medium', '#f59e0b',
-              'low', '#16a34a',
-              '#ef4444'
+              'match', ['downcase', ['to-string', ['get', 'status']]],
+              'pending', '#92400e',
+              'validated', '#166534',
+              'confirmed', '#166534',
+              'scheduled', '#166534',
+              'active', '#166534',
+              'resolved', '#166534',
+              'rejected', '#991b1b',
+              '#52525b'
             ],
             'circle-radius': 9,
             'circle-stroke-color': '#ffffff',

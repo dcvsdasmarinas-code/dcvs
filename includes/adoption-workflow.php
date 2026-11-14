@@ -60,6 +60,16 @@ function adoptionPrivateDirectory()
     return $realDirectory;
 }
 
+function adoptionPrivateDocumentExists($filename)
+{
+    if (!is_string($filename) || !preg_match('/^[a-z]+_[a-f0-9]{48}\.(jpg|png|webp|pdf)$/', $filename)) {
+        return false;
+    }
+
+    $path = adoptionPrivateDirectory() . DIRECTORY_SEPARATOR . $filename;
+    return is_file($path) && is_readable($path);
+}
+
 function adoptionStorePrivateDocument($file, $purpose)
 {
     if (!is_array($file) || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
@@ -589,7 +599,7 @@ function adoptionReleasePetIfUnreserved($conn, $listingId)
     }
 }
 
-function adoptionResidentAction($conn, $residentId, $applicationId, $action, $response = '')
+function adoptionResidentAction($conn, $residentId, $applicationId, $action, $response = '', $proofFile = null)
 {
     $response = adoptionInputText($response);
     if (strlen($response) > 5000) {
@@ -608,6 +618,9 @@ function adoptionResidentAction($conn, $residentId, $applicationId, $action, $re
     $listingId = (int)$row['pet_listing_id'];
 
     $conn->begin_transaction();
+    $replacementProofFilename = '';
+    $previousProofPath = '';
+    $transactionCommitted = false;
     try {
         adoptionLockPetListing($conn, $listingId);
         adoptionExpireListingReservations($conn, $listingId);
@@ -629,16 +642,45 @@ function adoptionResidentAction($conn, $residentId, $applicationId, $action, $re
             if ($application['status'] !== 'needs_info' || $response === '') {
                 throw new AdoptionWorkflowException('A response is only accepted for an open information request.');
             }
-            $stmt = adoptionRequireStatement($conn->prepare(
-                "UPDATE adoption_applications
-                 SET resident_response = ?, resident_response_at = NOW(), status = 'under_review', info_deadline = NULL
-                 WHERE application_id = ?"
-            ));
-            $stmt->bind_param('si', $response, $applicationId);
+            $previousProofFilename = (string)($application['residency_proof_file'] ?? '');
+            $proofAvailable = adoptionPrivateDocumentExists($previousProofFilename);
+            $uploadError = is_array($proofFile) ? (int)($proofFile['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+            if (!$proofAvailable && $uploadError === UPLOAD_ERR_NO_FILE) {
+                throw new AdoptionWorkflowException('Please upload a replacement proof of residency before responding.');
+            }
+
+            if ($uploadError !== UPLOAD_ERR_NO_FILE) {
+                $proofDirectory = adoptionPrivateDirectory();
+                $replacementProofFilename = adoptionStorePrivateDocument($proofFile, 'residency');
+                if ($proofAvailable) {
+                    $previousProofPath = $proofDirectory . DIRECTORY_SEPARATOR . $previousProofFilename;
+                }
+            }
+
+            if ($replacementProofFilename !== '') {
+                $stmt = adoptionRequireStatement($conn->prepare(
+                    "UPDATE adoption_applications
+                     SET resident_response = ?, residency_proof_file = ?, resident_response_at = NOW(),
+                         status = 'under_review', info_deadline = NULL
+                     WHERE application_id = ? AND applicant_id = ?"
+                ));
+                $stmt->bind_param('ssii', $response, $replacementProofFilename, $applicationId, $residentId);
+            } else {
+                $stmt = adoptionRequireStatement($conn->prepare(
+                    "UPDATE adoption_applications
+                     SET resident_response = ?, resident_response_at = NOW(), status = 'under_review', info_deadline = NULL
+                     WHERE application_id = ? AND applicant_id = ?"
+                ));
+                $stmt->bind_param('sii', $response, $applicationId, $residentId);
+            }
             $stmt->execute();
             $stmt->close();
             adoptionNotifyStaff($conn, 'Adoption Applicant Responded', 'An applicant responded to a request for more information.', $applicationId);
             adoptionCommit($conn);
+            $transactionCommitted = true;
+            if ($previousProofPath !== '' && is_file($previousProofPath) && !unlink($previousProofPath)) {
+                error_log('Unable to remove replaced private adoption document.');
+            }
             return;
         }
 
@@ -656,7 +698,12 @@ function adoptionResidentAction($conn, $residentId, $applicationId, $action, $re
         adoptionNotifyStaff($conn, 'Adoption Application Withdrawn', 'An applicant withdrew an adoption application.', $applicationId);
         adoptionCommit($conn);
     } catch (Throwable $exception) {
-        $conn->rollback();
+        if (!$transactionCommitted) {
+            $conn->rollback();
+        }
+        if (!$transactionCommitted && $replacementProofFilename !== '') {
+            adoptionRemovePrivateDocument($replacementProofFilename);
+        }
         throw $exception;
     }
 }
@@ -779,7 +826,7 @@ function adoptionApproveApplication($conn, $applicationId, $staffId, $pickupAt, 
         }
         adoptionResidentEligibilityFromRow($resident);
         if (adoptionAgeFromDate($application['date_of_birth'] ?? '') < 18
-            || empty($application['residency_proof_file'])) {
+            || !adoptionPrivateDocumentExists($application['residency_proof_file'] ?? '')) {
             throw new AdoptionWorkflowException('The application does not include valid age and proof of residency.');
         }
         $petName = (string)$listing['name'];

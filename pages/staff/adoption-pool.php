@@ -47,6 +47,7 @@ if (!$applicationResult) {
     throw new RuntimeException('Open adoption applications could not be loaded.');
 }
 while ($row = $applicationResult->fetch_assoc()) {
+    $row['residency_proof_available'] = adoptionPrivateDocumentExists($row['residency_proof_file'] ?? '');
     $adoptionApplications[] = $row;
 }
 $applicationResult->free();
@@ -2719,6 +2720,12 @@ $activePage = 'adoption-pool';
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
 <div class="main-wrapper">
+    <header class="staff-page-heading">
+      <div>
+        <h1>Adoption Pool</h1>
+        <p>Manage animals, review adoption applications, and track placements.</p>
+      </div>
+    </header>
     <!-- Operational Body: Adoption Pool Contents Only -->
     <main class="pool-body">
 
@@ -6406,7 +6413,9 @@ $activePage = 'adoption-pool';
       }
       var age = item.date_of_birth ? calculateAge(item.date_of_birth) : null;
       addCheck(age === null ? 'Age not provided' : 'Legal age: ' + age + ' yrs', age !== null && age >= 18);
-      addCheck(item.residency_proof_file ? 'Residency proof submitted' : 'Residency proof missing', !!item.residency_proof_file);
+      var hasResidencyProof = !!item.residency_proof_available;
+      var missingProofRequest = 'Please re-upload your proof of residency so we can continue reviewing your application.';
+      addCheck(hasResidencyProof ? 'Residency proof available' : 'Residency proof missing from storage', hasResidencyProof);
       addCheck('Housing: ' + (item.housing_type || 'Not provided'), !!item.housing_type && (item.housing_type !== 'rented' || Number(item.landlord_permission) === 1));
       addCheck(item.agreed_at ? 'Adoption commitments accepted' : 'Agreement not recorded', !!item.agreed_at);
       details.appendChild(checks);
@@ -6461,13 +6470,16 @@ $activePage = 'adoption-pool';
       proofButton.type = 'button';
       proofButton.className = 'adoption-review-toggle';
       proofButton.style.minWidth = '0';
-      proofButton.textContent = 'View proof of residency';
-      proofButton.addEventListener('click', function () {
-        documentPreview.src = 'adoption-document.php?kind=residency&id=' + encodeURIComponent(item.application_id) + '&view=1';
-        documentDialog.classList.add('open');
-        documentDialog.setAttribute('aria-hidden', 'false');
-        document.getElementById('adoption-document-dialog-close').focus();
-      });
+      proofButton.textContent = hasResidencyProof ? 'View proof of residency' : 'Proof file unavailable';
+      proofButton.disabled = !hasResidencyProof;
+      if (hasResidencyProof) {
+        proofButton.addEventListener('click', function () {
+          documentPreview.src = 'adoption-document.php?kind=residency&id=' + encodeURIComponent(item.application_id) + '&view=1';
+          documentDialog.classList.add('open');
+          documentDialog.setAttribute('aria-hidden', 'false');
+          document.getElementById('adoption-document-dialog-close').focus();
+        });
+      }
       documents.appendChild(proofButton);
       details.appendChild(documents);
 
@@ -6528,12 +6540,20 @@ $activePage = 'adoption-pool';
       });
       var requestButton = addButton(actions, 'Request Info / Schedule Visit', 'secondary', function () {
         reviewFields.hidden = false;
-        reason.placeholder = 'Enter the information needed from the applicant.';
+        reason.placeholder = hasResidencyProof
+          ? 'Enter the information needed from the applicant.'
+          : missingProofRequest;
+        if (!hasResidencyProof && !reason.value.trim()) {
+          reason.value = reason.placeholder;
+        }
         reason.focus();
       });
       var rejectButton = addButton(actions, 'Reject Application', 'reject', function () {
         reviewFields.hidden = false;
         reason.placeholder = 'Enter the reason for rejection.';
+        if (reason.value === missingProofRequest) {
+          reason.value = '';
+        }
         reason.focus();
       });
       var sendRequestButton = addButton(actions, 'Send Request', 'secondary', function (event) {

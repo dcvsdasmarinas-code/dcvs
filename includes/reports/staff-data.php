@@ -5,7 +5,7 @@ function dcvsStaffValidatedReportsQuery($conn) {
         FROM reports r
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
-        WHERE r.status = 'validated' AND r.archived_at IS NULL
+        WHERE r.status = 'validated' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
           AND u.status = 'active' AND u.deleted_at IS NULL
         ORDER BY r.validated_at DESC");
 }
@@ -15,7 +15,7 @@ function dcvsStaffBarangayReportsQuery($conn) {
         FROM reports r
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
-        WHERE r.archived_at IS NULL
+        WHERE r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
           AND u.status = 'active' AND u.deleted_at IS NULL
         ORDER BY r.created_at ASC");
 }
@@ -26,7 +26,7 @@ function dcvsStaffActiveCasesQuery($conn) {
         JOIN reports r ON cc.report_id = r.report_id
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON cc.barangay_id = b.barangay_id
-        WHERE r.status = 'confirmed' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
+        WHERE r.status = 'confirmed' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL
         ORDER BY r.confirmed_at ASC");
 }
 
@@ -36,7 +36,7 @@ function dcvsStaffResolvedCasesQuery($conn) {
         JOIN reports r ON cc.report_id = r.report_id
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON cc.barangay_id = b.barangay_id
-        WHERE r.status = 'resolved' AND r.archived_at IS NULL AND u.status = 'active' AND u.deleted_at IS NULL
+        WHERE r.status = 'resolved' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') AND u.status = 'active' AND u.deleted_at IS NULL
         ORDER BY cc.resolved_at DESC");
 }
 
@@ -72,7 +72,7 @@ function dcvsStaffReportItemsQuery($conn) {
 
     return $conn->query("
         SELECT r.report_id, r.reference_id, r.report_type, r.barangay_id, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.location_address,
-               r.status, r.urgency_level, r.photo_url, r.video_url, r.incident_at, r.created_at, r.updated_at, r.scheduled_at,
+               r.status, r.duplicate_status, r.parent_report_id, r.urgency_level, r.photo_url, r.video_url, r.incident_at, r.created_at, r.updated_at, r.scheduled_at,
                r.validated_at,
                r.barangay_notes, {$validationStatusColumn} AS barangay_validation_status,
                {$validationNotesColumn} AS barangay_validation_notes,
@@ -88,6 +88,7 @@ function dcvsStaffReportItemsQuery($conn) {
                rw.turnover_deadline, rw.secured_at, rw.holding_location, rw.animal_condition,
                rw.high_risk_override_by, rw.high_risk_override_reason, hov.full_name AS high_risk_override_staff,
                rw.dispatch_officer_id, dos.full_name AS dispatch_officer_name,
+               rw.escalated_at, rw.assigned_at,
                rw.turnover_requested_at, rw.turnover_received_at,
                rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at,
                rru.full_name AS resolution_actor,
@@ -99,7 +100,11 @@ function dcvsStaffReportItemsQuery($conn) {
                {$turnoverColumn('pickup_location', 'turnover_pickup_location')},
                {$turnoverColumn('safe_transport', 'turnover_safe_transport', '0')},
                tt.received_at AS turnover_receipt_at, ttu.full_name AS turnover_receiver,
-               cs.full_name AS confirmed_staff, vs.full_name AS validated_staff
+               cs.full_name AS confirmed_staff, vs.full_name AS validated_staff,
+               (SELECT COUNT(*) FROM reports supporting
+                WHERE supporting.parent_report_id = r.report_id
+                  AND supporting.duplicate_status = 'merged'
+                  AND supporting.archived_at IS NULL) AS supporting_report_count
         FROM reports r
         JOIN users u ON r.reporter_id = u.user_id
         LEFT JOIN barangays b ON r.barangay_id = b.barangay_id
@@ -113,7 +118,7 @@ function dcvsStaffReportItemsQuery($conn) {
         LEFT JOIN users rru ON rr.resolved_by = rru.user_id
         LEFT JOIN report_turnover_tasks tt ON r.report_id = tt.report_id
         LEFT JOIN users ttu ON tt.received_by = ttu.user_id
-        WHERE r.archived_at IS NULL
+        WHERE r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
         ORDER BY r.created_at DESC
     ");
 }

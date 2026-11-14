@@ -1,10 +1,11 @@
 <?php
 $sessionName = trim((string)($_GET['sess'] ?? ''));
-session_name(in_array($sessionName, ['DCVS_BARANGAY_SESSION', 'PHPSESSID'], true)
+session_name(in_array($sessionName, ['DCVS_BARANGAY_SESSION', 'DCVS_ADMIN_SESSION', 'PHPSESSID'], true)
     ? $sessionName
     : 'DCVS_STAFF_SESSION');
 session_start();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/reports/duplicates.php';
 
 header('Cache-Control: private, no-store');
 header('X-Content-Type-Options: nosniff');
@@ -13,7 +14,7 @@ $role = (string)($_SESSION['role'] ?? '');
 $userId = (int)($_SESSION['user_id'] ?? 0);
 $barangayId = (int)($_SESSION['barangay_id'] ?? 0);
 if (($_SESSION['logged_in'] ?? false) !== true
-    || !in_array($role, ['resident', 'staff', 'barangay'], true)
+    || !in_array($role, ['resident', 'staff', 'barangay', 'admin'], true)
     || $userId <= 0) {
     http_response_code(401);
     exit;
@@ -24,7 +25,7 @@ if (!$attachmentId || $attachmentId <= 0) {
     http_response_code(400);
     exit;
 }
-$query = $conn->prepare("SELECT a.file_url, a.mime_type, a.attachment_type, a.attachment_source,
+$query = $conn->prepare("SELECT a.attachment_id, a.report_id, a.file_url, a.mime_type, a.attachment_type, a.attachment_source,
         a.shared_with_resident, r.reporter_id, r.barangay_id
     FROM report_attachments a
     JOIN reports r ON r.report_id = a.report_id
@@ -55,20 +56,41 @@ $residentVisibleSources = [
     'barangay_action',
     'staff_action',
 ];
+$duplicatePhotoAccess = false;
+if ($role === 'resident' && $attachment['attachment_source'] === 'resident') {
+    $duplicatePhotoAccessData = $_SESSION['report_duplicate_candidates'] ?? null;
+    $authorizedAttachments = is_array($duplicatePhotoAccessData['attachments'] ?? null)
+        ? $duplicatePhotoAccessData['attachments']
+        : [];
+    $duplicatePhotoAccess = is_array($duplicatePhotoAccessData)
+        && (int)($duplicatePhotoAccessData['created_at'] ?? 0) >= time() - 300
+        && isset($authorizedAttachments[(string)$attachmentId])
+        && (int)$authorizedAttachments[(string)$attachmentId] === (int)$attachment['report_id'];
+}
 $allowed = $role === 'staff'
+    || $role === 'admin'
     || ($role === 'barangay' && $barangayId > 0 && (int)$attachment['barangay_id'] === $barangayId)
     || ($role === 'resident'
         && (int)$attachment['reporter_id'] === $userId
         && ($attachment['attachment_source'] === 'resident'
-            || in_array((string)$attachment['attachment_source'], $residentVisibleSources, true)));
+            || in_array((string)$attachment['attachment_source'], $residentVisibleSources, true)))
+    || $duplicatePhotoAccess;
 if (!$allowed || $attachment['attachment_type'] !== 'photo') {
     http_response_code(403);
     exit;
 }
 
 $relativePath = (string)$attachment['file_url'];
-if (strpos($relativePath, 'uploads/report-evidence/') !== 0
-    || basename($relativePath) !== substr($relativePath, strlen('uploads/report-evidence/'))) {
+$allowedUploadPrefixes = ['uploads/report-evidence/', 'uploads/reports/'];
+$validRelativePath = false;
+foreach ($allowedUploadPrefixes as $prefix) {
+    if (strpos($relativePath, $prefix) === 0
+        && basename($relativePath) === substr($relativePath, strlen($prefix))) {
+        $validRelativePath = true;
+        break;
+    }
+}
+if (!$validRelativePath) {
     http_response_code(404);
     exit;
 }
@@ -78,7 +100,7 @@ if (!is_file($absolutePath) || !is_readable($absolutePath)) {
     exit;
 }
 $mimeType = (string)$attachment['mime_type'];
-if (!in_array($mimeType, ['image/jpeg', 'image/png'], true)) {
+if (!in_array($mimeType, ['image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) {
     http_response_code(415);
     exit;
 }

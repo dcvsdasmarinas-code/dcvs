@@ -12,6 +12,12 @@ $boundaryPath = __DIR__ . '/../geo-map/barangays-boundary.json';
 $features = dcvsLoadOfficialBarangayPolygons($crosswalkPath, $boundaryPath);
 expectLocationCondition(count($features) === 75, 'Expected 75 official polygon mappings.');
 
+$kldBarangay = dcvsResolveOfficialBarangayPin(120.95126193779254, 14.334022388717354, $features);
+expectLocationCondition(
+    $kldBarangay !== null && $kldBarangay['barangay_name'] === 'Burol',
+    'The KLD reference coordinates should resolve to the official Burol boundary.'
+);
+
 $square = [
     'type' => 'Polygon',
     'coordinates' => [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],

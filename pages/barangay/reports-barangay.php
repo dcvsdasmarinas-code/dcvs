@@ -6,15 +6,18 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['barangay_id']) || ($_SESSI
     header('Location: login-barangay.php');
     exit;
 }
+$isOverduePage = (string)($_GET['status'] ?? '') === 'overdue';
 
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../env.php';
 require_once __DIR__ . '/../../includes/barangay-app-base.php';
+require_once __DIR__ . '/../../includes/reports/deadlines.php';
 loadDcvsEnv();
 $appBaseUrl = dcvsBarangayAppBaseUrl();
 $barangayResponseEnabled = env('DCVS_BARANGAY_RESPONSE_ENABLED', '0') === '1';
 $responseTargetHours = max(1, (int)env('DCVS_RESPONSE_TARGET_HOURS', '24'));
 $progressTargetHours = max(1, (int)env('DCVS_PROGRESS_TARGET_HOURS', '48'));
+$reportOverdueSlaSettings = dcvsLoadReportOverdueSlaSettings($conn);
 
 $userId     = (int)$_SESSION['user_id'];
 $barangayId = (int)$_SESSION['barangay_id'];
@@ -77,6 +80,8 @@ $rq = $conn->prepare("
            r.barangay_notes, r.dcvs_notes, rw.response_mode, rw.state AS response_state,
            rw.response_deadline, rw.progress_deadline, rw.last_progress_at, rw.turnover_deadline,
            rw.holding_location, rw.animal_condition, rw.secured_at,
+           rw.escalated_at, rw.assigned_at,
+           r.scheduled_at, cc.status AS case_status,
            rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at,
            tt.status AS turnover_status, tt.due_at AS turnover_due_at,
            " . $turnoverColumn('handover_method', 'turnover_method') . ",
@@ -98,7 +103,7 @@ $rq = $conn->prepare("
     LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
     LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
     LEFT JOIN users turnover_receiver ON turnover_receiver.user_id = tt.received_by
-    WHERE r.barangay_id = ? AND r.archived_at IS NULL
+    WHERE r.barangay_id = ? AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
     ORDER BY r.created_at DESC
 ");
 if (!$rq) {
@@ -110,6 +115,16 @@ $rq->execute();
 $rResult = $rq->get_result();
 while ($rRow = $rResult->fetch_assoc()) {
   $reportedAt = !empty($rRow['incident_at']) ? $rRow['incident_at'] : $rRow['created_at'];
+    $overdueInfo = dcvsReportOverdueInfo($rRow, null, $reportOverdueSlaSettings);
+    $statusLabel = ($rRow['response_state'] ?? '') === 'barangay_response_approved'
+        ? 'Accepted by Barangay'
+        : (($rRow['response_state'] ?? '') === 'barangay_responding' && $rRow['status'] === 'validated'
+            ? 'Barangay Responding'
+            : (($rRow['response_state'] ?? '') === 'escalated_to_dcvs'
+                ? 'Escalated to DCVS'
+                : (($rRow['response_state'] ?? '') === 'unable_to_locate'
+                    ? 'Unable to Locate'
+                    : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status'])))));
     $reports[] = [
         'id'            => $rRow['reference_id'],
         'report_id'     => (int)$rRow['report_id'],
@@ -138,15 +153,7 @@ while ($rRow = $rResult->fetch_assoc()) {
         'priority'      => ucfirst($rRow['urgency_level']),
         'urgency'       => $rRow['urgency_level'],
         'fieldStatus'   => (string)($rRow['barangay_validation_status'] ?? ''),
-        'status'        => ($rRow['response_state'] ?? '') === 'barangay_response_approved'
-            ? 'Accepted by Barangay'
-            : (($rRow['response_state'] ?? '') === 'barangay_responding' && $rRow['status'] === 'validated'
-                ? 'Barangay Responding'
-                : ((($rRow['response_state'] ?? '') === 'escalated_to_dcvs')
-                    ? 'Escalated to DCVS'
-                    : ((($rRow['response_state'] ?? '') === 'unable_to_locate')
-                        ? 'Unable to Locate'
-                        : ($statusLabels[$rRow['status']] ?? ucfirst($rRow['status']))))),
+        'status'        => $overdueInfo['badge'] ?? $statusLabel,
         'assignedTo'    => $rRow['validator_name'] ?: 'Unassigned',
         'dateResolved'  => $rRow['resolved_at'] ? date('M j, Y g:i A', strtotime($rRow['resolved_at'])) : '-',
         '_created_at'   => $rRow['created_at'],
@@ -161,6 +168,11 @@ while ($rRow = $rResult->fetch_assoc()) {
         'responseMode' => (string)($rRow['response_mode'] ?? ''),
         'responseDeadline' => (string)($rRow['response_deadline'] ?? ''),
         'progressDeadline' => (string)($rRow['progress_deadline'] ?? ''),
+        'isOverdue' => $overdueInfo !== null,
+        'overdueReason' => $overdueInfo['reason'] ?? '',
+        'overdueAction' => $overdueInfo['action'] ?? '',
+        'overdueBadge' => $overdueInfo['badge'] ?? '',
+        'overdueDeadline' => $overdueInfo['deadline'] ?? '',
         'lastProgressAt' => (string)($rRow['last_progress_at'] ?? ''),
         'turnoverDeadline' => (string)($rRow['turnover_deadline'] ?? ''),
         'holdingLocation' => (string)($rRow['holding_location'] ?? ''),
@@ -185,6 +197,49 @@ while ($rRow = $rResult->fetch_assoc()) {
     ];
 }
 $rq->close();
+
+$supportingReportsByParent = [];
+$supportingQuery = $conn->prepare("
+    SELECT child.parent_report_id, child.report_id, child.reference_id, child.report_type,
+           child.description, child.location_address, child.created_at, child.photo_url
+    FROM reports child
+    INNER JOIN reports primary_report ON primary_report.report_id = child.parent_report_id
+    WHERE primary_report.barangay_id = ?
+      AND primary_report.archived_at IS NULL
+      AND child.duplicate_status = 'merged'
+      AND child.archived_at IS NULL
+    ORDER BY child.parent_report_id, child.created_at, child.report_id
+");
+if (!$supportingQuery) {
+    error_log('Could not prepare supporting report details for Barangay report drawer: ' . $conn->error);
+    throw new RuntimeException('Could not load supporting report details.');
+} else {
+    $supportingQuery->bind_param('i', $barangayId);
+    if (!$supportingQuery->execute()) {
+        $supportingQueryError = $supportingQuery->error;
+        $supportingQuery->close();
+        error_log('Could not load supporting report details for Barangay report drawer: ' . $supportingQueryError);
+        throw new RuntimeException('Could not load supporting report details.');
+    } else {
+        $supportingResult = $supportingQuery->get_result();
+        while ($supportingReport = $supportingResult->fetch_assoc()) {
+            $supportingReportsByParent[(int)$supportingReport['parent_report_id']][] = [
+                'id' => (int)$supportingReport['report_id'],
+                'ref' => (string)($supportingReport['reference_id'] ?: ('Report #' . $supportingReport['report_id'])),
+                'type' => $typeLabels[$supportingReport['report_type']] ?? ucfirst((string)$supportingReport['report_type']),
+                'description' => (string)$supportingReport['description'],
+                'location' => (string)$supportingReport['location_address'],
+                'submitted' => date('M j, Y g:i A', strtotime($supportingReport['created_at'])),
+                'photo' => dcvsBarangayReportMediaUrl($supportingReport['photo_url'] ?: ''),
+            ];
+        }
+    }
+    $supportingQuery->close();
+}
+foreach ($reports as &$report) {
+    $report['supportingReportDetails'] = $supportingReportsByParent[(int)$report['report_id']] ?? [];
+}
+unset($report);
 
 $reportStatusMetrics = [
     'pending' => ['total' => 0, 'recent' => 0, 'previous' => 0],
@@ -259,7 +314,51 @@ $makeTrendText = static function (int $current, int $previous, string $period = 
     return $direction . ' ' . $percentage . '% vs ' . $period;
 };
 $reportKpiPage = (string)($_GET['status'] ?? '');
-if ($reportKpiPage === 'pending') {
+$overdueKpiCounts = ['total' => 0, 'dcvs' => 0, 'review' => 0, 'followup' => 0];
+foreach ($reports as $report) {
+    if (empty($report['isOverdue'])) {
+        continue;
+    }
+    $overdueKpiCounts['total']++;
+    $overdueAction = strtolower((string)($report['overdueAction'] ?? ''));
+    if (in_array($overdueAction, ['dispatch', 'scheduling'], true)) {
+        $overdueKpiCounts['dcvs']++;
+    } elseif ($overdueAction === 'review') {
+        $overdueKpiCounts['review']++;
+    } else {
+        $overdueKpiCounts['followup']++;
+    }
+}
+$reportPageTitles = [
+    'pending' => 'Pending Barangay Review',
+    'validated' => 'Pending DCVS Review',
+    'confirmed' => 'In Progress Reports',
+    'scheduled' => 'In Progress Reports',
+    'active' => 'In Progress Reports',
+    'resolved' => 'Resolved Reports',
+    'rejected' => 'Closed Reports',
+    'overdue' => 'Overdue Reports',
+];
+$reportPageDescriptions = [
+    'pending' => 'Reports awaiting review and action from your barangay.',
+    'validated' => 'Reports forwarded to DCVS and awaiting review.',
+    'confirmed' => 'Cases currently being handled by your barangay or DCVS.',
+    'scheduled' => 'Cases currently being handled by your barangay or DCVS.',
+    'active' => 'Cases currently being handled by your barangay or DCVS.',
+    'resolved' => 'Completed reports for your barangay.',
+    'rejected' => 'Closed reports that are no longer active.',
+    'overdue' => 'Active reports whose current response-stage deadline has passed.',
+];
+$reportPageTitle = $reportPageTitles[$reportKpiPage] ?? 'Reports';
+$reportPageDescription = $reportPageDescriptions[$reportKpiPage] ?? 'Review reports submitted to your barangay and track cases that need attention.';
+if ($reportKpiPage === 'overdue') {
+    $reportKpiCards = [
+        ['label' => 'Total Overdue', 'value' => $overdueKpiCounts['total'], 'note' => 'Past the current stage deadline'],
+        ['label' => 'Dispatch / Scheduling', 'value' => $overdueKpiCounts['dcvs'], 'note' => 'Awaiting DCVS action'],
+        ['label' => 'Barangay Review', 'value' => $overdueKpiCounts['review'], 'note' => 'Awaiting barangay review'],
+        ['label' => 'Visit / Follow-up', 'value' => $overdueKpiCounts['followup'], 'note' => 'Visit or case follow-up overdue'],
+    ];
+} elseif ($reportKpiPage === 'pending') {
     $reportKpiCards = [
         ['label' => 'Pending Barangay Review', 'value' => $reportStatusMetrics['pending']['total'], 'note' => $makeTrendText($reportStatusMetrics['pending']['recent'], $reportStatusMetrics['pending']['previous'])],
         ['label' => 'High Priority', 'value' => $pendingPriorityMetrics['total'], 'note' => $makeTrendText($pendingPriorityMetrics['recent'], $pendingPriorityMetrics['previous'])],
@@ -312,6 +411,7 @@ if ($barangayResponseEnabled) {
             'toState' => (string)$historyRow['to_state'],
             'reason' => (string)($historyRow['reason'] ?? ''),
             'createdAt' => $historyCreatedAt ? date('M j, Y g:i A', $historyCreatedAt) : (string)$historyRow['created_at'],
+            'createdAtRaw' => (string)$historyRow['created_at'],
         ];
     }
     $historyQuery->close();
@@ -389,7 +489,7 @@ $activePage = 'reports';
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>All Reports — <?php echo htmlspecialchars('BRGY. ' . strtoupper($barangayName)); ?></title>
+  <title><?php echo $isOverduePage ? 'Overdue Reports' : 'All Reports'; ?> — <?php echo htmlspecialchars('BRGY. ' . strtoupper($barangayName)); ?></title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -458,6 +558,11 @@ $activePage = 'reports';
     .report-kpi-trend{color:#71717a;font-size:14px;font-weight:400}
 
     .page-header{display:flex;justify-content:flex-end;margin-bottom:1rem;}
+    .report-page-heading{display:flex;flex-direction:column;gap:4px;margin:0 0 18px;}
+    .report-page-heading h1{margin:0;color:#18181b;font-size:22px;font-weight:600;letter-spacing:-.025em;}
+    .report-page-heading p{margin:0;color:#71717a;font-size:14px;line-height:1.5;}
+    .overdue-obligation{color:#b91c1c;font-size:13px;font-weight:500;line-height:1.4;}
+    .overdue-deadline{margin-top:3px;color:#71717a;font-size:12px;line-height:1.4;}
 
     /* ── Card header (search + filters + buttons) ── */
     .appt-card-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:1rem;}
@@ -791,6 +896,14 @@ $activePage = 'reports';
     .report-details-scope .response-history-item .rpt-updates-photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;margin-top:10px;}
     .report-details-scope .response-history-item .rpt-perspective-attachment{padding:0;}
     .report-details-scope .response-card{overflow:hidden;border:1px solid #e4e4e7;border-radius:9px;background:#fff;}
+    .report-details-scope .response-card.is-dcvs .response-card-title{font-size:12px;letter-spacing:.08em;text-transform:uppercase;}
+    .report-details-scope .response-date-summary{padding:12px 12px 0;color:#52525b;font-size:12px;line-height:1.45;}
+    .report-details-scope .response-date-summary-main{display:flex;flex-wrap:wrap;gap:0 4px;color:#71717a;}
+    .report-details-scope .response-date-delay{margin-top:4px;color:#52525b;}
+    .report-details-scope .response-overdue-alert{display:flex;align-items:flex-start;gap:8px;margin:12px 12px 0;padding:10px 12px;border:1px solid #fecaca;border-radius:7px;background:#fef2f2;color:#b91c1c;font-size:12px;line-height:1.5;}
+    .report-details-scope .response-overdue-alert .response-notice-icon{margin-top:2px;}
+    .report-details-scope .response-overdue-alert-title{display:block;font-size:13px;font-weight:600;}
+    .report-details-scope .response-overdue-alert-detail{display:block;margin-top:1px;}
     .report-details-scope .response-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px 12px 10px;}
     .report-details-scope .response-card-heading{min-width:0;flex:1;}
     .report-details-scope .response-card-title{font-size:14px;font-weight:600;color:#18181b;line-height:1.25;letter-spacing:-.025em;}
@@ -876,6 +989,7 @@ $activePage = 'reports';
           $breadcrumbLabels = [
             'pending' => 'Pending Barangay Review',
             'validated' => 'Pending DCVS Review',
+            'overdue' => 'Overdue Reports',
             'resolved'  => 'Resolved Cases',
           ];
           echo htmlspecialchars($breadcrumbLabels[$statusParam] ?? 'All Reports');
@@ -931,6 +1045,10 @@ $activePage = 'reports';
 
   <main class="main-content">
 
+    <header class="report-page-heading">
+      <h1><?php echo htmlspecialchars($reportPageTitle, ENT_QUOTES, 'UTF-8'); ?></h1>
+      <p><?php echo htmlspecialchars($reportPageDescription, ENT_QUOTES, 'UTF-8'); ?></p>
+    </header>
     <section class="report-kpi-grid" style="--report-kpi-columns:<?php echo count($reportKpiCards); ?>;" aria-label="Report summary">
       <?php foreach ($reportKpiCards as $kpiCard): ?>
         <article class="report-kpi-card">
@@ -945,16 +1063,17 @@ $activePage = 'reports';
       <div class="appt-header-right portal-toolbar-controls">
         <div class="portal-toolbar-search-row">
         <div class="appt-search-wrap">
-          <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by ID, category, location..." />
+          <input type="text" id="searchInput" class="appt-search-input" placeholder="<?php echo $isOverduePage ? 'Search overdue reports...' : 'Search by ID, category, location...'; ?>" />
         </div>
         </div>
         <div class="portal-toolbar-filter-grid">
-        <select class="appt-status-select" id="statusFilter">
+        <select class="appt-status-select" id="statusFilter" <?php echo $isOverduePage ? 'disabled style="display:none;"' : ''; ?>>
           <option value="">All Status</option>
           <option value="pending">Pending Barangay Review</option>
           <option value="validated">Pending DCVS Review</option>
           <option value="confirmed">In progress</option>
           <option value="resolved">Resolved</option>
+          <option value="overdue">Overdue</option>
           <option value="rejected">Closed</option>
         </select>
         <select class="appt-status-select" id="categoryFilter">
@@ -970,6 +1089,17 @@ $activePage = 'reports';
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
+        <?php if ($isOverduePage): ?>
+        <select class="appt-status-select portal-toolbar-last-filter" id="overdueActionFilter" aria-label="Filter overdue reports by action" onchange="refresh()">
+          <option value="">All Overdue Actions</option>
+          <option value="dispatch">Dispatch overdue</option>
+          <option value="scheduling">Scheduling overdue</option>
+          <option value="visit">Visit overdue</option>
+          <option value="review">Review overdue</option>
+          <option value="resolution">Resolution overdue</option>
+          <option value="turnover">Turnover overdue</option>
+        </select>
+        <?php endif; ?>
         </div>
         <div class="portal-toolbar-actions portal-toolbar-single-secondary">
           <button class="pet-action-btn portal-toolbar-secondary" id="clearFiltersBtn" style="display:none;" onclick="clearAllFilters()">
@@ -980,7 +1110,7 @@ $activePage = 'reports';
       <button class="pet-action-btn export-csv-btn portal-toolbar-primary" type="button" onclick="exportAll()"><span>Export CSV</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></button>
     </div>
 
-    <div class="bulk-bar" id="bulkBar">
+    <div class="bulk-bar" id="bulkBar" <?php echo $isOverduePage ? 'style="display:none;"' : ''; ?>>
       <div class="bulk-actions">
         <span class="bulk-count"><span id="bulkCount">0</span> reports selected</span>
         <button class="bulk-btn" onclick="bulkValidate()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg> Validate</button>
@@ -994,7 +1124,18 @@ $activePage = 'reports';
       <table class="appt-table">
         <thead>
           <tr>
+            <?php if (!$isOverduePage): ?>
             <th style="width:40px;"><input type="checkbox" class="sd-table-cb" id="selectAll" onclick="toggleSelectAll(this)" /></th>
+            <?php endif; ?>
+            <?php if ($isOverduePage): ?>
+            <th>Report ID</th>
+            <th>Reporter</th>
+            <th>Type</th>
+            <th>Location</th>
+            <th>Overdue obligation</th>
+            <th>Status</th>
+            <th style="width:48px;"></th>
+            <?php else: ?>
             <th class="sd-th"><button type="button" class="th-sort" data-col="id" onclick="TBL.sortBy('id')">Report ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="category" onclick="TBL.sortBy('category')">Category<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th>Location</th>
@@ -1005,6 +1146,7 @@ $activePage = 'reports';
             <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="TBL.sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th>Date Resolved</th>
             <th style="width:48px;"></th>
+            <?php endif; ?>
           </tr>
         </thead>
         <tbody id="reportsTableBody"></tbody>
@@ -1206,6 +1348,7 @@ $activePage = 'reports';
 <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/response-workflow.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/response-workflow.js'); ?>"></script>
 <script>
 var REPORTS_DATA = <?php echo json_encode($reports, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+var IS_OVERDUE_PAGE = <?php echo $isOverduePage ? 'true' : 'false'; ?>;
 window.DCVS_APP_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
 window.DCVS_BARANGAY_RESPONSE_ENABLED = <?php echo $barangayResponseEnabled ? 'true' : 'false'; ?>;
 window.DCVS_RESPONSE_ROLE = 'barangay';
@@ -1229,11 +1372,14 @@ function getFilteredList() {
   var st = document.getElementById('statusFilter').value;
   var cat = document.getElementById('categoryFilter').value;
   var pri = document.getElementById('priorityFilter').value;
+  var overdueActionFilter = document.getElementById('overdueActionFilter');
+  var action = overdueActionFilter ? overdueActionFilter.value : '';
   return REPORTS_DATA.filter(function(r) {
-    if (st && (r._db_status || '').toLowerCase() !== st.toLowerCase()) return false;
+    if (st === 'overdue' ? !r.isOverdue : (st && (r._db_status || '').toLowerCase() !== st.toLowerCase())) return false;
+    if (action && String(r.overdueAction || '').toLowerCase() !== action) return false;
     if (cat && r.type.toLowerCase() !== cat.toLowerCase()) return false;
     if (pri && r.urgency.toLowerCase() !== pri.toLowerCase()) return false;
-    if (s && (r.id.toLowerCase().indexOf(s) !== -1 || r.category.toLowerCase().indexOf(s) !== -1 || r.location.toLowerCase().indexOf(s) !== -1 || r.dateResolved.toLowerCase().indexOf(s) !== -1 || (r.reporter || '').toLowerCase().indexOf(s) !== -1 || (r.phone || '').toLowerCase().indexOf(s) !== -1 || (r.email || '').toLowerCase().indexOf(s) !== -1)) return true;
+    if (s && [r.id, r.category, r.location, r.dateResolved, r.overdueReason, r.overdueBadge, r.reporter, r.phone, r.email].join(' ').toLowerCase().indexOf(s) !== -1) return true;
     if (!s) return true;
     return false;
   });
@@ -1244,7 +1390,54 @@ function renderRows(list) {
   var tbody = document.getElementById('reportsTableBody');
   tbody.innerHTML = '';
   if (!list.length) {
-    tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:32px 16px;color:#71717a;font-size:14px;">No reports found.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="' + (IS_OVERDUE_PAGE ? 7 : 11) + '" style="text-align:center;padding:32px 16px;color:#71717a;font-size:14px;">' +
+      (IS_OVERDUE_PAGE ? 'No overdue reports found.' : 'No reports found.') + '</td></tr>';
+    return;
+  }
+  if (IS_OVERDUE_PAGE) {
+    var overdueObligationText = function(report) {
+      var descriptions = {
+        dispatch: 'No response team has been dispatched yet.',
+        scheduling: 'No visit date has been set.',
+        visit: 'The scheduled visit date has passed.',
+        review: 'The barangay review deadline has passed.',
+        resolution: 'The progress update deadline has passed.',
+        turnover: 'The handover deadline has passed.'
+      };
+      return descriptions[String(report.overdueAction || '').toLowerCase()]
+        || report.overdueReason
+        || 'The current response-stage deadline has passed.';
+    };
+    var deadlineLabel = function(value) {
+      var raw = String(value || '').trim();
+      if (!raw) return 'Date unavailable';
+      var date = new Date(raw.replace(' ', 'T'));
+      return Number.isNaN(date.getTime())
+        ? raw
+        : date.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    };
+    list.forEach(function(r) {
+      var tr = document.createElement('tr');
+      tr.setAttribute('data-rid', r.report_id);
+      tr.style.cursor = 'pointer';
+      tr.innerHTML =
+        '<td><div class="client-cell"><span class="client-name report-id-value">' + detailEsc(r.id) + '</span></div></td>' +
+        '<td><span class="reporter-cell-name">' + detailEsc(r.reporter || '-') + '</span></td>' +
+        '<td style="font-size:14px;color:#18181b;">' + detailEsc(r.category || '-') + '</td>' +
+        '<td class="location-value">' + detailEsc(r.location || '-') + '</td>' +
+        '<td><div class="overdue-obligation">' + detailEsc(overdueObligationText(r)) + '</div>' +
+          '<div class="overdue-deadline">Due ' + detailEsc(deadlineLabel(r.overdueDeadline)) + '</div></td>' +
+        '<td><span class="appt-status-pill" style="background:#FEF2F2;color:#B91C1C;border-color:#FECACA;">' +
+          detailEsc(r.overdueBadge || r.status || 'Overdue') + '</span></td>' +
+        '<td class="sd-td-action"><div class="action-dropdown"><button type="button" class="sd-row-actions" onclick="event.stopPropagation();toggleDropdown(this)" title="More options" aria-label="More options">' +
+          '<span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button><div class="action-menu">' +
+          '<button class="action-menu-item" onclick="closeDropdowns();viewReportLocation(' + r.report_id + ')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>View Location</button>' +
+          (r._db_status === 'pending' ? '<button class="action-menu-item" onclick="closeDropdowns();validateSingle(' + r.report_id + ')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>Validate</button>' +
+            '<button class="action-menu-item" onclick="closeDropdowns();rejectSingle(' + r.report_id + ',\'' + detailEsc(r.id) + '\')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>Reject</button>' : '') +
+          (r._db_status === 'pending' || r._db_status === 'resolved' ? '<button class="action-menu-item danger" onclick="closeDropdowns();archiveSingle(' + r.report_id + ',\'' + detailEsc(r.id) + '\')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</button><button class="action-menu-item danger" onclick="closeDropdowns();deleteSingle(' + r.report_id + ',\'' + detailEsc(r.id) + '\')"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7c-1 0-2-1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>' : '') +
+          '</div></div></td>';
+      tbody.appendChild(tr);
+    });
     return;
   }
   list.forEach(function(r) {
@@ -1260,7 +1453,8 @@ function renderRows(list) {
 
     var sBg, sColor, sBorder;
     var st = (r._db_status || '').toLowerCase();
-    if (st === 'resolved') { sBg='#0E8131'; sColor='#ffffff'; sBorder='#0E8131'; }
+    if (r.isOverdue) { sBg='#FEF2F2'; sColor='#B91C1C'; sBorder='#FECACA'; }
+    else if (st === 'resolved') { sBg='#0E8131'; sColor='#ffffff'; sBorder='#0E8131'; }
     else if (st === 'validated') { sBg='#dcebe0'; sColor='#045e1f'; sBorder='#bbf7d0'; }
     else if (st === 'confirmed' || st === 'scheduled') { sBg='#EFF6FF'; sColor='#1E40AF'; sBorder='#BFDBFE'; }
     else if (st === 'rejected') { sBg='#FEE2E2'; sColor='#991B1B'; sBorder='#FECACA'; }
@@ -1668,6 +1862,20 @@ document.addEventListener('click', function(e) {
 function detailEsc(value) {
   return String(value == null ? '' : value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+function barangaySupportingSubmissionsHtml(report) {
+  var submissions = Array.isArray(report.supportingReportDetails) ? report.supportingReportDetails : [];
+  if (!submissions.length) return '';
+  return '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Supporting submissions (' + submissions.length + ')</div>' +
+    '<div style="display:grid;gap:12px;">' + submissions.map(function(item) {
+      return '<article style="padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px;">' +
+        '<div style="font-size:13px;font-weight:600;">' + detailEsc(item.ref || ('Report #' + item.id)) + '</div>' +
+        '<div style="margin-top:3px;color:#71717a;font-size:12px;">' + detailEsc(item.type || 'Report') + ' · ' + detailEsc(item.submitted || 'Date unavailable') + '</div>' +
+        '<div style="margin-top:5px;font-size:12px;"><strong>Location:</strong> ' + detailEsc(item.location || 'Not specified') + '</div>' +
+        '<p style="margin:5px 0 0;font-size:12px;white-space:pre-wrap;">' + detailEsc(item.description || 'No description provided.') + '</p>' +
+        (item.photo ? '<a href="' + detailEsc(item.photo) + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;"><img src="' + detailEsc(item.photo) + '" alt="Photo for ' + detailEsc(item.ref || ('Report #' + item.id)) + '" style="width:96px;height:72px;object-fit:cover;border:1px solid #e4e4e7;border-radius:6px;"></a>' : '') +
+        '</article>';
+    }).join('') + '</div></div>';
+}
 var barangayEvidenceItems = [];
 var barangayEvidenceIndex = 0;
 function renderBarangayEvidenceViewer() {
@@ -1731,8 +1939,9 @@ function barangayInfoRow(label, value) {
 function buildReportDetailHtml(report) {
   var isPending = report._db_status === 'pending';
   var isRejected = report._db_status === 'rejected';
-  var displayStatus = report._db_status === 'pending' ? 'Pending Barangay Review'
-    : (report._db_status === 'validated' ? 'Pending DCVS Review' : report.status);
+  var displayStatus = report.isOverdue ? (report.overdueBadge || 'Overdue')
+    : (report._db_status === 'pending' ? 'Pending Barangay Review'
+      : (report._db_status === 'validated' ? 'Pending DCVS Review' : report.status));
 
   var evidencePhotos = Array.isArray(report.evidence) ? report.evidence : [];
   barangayEvidenceItems = barangayCaseEvidence(report);
@@ -1756,9 +1965,7 @@ function buildReportDetailHtml(report) {
       '<p style="font-size:14px;color:#1e3a8a;line-height:1.6;margin:0;">' + detailEsc(report.dcvsNotes) + '</p></div>' : '';
   var responseDeadline = report.responseDeadline || report.progressDeadline
     || (report._db_status === 'resolved' && report.turnoverStatus === 'pending' ? report.turnoverDueAt : '');
-  var responseDeadlineTime = responseDeadline ? new Date(responseDeadline.replace(' ', 'T')).getTime() : 0;
-  var responseOverdue = !!responseDeadlineTime && responseDeadlineTime < Date.now()
-    && (report._db_status !== 'resolved' || report.turnoverStatus === 'pending');
+  var responseOverdue = !!report.isOverdue;
   var isEscalatedToDcvs = report.responseState === 'escalated_to_dcvs';
   var responseHistoryLabels = {
     accept_barangay_assignment: 'Accepted',
@@ -1784,6 +1991,26 @@ function buildReportDetailHtml(report) {
     reject_report: 'Report rejected'
   };
   var responseHistory = Array.isArray(report.responseHistory) ? report.responseHistory : [];
+  var overdueUpdate = typeof window.responseWorkflowOverdueUpdate === 'function'
+    ? window.responseWorkflowOverdueUpdate(report)
+    : null;
+  var displayedResponseHistory = responseHistory.slice();
+  if (overdueUpdate && !displayedResponseHistory.some(function(entry) { return entry.action === 'current_overdue'; })) {
+    displayedResponseHistory.push({
+      action: overdueUpdate.action,
+      title: overdueUpdate.title,
+      actorName: overdueUpdate.actor,
+      actorRole: overdueUpdate.actorRole,
+      reason: overdueUpdate.reason,
+      createdAt: overdueUpdate.createdAt,
+      createdAtRaw: overdueUpdate.createdAtRaw,
+      id: 0
+    });
+  }
+  displayedResponseHistory.sort(function(a, b) {
+    return new Date(a.createdAtRaw || a.createdAt || 0).getTime()
+      - new Date(b.createdAtRaw || b.createdAt || 0).getTime();
+  });
   var linkedEvidenceIndices = {};
   function evidenceForHistory(entry) {
     var legacySources = {
@@ -1839,10 +2066,12 @@ function buildReportDetailHtml(report) {
       attachmentSection('From Brgy. ' + detailEsc(report.brgy || 'Barangay'), barangayItems, 'No attachments have been added by the barangay.') +
       attachmentSection('From DCVS', dcvsItems, 'No attachments have been added by DCVS.');
   }
-  var responseHistoryHtml = responseHistory.length
-    ? '<ol class="response-history">' + responseHistory.slice().reverse().map(function(entry) {
-        var title = responseHistoryLabels[entry.action] || String(entry.action || 'Case update').replace(/_/g, ' ');
-        var actor = entry.actorName || (entry.actorRole === 'system' ? 'System' : entry.actorRole) || 'System';
+  var responseHistoryHtml = displayedResponseHistory.length
+    ? '<ol class="response-history">' + displayedResponseHistory.slice().reverse().map(function(entry) {
+        var title = entry.title || responseHistoryLabels[entry.action] || String(entry.action || 'Case update').replace(/_/g, ' ');
+        var isSystemEntry = String(entry.actorRole || '').toLowerCase() === 'system' ||
+          String(entry.actorName || '').trim().toLowerCase() === 'system';
+        var actor = entry.actorName || entry.actorRole || '';
         var entryReason = entry.action === 'accept_barangay_assignment'
           ? 'Barangay accepted responsibility'
           : entry.reason;
@@ -1854,7 +2083,8 @@ function buildReportDetailHtml(report) {
             }).join('') + '</div>'
           : '';
         return '<li class="response-history-item"><div class="response-history-title">' + detailEsc(title) + '</div>' +
-          '<div class="response-history-meta">by ' + detailEsc(actor) + (entry.createdAt ? ' - ' + detailEsc(entry.createdAt) : '') + '</div>' +
+          '<div class="response-history-meta">' + (!isSystemEntry && actor ? 'by ' + detailEsc(actor) + (entry.createdAt ? ' - ' : '') : '') +
+          (entry.createdAt ? detailEsc(entry.createdAt) : '') + '</div>' +
           (entryReason ? '<p class="response-history-reason">' + detailEsc(entryReason) + '</p>' : '') + photosHtml +
           '</li>';
       }).join('') + '</ol>'
@@ -1869,27 +2099,6 @@ function buildReportDetailHtml(report) {
   }
   responseHistoryHtml = '<div class="response-history-timeline">' + responseHistoryHtml + '</div>';
   var responseStage = report.responseState;
-  var responseStages = ['Accepted', 'Responding', 'Secured', 'Resolved'];
-  var completedStage = responseStage === 'barangay_response_approved' ? 0
-    : (responseStage === 'barangay_responding' || responseStage === 'escalated_to_dcvs' ? 1
-      : (responseStage === 'animal_secured' ? 2 : (report._db_status === 'resolved'
-        ? 3 : -1)));
-  var responseStepsHtml = responseStages.map(function(label, index) {
-    var stepClass = index < completedStage ? ' is-complete'
-      : (index === completedStage ? (responseOverdue && index === 1 ? ' is-current is-overdue' : ' is-current') : '');
-    var checkIcon = index < completedStage
-      ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
-      : '';
-    return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
-  }).join('');
-  var deadlineLabel = responseStage === 'barangay_response_approved' ? 'Respond by' : 'Next update by';
-  var deadlineText = report._db_status === 'resolved' ? ''
-      : (isEscalatedToDcvs ? 'DCVS is deciding the next action'
-        : (responseOverdue
-          ? (responseStage === 'barangay_response_approved' ? 'Response overdue' : 'Update overdue')
-          : (responseDeadline ? deadlineLabel + ' ' + new Date(responseDeadlineTime).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '')));
-  var noticeClass = responseOverdue ? ' is-overdue'
-      : (responseStage === 'animal_secured' ? ' is-warning' : '');
   var responseNotice = '';
   if (report._db_status !== 'resolved') {
     if (responseOverdue) {
@@ -1945,15 +2154,19 @@ function buildReportDetailHtml(report) {
       }).join('') +
       '</div></section>' : '';
   var canUpdateProgress = ['barangay_responding', 'animal_secured'].indexOf(responseStage) !== -1;
-  var workflowHtml = window.DCVS_BARANGAY_RESPONSE_ENABLED && report.responseMode === 'barangay_response'
-    ? '<section class="rpt-col rpt-full-col">' +
-      '<div class="response-card"><div class="response-card-header"><div class="response-card-heading"><div class="response-card-title">Barangay Response</div><div class="response-card-subtitle">Handled by Brgy. ' + detailEsc(report.brgy || 'Barangay') + '</div></div>' +
-      (deadlineText ? '<span class="response-deadline' + (responseOverdue ? ' is-overdue' : '') + '">' + detailEsc(deadlineText) + '</span>' : '') +
-      '</div><div class="response-steps">' + responseStepsHtml + '</div>' +
-      (responseNotice ? '<div class="response-notice' + noticeClass + '"><span class="response-notice-icon" aria-hidden="true"><i class="fas fa-info-circle"></i></span><span class="response-notice-text">' + detailEsc(responseNotice) + '</span></div>' : '') +
-      responseRouteButton + '</div></section>' : '';
+  var workflowHtml = typeof window.responseWorkflowProgressHtml === 'function'
+    ? window.responseWorkflowProgressHtml(report, {
+        title: report.responseMode === 'dcvs_dispatch' ? 'DCVS Response' : 'Barangay Response',
+        subtitle: 'Handled by Brgy. ' + (report.brgy || 'Barangay'),
+        notice: report.isOverdue ? '' : responseNotice,
+        warning: responseStage === 'animal_secured',
+        deadlineText: responseDeadline && !report.isOverdue ? responseDeadline : '',
+        routeButton: responseRouteButton
+      })
+    : '';
   var pillBg, pillColor, pillBorder;
-  switch (report._db_status) {
+  if (report.isOverdue) { pillBg='#fef2f2';pillColor='#b91c1c';pillBorder='#fecaca'; }
+  else switch (report._db_status) {
     case 'pending': pillBg='#fef3c7';pillColor='#92400e';pillBorder='#fde68a';break;
     case 'validated': pillBg='#dcebe0';pillColor='#045e1f';pillBorder='#bbf7d0';break;
     case 'confirmed':case 'scheduled': pillBg='#EBF5FF';pillColor='#175CD3';pillBorder='#D5E9FD';break;
@@ -1969,8 +2182,8 @@ function buildReportDetailHtml(report) {
     default: urgBg='#eff6ff';urgColor='#1e40af';urgBorder='#bfdbfe';
   }
 
-  var hasWorkflowStatusStack = isEscalatedToDcvs;
-  var statusBadgeHtml = isEscalatedToDcvs
+  var hasWorkflowStatusStack = isEscalatedToDcvs && !report.isOverdue;
+  var statusBadgeHtml = hasWorkflowStatusStack
       ? '<span class="response-status-chip is-dcvs">With DCVS</span>'
       : '<span>' + detailEsc(displayStatus) + '</span>';
   var statusBadgeClass = hasWorkflowStatusStack
@@ -2002,11 +2215,12 @@ function buildReportDetailHtml(report) {
       '<div class="rpt-detail-grid">' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Report Information</div><div class="info-rows info-rows-2col">' + barangayInfoRow('Date Submitted', report.submitted) + barangayInfoRow('Incident Date', report.incidentDate) + barangayInfoRow('Location', report.location) + barangayInfoRow('Report Type', report.category) + '</div></div>' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Animal Information</div><div class="info-rows info-rows-2col">' + barangayInfoRow('Animal Type', report.animalType || '-') + barangayInfoRow('Breed / Appearance', report.animalBreed || '-') + barangayInfoRow('Estimated Number of Animals', report.animalCount || '-') + barangayInfoRow('Animal Behavior', report.animalBehavior || '-') + '</div></div>' +
+        barangaySupportingSubmissionsHtml(report) +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">General Information</div><div class="info-rows info-rows-2col">' + barangayInfoRow('Resident ID', report.reporterRef || '-') + barangayInfoRow('Mobile Number', report.phone || '-') + barangayInfoRow('Email', report.email || '-') + barangayInfoRow('Barangay', report.brgy || '-') + barangayInfoRow('Status', displayStatus) + barangayInfoRow('Assigned Officer', report.assignedTo || '-') + barangayInfoRow('Resolved', report.dateResolved || '-') + '</div></div>' +
         '<div class="rpt-col rpt-full-col"><div class="rpt-section-title">Incident Details</div><p class="info-row-label" style="margin:0 0 6px;">Description</p><div class="rpt-desc-box">' + detailEsc(report.description || 'No description provided.') + '</div></div>' +
       '</div>' +
     '</div>' +
-    '<div class="rpt-detail-body" data-tab="updates" style="display:none;"><div class="response-updates-header"><span>Progress updates (' + responseHistory.length + ')</span>' +
+    '<div class="rpt-detail-body" data-tab="updates" style="display:none;"><div class="response-updates-header"><span>Case updates (' + displayedResponseHistory.length + ')</span>' +
       (canUpdateProgress ? '<button type="button" onclick="responseWorkflowAction(' + Number(report.report_id) + ',\'update_progress\')">+ Add update</button>' : '') +
       '</div>' + responseHistoryHtml + '</div>';
   } else {
@@ -2032,6 +2246,7 @@ function buildReportDetailHtml(report) {
         '<div class="sd-info-item" style="grid-column:1/-1;"><div class="sd-info-label">Situation &amp; Detailed Description</div><div class="sd-info-value">' + (report.description || 'No description provided.') + '</div></div>' +
       '</div>' +
     '</div>' +
+    barangaySupportingSubmissionsHtml(report) +
     '<div class="sd-section">' +
       '<div class="sd-section-title"><span>03</span> General Information</div>' +
       '<div class="sd-info-grid">' +
@@ -2460,6 +2675,14 @@ function downloadCSV(rows) {
   showToast('CSV exported.');
 }
 function exportAll() {
+  if (IS_OVERDUE_PAGE) {
+    var overdueRows = [['Report ID','Reporter','Category','Location','Overdue Action','Deadline','Status']];
+    getFilteredList().forEach(function(r) {
+      overdueRows.push([r.id, r.reporter, r.category, r.location, r.overdueBadge || r.overdueReason, r.overdueDeadline, r.status]);
+    });
+    downloadCSV(overdueRows);
+    return;
+  }
   var rows = [['Report ID','Category','Type','Location','Incident Date','Priority','Status','Date Resolved']];
   getFilteredList().forEach(function(r) { rows.push([r.id,r.category,r.type,r.location,r.incidentDate,r.priority,r.status,r.dateResolved]); });
   downloadCSV(rows);
@@ -2468,13 +2691,17 @@ function exportAll() {
 /* ── Clear filters ── */
 function clearAllFilters() {
   document.getElementById('searchInput').value = '';
-  document.getElementById('statusFilter').value = '';
+  document.getElementById('statusFilter').value = initialStatus;
   document.getElementById('categoryFilter').value = '';
   document.getElementById('priorityFilter').value = '';
+  var overdueActionFilter = document.getElementById('overdueActionFilter');
+  if (overdueActionFilter) overdueActionFilter.value = '';
   refresh();
 }
 function updateClearBtn() {
-  var has = document.getElementById('searchInput').value || document.getElementById('statusFilter').value || document.getElementById('categoryFilter').value || document.getElementById('priorityFilter').value;
+  var overdueActionFilter = document.getElementById('overdueActionFilter');
+  var status = document.getElementById('statusFilter').value;
+  var has = document.getElementById('searchInput').value || (status && status !== initialStatus) || document.getElementById('categoryFilter').value || document.getElementById('priorityFilter').value || (overdueActionFilter && overdueActionFilter.value);
   document.getElementById('clearFiltersBtn').style.display = has ? 'inline-flex' : 'none';
 }
 
@@ -2494,9 +2721,11 @@ if (initialStatus) document.getElementById('statusFilter').value = initialStatus
 
 /* ── Refresh ── */
 function refresh() {
-  var hasUserFilter = document.getElementById('searchInput').value || document.getElementById('categoryFilter').value || document.getElementById('priorityFilter').value || (document.getElementById('statusFilter').value && document.getElementById('statusFilter').value !== initialStatus);
+  var overdueActionFilter = document.getElementById('overdueActionFilter');
+  var hasUserFilter = document.getElementById('searchInput').value || document.getElementById('categoryFilter').value || document.getElementById('priorityFilter').value || (overdueActionFilter && overdueActionFilter.value) || (document.getElementById('statusFilter').value && document.getElementById('statusFilter').value !== initialStatus);
   document.getElementById('clearFiltersBtn').style.display = hasUserFilter ? 'inline-flex' : 'none';
-  renderRows(getFilteredList());
+  var filteredRows = getFilteredList();
+  renderRows(filteredRows);
   currentPage = 1;
   paginate();
 }
@@ -2555,7 +2784,8 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('statusFilter').addEventListener('change', refresh);
   document.getElementById('categoryFilter').addEventListener('change', refresh);
   document.getElementById('priorityFilter').addEventListener('change', refresh);
-  document.getElementById('selectAll').addEventListener('change', function() { toggleSelectAll(this); });
+  var selectAll = document.getElementById('selectAll');
+  if (selectAll) selectAll.addEventListener('change', function() { toggleSelectAll(this); });
 
 });
 </script>

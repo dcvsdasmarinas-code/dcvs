@@ -22,10 +22,33 @@ if ($_SESSION['role'] !== 'resident') {
 }
 
 $officialBarangays = dcvsLoadApprovedBarangays($conn);
+$residentBarangayCode = '';
+$residentBarangayId = (int)($_SESSION['barangay_id'] ?? 0);
+foreach ($officialBarangays as $approvedBarangay) {
+    if ($residentBarangayId > 0 && (int)$approvedBarangay['barangay_id'] === $residentBarangayId) {
+        $residentBarangayCode = $approvedBarangay['psgc_code'];
+        break;
+    }
+}
 $reportPinEnabled = false;
 $reportPinFeatures = [];
 loadDcvsEnv();
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
+$reportSatelliteStyle = [
+    'version' => 8,
+    'glyphs' => 'https://tiles.basemaps.cartocdn.com/v/20261026-01/fonts/{fontstack}/{range}.pbf',
+    'sources' => [
+        'esri-world-imagery' => [
+            'type' => 'raster',
+            'tiles' => ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            'tileSize' => 256,
+            'attribution' => 'Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        ],
+    ],
+    'layers' => [
+        ['id' => 'esri-world-imagery', 'type' => 'raster', 'source' => 'esri-world-imagery'],
+    ],
+];
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $crosswalkPath = __DIR__ . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv';
     $boundaryPath = __DIR__ . '/geo-map/barangays-boundary.json';
@@ -49,6 +72,7 @@ $pageTitle = 'Submit Report';
   <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/dashboard.css'); ?>" />
   <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/responsive.css'); ?>" />
   <?php if ($reportPinEnabled): ?>
+  <link rel="stylesheet" href="assets/css/map-place-search.css?v=<?php echo (int)filemtime(__DIR__ . '/assets/css/map-place-search.css'); ?>" />
   <link rel="stylesheet" href="dist/mapcn.css" />
   <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/geo-map/map.css'); ?>" />
   <?php endif; ?>
@@ -174,6 +198,24 @@ $pageTitle = 'Submit Report';
     }
 
     .stepper-connector.filled .connector-fill { width: 100%; }
+    .stepper-current-label { display: none; }
+    .stepper-mobile-view { display: none; }
+    .stepper-mobile-progress { display: none; }
+    .stepper-mobile-segment { display: block; min-width: 0; height: 4px; border-radius: 2px; background: #CBD2CB; }
+    .stepper-mobile-segment.completed { background: #166534; }
+    .stepper-mobile-segment.current { background: #14201A; }
+    .step-completed-label { display: none; }
+    .stepper-step.completed .step-completed-label {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
 
     /* Wizard Card */
     .wizard-card {
@@ -205,13 +247,13 @@ $pageTitle = 'Submit Report';
       font-family: 'Inter','Segoe UI',sans-serif;
       font-size: 20px;
       font-weight: 600;
-      line-height: 1;
+      line-height: 1.3;
       letter-spacing: -0.025em;
-      color: #18181b;
-      margin-bottom: 6px;
+      color: #14201A;
+      margin-bottom: 4px;
     }
 
-    .step-header p { font-size: 15px; color: #71717a; line-height: 1.5; }
+    .step-header p { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; color:#5B675F; line-height:1.45; }
 
     /* Report Type Grid */
     .report-type-grid {
@@ -674,6 +716,7 @@ $pageTitle = 'Submit Report';
     .report-location-picker-actions svg { width: 18px; height: 18px; vertical-align: middle; }
     .report-location-map { height: 340px; position: relative; overflow: hidden; border-radius: 10px; background: #EEF2F6; touch-action: pan-x pan-y; }
     .report-location-map .mapcn-container { width: 100%; height: 100%; }
+    .report-location-map .maplibregl-ctrl-top-right { top: auto; right: 12px; bottom: 52px; }
     .report-location-map .mapcn-loading { z-index: 2; }
     .report-location-map.is-expanded { position: fixed; inset: 0; height: 100vh; height: 100dvh; width: 100vw; z-index: 9999; border-radius: 0; }
     .report-location-picker .helper-text,
@@ -687,16 +730,347 @@ $pageTitle = 'Submit Report';
     .report-location-status { color: #71717a; font-weight: 400; }
     .report-location-status { margin-top: 10px; }
     .report-location-status.is-error { color: #B42318; }
+    .report-location-barangay-status { padding: 9px 11px; border: 1px solid #dcfce7; border-radius: 6px; background: #f0fdf4; color: #166534; }
+    .report-location-barangay-status[hidden] { display: none; }
+    .report-location-barangay-status.is-error { border-color: #fecaca; background: #fef2f2; color: #b42318; }
+    .report-location-address { margin-top: 8px; padding: 9px 11px; border: 1px solid #e4e4e7; border-radius: 6px; background: #fff; color: #52525b; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .report-location-coordinates[hidden] { display: none; }
     .report-location-fallback-link { margin-top: 10px; padding: 0; border: 0; background: transparent; color: #18181b; font-weight: 500; text-decoration: underline; cursor: pointer; }
     .report-location-fallback { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
     .report-location-fallback[hidden] { display: none; }
-    .report-location-map-pin { position: absolute; z-index: 5; display: flex; align-items: flex-start; justify-content: center; width: 48px; height: 60px; padding: 0; border: 0; background: transparent; cursor: grab; touch-action: none; transform: translate(-50%, -100%); filter: drop-shadow(0 3px 4px rgba(0,0,0,.4)); }
+    .report-location-map-pin { position: absolute; z-index: 5; display: flex; align-items: flex-start; justify-content: center; width: 48px; height: 60px; transform: translate(-50%, -100%); filter: drop-shadow(0 3px 4px rgba(0,0,0,.4)); }
+    .report-location-map-pin.is-draggable { pointer-events: auto; cursor: grab; touch-action: none; }
+    .report-location-map-pin.is-draggable.is-dragging { cursor: grabbing; }
     .report-location-map-pin svg { display: block; width: 48px; height: 60px; overflow: visible; }
-    .report-location-map-pin:active { cursor: grabbing; }
-    .report-location-map-pin.is-preview { cursor: default; pointer-events: none; }
-    .report-location-map-pin[hidden] { display: none; }
+    .report-location-map-pin[hidden],
+    .report-location-map-hint[hidden] { display: none; }
+    .report-location-map-hint { position: absolute; z-index: 5; top: 14px; left: 14px; max-width: calc(100% - 140px); padding: 8px 12px; border: 1px solid rgba(20,32,26,.12); border-radius: 999px; background: rgba(255,255,255,.96); color: #14201A; font: 600 13px/1.3 'Inter', sans-serif; text-align: center; box-shadow: 0 2px 8px rgba(15,23,42,.12); pointer-events: none; }
+    .report-location-mobile-center-pin,
+    .report-location-mobile-back-step,
+    .report-location-mobile-details-header,
+    .report-location-mobile-details-intro,
+    .report-location-mobile-summary,
+    .report-location-mobile-confirm,
+    .report-location-mobile-confirm-reason { display: none; }
     .report-location-expand-close { display: none; }
     .report-location-map.is-expanded ~ .report-location-expand-close { display: inline-flex; position: fixed; top: 14px; right: 14px; z-index: 10000; }
+    body.report-location-screen { overflow: hidden; }
+    body.report-location-screen .main-content {
+      height: calc(100vh - var(--topbar-h, 64px));
+      min-height: 0;
+      overflow: hidden;
+      padding: 0 !important;
+    }
+    @supports (height: 100dvh) {
+      body.report-location-screen .main-content { height: calc(100dvh - var(--topbar-h, 64px)); }
+    }
+    body.report-location-screen .wizard-page-container {
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    body.report-location-screen #residentReportWizard {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: none;
+      height: 100%;
+      min-height: 0;
+      margin: 0;
+      padding: 0;
+    }
+    .stepper-container {
+      display: flex;
+      align-items: center;
+      flex: 0 0 56px;
+      box-sizing: border-box;
+      width: 100%;
+      height: 56px;
+      max-height: 56px;
+      margin: 0 0 20px;
+      padding: 0 14px;
+      border-bottom: 1px solid #E2E6E1;
+      background: #fff;
+    }
+    body.report-location-screen .stepper-container { margin-bottom: 0; }
+    .stepper-track {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      flex: 1 1 auto;
+      width: auto;
+      max-width: none;
+      margin: 0;
+      justify-content: center;
+      padding: 0;
+      list-style: none;
+    }
+    .stepper-step {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      flex: 0 0 auto;
+      position: relative;
+    }
+    .stepper-step-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #5B675F;
+      font: inherit;
+      cursor: pointer;
+    }
+    .stepper-step-control:focus-visible {
+      outline: 2px solid #166534;
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+    .step-circle {
+      box-sizing: border-box;
+      width: 24px;
+      height: 24px;
+      border: 1.5px solid #8A948D;
+      background: #fff;
+      color: #5B675F;
+      font-size: 14px;
+      box-shadow: none;
+    }
+    .stepper-step .step-label {
+      color: #5B675F;
+      font-size: 14px;
+      font-weight: 400;
+    }
+    .stepper-step.completed .step-circle {
+      border-color: #166534;
+      background: #166534;
+      color: #fff;
+    }
+    .stepper-step.completed .step-circle svg { width: 14px; height: 14px; }
+    .stepper-step.completed .step-label { color: #5B675F; font-weight: 400; }
+    .stepper-step.active .step-circle {
+      border-color: #14201A;
+      background: #14201A;
+      color: #fff;
+      box-shadow: none;
+      transform: none;
+    }
+    .stepper-step.active .step-label {
+      color: #14201A;
+      font-weight: 700;
+    }
+    .stepper-connector {
+      display: block;
+      flex: 0 0 36px;
+      width: 36px;
+      height: 2px;
+      margin: 0 12px;
+      background: #CBD2CB;
+    }
+    .stepper-connector .connector-fill { background: #166534; }
+    .stepper-current-label { display: none; }
+    .stepper-mobile-view { display: none; }
+    body.report-location-screen .wizard-card {
+      flex: 1 1 auto;
+      width: 100%;
+      height: auto;
+      min-height: 0;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      overflow: hidden;
+    }
+    body.report-location-screen .wizard-card-body { height: 100%; padding: 0; }
+    body.report-location-screen .report-location-step.active { display: block; padding: 0; animation: none; }
+    body.report-location-screen .wizard-card-footer {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      z-index: 20;
+      box-sizing: border-box;
+      width: clamp(440px, 32vw, 460px);
+      margin: 0;
+      padding: 6px 16px;
+      border-top: 1px solid #e6ece6;
+      background: #fff;
+    }
+    body.report-location-screen .wizard-card-footer {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "left next" "reason reason";
+      align-items: center;
+      gap: 4px 12px;
+    }
+    body.report-location-screen #footer-left { grid-area: left; justify-self: start; }
+    body.report-location-screen #btn-next { grid-area: next; }
+    .report-location-continue-reason { grid-area: reason; color: #5B675F; font: 13px/1.35 'Inter', sans-serif; }
+    .report-location-continue-reason[hidden] { display: none; }
+    body.report-location-screen #btn-next:disabled { background: #A7B0AA; border-color: #A7B0AA; cursor: not-allowed; }
+    body.report-location-screen .wizard-card-footer .btn-back,
+    body.report-location-screen .wizard-card-footer .btn-continue {
+      min-height: 44px;
+      padding: 8px 16px;
+      font-size: 13px;
+      line-height: 1.2;
+    }
+    .report-location-step { height: 100%; min-height: 0; }
+    .report-location-layout {
+      display: grid;
+      grid-template-columns: clamp(440px, 32vw, 460px) minmax(0, 1fr);
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+    }
+    .report-location-sidebar {
+      display: flex;
+      min-width: 0;
+      min-height: 0;
+      flex-direction: column;
+      gap: clamp(14px, 1.8vh, 18px);
+      overflow-x: hidden;
+      overflow-y: auto;
+      padding: clamp(16px, 2vh, 20px) 16px 72px;
+      border-right: 1px solid #e6ece6;
+      background: #fff;
+      scrollbar-width: thin;
+    }
+    .report-location-sidebar .step-header { flex: 0 0 auto; margin: 0; }
+    .report-location-sidebar .helper-text { color: #3F4A43; font-size: 13px; line-height: 1.45; }
+    .report-location-sidebar .step-header h2 { margin: 0 0 4px; font-size: clamp(18px, 2.4vh, 21px); line-height: 1.25; }
+    .report-location-sidebar .step-header p { margin: 0; color: #3F4A43; font-size: 13px; line-height: 1.45; }
+    .report-location-search-section,
+    .report-location-pin-card,
+    .report-location-sidebar .form-section { flex: 0 0 auto; margin: 0; }
+    .report-location-search-label,
+    .report-location-sidebar .form-group > label,
+    .report-location-barangay-label { font-size: 13px; font-weight: 600; }
+    .report-location-search-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 5px; }
+    .report-location-search-section .report-location-place-search { width: 100%; min-width: 0; margin: 0; }
+    .report-location-place-search .report-location-search-label { margin-bottom: 3px; }
+    .report-location-search-controls .report-location-input-wrap { min-width: 0; }
+    .report-location-search-controls input[type="search"] {
+      width: 100%;
+      min-width: 0;
+      height: 46px;
+      min-height: 46px;
+      padding-left: 28px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+    .report-location-search-controls .dcvs-place-search-icon { left: 9px; font-size: 11px; }
+    .report-location-gps {
+      display: inline-flex;
+      height: 46px;
+      min-height: 46px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 1px solid #d8e0db;
+      border-radius: 7px;
+      background: #fff;
+      color: #111827;
+      font: 600 13px 'Inter', sans-serif;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+    .report-location-gps svg { width: 13px; height: 13px; }
+    .report-location-gps:disabled { opacity: .6; cursor: wait; }
+    .report-location-search-section > .helper-text { display: block; margin-top: 5px; color: #3F4A43; font-size: 13px; line-height: 1.45; }
+    .report-location-search-section .dcvs-place-status { margin-top: 4px; font-size: 13px; }
+    .report-location-pin-card {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid #d7ddda;
+      border-radius: 8px;
+      background: #f4f6f5;
+    }
+    .report-location-pin-card.is-pinned { border-color: #b7dfc2; background: #f2f8f3; }
+    .report-location-pin-state {
+      color: #334155;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .report-location-pin-state[hidden] { display: none; }
+    .report-location-pin-card .report-location-address {
+      margin: 0;
+      padding: 9px 11px;
+      border: 1px solid #d7ddda;
+      border-radius: 6px;
+      background: transparent;
+      color: #3F4A43;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .report-location-pin-card.is-pinned .report-location-address { border-color: #b7dfc2; background: #fff; }
+    .report-location-barangay-detected { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #334155; font-size: 13px; }
+    .report-location-barangay-detected[hidden] { display: none; }
+    .report-location-barangay-detected button { min-height: 44px; padding: 0; border: 0; background: transparent; color: #166534; font: 600 13px 'Inter', sans-serif; text-decoration: underline; cursor: pointer; }
+    .report-location-barangay-group { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 6px; }
+    .report-location-barangay-group[hidden] { display: none; }
+    .report-location-barangay-group label { margin: 0; font-size: 13px; }
+    .report-location-barangay-group .form-select {
+      height: 46px;
+      min-height: 46px;
+      padding: 4px 9px;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .report-location-sidebar .report-location-status {
+      margin: 0;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .report-location-sidebar .report-location-barangay-status { padding: 9px 10px; }
+    .report-location-sidebar .report-location-accuracy {
+      color: #166534;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .report-location-sidebar .report-location-fallback-link { min-height: 44px; margin: 0; font-size: 13px; text-align: left; }
+    .report-location-sidebar .report-location-fallback { margin-top: 0; font-size: 13px; }
+    .report-location-sidebar .report-location-coordinates { display: none; }
+    .report-location-sidebar .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .report-location-sidebar .form-row.single { grid-template-columns: minmax(0, 1fr); }
+    .report-location-sidebar .form-group { min-width: 0; margin: 0; }
+    .report-location-sidebar .form-input {
+      height: 46px;
+      min-height: 46px;
+      padding: 8px 10px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+    .report-location-sidebar .form-group .helper-text { display: block; margin-top: 5px; color: #3F4A43; font-size: 13px; line-height: 1.45; }
+    .report-location-map-panel { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+    .report-location-map-panel .report-location-map { width: 100%; height: 100%; min-height: 0; border-radius: 0; }
+    .report-location-map .dcvs-landmark-controls { display: none !important; }
+    .report-location-map-panel .report-location-expand-close { border-radius: 7px; }
+    .report-location-map-panel #expand-report-map {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      z-index: 6;
+      margin: 0;
+      padding: 6px 9px;
+      border: 1px solid rgba(255,255,255,.8);
+      border-radius: 6px;
+      background: rgba(255,255,255,.94);
+      color: #172033;
+      font-size: 10px;
+      box-shadow: 0 1px 5px rgba(15,23,42,.16);
+    }
+    .report-location-map-panel .report-location-map.is-expanded ~ #expand-report-map { display: none; }
+    @media (min-width: 701px) and (min-height: 680px) {
+      .report-location-sidebar > .form-section:last-child { margin-top: auto; }
+    }
     .review-pin-map { width: 100%; height: 190px; margin-top: 14px; border-radius: 10px; overflow: hidden; background: #EEF2F6; }
     @media (max-width: 768px) {
       .report-location-map { height: 420px; }
@@ -704,12 +1078,349 @@ $pageTitle = 'Submit Report';
       .report-location-map .maplibregl-ctrl-group button { width: 44px; height: 44px; }
       .review-pin-map { height: 220px; }
     }
+    @media (max-width: 700px) {
+      .report-location-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 55fr) minmax(0, 45fr); }
+      .report-location-sidebar { border-right: 0; border-bottom: 1px solid #e6ece6; padding: 12px 12px 72px; }
+      .report-location-sidebar .step-header h2 { font-size: 17px; }
+      body.report-location-screen .wizard-card-footer { bottom: 0; width: 100%; }
+    }
+    @media (max-width: 640px) {
+      .stepper-container { padding: 0 14px; }
+      .stepper-track { display: none; }
+      .stepper-mobile-view { display: grid; width: 100%; gap: 8px; }
+      .stepper-mobile-label { color: #14201A; font: 600 13px/1.2 'Inter', sans-serif; }
+      .stepper-mobile-progress { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+      .report-location-layout {
+        --mobile-location-sheet-height: clamp(270px, 43vh, 340px);
+        position: relative;
+        display: block;
+        overflow: hidden;
+      }
+      .report-location-sidebar { display: contents; }
+      .report-location-sidebar > .step-header,
+      .report-location-sidebar > .form-section { display: none; }
+      .report-location-map-panel {
+        position: absolute;
+        inset: 0 0 var(--mobile-location-sheet-height);
+        z-index: 1;
+      }
+      .report-location-map-panel .report-location-map { height: 100%; }
+      .report-location-map-panel #expand-report-map { display: none; }
+      .report-location-map .dcvs-basemap-toggle { top: 118px; right: 12px; }
+      .report-location-map .dcvs-map-attribution { top: 160px; right: 12px; }
+      .report-location-map .dcvs-landmark-controls { top: 208px; right: 12px; }
+      .report-location-mobile-back-step {
+        position: absolute;
+        top: 10px;
+        left: 12px;
+        z-index: 30;
+        display: inline-flex;
+        width: 44px;
+        height: 44px;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 1px solid #e2e8e4;
+        border-radius: 50%;
+        background: #fff;
+        color: #14201A;
+        box-shadow: 0 2px 8px rgba(15,23,42,.12);
+      }
+      .report-location-mobile-back-step svg { width: 18px; height: 18px; }
+      .report-location-search-section {
+        position: absolute;
+        top: 10px;
+        right: 12px;
+        left: 64px;
+        z-index: 30;
+      }
+      .report-location-search-label,
+        .report-location-search-section > .helper-text { display: none !important; }
+      .report-location-search-controls {
+        grid-template-columns: minmax(0, 1fr) 44px;
+        align-items: center;
+        gap: 7px;
+      }
+      .report-location-search-controls input[type="search"] {
+        height: 44px;
+        min-height: 44px;
+        border-radius: 22px;
+        background: #fff;
+        box-shadow: 0 2px 8px rgba(15,23,42,.12);
+      }
+      .report-location-search-controls .dcvs-place-search-icon { left: 12px; }
+      .report-location-gps {
+        width: 44px;
+        height: 44px;
+        min-height: 44px;
+        padding: 0;
+        border-radius: 50%;
+        background: #fff;
+        font-size: 0;
+        box-shadow: 0 2px 8px rgba(15,23,42,.12);
+      }
+      .report-location-gps svg { width: 18px; height: 18px; }
+      .report-location-search-section .dcvs-place-status { margin-top: 2px; font-size: 12px; }
+      .report-location-map-hint {
+        top: 62px;
+        left: 50%;
+        max-width: calc(100% - 32px);
+        padding: 7px 12px;
+        white-space: nowrap;
+        transform: translateX(-50%);
+      }
+      .report-location-mobile-center-pin {
+        position: absolute;
+        top: calc(50% - 8px);
+        left: 50%;
+        z-index: 5;
+        display: block;
+        width: 48px;
+        height: 60px;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+      }
+      .report-location-mobile-center-pin::before {
+        position: absolute;
+        bottom: 0;
+        left: 50%;
+        width: 44px;
+        height: 44px;
+        border: 1px solid rgba(220,38,38,.5);
+        border-radius: 50%;
+        background: rgba(220,38,38,.1);
+        content: "";
+        transform: translateX(-50%);
+      }
+      .report-location-mobile-center-pin svg {
+        position: relative;
+        display: block;
+        width: 30px;
+        height: 38px;
+        margin: 0 auto;
+        overflow: visible;
+      }
+      .report-location-mobile-center-pin path { fill: #dc2626; }
+      .report-location-map .report-location-map-pin { display: none !important; }
+      .report-location-pin-card {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 20;
+        display: grid;
+        height: var(--mobile-location-sheet-height);
+        overflow-y: auto;
+        gap: 8px;
+        box-sizing: border-box;
+        padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+        border: 0;
+        border-radius: 16px 16px 0 0;
+        background: #fff;
+        box-shadow: 0 -4px 18px rgba(15,23,42,.14);
+      }
+      .report-location-pin-card.is-pinned { background: #fff; }
+      .report-location-pin-state { color: #166534; font-size: 10px; }
+      .report-location-pin-card .report-location-address {
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #14201A;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.4;
+      }
+      .report-location-pin-card.is-pinned .report-location-address { border: 0; background: transparent; }
+      .report-location-barangay-detected {
+        min-height: 40px;
+        padding: 0 9px;
+        border: 1px solid #dfe7df;
+        border-radius: 8px;
+        background: #fff;
+        color: #334155;
+      }
+      .report-location-barangay-detected button { min-height: 40px; }
+      .report-location-sidebar .report-location-accuracy { font-size: 12px; }
+      .report-location-sidebar .report-location-status {
+        margin: 0;
+        padding: 8px 9px;
+        border-radius: 7px;
+        background: #e7f4eb;
+        color: #166534;
+        font-size: 12px;
+        line-height: 1.35;
+      }
+      .report-location-sidebar .report-location-status.is-error {
+        background: #fef2f2;
+        color: #b42318;
+      }
+      .report-location-sidebar .report-location-barangay-status { padding: 8px 9px; }
+      .report-location-sidebar .report-location-fallback { font-size: 12px; }
+      .report-location-sidebar .report-location-fallback-link {
+        min-height: 32px;
+        margin: 0;
+        color: #166534;
+        font-size: 12px;
+        text-align: center;
+      }
+      .report-location-mobile-confirm-reason {
+        display: block;
+        color: #5B675F;
+        font: 12px/1.35 'Inter', sans-serif;
+      }
+      .report-location-mobile-confirm-reason[hidden] { display: none; }
+      .report-location-mobile-confirm {
+        display: block;
+        width: 100%;
+        min-height: 44px;
+        padding: 8px 16px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: #18181b;
+        color: #fff;
+        font: 500 14px 'Inter', sans-serif;
+      }
+      .report-location-mobile-confirm:disabled {
+        border-color: transparent;
+        background: #a1a1aa;
+        cursor: not-allowed;
+      }
+      .report-location-layout.is-fallback .report-location-mobile-center-pin { display: none; }
+      .report-location-layout.is-details-view .report-location-mobile-back-step,
+      .report-location-layout.is-details-view .report-location-search-section,
+      .report-location-layout.is-details-view .report-location-pin-card,
+      .report-location-layout.is-details-view .report-location-map-panel { display: none; }
+      .report-location-layout.is-details-view .report-location-sidebar {
+        position: absolute;
+        inset: 0;
+        z-index: 10;
+        display: flex;
+        min-height: 0;
+        flex-direction: column;
+        gap: 0;
+        overflow-x: hidden;
+        overflow-y: auto;
+        padding: 0 0 90px;
+        background: #fff;
+      }
+      .report-location-layout.is-details-view .report-location-mobile-details-header {
+        display: flex;
+        min-height: 52px;
+        align-items: center;
+        gap: 10px;
+        padding: 0 16px;
+        border-bottom: 1px solid #e6ece6;
+      }
+      .report-location-layout.is-details-view .report-location-mobile-details-intro {
+        display: block;
+        margin: 14px 16px 0;
+      }
+      .report-location-mobile-details-intro h2 {
+        margin: 0 0 4px;
+        color: #14201A;
+        font-size: 15px;
+        line-height: 1.3;
+      }
+      .report-location-mobile-details-intro p {
+        margin: 0;
+        color: #3F4A43;
+        font-size: 10px;
+        line-height: 1.35;
+      }
+      .report-location-mobile-details-header button {
+        display: inline-flex;
+        width: 28px;
+        height: 36px;
+        align-items: center;
+        justify-content: center;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #166534;
+      }
+      .report-location-mobile-details-header svg { width: 18px; height: 18px; }
+      .report-location-mobile-details-title { color: #14201A; font-size: 13px; font-weight: 700; }
+      .report-location-mobile-details-step { display: none; }
+      .report-location-layout.is-details-view .report-location-mobile-summary {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+        margin: 12px 16px 0;
+        padding: 10px;
+        border: 1px solid #d7e8dc;
+        border-radius: 9px;
+        background: #f2f8f3;
+      }
+      .report-location-mobile-summary-copy { min-width: 0; }
+      .report-location-mobile-summary-state {
+        display: block;
+        margin-bottom: 3px;
+        color: #166534;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+      }
+      .report-location-mobile-summary-address { color: #14201A; font-size: 11px; line-height: 1.35; }
+      .report-location-mobile-summary button {
+        flex: 0 0 auto;
+        min-height: 32px;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        color: #166534;
+        font: 600 11px 'Inter', sans-serif;
+        text-decoration: underline;
+      }
+      .report-location-layout.is-details-view .report-location-sidebar > .form-section {
+        display: block;
+        flex: 0 0 auto;
+        margin: 0;
+        padding: 14px 16px 0;
+      }
+      .report-location-layout.is-details-view .report-location-sidebar > .form-section:last-child { padding-bottom: 12px; }
+      .report-location-layout.is-details-view .report-location-sidebar .form-row { gap: 8px; }
+      body.report-location-screen .report-location-layout.is-details-view .report-location-sidebar .form-row:not(.single) {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+      }
+      .report-location-layout.is-details-view .report-location-sidebar .form-group > label { font-size: 11px; }
+      .report-location-layout.is-details-view .report-location-sidebar .form-input {
+        height: 44px;
+        min-height: 44px;
+        padding: 7px 9px;
+        font-size: 12px;
+      }
+      .report-location-layout.is-details-view .report-location-sidebar .form-group .helper-text { font-size: 10px; line-height: 1.35; }
+      body.report-location-screen .wizard-card-footer { display: none; }
+      body.report-location-screen .wizard-card-footer {
+        bottom: 0;
+        z-index: 25;
+        width: 100%;
+        padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+        border-top: 1px solid #e6ece6;
+        background: #fff;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        grid-template-areas: "left next" "reason reason";
+        gap: 8px;
+      }
+      body.report-location-screen .wizard-page-container.report-location-mobile-details .wizard-card-footer { display: grid; }
+      body.report-location-screen .wizard-card-footer #footer-left { display: block; justify-self: stretch; }
+      body.report-location-screen .wizard-card-footer #footer-left .btn-back,
+      body.report-location-screen .wizard-card-footer .btn-continue {
+        width: 100%;
+        min-height: 40px;
+        justify-content: center;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+    }
     <?php endif; ?>
 
     /* Responsive */
     @media (max-width: 900px) {
       .wizard-page-container { padding: 24px 16px 60px; }
-      .stepper-container { padding: 20px; }
       .wizard-card-body { padding: 28px 24px 24px; }
       .wizard-card-footer { padding: 16px 24px; }
       .review-detail-grid { padding-left: 0; grid-template-columns: 120px 1fr; }
@@ -717,8 +1428,6 @@ $pageTitle = 'Submit Report';
     }
 
     @media (max-width: 768px) {
-      .stepper-container { padding: 18px 12px; overflow-x: auto; }
-      .stepper-track { min-width: 520px; }
       .report-type-grid { grid-template-columns: 1fr; }
       .form-row { grid-template-columns: 1fr; }
       .wizard-card-body { padding: 24px 18px 20px; }
@@ -729,11 +1438,52 @@ $pageTitle = 'Submit Report';
 
     @media (max-width: 480px) {
       .wizard-page-title { font-size: 20px; }
-      .step-header h2 { font-size: 18px; }
+      .step-header h2 { font-size: 20px; }
       .photo-previews { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
       .review-detail-grid { grid-template-columns: 1fr; gap: 4px 0; }
       .review-label { font-weight: 700; color: #4B5563; }
       .success-card { padding: 36px 24px; }
+    }
+
+    @media (max-width: 640px) {
+      .stepper-container {
+        position: sticky;
+        top: 50px;
+        z-index: 90;
+      }
+      .wizard-page-container:not(.report-location-screen) { padding-bottom: 90px; }
+      .wizard-card-footer {
+        position: fixed;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        z-index: 90;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        width: 100%;
+        margin: 0;
+        padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+        border-top: 1px solid #e4e4e7;
+        background: #fff;
+      }
+      .wizard-card-footer.is-first-step { grid-template-columns: minmax(0, 1fr); }
+      .wizard-card-footer.is-first-step #footer-left { display: none; }
+      .wizard-card-footer #footer-left,
+      .wizard-card-footer #footer-left .btn-back,
+      .wizard-card-footer .btn-continue,
+      .wizard-card-footer .btn-submit-report {
+        width: 100%;
+      }
+      .wizard-card-footer #footer-left .btn-back,
+      .wizard-card-footer .btn-continue,
+      .wizard-card-footer .btn-submit-report {
+        min-height: 40px;
+        justify-content: center;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
     }
 
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -749,35 +1499,60 @@ $pageTitle = 'Submit Report';
     <input type="hidden" id="residentReportDraftStep" data-draft-state value="1">
     <input type="hidden" id="residentReportDraftHighestStep" data-draft-state value="1">
 
-    <!-- Horizontal Progress Stepper -->
-    <div class="stepper-container" role="navigation" aria-label="Form progress">
-      <div class="stepper-track">
-        <div class="stepper-step active clickable" data-step="1" onclick="goToStep(1)" aria-current="step">
-          <div class="step-circle">1</div>
-          <span class="step-label">What?</span>
-        </div>
-        <div class="stepper-connector" id="connector-1-2"><div class="connector-fill"></div></div>
-        <div class="stepper-step clickable" data-step="2" onclick="goToStep(2)">
-          <div class="step-circle">2</div>
-          <span class="step-label">Where?</span>
-        </div>
-        <div class="stepper-connector" id="connector-2-3"><div class="connector-fill"></div></div>
-        <div class="stepper-step clickable" data-step="3" onclick="goToStep(3)">
-          <div class="step-circle">3</div>
-          <span class="step-label">Details</span>
-        </div>
-        <div class="stepper-connector" id="connector-3-4"><div class="connector-fill"></div></div>
-        <div class="stepper-step clickable" data-step="4" onclick="goToStep(4)">
-          <div class="step-circle">4</div>
-          <span class="step-label">Photos</span>
-        </div>
-        <div class="stepper-connector" id="connector-4-5"><div class="connector-fill"></div></div>
-        <div class="stepper-step clickable" data-step="5" onclick="goToStep(5)">
-          <div class="step-circle">5</div>
-          <span class="step-label">Review</span>
+    <nav class="stepper-container" aria-label="Progress">
+      <ol class="stepper-track">
+        <li class="stepper-step active clickable" data-step="1">
+          <button type="button" class="stepper-step-control" onclick="goToStep(1)">
+            <span class="step-circle">1</span>
+            <span class="step-label">What?</span>
+            <span class="step-completed-label">(completed)</span>
+          </button>
+          <span class="stepper-connector" id="connector-1-2" aria-hidden="true"><span class="connector-fill"></span></span>
+        </li>
+        <li class="stepper-step clickable" data-step="2">
+          <button type="button" class="stepper-step-control" onclick="goToStep(2)">
+            <span class="step-circle">2</span>
+            <span class="step-label">Where?</span>
+            <span class="step-completed-label">(completed)</span>
+          </button>
+          <span class="stepper-connector" id="connector-2-3" aria-hidden="true"><span class="connector-fill"></span></span>
+        </li>
+        <li class="stepper-step clickable" data-step="3">
+          <button type="button" class="stepper-step-control" onclick="goToStep(3)">
+            <span class="step-circle">3</span>
+            <span class="step-label">Details</span>
+            <span class="step-completed-label">(completed)</span>
+          </button>
+          <span class="stepper-connector" id="connector-3-4" aria-hidden="true"><span class="connector-fill"></span></span>
+        </li>
+        <li class="stepper-step clickable" data-step="4">
+          <button type="button" class="stepper-step-control" onclick="goToStep(4)">
+            <span class="step-circle">4</span>
+            <span class="step-label">Photos</span>
+            <span class="step-completed-label">(completed)</span>
+          </button>
+          <span class="stepper-connector" id="connector-4-5" aria-hidden="true"><span class="connector-fill"></span></span>
+        </li>
+        <li class="stepper-step clickable" data-step="5">
+          <button type="button" class="stepper-step-control" onclick="goToStep(5)">
+            <span class="step-circle">5</span>
+            <span class="step-label">Review</span>
+            <span class="step-completed-label">(completed)</span>
+          </button>
+        </li>
+      </ol>
+      <span class="stepper-current-label" id="stepper-current-label">Step 1 of 5</span>
+      <div class="stepper-mobile-view">
+        <span class="stepper-mobile-label" id="stepper-mobile-label">Step 1 of 5 · What?</span>
+        <div class="stepper-mobile-progress" aria-hidden="true">
+          <span class="stepper-mobile-segment"></span>
+          <span class="stepper-mobile-segment"></span>
+          <span class="stepper-mobile-segment"></span>
+          <span class="stepper-mobile-segment"></span>
+          <span class="stepper-mobile-segment"></span>
         </div>
       </div>
-    </div>
+    </nav>
 
     <!-- Wizard Card -->
     <div class="wizard-card">
@@ -800,8 +1575,8 @@ $pageTitle = 'Submit Report';
               Report type
             </div>
             <div class="report-type-grid" role="radiogroup" aria-label="Report type">
-              <label class="report-type-card" id="type-stray" tabindex="0" role="radio" aria-checked="false">
-                <input type="radio" name="reportType" value="Stray Animal">
+              <div class="report-type-card" id="type-stray" tabindex="0" role="radio" aria-checked="false" aria-label="Stray Animal">
+                <input type="radio" name="reportType" value="Stray Animal" tabindex="-1" aria-hidden="true">
                 <div class="type-icon-box stray">🐕</div>
                 <div class="type-info">
                   <h4>Stray Animal</h4>
@@ -810,9 +1585,9 @@ $pageTitle = 'Submit Report';
                 <div class="type-check-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-              </label>
-              <label class="report-type-card" id="type-injured" tabindex="0" role="radio" aria-checked="false">
-                <input type="radio" name="reportType" value="Injured Animal">
+              </div>
+              <div class="report-type-card" id="type-injured" tabindex="0" role="radio" aria-checked="false" aria-label="Injured Animal">
+                <input type="radio" name="reportType" value="Injured Animal" tabindex="-1" aria-hidden="true">
                 <div class="type-icon-box injured">🩹</div>
                 <div class="type-info">
                   <h4>Injured Animal</h4>
@@ -821,9 +1596,9 @@ $pageTitle = 'Submit Report';
                 <div class="type-check-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-              </label>
-              <label class="report-type-card" id="type-rabies" tabindex="0" role="radio" aria-checked="false">
-                <input type="radio" name="reportType" value="Rabies Concern">
+              </div>
+              <div class="report-type-card" id="type-rabies" tabindex="0" role="radio" aria-checked="false" aria-label="Rabies concern">
+                <input type="radio" name="reportType" value="Rabies Concern" tabindex="-1" aria-hidden="true">
                 <div class="type-icon-box rabies">⚠️</div>
                 <div class="type-info">
                   <h4>Rabies Concern</h4>
@@ -832,9 +1607,9 @@ $pageTitle = 'Submit Report';
                 <div class="type-check-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-              </label>
-              <label class="report-type-card" id="type-dead" tabindex="0" role="radio" aria-checked="false">
-                <input type="radio" name="reportType" value="Dead Animal">
+              </div>
+              <div class="report-type-card" id="type-dead" tabindex="0" role="radio" aria-checked="false" aria-label="Dead Animal">
+                <input type="radio" name="reportType" value="Dead Animal" tabindex="-1" aria-hidden="true">
                 <div class="type-icon-box dead">🕊️</div>
                 <div class="type-info">
                   <h4>Dead Animal</h4>
@@ -843,7 +1618,7 @@ $pageTitle = 'Submit Report';
                 <div class="type-check-indicator">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
                 </div>
-              </label>
+              </div>
             </div>
           </div>
 
@@ -854,18 +1629,152 @@ $pageTitle = 'Submit Report';
             </div>
             <div class="form-group">
               <select class="form-select" id="urgency-level" aria-label="Urgency level">
-                <option value="" disabled selected>Select urgency level</option>
+                <option value="" selected>Select urgency level</option>
                 <option value="low">Low — Not immediately dangerous</option>
                 <option value="medium">Medium — Needs attention soon</option>
                 <option value="high">High — Requires immediate response</option>
               </select>
-              <span class="helper-text">Select how urgent this report is so responders can prioritize accordingly.</span>
+              <span class="helper-text">Select how urgent this report is. Choose “Select urgency level” again to clear it.</span>
             </div>
           </div>
         </div>
 
         <!-- STEP 2: WHERE? -->
-        <div class="step-content" id="step-2">
+        <div class="step-content<?php echo $reportPinEnabled ? ' report-location-step' : ''; ?>" id="step-2">
+          <?php if ($reportPinEnabled): ?>
+          <div class="report-location-layout" id="report-location-layout">
+            <button type="button" class="report-location-mobile-back-step" id="report-location-mobile-back-step" aria-label="Back to report type" onclick="prevStep()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            </button>
+            <aside class="report-location-sidebar" aria-label="Incident location details">
+              <div class="report-location-mobile-details-header">
+                <button type="button" id="report-location-mobile-back" aria-label="Back to pin location">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+                </button>
+                <div>
+                  <div class="report-location-mobile-details-title">Location details</div>
+                  <div class="report-location-mobile-details-step">Step 2 of 5 · Where? (2 of 2)</div>
+                </div>
+              </div>
+              <div class="report-location-mobile-details-intro">
+                <h2>Where and when did it happen?</h2>
+                <p>Provide the location and date/time of the incident so responders can locate it quickly.</p>
+              </div>
+              <div class="report-location-mobile-summary" id="report-location-mobile-summary" aria-live="polite">
+                <div class="report-location-mobile-summary-copy">
+                  <span class="report-location-mobile-summary-state" id="report-location-mobile-summary-state">Pin set</span>
+                  <div class="report-location-mobile-summary-address" id="report-location-mobile-summary-address"></div>
+                </div>
+                <button type="button" id="report-location-mobile-edit-pin">Edit pin</button>
+              </div>
+              <div class="step-header">
+                <div class="step-tag">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                  Step 2 of 5
+                </div>
+                <h2>Where and when did it happen?</h2>
+                <p>Provide the location and date/time of the incident so responders can locate it quickly.</p>
+              </div>
+
+              <div class="report-location-search-section">
+                <div class="dcvs-place-search report-location-place-search"
+                     data-map-target="reportLocationMap"
+                     data-selection-mode="pin"
+                     data-geocode-endpoint="api/shared/location-geocode.php"
+                     data-portal="resident"
+                     data-status-target="#report-location-search-status">
+                  <label class="report-location-search-label" for="report-location-search">Search for a place or street</label>
+                  <div class="report-location-search-controls">
+                    <div class="report-location-input-wrap">
+                      <i class="fas fa-search dcvs-place-search-icon" aria-hidden="true"></i>
+                      <input type="search" id="report-location-search" autocomplete="off"
+                             placeholder="Search for a place or street"
+                             role="combobox" aria-autocomplete="list"
+                             aria-controls="report-location-search-results" aria-expanded="false">
+                    </div>
+                    <button type="button" class="report-location-gps" id="use-report-gps">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                      Use my location
+                    </button>
+                  </div>
+                  <div class="dcvs-place-results" id="report-location-search-results"
+                       role="listbox" aria-label="Place search results" hidden></div>
+                </div>
+                <div class="dcvs-place-status" id="report-location-search-status" role="status" aria-live="polite"></div>
+                <div class="helper-text">Drag the red pin or click the map to place it. Pan the map to inspect nearby areas.</div>
+              </div>
+
+              <section class="report-location-pin-card" aria-label="Selected pin details">
+                <div class="report-location-pin-state" id="report-location-pin-state" hidden>Pin set</div>
+                <div class="report-location-address" id="report-location-address" aria-live="polite">Detected Address: Move the pin or choose a place to see its address.</div>
+                <div class="report-location-barangay-detected" id="report-location-barangay-detected" hidden>
+                  <span>Detected barangay: <strong id="report-location-barangay-name"></strong></span>
+                  <button type="button" id="report-location-barangay-change">Change</button>
+                </div>
+                <div class="form-group report-location-barangay-group" id="report-location-barangay-group" hidden>
+                  <label class="report-location-barangay-label" for="location-barangay">Incident Barangay <span class="required-star">*</span></label>
+                  <select class="form-select" id="location-barangay">
+                    <option value="" disabled selected>Select barangay</option>
+                    <?php foreach ($officialBarangays as $barangay): ?>
+                      <option value="<?php echo htmlspecialchars($barangay['psgc_code'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($barangay['barangay_name'], ENT_QUOTES, 'UTF-8'); ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </div>
+                <div class="report-location-accuracy" id="report-location-accuracy" hidden></div>
+                <div class="report-location-status" id="report-location-status" role="status">Drag the red pin or click the map to place it.</div>
+                <div class="report-location-status report-location-barangay-status" id="report-location-barangay-status" role="status" hidden></div>
+                <div class="report-location-coordinates" id="report-location-coordinates" aria-hidden="true" hidden></div>
+                <div class="report-location-mobile-confirm-reason" id="report-location-mobile-confirm-reason" role="status" aria-live="polite" hidden></div>
+                <button type="button" class="report-location-mobile-confirm" id="report-location-mobile-confirm" onclick="confirmReportMobileLocation()">Confirm location</button>
+                <button type="button" class="report-location-fallback-link" id="report-location-fallback-toggle">I can't pin the location</button>
+                <div class="report-location-fallback" id="report-location-fallback" hidden>
+                  <span class="helper-text">If you can't place a pin, describe where it happened below and add a photo or video in the next step.</span>
+                </div>
+              </section>
+
+              <div class="form-section">
+                <div class="form-row single">
+                  <div class="form-group">
+                    <label for="location-street">Street / Landmark / Specific Location <span class="required-star">*</span></label>
+                    <input type="text" class="form-input" id="location-street" placeholder="Street, landmark, entrance, or directions">
+                    <span class="helper-text">Add directions that can help responders find the exact spot.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-section">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="incident-date">Date of Incident <span class="required-star">*</span></label>
+                    <input type="date" class="form-input" id="incident-date">
+                  </div>
+                  <div class="form-group">
+                    <label for="incident-time">Approximate Time</label>
+                    <input type="time" class="form-input" id="incident-time">
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            <section class="report-location-map-panel" aria-label="Incident location map">
+              <div class="report-location-map" id="reportLocationMap" aria-label="Incident location map" data-resident-barangay-code="<?php echo htmlspecialchars($residentBarangayCode, ENT_QUOTES, 'UTF-8'); ?>" data-satellite-style='<?php echo htmlspecialchars(json_encode($reportSatelliteStyle, JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>' data-map-basemap-toggle="true" data-max-map-zoom="18" data-initial-basemap="street" data-use-mapcn-satellite-style="true" data-preserve-map-view="true" data-city-boundary="true" data-map-landmarks-session="resident"<?php if ($mapTilerApiKey !== ''): ?> data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?>>
+                <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading the map...</div>
+                <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
+                <div class="report-location-map-hint">Move the map to place the pin</div>
+                <div class="report-location-mobile-center-pin" id="report-location-mobile-center-pin" aria-hidden="true">
+                  <svg viewBox="0 0 24 30" focusable="false"><path d="M12 29S2 19.8 2 11a10 10 0 1 1 20 0c0 8.8-10 18-10 18Z" fill="#dc2626" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="11" r="3.2" fill="#fff"/></svg>
+                </div>
+              </div>
+              <button type="button" class="btn-back report-location-expand-close" id="close-expanded-report-map">Close expanded map</button>
+              <button type="button" class="report-location-fallback-link" id="expand-report-map" aria-pressed="false">Expand map</button>
+            </section>
+          </div>
+          <input type="hidden" id="report-latitude" data-draft-state value="">
+          <input type="hidden" id="report-longitude" data-draft-state value="">
+          <input type="hidden" id="report-pin-source" data-draft-state value="resident">
+          <input type="hidden" id="report-location-fallback-state" data-draft-state value="0">
+          <input type="hidden" id="report-location-street-touched" data-draft-state value="0">
+          <?php else: ?>
           <div class="step-header">
             <div class="step-tag">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -874,7 +1783,6 @@ $pageTitle = 'Submit Report';
             <h2>Where and when did it happen?</h2>
             <p>Provide the location and date/time of the incident so responders can locate it quickly.</p>
           </div>
-
           <div class="form-section">
             <div class="form-row single">
               <div class="form-group">
@@ -885,50 +1793,19 @@ $pageTitle = 'Submit Report';
                     <option value="<?php echo htmlspecialchars($barangay['psgc_code'], ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($barangay['barangay_name'], ENT_QUOTES, 'UTF-8'); ?></option>
                   <?php endforeach; ?>
                 </select>
-                <span class="helper-text"><?php echo $reportPinEnabled ? 'For pinned reports, this is automatically set from the incident pin, not your registered barangay. Select it manually only if you cannot place a pin.' : 'Select the barangay where the incident happened.'; ?></span>
+                <span class="helper-text">Choose the barangay where the incident happened.</span>
               </div>
             </div>
           </div>
-
-          <?php if ($reportPinEnabled): ?>
-          <div class="form-section">
-            <div class="form-section-title">Pin the incident location</div>
-            <div class="report-location-picker">
-              <div class="report-location-picker-actions">
-                <span class="helper-text">Tap the map to place a pin, then drag it to the exact spot.</span>
-                <button type="button" class="btn-back" id="use-report-gps">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-                  Use my location
-                </button>
-              </div>
-              <div class="report-location-map" id="reportLocationMap" aria-label="Incident location map" data-map-basemap-toggle="true" data-city-boundary="true" data-map-landmarks-session="resident"<?php if ($mapTilerApiKey !== ''): ?> data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?>>
-                <div class="mapcn-loading"><i class="fas fa-spinner"></i> The map loads when this step is opened.</div>
-                <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
-              </div>
-              <button type="button" class="btn-back report-location-expand-close" id="close-expanded-report-map">Close expanded map</button>
-              <button type="button" class="report-location-fallback-link" id="expand-report-map" aria-pressed="false">Expand map</button>
-              <div class="report-location-status" id="report-location-status" role="status">Place a pin inside Dasmariñas.</div>
-              <button type="button" class="report-location-fallback-link" id="report-location-fallback-toggle">I can't pin the location</button>
-              <div class="report-location-fallback" id="report-location-fallback" hidden>
-                <span class="helper-text">Describe the incident location in Street / Landmark / Specific Location, and attach at least one photo or video in the next step.</span>
-              </div>
-            </div>
-            <input type="hidden" id="report-latitude" value="">
-            <input type="hidden" id="report-longitude" value="">
-            <input type="hidden" id="report-pin-source" value="resident">
-          </div>
-          <?php endif; ?>
-
           <div class="form-section">
             <div class="form-row single">
               <div class="form-group">
                 <label for="location-street">Street / Landmark / Specific Location <span class="required-star">*</span></label>
                 <input type="text" class="form-input" id="location-street" placeholder="e.g., Phase 3, near the covered court; entrance beside the blue gate">
-                <span class="helper-text"><?php echo $reportPinEnabled ? 'Map details may be unclear when zoomed in. Add directions responders can follow: phase, sitio or purok, street, nearby landmark, entrance, or which side of the road. The map pin and your written directions work together.' : 'Add directions responders can follow, such as the phase, sitio or purok, street, nearby landmark, entrance, or which side of the road.'; ?></span>
+                <span class="helper-text">Add directions responders can follow, such as the phase, sitio or purok, street, nearby landmark, entrance, or which side of the road.</span>
               </div>
             </div>
           </div>
-
           <div class="form-section">
             <div class="form-row">
               <div class="form-group">
@@ -942,6 +1819,7 @@ $pageTitle = 'Submit Report';
               </div>
             </div>
           </div>
+          <?php endif; ?>
         </div>
 
         <!-- STEP 3: DETAILS -->
@@ -1165,6 +2043,7 @@ $pageTitle = 'Submit Report';
             <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
           </svg>
         </button>
+        <div class="report-location-continue-reason" id="report-location-continue-reason" role="status" aria-live="polite" hidden></div>
       </div>
 
   </div>
@@ -1179,7 +2058,7 @@ $pageTitle = 'Submit Report';
       </svg>
     </div>
     <h2>Report Submitted!</h2>
-    <p>Your report has been successfully submitted and is now pending validation by your barangay officer.</p>
+    <p>Your report has been successfully submitted. If a potential match was found, authorized personnel will review it before it appears in the Staff and Barangay report lists.</p>
     <div class="success-ref-code" id="success-ref-code">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       <span id="ref-code-text">—</span>
@@ -1204,6 +2083,18 @@ $pageTitle = 'Submit Report';
   <span id="toast-message"></span>
 </div>
 
+<div class="duplicate-review-overlay" id="duplicate-review-overlay" hidden>
+  <section class="duplicate-review-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-review-title">
+    <h2 id="duplicate-review-title">Related reports found</h2>
+    <p>Select the closest existing report to help authorized personnel review your submission. Your report will remain separate unless the review team links it.</p>
+    <div class="duplicate-candidate-list" id="duplicate-candidate-list"></div>
+    <div class="duplicate-review-actions">
+      <button type="button" class="btn-continue" id="duplicate-same">Submit for review</button>
+    </div>
+    <button type="button" class="duplicate-review-cancel" id="duplicate-cancel">Go back and review</button>
+  </section>
+</div>
+
 <script>
   // ==========================================================================
   // STATE MANAGEMENT
@@ -1217,11 +2108,88 @@ $pageTitle = 'Submit Report';
   var reportMapFeatures = null;
   var reportPinCoordinates = null;
   var reportPinAccuracyMeters = null;
+  var reportReverseLookupRequestId = 0;
+  var reportReverseLookupPending = false;
+  var reportAutoLocationDetail = '';
+  var reportAutoLocationCoordinates = null;
+  var reportStreetInputTouched = false;
+  var reportPinLocationLabel = '';
   var reportPinBarangayCode = '';
   var reportFallbackMode = false;
+  var reportPendingBarangayCode = '';
+  var reportMapPinDrag = null;
+  var reportMobilePinMoveTimer = null;
+  var reportPendingDraftPin = null;
   var reportReviewMapInstance = null;
   var reportMapPinElement = null;
+  var reportMapCenterPinElement = null;
   var reportReviewPinElement = null;
+  var pendingDuplicateCandidates = [];
+  var duplicateChoiceResolver = null;
+  var reportCsrfToken = <?php echo json_encode(csrfToken()); ?>;
+
+  (function addDuplicateReviewStyles() {
+    var style = document.createElement('style');
+    style.textContent = '.duplicate-review-overlay{position:fixed;inset:0;z-index:10020;background:rgba(15,23,42,.58);display:flex;align-items:center;justify-content:center;padding:20px}.duplicate-review-overlay[hidden]{display:none}.duplicate-review-dialog{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.28)}.duplicate-review-dialog h2{margin:0 0 8px;color:#0f172a;font-size:21px}.duplicate-review-dialog>p{margin:0 0 18px;color:#64748b;font-size:14px}.duplicate-candidate-list{display:grid;gap:12px}.duplicate-candidate{display:grid;grid-template-columns:22px 84px 1fr;gap:12px;align-items:center;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.duplicate-candidate input{margin:0}.duplicate-candidate img,.duplicate-photo-placeholder{width:84px;height:72px;object-fit:cover;border-radius:8px;background:#f1f5f9}.duplicate-candidate-meta{display:grid;gap:4px;color:#334155;font-size:13px}.duplicate-candidate-meta strong{color:#0f172a}.duplicate-review-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px}.duplicate-review-cancel{display:block;margin:14px auto 0;border:0;background:none;color:#64748b;text-decoration:underline;cursor:pointer;font:inherit}@media(max-width:520px){.duplicate-review-actions{flex-direction:column-reverse}.duplicate-review-actions button{width:100%}}';
+    document.head.appendChild(style);
+  })();
+
+  function resolveDuplicateChoice(choice) {
+    var overlay = document.getElementById('duplicate-review-overlay');
+    overlay.hidden = true;
+    if (duplicateChoiceResolver) {
+      var resolve = duplicateChoiceResolver;
+      duplicateChoiceResolver = null;
+      resolve(choice);
+    }
+  }
+
+  function showDuplicateReview(candidates) {
+    pendingDuplicateCandidates = candidates;
+    var list = document.getElementById('duplicate-candidate-list');
+    list.textContent = '';
+    candidates.forEach(function(candidate) {
+      var card = document.createElement('article');
+      card.className = 'duplicate-candidate';
+      var parentChoice = document.createElement('input');
+      parentChoice.type = 'radio';
+      parentChoice.name = 'duplicate-parent-choice';
+      parentChoice.value = String(candidate.report_id);
+      parentChoice.checked = candidates[0].report_id === candidate.report_id;
+      parentChoice.setAttribute('aria-label', 'Use report from ' + new Date(candidate.created_at.replace(' ', 'T')).toLocaleString() + ' as the suggested parent');
+      card.appendChild(parentChoice);
+      if (candidate.photo_attachment_id) {
+        var image = document.createElement('img');
+        image.alt = 'Photo from a similar report';
+        image.src = 'api/shared/report-evidence-file.php?id='
+          + encodeURIComponent(candidate.photo_attachment_id) + '&sess=PHPSESSID';
+        card.appendChild(image);
+      } else {
+        var placeholder = document.createElement('div');
+        placeholder.className = 'duplicate-photo-placeholder';
+        placeholder.setAttribute('aria-label', 'No report photo');
+        card.appendChild(placeholder);
+      }
+      var details = document.createElement('div');
+      details.className = 'duplicate-candidate-meta';
+      var type = document.createElement('strong');
+      type.textContent = candidate.report_type.charAt(0).toUpperCase() + candidate.report_type.slice(1);
+      var date = document.createElement('span');
+      date.textContent = 'Reported ' + new Date(candidate.created_at.replace(' ', 'T')).toLocaleString();
+      var status = document.createElement('span');
+      status.textContent = 'Status: ' + candidate.status;
+      var distance = document.createElement('span');
+      distance.textContent = 'About ' + candidate.distance_meters + ' m away';
+      details.append(type, date, status, distance);
+      card.appendChild(details);
+      list.appendChild(card);
+    });
+    document.getElementById('duplicate-review-overlay').hidden = false;
+    return new Promise(function(resolve) { duplicateChoiceResolver = resolve; });
+  }
+
+  document.getElementById('duplicate-same').addEventListener('click', function() { resolveDuplicateChoice('same'); });
+  document.getElementById('duplicate-cancel').addEventListener('click', function() { resolveDuplicateChoice('cancel'); });
 
   function loadReportMapBundle() {
     if (window.MapCN && typeof window.MapCN.init === 'function') return Promise.resolve();
@@ -1326,12 +2294,139 @@ $pageTitle = 'Submit Report';
     return name ? { name: name, code: reportBarangayCodeByName()[name.toLocaleLowerCase()] || '' } : null;
   }
 
+  function isMobileReportLocation() {
+    return window.matchMedia
+      ? window.matchMedia('(max-width: 640px)').matches
+      : window.innerWidth <= 640;
+  }
+
+  function updateReportMobileLocationUI() {
+    var layout = document.getElementById('report-location-layout');
+    var confirmButton = document.getElementById('report-location-mobile-confirm');
+    var confirmReason = document.getElementById('report-location-mobile-confirm-reason');
+    var summaryState = document.getElementById('report-location-mobile-summary-state');
+    var summaryAddress = document.getElementById('report-location-mobile-summary-address');
+    var barangaySelect = document.getElementById('location-barangay');
+    if (!layout || !confirmButton || !barangaySelect) return;
+
+    layout.classList.toggle('is-fallback', reportFallbackMode);
+    var mapHint = document.querySelector('.report-location-map-hint');
+    if (mapHint && !reportFallbackMode) {
+      mapHint.textContent = 'Move the map to place the pin';
+    }
+    var canConfirm = reportFallbackMode
+      ? !!barangaySelect.value
+      : !!reportPinCoordinates && !!reportPinBarangayCode;
+    confirmButton.disabled = !canConfirm;
+    if (confirmReason) {
+      confirmReason.textContent = canConfirm
+        ? ''
+        : (reportFallbackMode
+          ? 'Select the incident barangay to continue.'
+          : 'Move the map to place the pin inside a verified barangay.');
+      confirmReason.hidden = canConfirm;
+    }
+
+    if (summaryState) {
+      var selectedOption = barangaySelect.selectedOptions[0];
+      var barangayName = selectedOption && selectedOption.value ? selectedOption.textContent : '';
+      summaryState.textContent = reportFallbackMode
+        ? (barangayName ? 'Location by barangay · ' + barangayName : 'No pin set')
+        : (reportPinCoordinates && reportPinBarangayCode && barangayName
+          ? 'Pin set · ' + barangayName : 'Pin location not confirmed');
+    }
+    if (summaryAddress) {
+      var address = document.getElementById('report-location-address');
+      var addressText = address ? address.textContent.replace(/^Detected Address:\s*/, '').trim() : '';
+      summaryAddress.textContent = addressText || (reportFallbackMode
+        ? 'Add a street, landmark, or directions for responders.'
+        : 'Move the map to see the detected address.');
+    }
+  }
+
+  function setReportMobileLocationDetailsView(showDetails) {
+    var layout = document.getElementById('report-location-layout');
+    var wizard = document.getElementById('residentReportWizard');
+    if (!layout || !wizard) return;
+    layout.classList.toggle('is-details-view', !!showDetails);
+    wizard.classList.toggle('report-location-mobile-details', !!showDetails);
+    var footerBackButton = document.querySelector('#footer-left .btn-back');
+    if (footerBackButton) {
+      footerBackButton.onclick = function() {
+        if (isMobileReportLocation() && wizard.classList.contains('report-location-mobile-details')) {
+          setReportMobileLocationDetailsView(false);
+          return;
+        }
+        prevStep();
+      };
+    }
+    if (reportMapInstance && !showDetails) {
+      window.requestAnimationFrame(function() {
+        reportMapInstance.resize();
+      });
+    }
+  }
+
+  function confirmReportMobileLocation() {
+    if (!isMobileReportLocation()) return;
+    updateReportMobileLocationUI();
+    var confirmButton = document.getElementById('report-location-mobile-confirm');
+    if (!confirmButton || confirmButton.disabled) return;
+    setReportMobileLocationDetailsView(true);
+  }
+
   function updateReportPinMarker() {
-    if (!reportMapInstance || !reportMapPinElement || !reportPinCoordinates) return;
-    var point = reportMapInstance.project(reportPinCoordinates);
+    if (!reportMapInstance || !reportMapPinElement) return;
+    var center = reportMapInstance.getCenter();
+    var coordinates = reportMapPinDrag
+      ? reportMapPinDrag.coordinates
+      : (reportPinCoordinates || [center.lng, center.lat]);
+    var point = reportMapInstance.project(coordinates);
     reportMapPinElement.style.left = point.x + 'px';
     reportMapPinElement.style.top = point.y + 'px';
-    reportMapPinElement.hidden = false;
+    reportMapPinElement.hidden = reportFallbackMode;
+  }
+
+  function updateReportLocationBarangayUI() {
+    var card = document.querySelector('.report-location-pin-card');
+    var detected = document.getElementById('report-location-barangay-detected');
+    var detectedName = document.getElementById('report-location-barangay-name');
+    var group = document.getElementById('report-location-barangay-group');
+    var mapHint = document.querySelector('.report-location-map-hint');
+    var select = document.getElementById('location-barangay');
+    var hasDetectedBarangay = !!(reportPinCoordinates && reportPinBarangayCode && select);
+    if (card) card.classList.toggle('is-pinned', !!reportPinCoordinates && !reportFallbackMode);
+    if (detected) detected.hidden = reportFallbackMode || !hasDetectedBarangay;
+    if (group) group.hidden = !reportFallbackMode;
+    if (mapHint) mapHint.hidden = reportFallbackMode;
+    if (reportMapPinElement) reportMapPinElement.hidden = reportFallbackMode;
+    if (detectedName && hasDetectedBarangay) {
+      var selectedOption = select.querySelector('option:checked');
+      detectedName.textContent = selectedOption ? selectedOption.textContent : '';
+    }
+    updateLocationContinueState();
+  }
+
+  function moveReportMapTo(options) {
+    if (!reportMapInstance) return;
+    var currentCenter = reportMapInstance.getCenter();
+    var targetCenter = options.center;
+    if (targetCenter && Math.abs(currentCenter.lng - Number(targetCenter[0])) < 0.0000001
+        && Math.abs(currentCenter.lat - Number(targetCenter[1])) < 0.0000001
+        && Math.abs(reportMapInstance.getZoom() - Number(options.zoom || reportMapInstance.getZoom())) < 0.01) return;
+    reportMapInstance.flyTo(options);
+  }
+
+  function focusReportBarangay(code) {
+    if (!reportMapInstance) {
+      reportPendingBarangayCode = code;
+      return;
+    }
+    var feature = reportBoundaryFeatureByCode(code);
+    var bounds = feature ? reportFeatureBounds(feature) : null;
+    if (!bounds) return;
+    reportPendingBarangayCode = '';
+    reportMapInstance.fitBounds(bounds, { padding: 48, maxZoom: 15.5, duration: 500 });
   }
 
   function updateReportReviewPinMarker() {
@@ -1346,6 +2441,21 @@ $pageTitle = 'Submit Report';
     var status = document.getElementById('report-location-status');
     if (!status) return;
     status.textContent = message;
+    status.classList.toggle('is-error', !!isError);
+  }
+
+  function setReportDraftField(id, value) {
+    var field = document.getElementById(id);
+    if (!field) return;
+    field.value = String(value);
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function setReportBarangayStatus(message, isError) {
+    var status = document.getElementById('report-location-barangay-status');
+    if (!status) return;
+    status.textContent = message;
+    status.hidden = !message;
     status.classList.toggle('is-error', !!isError);
   }
 
@@ -1368,13 +2478,126 @@ $pageTitle = 'Submit Report';
     return { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [coordinates] } };
   }
 
-  function setReportPin(longitude, latitude, source, detected, finalize, accuracyMeters) {
+  function reverseGeocodeReportPin(longitude, latitude) {
+    var requestId = ++reportReverseLookupRequestId;
+    var locationInput = document.getElementById('location-street');
+    var previousAutoDetail = reportAutoLocationDetail;
+    var previousAutoCoordinates = reportAutoLocationCoordinates;
+    var previousValueWasAuto = locationInput && locationInput.value.trim() === previousAutoDetail;
+    var previousAutoLocationMoved = previousValueWasAuto && previousAutoCoordinates
+      && (Math.abs(previousAutoCoordinates[0] - longitude) > 0.00001
+        || Math.abs(previousAutoCoordinates[1] - latitude) > 0.00001);
+    if (previousAutoLocationMoved && locationInput
+        && locationInput.value.trim() === previousAutoDetail) {
+      locationInput.value = '';
+      reportAutoLocationDetail = '';
+      reportAutoLocationCoordinates = null;
+      reportStreetInputTouched = false;
+      setReportDraftField('report-location-street-touched', '0');
+      locationInput.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    reportReverseLookupPending = true;
+    var addressStatus = document.getElementById('report-location-address');
+    if (!addressStatus) return;
+    addressStatus.classList.remove('is-error');
+    addressStatus.textContent = 'Detected Address: checking this location...';
+
+    var url = new URL('api/shared/location-geocode.php', window.location.href);
+    url.searchParams.set('portal', 'resident');
+    url.searchParams.set('latitude', String(latitude));
+    url.searchParams.set('longitude', String(longitude));
+    fetch(url.toString(), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+      .then(function(response) {
+        return response.json().then(function(payload) {
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.message || 'The address could not be looked up.');
+          }
+          return payload;
+        });
+      })
+      .then(function(payload) {
+        if (requestId !== reportReverseLookupRequestId) return;
+        reportReverseLookupPending = false;
+        var result = Array.isArray(payload.results) ? payload.results[0] : null;
+        if (!result || !result.label) {
+          addressStatus.textContent = "Detected Address: We couldn't find a nearby address. Add a street or landmark below.";
+          if (previousAutoLocationMoved && locationInput
+              && locationInput.value.trim() === previousAutoDetail) {
+            locationInput.value = '';
+            reportAutoLocationDetail = '';
+            reportAutoLocationCoordinates = null;
+            reportStreetInputTouched = false;
+          }
+          updateLocationContinueState();
+          return;
+        }
+        addressStatus.textContent = 'Detected Address: ' + result.label;
+        if (!reportPinLocationLabel) {
+          reportPinLocationLabel = result.label;
+          setReportPinStatus('Your pin is currently placed near ' + result.label + '.', false);
+        }
+        if (locationInput) {
+          var currentValue = locationInput.value.trim();
+          if (!reportStreetInputTouched && (!currentValue
+              || (currentValue === previousAutoDetail
+                && (!previousAutoCoordinates || previousAutoLocationMoved)))) {
+            locationInput.value = result.label;
+            reportAutoLocationDetail = result.label;
+            reportAutoLocationCoordinates = [longitude, latitude];
+            reportStreetInputTouched = false;
+            setReportDraftField('report-location-street-touched', '0');
+            locationInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }
+        updateLocationContinueState();
+      })
+      .catch(function(error) {
+        if (requestId !== reportReverseLookupRequestId) return;
+        reportReverseLookupPending = false;
+        console.error('Incident pin reverse geocoding failed:', error);
+        addressStatus.textContent = "Detected Address: We couldn't look up this address right now. You can add the location details below.";
+        addressStatus.classList.add('is-error');
+        if (previousAutoLocationMoved && locationInput
+            && locationInput.value.trim() === previousAutoDetail) {
+          locationInput.value = '';
+          reportAutoLocationDetail = '';
+          reportAutoLocationCoordinates = null;
+          reportStreetInputTouched = false;
+        }
+        updateLocationContinueState();
+      });
+  }
+
+  function setReportPin(longitude, latitude, source, detected, finalize, accuracyMeters, locationLabel) {
+    if (reportMobilePinMoveTimer) {
+      window.clearTimeout(reportMobilePinMoveTimer);
+      reportMobilePinMoveTimer = null;
+    }
     reportPinCoordinates = [Number(longitude), Number(latitude)];
     reportPinAccuracyMeters = Number.isFinite(accuracyMeters) && accuracyMeters > 0 ? accuracyMeters : null;
-    document.getElementById('report-latitude').value = String(reportPinCoordinates[1]);
-    document.getElementById('report-longitude').value = String(reportPinCoordinates[0]);
-    document.getElementById('report-pin-source').value = source || 'resident';
+    reportPinLocationLabel = typeof locationLabel === 'string' ? locationLabel.trim() : '';
+    reportReverseLookupRequestId++;
+    reportReverseLookupPending = false;
+    var pinState = document.getElementById('report-location-pin-state');
+    if (pinState) pinState.hidden = false;
+    setReportDraftField('report-latitude', reportPinCoordinates[1]);
+    setReportDraftField('report-longitude', reportPinCoordinates[0]);
+    setReportDraftField('report-pin-source', source || 'resident');
+    document.getElementById('report-location-coordinates').textContent =
+      'Latitude: ' + String(reportPinCoordinates[1]) + ' | Longitude: ' + String(reportPinCoordinates[0]);
+    var accuracyStatus = document.getElementById('report-location-accuracy');
+    if (reportPinAccuracyMeters && accuracyStatus) {
+      accuracyStatus.hidden = false;
+      accuracyStatus.classList.remove('is-error');
+      accuracyStatus.textContent = 'GPS accuracy: ±' + Math.round(reportPinAccuracyMeters) +
+        ' m. Drag the pin or click the map to correct its position if needed.';
+    } else if (accuracyStatus) {
+      accuracyStatus.hidden = true;
+      accuracyStatus.classList.remove('is-error');
+      accuracyStatus.textContent = '';
+    }
     reportFallbackMode = false;
+    setReportDraftField('report-location-fallback-state', '0');
     document.getElementById('report-location-fallback').hidden = true;
     document.getElementById('report-location-fallback-toggle').textContent = "I can't pin the location";
     document.getElementById('upload-requirement-note').textContent =
@@ -1393,29 +2616,90 @@ $pageTitle = 'Submit Report';
       var barangaySelect = document.getElementById('location-barangay');
       barangaySelect.value = '';
       barangaySelect.disabled = false;
-      setReportPinStatus('This pin is outside Dasmariñas or on an ambiguous barangay boundary. Move it inside one barangay.', true);
-    } else if (finalize !== false) {
+      setReportPinStatus("We couldn't confirm which barangay this location is in. Move the pin slightly or check that it is inside Dasmariñas.", true);
+      setReportBarangayStatus('', false);
+    } else {
       var barangaySelect = document.getElementById('location-barangay');
       barangaySelect.value = detected.code;
       barangaySelect.disabled = true;
-      setReportPinStatus('Incident location detected in ' + detected.name + '. The report will go to that barangay.', false);
-    } else {
-      setReportPinStatus('Pin is in ' + detected.name + '.', false);
+      var nearbyLocation = reportPinLocationLabel || ('Barangay ' + detected.name);
+      setReportPinStatus('Your pin is currently placed near ' + nearbyLocation + '.', false);
+      setReportBarangayStatus('', false);
     }
 
     updateReportPinMarker();
+    updateReportLocationBarangayUI();
+    if (finalize !== false) {
+      reverseGeocodeReportPin(reportPinCoordinates[0], reportPinCoordinates[1]);
+    }
   }
 
   function setupReportLocationMap(map) {
     reportMapInstance = map;
-    reportMapPinElement = document.createElement('button');
-    reportMapPinElement.type = 'button';
-    reportMapPinElement.className = 'report-location-map-pin';
-    reportMapPinElement.setAttribute('aria-label', 'Drag to adjust incident pin');
-    reportMapPinElement.innerHTML = '<svg viewBox="0 0 24 30" aria-hidden="true" focusable="false"><path d="M12 29S2 19.8 2 11a10 10 0 1 1 20 0c0 8.8-10 18-10 18Z" fill="#e53935" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="11" r="3.2" fill="#fff"/></svg>';
-    reportMapPinElement.hidden = true;
-    reportMapPinElement.addEventListener('click', function(event) { event.stopPropagation(); });
+    reportMapPinElement = document.createElement('span');
+    reportMapPinElement.className = 'report-location-map-pin is-draggable';
+    reportMapPinElement.setAttribute('aria-hidden', 'true');
+    reportMapPinElement.innerHTML = '<svg viewBox="0 0 24 30" focusable="false"><path d="M12 29S2 19.8 2 11a10 10 0 1 1 20 0c0 8.8-10 18-10 18Z" fill="#e53935" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="11" r="3.2" fill="#fff"/></svg>';
     map.getContainer().appendChild(reportMapPinElement);
+    reportMapCenterPinElement = map.getContainer().querySelector('#report-location-mobile-center-pin');
+    if (!reportMapCenterPinElement) {
+      reportMapCenterPinElement = document.createElement('span');
+      reportMapCenterPinElement.className = 'report-location-mobile-center-pin';
+      reportMapCenterPinElement.id = 'report-location-mobile-center-pin';
+      reportMapCenterPinElement.setAttribute('aria-hidden', 'true');
+      reportMapCenterPinElement.innerHTML = '<svg viewBox="0 0 24 30" focusable="false"><path d="M12 29S2 19.8 2 11a10 10 0 1 1 20 0c0 8.8-10 18-10 18Z" fill="#dc2626" stroke="#fff" stroke-width="1.4"/><circle cx="12" cy="11" r="3.2" fill="#fff"/></svg>';
+      map.getContainer().appendChild(reportMapCenterPinElement);
+    }
+    reportMapPinElement.addEventListener('pointerdown', function(event) {
+      if (event.button !== undefined && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      var center = map.getCenter();
+      reportMapPinDrag = {
+        pointerId: event.pointerId,
+        coordinates: reportPinCoordinates || [center.lng, center.lat]
+      };
+      reportMapPinElement.classList.add('is-dragging');
+      reportMapPinElement.setPointerCapture(event.pointerId);
+    });
+    reportMapPinElement.addEventListener('pointermove', function(event) {
+      if (!reportMapPinDrag || event.pointerId !== reportMapPinDrag.pointerId) return;
+      event.preventDefault();
+      var bounds = map.getContainer().getBoundingClientRect();
+      var x = Math.max(0, Math.min(map.getContainer().clientWidth, event.clientX - bounds.left));
+      var y = Math.max(0, Math.min(map.getContainer().clientHeight, event.clientY - bounds.top));
+      var coordinates = map.unproject([x, y]);
+      reportMapPinDrag.coordinates = [coordinates.lng, coordinates.lat];
+      updateReportPinMarker();
+    });
+    function finishReportMapPinDrag(event) {
+      if (!reportMapPinDrag || event.pointerId !== reportMapPinDrag.pointerId) return;
+      var coordinates = reportMapPinDrag.coordinates;
+      reportMapPinDrag = null;
+      reportMapPinElement.classList.remove('is-dragging');
+      if (reportMapPinElement.hasPointerCapture(event.pointerId)) {
+        reportMapPinElement.releasePointerCapture(event.pointerId);
+      }
+      setReportPin(
+        coordinates[0],
+        coordinates[1],
+        'resident',
+        reportFeatureAtCoordinates(coordinates[0], coordinates[1]),
+        true,
+        null,
+        ''
+      );
+    }
+    reportMapPinElement.addEventListener('pointerup', finishReportMapPinDrag);
+    reportMapPinElement.addEventListener('pointercancel', finishReportMapPinDrag);
+    reportMapPinElement.addEventListener('click', function(event) { event.stopPropagation(); });
+    if (!map.getContainer().querySelector('.report-location-map-hint')) {
+      var mapHint = document.createElement('div');
+      mapHint.className = 'report-location-map-hint';
+      mapHint.textContent = 'Move the map to place the pin';
+      map.getContainer().appendChild(mapHint);
+    }
+    updateReportPinMarker();
 
     map.addSource('report-pin-accuracy', {
       type: 'geojson',
@@ -1466,56 +2750,126 @@ $pageTitle = 'Submit Report';
           : { type: 'FeatureCollection', features: [] });
       }
     });
-    map.on('click', function(event) {
-      var detected = reportFeatureAtCoordinates(event.lngLat.lng, event.lngLat.lat);
-      setReportPin(event.lngLat.lng, event.lngLat.lat, 'resident', detected);
-    });
     map.on('render', updateReportPinMarker);
+    map.on('moveend', function() {
+      if (!isMobileReportLocation() || reportFallbackMode) return;
+      if (reportMobilePinMoveTimer) window.clearTimeout(reportMobilePinMoveTimer);
+      reportMobilePinMoveTimer = window.setTimeout(function() {
+        reportMobilePinMoveTimer = null;
+        if (!reportMapInstance || !isMobileReportLocation() || reportFallbackMode) return;
+        var center = reportMapInstance.getCenter();
+        if (reportPinCoordinates
+            && Math.abs(reportPinCoordinates[0] - center.lng) < 0.00001
+            && Math.abs(reportPinCoordinates[1] - center.lat) < 0.00001) return;
+        setReportPin(
+          center.lng,
+          center.lat,
+          'resident',
+          reportFeatureAtCoordinates(center.lng, center.lat),
+          true,
+          null,
+          ''
+        );
+      }, 300);
+    });
+    map.on('click', function(event) {
+      if (!event || !event.lngLat) return;
+      var longitude = Number(event.lngLat.lng);
+      var latitude = Number(event.lngLat.lat);
+      if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) return;
 
-    reportMapPinElement.addEventListener('pointerdown', function(event) {
-      event.preventDefault();
-      event.stopPropagation();
-      reportMapPinElement.setPointerCapture(event.pointerId);
-      map.dragPan.disable();
-    });
-    reportMapPinElement.addEventListener('pointermove', function(event) {
-      if (!reportMapPinElement.hasPointerCapture(event.pointerId)) return;
-      event.preventDefault();
-      var rect = map.getContainer().getBoundingClientRect();
-      var point = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
-      setReportPin(point.lng, point.lat, document.getElementById('report-pin-source').value, reportFeatureAtCoordinates(point.lng, point.lat), false);
-    });
-    reportMapPinElement.addEventListener('pointerup', function(event) {
-      if (reportPinCoordinates) {
-        setReportPin(reportPinCoordinates[0], reportPinCoordinates[1],
-          document.getElementById('report-pin-source').value,
-          reportFeatureAtCoordinates(reportPinCoordinates[0], reportPinCoordinates[1]));
+      var searchInput = document.getElementById('report-location-search');
+      if (searchInput && searchInput.value) {
+        searchInput.value = '';
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
       }
-      map.dragPan.enable();
-      if (reportMapPinElement.hasPointerCapture(event.pointerId)) reportMapPinElement.releasePointerCapture(event.pointerId);
+      if (isMobileReportLocation()) {
+        var mapCenter = map.getCenter();
+        if (Math.abs(mapCenter.lng - longitude) < 0.000001
+            && Math.abs(mapCenter.lat - latitude) < 0.000001) {
+          if (reportMobilePinMoveTimer) window.clearTimeout(reportMobilePinMoveTimer);
+          reportMobilePinMoveTimer = window.setTimeout(function() {
+            reportMobilePinMoveTimer = null;
+            setReportPin(
+              longitude,
+              latitude,
+              'resident',
+              reportFeatureAtCoordinates(longitude, latitude),
+              true,
+              null,
+              ''
+            );
+          }, 300);
+        } else {
+          map.panTo([longitude, latitude], { duration: 250 });
+        }
+        return;
+      }
+      setReportPin(
+        longitude,
+        latitude,
+        'resident',
+        reportFeatureAtCoordinates(longitude, latitude),
+        true,
+        null,
+        ''
+      );
     });
-    ['pointercancel', 'lostpointercapture'].forEach(function(eventName) {
-      reportMapPinElement.addEventListener(eventName, function() { map.dragPan.enable(); });
-    });
+    if (reportPendingDraftPin) {
+      var restoredCoordinates = reportPendingDraftPin;
+      reportPendingDraftPin = null;
+      setReportPin(
+        restoredCoordinates[0],
+        restoredCoordinates[1],
+        document.getElementById('report-pin-source').value || 'resident',
+        reportFeatureAtCoordinates(restoredCoordinates[0], restoredCoordinates[1]),
+        true,
+        null,
+        reportPinLocationLabel
+      );
+    }
+    if (reportPinCoordinates) {
+      moveReportMapTo({ center: reportPinCoordinates, zoom: 15, duration: 0 });
+      map.jumpTo({ center: reportPinCoordinates, zoom: 15 });
+      updateReportPinMarker();
+    }
+    if (reportPendingBarangayCode) focusReportBarangay(reportPendingBarangayCode);
+  }
 
-    document.getElementById('location-barangay').addEventListener('change', function() {
-      var feature = reportBoundaryFeatureByCode(this.value);
-      var bounds = feature ? reportFeatureBounds(feature) : null;
-      if (bounds) map.fitBounds(bounds, { padding: 48, maxZoom: 17, duration: 500 });
-    });
-
-    var selectedFeature = reportBoundaryFeatureByCode(document.getElementById('location-barangay').value);
-    var selectedBounds = selectedFeature ? reportFeatureBounds(selectedFeature) : null;
-    if (selectedBounds) map.fitBounds(selectedBounds, { padding: 48, maxZoom: 17, duration: 0 });
-
-    if (reportPinCoordinates) updateReportPinMarker();
+  function reportFeatureCameraCenter(feature) {
+    var bounds = feature ? reportFeatureBounds(feature) : null;
+    if (!bounds) return null;
+    var center = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2];
+    if (reportPointInPolygon(center[0], center[1], feature.geometry)) return center;
+    var best = null;
+    var bestDistance = Infinity;
+    for (var row = 0; row < 20; row++) {
+      for (var column = 0; column < 20; column++) {
+        var candidate = [
+          bounds[0][0] + (column + 0.5) * (bounds[1][0] - bounds[0][0]) / 20,
+          bounds[0][1] + (row + 0.5) * (bounds[1][1] - bounds[0][1]) / 20
+        ];
+        if (!reportPointInPolygon(candidate[0], candidate[1], feature.geometry)) continue;
+        var distance = Math.pow(candidate[0] - center[0], 2) + Math.pow(candidate[1] - center[1], 2);
+        if (distance < bestDistance) {
+          best = candidate;
+          bestDistance = distance;
+        }
+      }
+    }
+    return best;
   }
 
   function initializeReportLocationMap() {
     if (!document.getElementById('reportLocationMap') || reportMapInstance) return;
     var container = document.getElementById('reportLocationMap');
     container.addEventListener('mapcn:load', function(event) {
-      if (event.detail && event.detail.map) setupReportLocationMap(event.detail.map);
+      if (event.detail && event.detail.map) {
+        setupReportLocationMap(event.detail.map);
+        window.requestAnimationFrame(function() {
+          if (typeof event.detail.map.resize === 'function') event.detail.map.resize();
+        });
+      }
     }, { once: true });
 
     loadReportMapBundle()
@@ -1531,17 +2885,23 @@ $pageTitle = 'Submit Report';
           throw new Error('The official barangay boundary set is incomplete.');
         }
         reportMapFeatures = geojson;
+        var residentCode = container.getAttribute('data-resident-barangay-code') || '';
+        var residentFeature = reportBoundaryFeatureByCode(residentCode);
+        var initialCenter = reportFeatureCameraCenter(residentFeature) || [120.968, 14.306];
+        if (!residentFeature) {
+          setReportPinStatus('Your assigned barangay boundary could not be matched. Verify the map location before continuing.', true);
+        }
         window.MapCN.init('reportLocationMap', {
-          center: [120.968, 14.306],
-          zoom: 15,
-          maxZoom: 20,
+          center: initialCenter,
+          zoom: 15.5,
+          maxZoom: 18,
           barangayOverlay: false,
           style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
         });
       })
       .catch(function(error) {
         console.error('Report location map initialization failed:', error);
-        setReportPinStatus('The location map could not load. Use the written location details and attach a photo or video.', true);
+        setReportPinStatus("The map couldn't load. You can still enter the location details and attach a photo or video.", true);
       });
   }
 
@@ -1552,8 +2912,7 @@ $pageTitle = 'Submit Report';
     document.getElementById('reviewReportLocationMap').hidden = false;
     var selected = document.getElementById('location-barangay').selectedOptions[0];
     var summary = selected ? selected.textContent : 'Selected barangay';
-    document.getElementById('review-pin-summary').textContent =
-      summary + ' · ' + reportPinCoordinates[1].toFixed(6) + ', ' + reportPinCoordinates[0].toFixed(6);
+    document.getElementById('review-pin-summary').textContent = 'Pin set in Barangay ' + summary + '.';
 
     loadReportMapBundle().then(function() {
       if (reportReviewMapInstance) {
@@ -1575,9 +2934,9 @@ $pageTitle = 'Submit Report';
       }, { once: true });
       window.MapCN.init('reviewReportLocationMap', {
         center: reportPinCoordinates,
-        zoom: 14,
+        zoom: 15,
         barangayOverlay: false,
-        style: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
+        style: <?php echo json_encode($reportSatelliteStyle, JSON_UNESCAPED_SLASHES); ?>
       });
     }).catch(function(error) {
       console.error('Report review map initialization failed:', error);
@@ -1602,7 +2961,12 @@ $pageTitle = 'Submit Report';
 
     if (step === 5) populateReview();
 
-    document.querySelector('.stepper-container').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (<?php echo $reportPinEnabled ? 'true' : 'false'; ?> && step === 2) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      var stepper = document.querySelector('.stepper-container');
+      if (stepper) stepper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
   }
 
   function nextStep() {
@@ -1623,6 +2987,15 @@ $pageTitle = 'Submit Report';
   function updateStepperUI() {
     const steps = document.querySelectorAll('.stepper-step');
     const connectors = document.querySelectorAll('.stepper-connector');
+    const currentStepLabel = document.getElementById('stepper-current-label');
+    if (currentStepLabel) currentStepLabel.textContent = 'Step ' + currentStep + ' of ' + totalSteps;
+    const mobileStepLabel = document.getElementById('stepper-mobile-label');
+    const currentStepItem = document.querySelector('.stepper-step[data-step="' + currentStep + '"]');
+    const currentStepName = currentStepItem && currentStepItem.querySelector('.step-label');
+    if (mobileStepLabel) {
+      mobileStepLabel.textContent = 'Step ' + currentStep + ' of ' + totalSteps
+        + ' · ' + (currentStepName ? currentStepName.textContent.trim() : '');
+    }
 
     steps.forEach((step, idx) => {
       const stepNum = idx + 1;
@@ -1632,7 +3005,6 @@ $pageTitle = 'Submit Report';
 
       if (stepNum === currentStep) {
         step.classList.add('active');
-        step.setAttribute('aria-current', 'step');
         circle.innerHTML = stepNum;
       } else if (stepNum < currentStep) {
         step.classList.add('completed');
@@ -1640,6 +3012,8 @@ $pageTitle = 'Submit Report';
       } else {
         circle.innerHTML = stepNum;
       }
+      if (stepNum === currentStep) step.setAttribute('aria-current', 'step');
+      else step.removeAttribute('aria-current');
     });
 
     connectors.forEach((conn, idx) => {
@@ -1649,13 +3023,26 @@ $pageTitle = 'Submit Report';
         conn.classList.remove('filled');
       }
     });
+    document.querySelectorAll('.stepper-mobile-segment').forEach((segment, idx) => {
+      segment.classList.toggle('completed', idx + 1 < currentStep);
+      segment.classList.toggle('current', idx + 1 === currentStep);
+    });
   }
 
   function updateStepContent() {
+    var showLocationScreen = <?php echo $reportPinEnabled ? 'true' : 'false'; ?> && currentStep === 2;
+    document.body.classList.toggle('report-location-screen', showLocationScreen);
+    document.getElementById('residentReportWizard').classList.toggle('report-location-screen', showLocationScreen);
     document.querySelectorAll('.step-content').forEach(el => el.classList.remove('active'));
     const target = document.getElementById('step-' + currentStep);
     if (target) target.classList.add('active');
-    if (currentStep === 2) initializeReportLocationMap();
+    if (currentStep === 2) {
+      setReportMobileLocationDetailsView(false);
+      initializeReportLocationMap();
+      window.requestAnimationFrame(function() {
+        if (reportMapInstance && typeof reportMapInstance.resize === 'function') reportMapInstance.resize();
+      });
+    }
   }
 
   // ==========================================================================
@@ -1664,6 +3051,8 @@ $pageTitle = 'Submit Report';
   function updateFooter() {
     const footerLeft = document.getElementById('footer-left');
     const btnNext = document.getElementById('btn-next');
+    const wizardFooter = document.getElementById('wizard-footer');
+    if (wizardFooter) wizardFooter.classList.toggle('is-first-step', currentStep === 1);
 
     if (currentStep === 1) {
       footerLeft.innerHTML = '<div class="btn-placeholder"></div>';
@@ -1703,6 +3092,42 @@ $pageTitle = 'Submit Report';
         footer.appendChild(newBtn);
       }
     }
+    updateLocationContinueState();
+  }
+
+  function updateLocationContinueState() {
+    var reason = document.getElementById('report-location-continue-reason');
+    var nextButton = document.getElementById('btn-next');
+    if (!reason || !nextButton) {
+      updateReportMobileLocationUI();
+      return;
+    }
+    if (currentStep !== 2) {
+      nextButton.disabled = false;
+      reason.hidden = true;
+      reason.textContent = '';
+      updateReportMobileLocationUI();
+      return;
+    }
+    var message = '';
+    var street = document.getElementById('location-street');
+    var date = document.getElementById('incident-date');
+    var barangay = document.getElementById('location-barangay');
+    if (reportFallbackMode) {
+      if (!barangay || !barangay.value) message = 'Select the incident barangay to continue.';
+    } else if (!reportPinCoordinates || !reportPinBarangayCode) {
+      message = reportPinCoordinates
+        ? 'Place the pin inside a verified Dasmariñas barangay, or use the fallback option.'
+        : 'Drag the red pin, click the map, or use the fallback option to set the incident location.';
+    }
+    if (!message && (!street || !street.value.trim())) {
+      message = 'Add a street, landmark, or directions for responders.';
+    }
+    if (!message && (!date || !date.value)) message = 'Select the incident date to continue.';
+    nextButton.disabled = !!message;
+    reason.textContent = message;
+    reason.hidden = !message;
+    updateReportMobileLocationUI();
   }
 
   // ==========================================================================
@@ -1724,14 +3149,19 @@ $pageTitle = 'Submit Report';
         if (!barangay) { showToast('Please select the incident barangay.'); return false; }
         if (document.getElementById('report-location-fallback')) {
           if (!reportFallbackMode && (!reportPinCoordinates || !reportPinBarangayCode)) {
-            showToast('Place a pin inside Dasmariñas or use the unpinned fallback.');
+            showToast("Mark the location on the map, or choose \"I can't pin the location\" to continue without a pin.");
             return false;
           } else if (!reportFallbackMode && reportPinBarangayCode !== barangay) {
-            showToast('The incident barangay is determined by the pin. Place it inside the correct barangay.');
+            showToast('The barangay is based on your pin. Move the pin to the right place.');
+            return false;
+          }
+          if (!reportFallbackMode && reportReverseLookupPending
+              && street === reportAutoLocationDetail) {
+            showToast('Wait a moment for the address to appear, or enter the location details below.');
             return false;
           }
         }
-        if (!street) { showToast('Please provide a specific location or landmark.'); return false; }
+        if (!street) { showToast('Add a street, landmark, or directions that can help responders find the location.'); return false; }
         if (!date) { showToast('Please provide the date of the incident.'); return false; }
         return true;
       }
@@ -1758,14 +3188,20 @@ $pageTitle = 'Submit Report';
   // REPORT TYPE SELECTION
   // ==========================================================================
   document.querySelectorAll('.report-type-card').forEach(card => {
-    card.addEventListener('click', function () {
+    card.addEventListener('click', function (event) {
+      event.preventDefault();
+      const wasSelected = this.classList.contains('selected');
       document.querySelectorAll('.report-type-card').forEach(c => {
         c.classList.remove('selected');
         c.setAttribute('aria-checked', 'false');
+        c.querySelector('input[type="radio"]').checked = false;
       });
-      this.classList.add('selected');
-      this.setAttribute('aria-checked', 'true');
-      this.querySelector('input[type="radio"]').checked = true;
+      if (!wasSelected) {
+        this.classList.add('selected');
+        this.setAttribute('aria-checked', 'true');
+        this.querySelector('input[type="radio"]').checked = true;
+      }
+      this.querySelector('input[type="radio"]').dispatchEvent(new Event('change', { bubbles: true }));
     });
     card.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -1786,6 +3222,51 @@ $pageTitle = 'Submit Report';
 
   document.addEventListener('dcvs:draft-restored', function(event) {
     if (!event.detail || event.detail.root.id !== 'residentReportWizard') return;
+    var latitudeField = document.getElementById('report-latitude');
+    var longitudeField = document.getElementById('report-longitude');
+    if (latitudeField && longitudeField) {
+      var latitudeValue = latitudeField.value.trim();
+      var longitudeValue = longitudeField.value.trim();
+      var latitude = Number(latitudeValue);
+      var longitude = Number(longitudeValue);
+      var streetInput = document.getElementById('location-street');
+      var fallbackState = document.getElementById('report-location-fallback-state');
+      var streetTouchedState = document.getElementById('report-location-street-touched');
+      reportFallbackMode = !!(fallbackState && fallbackState.value === '1');
+      reportStreetInputTouched = !!(streetTouchedState && streetTouchedState.value === '1');
+      reportPendingDraftPin = null;
+      reportPinLocationLabel = '';
+      if (latitudeValue && longitudeValue
+          && Number.isFinite(latitude) && latitude >= -90 && latitude <= 90
+          && Number.isFinite(longitude) && longitude >= -180 && longitude <= 180) {
+        reportFallbackMode = false;
+        reportPendingDraftPin = [longitude, latitude];
+        if (!reportStreetInputTouched && streetInput) {
+          reportAutoLocationDetail = streetInput.value.trim();
+          reportAutoLocationCoordinates = reportAutoLocationDetail ? [longitude, latitude] : null;
+          reportPinLocationLabel = reportAutoLocationDetail;
+        }
+      } else if (!reportFallbackMode) {
+        reportStreetInputTouched = false;
+        reportAutoLocationDetail = '';
+        reportAutoLocationCoordinates = null;
+        if (streetInput) {
+          streetInput.value = '';
+          streetInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        setReportDraftField('report-location-street-touched', '0');
+      }
+      var fallback = document.getElementById('report-location-fallback');
+      var fallbackToggle = document.getElementById('report-location-fallback-toggle');
+      var barangaySelect = document.getElementById('location-barangay');
+      if (fallback) fallback.hidden = !reportFallbackMode;
+      if (fallbackToggle) {
+        fallbackToggle.textContent = reportFallbackMode
+          ? 'I can place a pin instead' : "I can't pin the location";
+      }
+      if (barangaySelect) barangaySelect.disabled = false;
+      updateReportLocationBarangayUI();
+    }
     const selectedType = document.querySelector('input[name="reportType"]:checked');
     document.querySelectorAll('.report-type-card').forEach(card => {
       const selected = selectedType && card.querySelector('input[type="radio"]') === selectedType;
@@ -2012,16 +3493,59 @@ $pageTitle = 'Submit Report';
     formData.append('description', description);
     formData.append('urgency', urgency);
     formData.append('return_section', 'my-reports');
+    formData.append('csrf_token', reportCsrfToken);
 
     for (var fi = 0; fi < uploadedFiles.length; fi++) {
       formData.append('attachments[]', uploadedFiles[fi]);
     }
 
-    fetch('submit-report.php', {
+    var preflightData = new FormData();
+    preflightData.append('csrf_token', reportCsrfToken);
+    preflightData.append('report_type', reportType ? reportType.value : '');
+    preflightData.append('barangay_psgc_code', barangayCode);
+    if (document.getElementById('report-latitude')) {
+      preflightData.append('latitude', document.getElementById('report-latitude').value);
+      preflightData.append('longitude', document.getElementById('report-longitude').value);
+    }
+
+    fetch('report-duplicate-check.php', {
       method: 'POST',
-      body: formData
+      body: preflightData
     })
     .then(function(response) {
+      return response.json().then(function(payload) {
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.message || 'Similar reports could not be checked.');
+        }
+        return payload;
+      });
+    })
+    .catch(function(error) {
+      showToast((error && error.message ? error.message : 'Similar reports could not be checked.')
+        + ' Your report can still be submitted normally.');
+      return { success: true, candidates: [] };
+    })
+    .then(function(payload) {
+      if (!payload.candidates || payload.candidates.length === 0) return 'none';
+      return showDuplicateReview(payload.candidates);
+    })
+    .then(function(choice) {
+      if (choice === 'cancel') {
+        resetSubmitButton();
+        return null;
+      }
+      if (choice === 'same' && pendingDuplicateCandidates.length) {
+        var selectedParent = document.querySelector('input[name="duplicate-parent-choice"]:checked');
+        formData.append('duplicate_parent_id', selectedParent ? selectedParent.value : String(pendingDuplicateCandidates[0].report_id));
+        formData.append('duplicate_choice', 'same');
+      }
+      return fetch('submit-report.php', {
+        method: 'POST',
+        body: formData
+      });
+    })
+    .then(function(response) {
+      if (!response) return null;
       return response.text().then(function(html) {
         if (!response.redirected) return { html: html, redirected: false };
         var redirectedPage = new DOMParser().parseFromString(html, 'text/html');
@@ -2050,8 +3574,8 @@ $pageTitle = 'Submit Report';
         showSuccess(refId);
       }
     })
-    .catch(function() {
-      showToast('Network error. Please check your connection and try again.');
+    .catch(function(error) {
+      showToast(error && error.message ? error.message : 'Network error. Please check your connection and try again.');
       resetSubmitButton();
     });
   }
@@ -2099,18 +3623,49 @@ $pageTitle = 'Submit Report';
     document.querySelectorAll('input[type="radio"]').forEach(function(r) { r.checked = false; });
     document.getElementById('urgency-level').selectedIndex = 0;
     document.getElementById('location-barangay').selectedIndex = 0;
+    document.getElementById('location-barangay').disabled = false;
     document.getElementById('location-street').value = '';
     reportPinCoordinates = null;
+    reportPinAccuracyMeters = null;
+    reportReverseLookupRequestId++;
+    reportReverseLookupPending = false;
+    reportAutoLocationDetail = '';
+    reportAutoLocationCoordinates = null;
+    reportPinLocationLabel = '';
     reportPinBarangayCode = '';
+    reportStreetInputTouched = false;
+    reportPendingDraftPin = null;
     if (reportReviewPinElement) reportReviewPinElement.hidden = true;
     reportFallbackMode = false;
-    if (document.getElementById('report-latitude')) document.getElementById('report-latitude').value = '';
-    if (document.getElementById('report-longitude')) document.getElementById('report-longitude').value = '';
+    setReportDraftField('report-latitude', '');
+    setReportDraftField('report-longitude', '');
+    setReportDraftField('report-pin-source', 'resident');
+    setReportDraftField('report-location-fallback-state', '0');
+    setReportDraftField('report-location-street-touched', '0');
+    if (document.getElementById('report-location-coordinates')) document.getElementById('report-location-coordinates').textContent = 'Latitude: — | Longitude: —';
+    if (document.getElementById('report-location-address')) {
+      document.getElementById('report-location-address').textContent = 'Detected Address: Move the pin or choose a place to see its address.';
+      document.getElementById('report-location-address').classList.remove('is-error');
+    }
+    setReportBarangayStatus('', false);
+    if (document.getElementById('report-location-accuracy')) {
+      document.getElementById('report-location-accuracy').hidden = true;
+      document.getElementById('report-location-accuracy').classList.remove('is-error');
+    }
+    var placeSearchInput = document.getElementById('report-location-search');
+    if (placeSearchInput) {
+      placeSearchInput.value = '';
+      placeSearchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    }
     if (document.getElementById('report-pin-source')) document.getElementById('report-pin-source').value = 'resident';
     if (document.getElementById('report-location-fallback')) document.getElementById('report-location-fallback').hidden = true;
     if (document.getElementById('report-location-fallback-toggle')) document.getElementById('report-location-fallback-toggle').textContent = "I can't pin the location";
-    if (document.getElementById('report-location-status')) setReportPinStatus('Place a pin inside Dasmariñas.', false);
-    if (reportMapPinElement) reportMapPinElement.hidden = true;
+    if (document.getElementById('report-location-pin-state')) document.getElementById('report-location-pin-state').hidden = true;
+    if (document.getElementById('report-location-status')) setReportPinStatus('Drag the red pin or click the map to place it.', false);
+    updateReportLocationBarangayUI();
+    if (reportMapInstance && reportMapInstance.getSource('report-pin-accuracy')) {
+      reportMapInstance.getSource('report-pin-accuracy').setData({ type: 'FeatureCollection', features: [] });
+    }
     document.getElementById('incident-date').value = '';
     document.getElementById('incident-time').value = '';
     document.getElementById('animal-type').selectedIndex = 0;
@@ -2264,27 +3819,137 @@ $pageTitle = 'Submit Report';
     var mm = String(today.getMonth() + 1).padStart(2, '0');
     var dd = String(today.getDate()).padStart(2, '0');
     document.getElementById('incident-date').value = yyyy + '-' + mm + '-' + dd;
+    updateStepperUI();
+    updateFooter();
+    var reportLocationMapElement = document.getElementById('reportLocationMap');
+    if (reportLocationMapElement) {
+      reportLocationMapElement.addEventListener('dcvs:barangay-search', function(event) {
+        var code = event.detail && event.detail.code;
+        if (code) focusReportBarangay(code);
+      });
+      reportLocationMapElement.addEventListener('dcvs:place-selected', function(event) {
+        var place = event.detail || {};
+        var coordinates = place.coordinates;
+        if (!Array.isArray(coordinates) || !Number.isFinite(Number(coordinates[0]))
+            || !Number.isFinite(Number(coordinates[1]))
+            || Number(coordinates[0]) < -180 || Number(coordinates[0]) > 180
+            || Number(coordinates[1]) < -90 || Number(coordinates[1]) > 90) {
+          setReportPinStatus("We couldn't place that location on the map. Try another result, drag the pin, or click the map.", true);
+          return;
+        }
+        var longitude = Number(coordinates[0]);
+        var latitude = Number(coordinates[1]);
+        var detected = reportFeatureAtCoordinates(longitude, latitude);
+        var locationInput = document.getElementById('location-street');
+        var placeDetail = place.name || place.label || '';
+        if (locationInput && placeDetail && (!reportStreetInputTouched || !locationInput.value.trim())) {
+          locationInput.value = placeDetail;
+          reportAutoLocationDetail = placeDetail;
+          reportAutoLocationCoordinates = [longitude, latitude];
+          reportStreetInputTouched = false;
+          setReportDraftField('report-location-street-touched', '0');
+          locationInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        setReportPin(longitude, latitude, 'resident', detected, true, null, place.name || place.label || '');
+        if (place.approximate && detected && detected.code) {
+          setReportPinStatus('This search result is approximate. Check the satellite imagery and drag the pin to the exact incident spot.', false);
+        }
+        moveReportMapTo({ center: [longitude, latitude], zoom: 18, duration: 700 });
+      });
+    }
+    var locationStreetInput = document.getElementById('location-street');
+    if (locationStreetInput) {
+      locationStreetInput.addEventListener('input', function() {
+        reportStreetInputTouched = !!this.value.trim() && this.value.trim() !== reportAutoLocationDetail;
+        setReportDraftField('report-location-street-touched', reportStreetInputTouched ? '1' : '0');
+        updateLocationContinueState();
+      });
+    }
+    ['location-barangay', 'incident-date'].forEach(function(id) {
+      var field = document.getElementById(id);
+      if (field) {
+        field.addEventListener('change', updateLocationContinueState);
+        field.addEventListener('input', updateLocationContinueState);
+      }
+    });
+    var changeBarangayButton = document.getElementById('report-location-barangay-change');
+    if (changeBarangayButton) {
+      changeBarangayButton.addEventListener('click', function() {
+        var fallbackButton = document.getElementById('report-location-fallback-toggle');
+        if (fallbackButton && !reportFallbackMode) fallbackButton.click();
+      });
+    }
+    var mobileDetailsBack = document.getElementById('report-location-mobile-back');
+    var mobileEditPin = document.getElementById('report-location-mobile-edit-pin');
+    if (mobileDetailsBack) {
+      mobileDetailsBack.addEventListener('click', function() {
+        setReportMobileLocationDetailsView(false);
+      });
+    }
+    if (mobileEditPin) {
+      mobileEditPin.addEventListener('click', function() {
+        setReportMobileLocationDetailsView(false);
+      });
+    }
     var fallbackToggle = document.getElementById('report-location-fallback-toggle');
     if (fallbackToggle) {
       fallbackToggle.addEventListener('click', function() {
         reportFallbackMode = !reportFallbackMode;
+        setReportDraftField('report-location-fallback-state', reportFallbackMode ? '1' : '0');
         document.getElementById('report-location-fallback').hidden = !reportFallbackMode;
         this.textContent = reportFallbackMode ? 'I can place a pin instead' : "I can't pin the location";
         if (reportFallbackMode) {
+          var pinState = document.getElementById('report-location-pin-state');
+          if (pinState) pinState.hidden = true;
           document.getElementById('location-barangay').disabled = false;
+          document.getElementById('location-barangay').value = '';
+          var locationInput = document.getElementById('location-street');
+          if (locationInput && locationInput.value.trim() === reportAutoLocationDetail) {
+            locationInput.value = '';
+            reportStreetInputTouched = false;
+          } else if (locationInput && locationInput.value.trim()) {
+            reportStreetInputTouched = true;
+          }
+          setReportDraftField('report-location-street-touched', reportStreetInputTouched ? '1' : '0');
+          reportAutoLocationDetail = '';
+          reportAutoLocationCoordinates = null;
+          reportPinLocationLabel = '';
           reportPinCoordinates = null;
           reportPinBarangayCode = '';
-          document.getElementById('report-latitude').value = '';
-          document.getElementById('report-longitude').value = '';
-          if (reportMapPinElement) reportMapPinElement.hidden = true;
+          reportPinAccuracyMeters = null;
+          reportReverseLookupRequestId++;
+          reportReverseLookupPending = false;
+          reportPendingDraftPin = null;
+          setReportDraftField('report-latitude', '');
+          setReportDraftField('report-longitude', '');
+          setReportDraftField('report-pin-source', 'resident');
+          document.getElementById('report-location-coordinates').textContent = 'Latitude: — | Longitude: —';
+          document.getElementById('report-location-address').textContent = 'Detected Address: Move the pin or choose a place to see its address.';
+          document.getElementById('report-location-address').classList.remove('is-error');
+          document.getElementById('report-location-accuracy').hidden = true;
+          setReportBarangayStatus('', false);
+          if (reportMapInstance && reportMapInstance.getSource('report-pin-accuracy')) {
+            reportMapInstance.getSource('report-pin-accuracy').setData({ type: 'FeatureCollection', features: [] });
+          }
           document.getElementById('upload-requirement-note').textContent =
             'Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.';
-          setReportPinStatus('No pin selected. Describe the incident location and attach photo or video evidence.', false);
+          setReportPinStatus("No pin is selected. Describe where the incident happened below and add a photo or video in the next step.", false);
+          updateReportLocationBarangayUI();
         } else {
           document.getElementById('location-barangay').disabled = false;
+          document.getElementById('location-barangay').value = '';
+          var locationInput = document.getElementById('location-street');
+          if (locationInput) {
+            locationInput.value = '';
+            locationInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          reportStreetInputTouched = false;
+          setReportDraftField('report-location-street-touched', '0');
           document.getElementById('upload-requirement-note').textContent =
             'Upload at least one photo or video of the animal or location to help responders assess the situation. This is required to submit your report.';
-          setReportPinStatus('Place a pin inside Dasmariñas.', false);
+          setReportPinStatus('Drag the red pin or click the map to place it.', false);
+          setReportBarangayStatus('', false);
+          updateReportLocationBarangayUI();
         }
       });
     }
@@ -2292,21 +3957,38 @@ $pageTitle = 'Submit Report';
     if (gpsButton) {
       gpsButton.addEventListener('click', function() {
         if (!navigator.geolocation) {
-          showToast('Location services are not available in this browser.');
+          showToast('Your browser cannot share your current location. Search for the place, drag the pin, or click the map instead.');
           return;
         }
+        gpsButton.disabled = true;
+        gpsButton.setAttribute('aria-busy', 'true');
         navigator.geolocation.getCurrentPosition(function(position) {
           if (!reportMapInstance) {
             showToast('The map is still loading. Please try again.');
+            gpsButton.disabled = false;
+            gpsButton.removeAttribute('aria-busy');
             return;
           }
-          var coords = [position.coords.longitude, position.coords.latitude];
+          var latitude = Number(position.coords.latitude);
+          var longitude = Number(position.coords.longitude);
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+              || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            showToast("Your current location couldn't be read. Search for the place, drag the pin, or click the map instead.");
+            gpsButton.disabled = false;
+            gpsButton.removeAttribute('aria-busy');
+            return;
+          }
+          var coords = [longitude, latitude];
           setReportPin(coords[0], coords[1], 'gps_assisted', reportFeatureAtCoordinates(coords[0], coords[1]), true, position.coords.accuracy);
-          reportMapInstance.flyTo({ center: coords, zoom: 15 });
+          moveReportMapTo({ center: coords, zoom: 18, duration: 700 });
+          gpsButton.disabled = false;
+          gpsButton.removeAttribute('aria-busy');
         }, function(error) {
           console.warn('Incident location GPS request failed:', error.message);
-          showToast('Unable to use your location. Check browser permission or place the pin manually.');
-        }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+          showToast("We couldn't get your current location. Check your browser's location permission, or search for the place, drag the pin, or click the map.");
+          gpsButton.disabled = false;
+          gpsButton.removeAttribute('aria-busy');
+        }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
       });
     }
     var expandButton = document.getElementById('expand-report-map');
@@ -2335,6 +4017,7 @@ $pageTitle = 'Submit Report';
 <?php if ($reportPinEnabled): ?>
 <script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-landmarks.js'); ?>"></script>
 <script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="assets/js/map-place-search.js?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/map-place-search.js'); ?>"></script>
 <?php endif; ?>
 
 <style>

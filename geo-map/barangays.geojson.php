@@ -46,7 +46,7 @@ $caseQuery = "SELECT b.barangay_id, b.barangay_name, b.district,
     COUNT(DISTINCT CASE WHEN cc.status = 'resolved' THEN cc.case_id END) AS resolved
     FROM barangays b
     LEFT JOIN confirmed_cases cc ON b.barangay_id = cc.barangay_id AND cc.status IN ('active', 'resolved')
-    LEFT JOIN reports r ON b.barangay_id = r.barangay_id AND r.archived_at IS NULL
+    LEFT JOIN reports r ON b.barangay_id = r.barangay_id AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
     GROUP BY b.barangay_id";
 
 $result = $conn->query($caseQuery);

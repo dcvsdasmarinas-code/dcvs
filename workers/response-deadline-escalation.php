@@ -39,6 +39,7 @@ while ($case = $dueQuery->fetch_assoc()) {
 $dueQuery->close();
 
 $escalatedCount = 0;
+$stageChangedAt = (new DateTimeImmutable('now', new DateTimeZone('Asia/Manila')))->format('Y-m-d H:i:s');
 foreach ($dueCases as $case) {
     $reportId = (int)$case['report_id'];
     $fromState = (string)$case['state'];
@@ -57,6 +58,7 @@ foreach ($dueCases as $case) {
         $update = $conn->prepare("
             UPDATE report_response_workflow
             SET response_mode = 'dcvs_dispatch', state = 'escalated_to_dcvs',
+                escalated_at = ?, assigned_at = NULL, dispatch_officer_id = NULL,
                 response_deadline = NULL, progress_deadline = NULL, last_reminded_at = NOW()
             WHERE report_id = ? AND state = ?
               AND (
@@ -65,7 +67,7 @@ foreach ($dueCases as $case) {
               )
         ");
         if (!$update) throw new RuntimeException('Could not prepare the overdue workflow update: ' . $conn->error);
-        $update->bind_param('is', $reportId, $fromState);
+        $update->bind_param('sis', $stageChangedAt, $reportId, $fromState);
         if (!$update->execute()) throw new RuntimeException('Could not escalate the overdue workflow: ' . $update->error);
         $updated = $update->affected_rows === 1;
         $update->close();

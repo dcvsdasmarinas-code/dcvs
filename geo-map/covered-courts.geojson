@@ -1,0 +1,1071 @@
+{
+    "type": "FeatureCollection",
+    "metadata": {
+        "source": "User-provided covered-court coordinates CSV",
+        "source_file": "dasmarinas_covered_courts_coordinates.csv",
+        "updated_at": "2026-11-14T08:23:21+00:00",
+        "feature_count": 41,
+        "unassigned_feature_count": 1,
+        "coordinate_sources": [
+            "Google Maps Plus Code",
+            "Google Maps Pin",
+            "Google Maps / Wikimapia",
+            "Google Maps / OSM"
+        ]
+    },
+    "features": [
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.979359,
+                    14.322563
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:2",
+                "csv_row": 2,
+                "name": "Paliparan 3 Phase 5 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8XFH+2PH, 3 Paliparan Rd, Salawag, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8XFH+2PH"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.98541,
+                    14.31689
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:3",
+                "csv_row": 3,
+                "name": "Paliparan 3 Phase 1 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Phase 1, Blk 22, Lot 13, Paliparan III, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.98395,
+                    14.31842
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:4",
+                "csv_row": 4,
+                "name": "Paliparan 3 Phase 2 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Phase 2, Lot 11 Blk 2, Camella, 3 Paliparan Rd, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9821,
+                    14.3198
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:5",
+                "csv_row": 5,
+                "name": "Paliparan 3 Phase 3 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Phase 3, Paliparan III, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.992766,
+                    14.302963
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:6",
+                "csv_row": 6,
+                "name": "Barangay Paliparan II Multipurpose Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X3V+54J, Paliparan II, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X3V+54J"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.989203,
+                    14.307938
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:7",
+                "csv_row": 7,
+                "name": "Pook Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X5Q+5MG, Sitio Pook, Molino - Paliparan Rd, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X5Q+5MG"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.98143,
+                    14.30512
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:8",
+                "csv_row": 8,
+                "name": "Mabuhay Homes 2000 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Phase 5, Block 1, Mabuhay Homes 2000, Paliparan II, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Paliparan III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.97748,
+                    14.33152
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:9",
+                "csv_row": 9,
+                "name": "Brgy. Salawag Proper - Covered Basketball Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered basketball court",
+                "subcategory": "covered_court",
+                "address": "Brgy. Salawag Proper, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Salawag",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.982266,
+                    14.350563
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:10",
+                "csv_row": 10,
+                "name": "Dasma 1 Basketball Court (Golden City)",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Basketball court",
+                "subcategory": "covered_court",
+                "address": "9X2J+6W2, Main Road Ph4 Golden City, Salawag, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Salawag",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "9X2J+6W2"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.981922,
+                    14.346813
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:11",
+                "csv_row": 11,
+                "name": "Uncle Drew Sports Center",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Sports center",
+                "subcategory": "covered_court",
+                "address": "Warehouse 20 Phase 5, 8XWJ+PQJ Century Commercial Complex, Salawag, Dasmariñas, Cavite",
+                "area_cluster": "Paliparan & Salawag",
+                "barangay": "Salawag",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8XWJ+PQJ"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.968234,
+                    14.323588
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:12",
+                "csv_row": 12,
+                "name": "Brgy. San Roque Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8XF9+C7Q, Brgy. San Roque, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Roque",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8XF9+C7Q"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.968203,
+                    14.322237
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:13",
+                "csv_row": 13,
+                "name": "San Andres 1 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8XC9+V7W, Area E, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Andres II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8XC9+V7W"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9693,
+                    14.3211
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:14",
+                "csv_row": 14,
+                "name": "San Andres 2 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Area E, Brgy. San Andres II, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Andres I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.96444,
+                    14.32028
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:15",
+                "csv_row": 15,
+                "name": "Santa Fe Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Block I A3, Lot 16, Brgy. Fatima II / Sta. Cristina II, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "Santa Fe",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / Wikimapia",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.960797,
+                    14.319488
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:16",
+                "csv_row": 16,
+                "name": "Brgy. Fatima 1-K Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X96+Q8V, Area K, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "Fatima I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X96+Q8V"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.96389,
+                    14.32115
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:17",
+                "csv_row": 17,
+                "name": "Barangay Fatima Dos Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Dasmarinas Monument, 2 Fatima Rd, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "Santa Fe",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.967641,
+                    14.316388
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:18",
+                "csv_row": 18,
+                "name": "San Mateo Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X89+H32, Blk E17-E18, Brgy. San Mateo, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Mateo",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X89+H32"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.967141,
+                    14.317688
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:19",
+                "csv_row": 19,
+                "name": "San Mateo Covered Court (Annex)",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X98+3V4, Brgy. San Mateo, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Mateo",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X98+3V4"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.96965,
+                    14.31506
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:20",
+                "csv_row": 20,
+                "name": "San Nicolas 1 Multi-Purpose Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X89+2V, Brgy. San Nicolas I, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Nicolas I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / OSM",
+                "accuracy": "user-provided",
+                "plus_code": "8X89+2V"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.96049,
+                    14.31114
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:21",
+                "csv_row": 21,
+                "name": "San Lorenzo Ruiz 1 Basketball Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Basketball court",
+                "subcategory": "covered_court",
+                "address": "8X66+F55, San Lorenzo Ruiz I, Dasmariñas, Cavite",
+                "area_cluster": "DBB Areas (Fatima, San Andres, San Mateo, San Roque, San Nicolas)",
+                "barangay": "San Lorenzo Ruiz I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X66+F55"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.93556,
+                    14.36083
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:22",
+                "csv_row": 22,
+                "name": "Diamond Village Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "9W6P+86, Salitran, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / Wikimapia",
+                "accuracy": "user-provided",
+                "boundary_status": "outside_official_boundary",
+                "plus_code": "9W6P+86"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.94128,
+                    14.35412
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:23",
+                "csv_row": 23,
+                "name": "Garden Grove Village Clubhouse & Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Clubhouse & court",
+                "subcategory": "covered_court",
+                "address": "Garden Grove Village, Salitran, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "Salitran I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.925047,
+                    14.341988
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:24",
+                "csv_row": 24,
+                "name": "Goldenville 1 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8WRG+Q2V, Copper St., Sabang / Salitran, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Jose",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8WRG+Q2V"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.92891,
+                    14.33645
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:25",
+                "csv_row": 25,
+                "name": "Dexterville Classic Subdivision Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Phase 1, Dexterville Classic Subd., Sabang, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Jose",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.967047,
+                    14.326163
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:26",
+                "csv_row": 26,
+                "name": "Burol III Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8XG8+FR7, Unnamed Rd, Burol III, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "Burol III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8XG8+FR7"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.938563,
+                    14.320063
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:27",
+                "csv_row": 27,
+                "name": "Villa Catalina Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8WCQ+2C, San Agustin III, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Agustin III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8WCQ+2C"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.93833,
+                    14.32
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:28",
+                "csv_row": 28,
+                "name": "San Agustin III Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8WCQ+28, San Agustin III, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Agustin III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / Wikimapia",
+                "accuracy": "user-provided",
+                "plus_code": "8WCQ+28"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.953984,
+                    14.319263
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:29",
+                "csv_row": 29,
+                "name": "San Agustin 2 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X93+PH5, Via Verde Rd, Burol / San Agustin II, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "Burol",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X93+PH5"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.95114,
+                    14.32289
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:30",
+                "csv_row": 30,
+                "name": "Manuelaville Gymnasium",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Gymnasium",
+                "subcategory": "covered_court",
+                "address": "San Agustin II, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Agustin II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.93624,
+                    14.31904
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:31",
+                "csv_row": 31,
+                "name": "DEV Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8W9P+JF, Dasmariñas Proper (Poblacion), Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "Zone III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / OSM",
+                "accuracy": "user-provided",
+                "plus_code": "8W9P+JF"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.944641,
+                    14.320438
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:32",
+                "csv_row": 32,
+                "name": "The Picklezone Leisure Hub",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Leisure hub",
+                "subcategory": "covered_court",
+                "address": "8WCV+5V6, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Agustin II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8WCV+5V6"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.945047,
+                    14.317563
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:33",
+                "csv_row": 33,
+                "name": "Positive Ground PH (Vista Mall Dasmariñas)",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Sports facility",
+                "subcategory": "covered_court",
+                "address": "8W9W+22G, 3rd Floor Vista Mall, Aguinaldo Hwy, Dasmariñas, Cavite",
+                "area_cluster": "Burol, San Agustin, Salitran, Sabang & Poblacion",
+                "barangay": "San Agustin II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8W9W+22G"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.970484,
+                    14.311413
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:34",
+                "csv_row": 34,
+                "name": "Barangay Sampaloc IV Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "8X6C+H59, Sampaloc IV, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc IV",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "8X6C+H59"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.958984,
+                    14.298237
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:35",
+                "csv_row": 35,
+                "name": "Kingsland Village Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "7XX5+7HX, Kingsland Village, Sampaloc, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "7XX5+7HX"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.97877,
+                    14.28888
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:36",
+                "csv_row": 36,
+                "name": "Sampaloc 3 Multi-Purpose Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "7XQH+HG, Sampaloc III, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / OSM",
+                "accuracy": "user-provided",
+                "plus_code": "7XQH+HG"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.9601,
+                    14.28337
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:37",
+                "csv_row": 37,
+                "name": "Sampaloc 2 Multi-Purpose Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "7XM6+82, Aguinaldo Hwy, Sampaloc II, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps / OSM",
+                "accuracy": "user-provided",
+                "plus_code": "7XM6+82"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.97312,
+                    14.29145
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:38",
+                "csv_row": 38,
+                "name": "Blk J8 San Francisco II Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "Blk J, San Francisco II, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc III",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.95234,
+                    14.28612
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:39",
+                "csv_row": 39,
+                "name": "Cityhomes Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "B-18 L-1 R5, Cityhomes Resoville, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Langkaan I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.949797,
+                    14.294313
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:40",
+                "csv_row": 40,
+                "name": "Tierra Vista Ayana Phase 2 Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "7WVX+PWF, Langkaan I, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Langkaan I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "7WVX+PWF"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.95412,
+                    14.27485
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:41",
+                "csv_row": 41,
+                "name": "FCIE Multi-Purpose Covered Court and Helipad",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "FCIE Covered Court, Main Dr, Langkaan, Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Langkaan I",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Pin",
+                "accuracy": "user-provided"
+            }
+        },
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [
+                    120.970953,
+                    14.263687
+                ]
+            },
+            "properties": {
+                "id": "user:covered-court:42",
+                "csv_row": 42,
+                "name": "Blessed Ville Covered Court",
+                "category": "sports",
+                "category_label": "Sports & covered courts",
+                "type_label": "Covered court",
+                "subcategory": "covered_court",
+                "address": "7X7C+F9G, Langkaan / South Dasmariñas, Cavite",
+                "area_cluster": "Sampaloc, San Francisco & Langkaan",
+                "barangay": "Sampaloc II",
+                "source": "User-provided covered-court coordinates",
+                "coordinate_source": "Google Maps Plus Code",
+                "accuracy": "user-provided",
+                "plus_code": "7X7C+F9G"
+            }
+        }
+    ]
+}

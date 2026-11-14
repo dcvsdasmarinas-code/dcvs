@@ -185,6 +185,8 @@ $sbModules = [
                     sbItem('Accepted by Barangay', 'fa-building', ['section' => 'reports-accepted', 'href' => 'dashboard-staff.php#reports-accepted']),
                     sbItem('Active Cases', 'fa-clipboard-check', ['section' => 'reports-active', 'href' => 'dashboard-staff.php#reports-active']),
                     sbItem('Resolved Cases', 'fa-check-circle', ['section' => 'reports-resolved', 'href' => 'dashboard-staff.php#reports-resolved']),
+                    sbItem('Overdue', 'fa-exclamation-circle', ['section' => 'reports-overdue', 'href' => 'dashboard-staff.php#reports-overdue']),
+                    sbItem('Similar Reports', 'fa-clone', ['href' => 'possible-duplicates.php?portal=staff', 'initialActive' => $activePage === 'report-duplicates']),
                     sbItem('Turnover', 'fa-exchange-alt', ['href' => 'staff-turnover.php', 'initialActive' => $activePage === 'turnover']),
                 ],
             ],
@@ -707,7 +709,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     'adoption': 'operations',
     'reports-all': 'operations', 'reports-pending': 'operations',
     'reports-accepted': 'operations',
-    'reports-active': 'operations', 'reports-resolved': 'operations',
+    'reports-active': 'operations', 'reports-resolved': 'operations', 'reports-overdue': 'operations',
     'geomapping': 'monitoring',
     'account-settings': 'system'
   };
@@ -774,6 +776,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
       'reports-all':'All Reports','reports-pending':'Pending Validation',
       'reports-accepted':'Accepted by Barangay',
       'reports-active':'Active Cases','reports-resolved':'Resolved Cases',
+      'reports-overdue':'Overdue Reports',
       'appointments':'Appointment Requests','calendar-schedule':'Calendar Schedule',
       'client-pets':'All Clients','client-pets-with':'With Pets','client-pets-none':'No Pets'
     };
@@ -867,8 +870,11 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
       var fn = item.getAttribute('data-fn');
       var arg = item.getAttribute('data-arg');
       var href = item.getAttribute('data-href');
+      var sectionTarget = section === 'adoption' ? 'analytics' : section;
+      var isCurrentPageSection = item.pathname === window.location.pathname;
 
-      if (section && typeof switchSection === 'function') {
+      if (section && isCurrentPageSection &&
+          typeof switchSection === 'function' && document.getElementById(sectionTarget)) {
         e.preventDefault();
         switchSection(section);
         if (fn && typeof window[fn] === 'function') window[fn](arg);

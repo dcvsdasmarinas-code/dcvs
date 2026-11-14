@@ -410,7 +410,7 @@ $turnoverKpis = [
     @media(max-width:600px){.main-content{padding:14px 12px!important}.turnover-toolbar{align-items:stretch}.turnover-filters,.turnover-controls{width:100%}.turnover-input{flex:1;min-width:0}.turnover-controls{justify-content:space-between}.turnover-pagination-right{justify-content:center;gap:12px}.turnover-detail-grid{grid-template-columns:1fr}}
     @media(max-width:520px){.turnover-kpis{gap:10px}.turnover-kpi{padding:14px 10px}.turnover-kpi-label{font-size:12px}.turnover-kpi-value{font-size:23px}}
     .main-content,.turnover-toolbar,.turnover-filters,.turnover-controls,.turnover-table-wrap{min-width:0;max-width:100%}
-    .main-content>.turnover-kpis,.main-content>.turnover-toolbar,.main-content>.turnover-error,.main-content>.turnover-table-wrap,.main-content>.turnover-pagination{width:100%;max-width:1550px;margin-inline:auto}
+    .main-content>.staff-page-heading,.main-content>.turnover-kpis,.main-content>.turnover-toolbar,.main-content>.turnover-error,.main-content>.turnover-table-wrap,.main-content>.turnover-pagination{width:100%;max-width:1550px;margin-inline:auto}
     .turnover-table-wrap{contain:paint;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
     @media(max-width:480px){
       .turnover-kpis{grid-template-columns:minmax(0,1fr)}
@@ -430,6 +430,12 @@ $turnoverKpis = [
 <body class="staff-theme" data-portal="staff">
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
+  <header class="staff-page-heading">
+    <div>
+      <h1>Reports Turnover</h1>
+      <p>Track report handoffs from barangays to the City Veterinary Services Office.</p>
+    </div>
+  </header>
   <section class="turnover-kpis" aria-label="Turnover summary">
     <?php foreach ($turnoverKpis['pending'] as $kpi): ?>
       <article class="turnover-kpi<?php echo !empty($kpi['variant']) ? ' is-' . $escape($kpi['variant']) : ''; ?>">

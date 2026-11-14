@@ -1,5 +1,5 @@
 <?php
-/** Return all non-archived pinned reports for the signed-in staff or assigned barangay. */
+/** Return report details or map pins for the signed-in staff or assigned barangay. */
 $sessionRoles = [
     'DCVS_STAFF_SESSION' => 'staff',
     'DCVS_BARANGAY_SESSION' => 'barangay',
@@ -28,30 +28,6 @@ if (($_SESSION['logged_in'] ?? false) !== true || ($_SESSION['role'] ?? '') !== 
     exit;
 }
 
-loadDcvsEnv();
-if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') !== '1') {
-    http_response_code(503);
-    echo json_encode(['error' => 'Report pins are not enabled.']);
-    exit;
-}
-
-try {
-    $features = dcvsLoadOfficialBarangayPolygons(
-        dirname(__DIR__) . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
-        __DIR__ . '/barangays-boundary.json'
-    );
-    if (!dcvsReportPinFeatureEnabled($conn, $features)) {
-        http_response_code(503);
-        echo json_encode(['error' => 'Report pin configuration is not ready.']);
-        exit;
-    }
-} catch (RuntimeException $exception) {
-    error_log('Report pins boundary readiness check failed: ' . $exception->getMessage());
-    http_response_code(503);
-    echo json_encode(['error' => 'Report pin configuration is not ready.']);
-    exit;
-}
-
 $barangayId = (int)($_SESSION['barangay_id'] ?? 0);
 if ($expectedRole === 'barangay' && $barangayId <= 0) {
     http_response_code(403);
@@ -60,7 +36,7 @@ if ($expectedRole === 'barangay' && $barangayId <= 0) {
 }
 
 $targetReportId = null;
-if ($expectedRole === 'staff' && array_key_exists('report_id', $_GET)) {
+if (array_key_exists('report_id', $_GET)) {
     $targetReportValue = $_GET['report_id'];
     if (!is_scalar($targetReportValue) || !ctype_digit((string)$targetReportValue) || (int)$targetReportValue <= 0) {
         http_response_code(400);
@@ -70,6 +46,32 @@ if ($expectedRole === 'staff' && array_key_exists('report_id', $_GET)) {
     $targetReportId = (int)$targetReportValue;
 }
 
+if ($targetReportId === null) {
+    loadDcvsEnv();
+    if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') !== '1') {
+        http_response_code(503);
+        echo json_encode(['error' => 'Report pins are not enabled.']);
+        exit;
+    }
+
+    try {
+        $features = dcvsLoadOfficialBarangayPolygons(
+            dirname(__DIR__) . '/DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
+            __DIR__ . '/barangays-boundary.json'
+        );
+        if (!dcvsReportPinFeatureEnabled($conn, $features)) {
+            http_response_code(503);
+            echo json_encode(['error' => 'Report pin configuration is not ready.']);
+            exit;
+        }
+    } catch (RuntimeException $exception) {
+        error_log('Report pins boundary readiness check failed: ' . $exception->getMessage());
+        http_response_code(503);
+        echo json_encode(['error' => 'Report pin configuration is not ready.']);
+        exit;
+    }
+}
+
 $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
             r.reference_id, r.report_type, r.animal_type, r.animal_count,
             r.animal_behavior, r.description, r.incident_at,
@@ -77,6 +79,10 @@ $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
             r.photo_url, r.video_url,
             ra.attachment_type, ra.attachment_source, ra.file_url, ra.mime_type,
             r.barangay_id, b.barangay_name, r.status AS case_status, r.updated_at,
+            (SELECT COUNT(*) FROM reports supporting
+             WHERE supporting.parent_report_id = r.report_id
+               AND supporting.duplicate_status = 'merged'
+               AND supporting.archived_at IS NULL) AS supporting_report_count,
             rw.response_mode, rw.state AS response_state, rw.response_deadline,
             rw.progress_deadline, rw.last_progress_at,
             tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at,
@@ -101,7 +107,11 @@ $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
           AND r.coordinates_lat IS NOT NULL
           AND r.coordinates_long IS NOT NULL";
 if ($expectedRole === 'staff') {
-    if ($targetReportId !== null) $sql .= " AND r.report_id = ?";
+    if ($targetReportId !== null) {
+        $sql .= " AND r.report_id = ?";
+    } else {
+        $sql .= " AND r.duplicate_status NOT IN ('merged', 'suspected')";
+    }
 }
 if ($expectedRole === 'barangay') {
     $sql = "SELECT r.report_id, r.coordinates_long, r.coordinates_lat,
@@ -111,6 +121,10 @@ if ($expectedRole === 'barangay') {
                 r.photo_url, r.video_url,
                 ra.attachment_type, ra.attachment_source, ra.file_url, ra.mime_type,
                 r.barangay_id, b.barangay_name, r.status AS case_status, r.updated_at,
+                (SELECT COUNT(*) FROM reports supporting
+                 WHERE supporting.parent_report_id = r.report_id
+                   AND supporting.duplicate_status = 'merged'
+                   AND supporting.archived_at IS NULL) AS supporting_report_count,
                 rw.response_mode, rw.state AS response_state, rw.response_deadline,
                 rw.progress_deadline, rw.last_progress_at,
                 tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at,
@@ -135,6 +149,11 @@ if ($expectedRole === 'barangay') {
               AND r.coordinates_lat IS NOT NULL
               AND r.coordinates_long IS NOT NULL
               AND r.barangay_id = ?";
+    if ($targetReportId !== null) {
+        $sql .= " AND r.report_id = ?";
+    } else {
+        $sql .= " AND r.duplicate_status NOT IN ('merged', 'suspected')";
+    }
 }
 $sql .= ' ORDER BY r.created_at DESC, ra.display_order ASC, ra.attachment_id ASC';
 $statement = $conn->prepare($sql);
@@ -145,7 +164,11 @@ if (!$statement) {
     exit;
 }
 if ($expectedRole === 'barangay') {
-    $statement->bind_param('i', $barangayId);
+    if ($targetReportId !== null) {
+        $statement->bind_param('ii', $barangayId, $targetReportId);
+    } else {
+        $statement->bind_param('i', $barangayId);
+    }
 } elseif ($targetReportId !== null) {
     $statement->bind_param('i', $targetReportId);
 }
@@ -180,6 +203,7 @@ while ($row = $result->fetch_assoc()) {
                     'incident_at' => $row['incident_at'],
                     'priority' => $row['urgency_level'],
                     'status' => $row['case_status'],
+                    'supporting_reports' => (int)$row['supporting_report_count'],
                     'barangay_id' => (int)$row['barangay_id'],
                     'barangay' => $row['barangay_name'],
                     'response_mode' => (string)($row['response_mode'] ?? ''),

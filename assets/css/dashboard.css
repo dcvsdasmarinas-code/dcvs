@@ -38,6 +38,35 @@ h1,h2,h3,h4 { font-family: 'Inter', 'Segoe UI', sans-serif; }
 a { text-decoration: none; color: inherit; }
 button { font-family: inherit; cursor: pointer; }
 
+.staff-page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1.5rem;
+}
+.staff-page-heading h1 {
+  margin: 0;
+  color: #14201A;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+}
+.staff-page-heading p {
+  margin: 4px 0 0;
+  color: #5B675F;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.staff-page-heading--fullbleed {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 1.5rem 1.5rem 0;
+}
+.staff-page-heading--compact { margin-bottom: 0; }
+
 /* Shared row action menu used by staff data tables. */
 .appt-action-btn,
 .sd-row-actions { width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; padding:0; border-radius:6px; background:transparent; border:none; color:#71717a; cursor:pointer; }
@@ -62,6 +91,10 @@ button { font-family: inherit; cursor: pointer; }
 .staff-theme .tf-select:focus,
 .staff-theme .select-input.tf-select:focus,
 .staff-theme .appt-status-select:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+
+@media (max-width: 700px) {
+  .staff-page-heading--fullbleed { padding: 1rem 12px 0; }
+}
 
 /* ── Sidebar (always expanded) ── */
 .sidebar {

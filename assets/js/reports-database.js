@@ -36,6 +36,22 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  function supportingSubmissionsHtml(report) {
+    var submissions = Array.isArray(report.supportingReportDetails) ? report.supportingReportDetails : [];
+    if (!submissions.length) return '';
+    return '<details style="margin:0 0 16px;padding:10px 12px;border:1px solid #e4e4e7;border-radius:8px;">' +
+      '<summary style="cursor:pointer;font-size:13px;font-weight:600;">Supporting submissions (' + submissions.length + ')</summary>' +
+      '<div style="display:grid;gap:12px;margin-top:12px;">' + submissions.map(function (item) {
+        return '<article style="padding-top:10px;border-top:1px solid #f1f1f2;">' +
+          '<div style="font-size:13px;font-weight:600;">' + esc(item.ref || ('Report #' + item.id)) + '</div>' +
+          '<div style="margin-top:3px;color:#71717a;font-size:12px;">' + esc(item.type || 'Report') + ' · ' + esc(item.submitted || 'Date unavailable') + '</div>' +
+          '<div style="margin-top:5px;font-size:12px;"><strong>Location:</strong> ' + esc(item.location || 'Not specified') + '</div>' +
+          '<p style="margin:5px 0 0;font-size:12px;white-space:pre-wrap;">' + esc(item.description || 'No description provided.') + '</p>' +
+          (item.photo ? '<a href="' + esc(item.photo) + '" target="_blank" rel="noopener" style="display:inline-block;margin-top:8px;"><img src="' + esc(item.photo) + '" alt="Photo for ' + esc(item.ref || ('Report #' + item.id)) + '" style="width:96px;height:72px;object-fit:cover;border:1px solid #e4e4e7;border-radius:6px;"></a>' : '') +
+          '</article>';
+      }).join('') + '</div></details>';
+  }
+
   function isTurnoverPending(report) {
     return String(report.statusRaw || '').toLowerCase() === 'resolved'
       && String(report.turnoverStatus || '').toLowerCase() === 'pending';
@@ -98,8 +114,11 @@
     if (state.type) rows = rows.filter(function (r) { return r.type === state.type; });
     if (state.brgy) rows = rows.filter(function (r) { return r.brgy === state.brgy; });
     if (state.status) rows = rows.filter(function (r) { return r.status === state.status; });
-    if (state.dateFrom) rows = rows.filter(function (r) { return r.ts >= new Date(state.dateFrom + 'T00:00:00').getTime(); });
-    if (state.dateTo) rows = rows.filter(function (r) { return r.ts <= new Date(state.dateTo + 'T23:59:59').getTime(); });
+    if (state.dateFrom || state.dateTo) {
+      rows = rows.filter(function (r) {
+        return reportDateInRange(r.ts, state.dateFrom, state.dateTo);
+      });
+    }
     rows.sort(function (a, b) {
       if (state.sort === 'oldest') return a.ts - b.ts;
       if (state.sort === 'type') return a.typeLabel.localeCompare(b.typeLabel);
@@ -153,6 +172,7 @@
     return '<span class="rpt-status ' + esc(s) + '">' + esc(label || (s.charAt(0).toUpperCase() + s.slice(1))) + '</span>';
   }
   function statusClassForReport(report) {
+    if (report.isOverdue) return 'overdue';
     var rawStatus = String(report.statusRaw || '').toLowerCase();
     var statusLabel = String(report.statusLabel || '').toLowerCase();
     if (/^pending(?:\s|$)/.test(statusLabel)) return 'pending';
@@ -166,7 +186,8 @@
       validated: ['#dcebe0', '#045e1f', '#bbf7d0'],
       active: ['#EFF6FF', '#1E40AF', '#BFDBFE'],
       resolved: ['#0E8131', '#ffffff', '#0E8131'],
-      rejected: ['#FEE2E2', '#991B1B', '#FECACA']
+      rejected: ['#FEE2E2', '#991B1B', '#FECACA'],
+      overdue: ['#FEF2F2', '#B91C1C', '#FECACA']
     };
     var color = colors[statusClassForReport(report)] || colors.pending;
     return 'color:' + color[1] + ';background:' + color[0] + ';border:1px solid ' + color[2] + ';';
@@ -218,7 +239,11 @@
           '<td class="sd-td"><div class="client-cell"><div class="avatar">' + avatarHtml(r) + '</div><div><div class="client-name">' + esc(r.reporter) + '</div></div></div></td>' +
           '<td class="sd-td"><div class="contact-main">' + esc(r.phone || '-') + '</div><div class="contact-sub">' + esc(r.email || '-') + '</div></td>' +
           '<td class="sd-td">' + typeCell(r) + '</td>' +
-          '<td class="sd-td">' + priorityPill(r.urgency) + '</td>' +
+          '<td class="sd-td">' + priorityPill(r.urgency) +
+            (Number(r.supportingReports || 0) > 0
+              ? '<div style="margin-top:5px;"><span class="rpt-supporting-count">Supporting reports: ' + Number(r.supportingReports) + '</span></div>'
+              : '') +
+            '</td>' +
           '<td class="sd-td"><div class="client-name">' + esc(r.brgy || '-') + '</div></td>' +
           '<td class="sd-td">' + statusPill(statusClassForReport(r), r.statusLabel) + '</td>' +
           '<td class="sd-td"><div class="contact-main">' + esc(r.submitted || '-') + '</div></td>' +
@@ -254,13 +279,192 @@
     if (last) last.onclick = function () { state.page = pages; render(); };
   }
 
+  function updateTypeFilterCounts() {
+    var select = document.getElementById('rptType');
+    if (!select) return;
+
+    var selectedType = state.type;
+    var rows;
+    state.type = '';
+    try {
+      rows = filtered();
+    } finally {
+      state.type = selectedType;
+    }
+
+    var counts = { '': rows.length };
+    rows.forEach(function (row) {
+      var type = String(row.type || '');
+      if (type) counts[type] = (counts[type] || 0) + 1;
+    });
+    Array.prototype.forEach.call(select.options, function (option) {
+      if (!option.dataset.countLabel) {
+        option.dataset.countLabel = option.textContent.replace(/\s+\(\d+\)$/, '');
+      }
+      option.textContent = option.dataset.countLabel + ' (' + (counts[option.value] || 0) + ')';
+    });
+  }
+
+  function reportDateInRange(timestamp, dateFrom, dateTo) {
+    if (dateFrom && timestamp < new Date(dateFrom + 'T00:00:00').getTime()) return false;
+    if (dateTo && timestamp > new Date(dateTo + 'T23:59:59').getTime()) return false;
+    return true;
+  }
+
   function render() {
+    updateTypeFilterCounts();
     var rows = filtered();
     var total = rows.length;
     var pageRows = rows.slice((state.page - 1) * state.perPage, state.page * state.perPage);
     renderTable(pageRows);
     renderPagination(total);
+    renderOverdueSection();
   }
+
+  var rptOverdueSearch = '';
+  var rptOverduePage = 1;
+  var rptOverduePerPage = 10;
+
+  function filteredOverdueRows() {
+    var type = String((document.getElementById('rptOverdueType') || {}).value || '').toLowerCase();
+    var brgy = String((document.getElementById('rptOverdueBrgy') || {}).value || '').toLowerCase();
+    var action = String((document.getElementById('rptOverdueAction') || {}).value || '').toLowerCase();
+    var dateFrom = String((document.getElementById('rptOverdueDateFrom') || {}).value || '');
+    var dateTo = String((document.getElementById('rptOverdueDateTo') || {}).value || '');
+    var query = rptOverdueSearch.toLowerCase();
+    var rows = ALL.filter(function (report) {
+      if (!report.isOverdue) return false;
+      if ((dateFrom || dateTo) && !reportDateInRange(report.ts, dateFrom, dateTo)) return false;
+      if (type && String(report.type || '').toLowerCase() !== type) return false;
+      if (brgy && String(report.brgy || '').toLowerCase() !== brgy) return false;
+      if (action && String(report.overdueAction || '').toLowerCase() !== action) return false;
+      if (query && [report.ref, report.reporter, report.typeLabel, report.brgy, report.overdueReason, report.overdueBadge, report.location, report.phone, report.email]
+        .join(' ').toLowerCase().indexOf(query) === -1) return false;
+      return true;
+    });
+    rows.sort(function (a, b) {
+      return String(a.overdueDeadline || '').localeCompare(String(b.overdueDeadline || ''));
+    });
+    return rows;
+  }
+
+  function renderOverdueSection() {
+    var tbody = document.getElementById('rptOverdueRows');
+    if (!tbody) return;
+    var rows = filteredOverdueRows();
+    var pages = Math.max(1, Math.ceil(rows.length / rptOverduePerPage));
+    rptOverduePage = Math.min(rptOverduePage, pages);
+    var pageRows = rows.slice((rptOverduePage - 1) * rptOverduePerPage, rptOverduePage * rptOverduePerPage);
+    tbody.innerHTML = pageRows.length ? pageRows.map(function (report) {
+      var reportId = Number(report.id);
+      var contact = '<div class="contact-main">' + esc(report.phone || '-') + '</div><div class="contact-sub">' + esc(report.email || '-') + '</div>';
+      var deadline = String(report.overdueDeadline || '').trim();
+      if (deadline) {
+        var parsedDeadline = new Date(deadline.replace(' ', 'T'));
+        if (!isNaN(parsedDeadline.getTime())) {
+          deadline = parsedDeadline.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+        }
+      } else {
+        deadline = 'Date unavailable';
+      }
+      return '<tr class="sd-tr" onclick="rptSelect(' + reportId + ')" style="cursor:pointer;">' +
+        '<td class="sd-td"><div class="client-name" style="font-weight:400;">' + esc(report.ref) + '</div></td>' +
+        '<td class="sd-td"><div class="client-name">' + esc(report.reporter || '-') + '</div></td>' +
+        '<td class="sd-td">' + contact + '</td>' +
+        '<td class="sd-td">' + esc(report.typeLabel || report.type || '-') + '</td>' +
+        '<td class="sd-td">' + esc(report.brgy || '-') + '</td>' +
+        '<td class="sd-td"><div class="contact-main">' + esc(report.location || '-') + '</div></td>' +
+        '<td class="sd-td"><div class="contact-main" style="color:#b91c1c;font-weight:500;">' +
+          esc(report.overdueReason || 'Deadline passed') + '</div><div class="contact-sub">Due ' + esc(deadline) + '</div></td>' +
+        '<td class="sd-td">' + statusPill('overdue', report.overdueBadge || 'Overdue') + '</td>' +
+        '<td class="sd-td sd-td-action"><button type="button" class="sd-row-actions" title="More options" aria-label="More options" onclick="event.stopPropagation();rptActions(event,' + reportId + ')">' +
+          '<span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>' +
+        '</tr>';
+    }).join('') : '<tr class="sd-tr"><td class="sd-td" colspan="9"><div class="no-results"><p>No overdue reports found.</p></div></td></tr>';
+
+    var pageLabel = document.getElementById('rptOverduePageLabel');
+    if (pageLabel) pageLabel.textContent = 'Page ' + rptOverduePage + ' of ' + pages;
+    ['First', 'Prev', 'Next', 'Last'].forEach(function (pageButton) {
+      var button = document.getElementById('rptOverduePage' + pageButton);
+      if (!button) return;
+      button.disabled = pageButton === 'First' || pageButton === 'Prev'
+        ? rptOverduePage <= 1
+        : rptOverduePage >= pages;
+      button.onclick = function () {
+        if (pageButton === 'First') rptOverduePage = 1;
+        else if (pageButton === 'Prev') rptOverduePage = Math.max(1, rptOverduePage - 1);
+        else if (pageButton === 'Next') rptOverduePage = Math.min(pages, rptOverduePage + 1);
+        else rptOverduePage = pages;
+        renderOverdueSection();
+      };
+    });
+    var clearButton = document.getElementById('rptOverdueClear');
+    if (clearButton) {
+      clearButton.style.display = rptOverdueSearch ||
+        (document.getElementById('rptOverdueType') || {}).value ||
+        (document.getElementById('rptOverdueBrgy') || {}).value ||
+        (document.getElementById('rptOverdueAction') || {}).value ||
+        (document.getElementById('rptOverdueDateFrom') || {}).value ||
+        (document.getElementById('rptOverdueDateTo') || {}).value ? 'inline-flex' : 'none';
+    }
+  }
+  window.rptSetOverdueSearch = function (value) {
+    rptOverdueSearch = String(value || '').trim();
+    rptOverduePage = 1;
+    renderOverdueSection();
+  };
+  window.rptSetOverdueFilter = function () {
+    rptOverduePage = 1;
+    renderOverdueSection();
+  };
+  window.rptOverdueSetDate = function () {
+    rptOverduePage = 1;
+    renderOverdueSection();
+  };
+  window.rptClearOverdueFilters = function () {
+    rptOverdueSearch = '';
+    ['rptOverdueSearch', 'rptOverdueType', 'rptOverdueBrgy', 'rptOverdueAction',
+      'rptOverdueDateFrom', 'rptOverdueDateTo'].forEach(function (id) {
+      var input = document.getElementById(id);
+      if (input) input.value = '';
+    });
+    var overdueDateButton = document.querySelector('[data-date-filter="rptOverdue"] .staff-date-filter-button');
+    if (overdueDateButton) overdueDateButton.classList.remove('has-date');
+    rptOverduePage = 1;
+    renderOverdueSection();
+  };
+  window.rptSetOverduePerPage = function (value) {
+    var rowsPerPage = parseInt(value, 10);
+    if (!isNaN(rowsPerPage) && rowsPerPage > 0) rptOverduePerPage = rowsPerPage;
+    rptOverduePage = 1;
+    renderOverdueSection();
+  };
+  window.rptExportOverdueCSV = function () {
+    var rows = [['Report ID', 'Reporter', 'Contact', 'Type', 'Barangay', 'Location', 'Overdue obligation', 'Deadline', 'Status']];
+    filteredOverdueRows().forEach(function (report) {
+      rows.push([
+        report.ref,
+        report.reporter,
+        report.phone || report.email,
+        report.typeLabel || report.type,
+        report.brgy,
+        report.location,
+        report.overdueReason || report.overdueBadge,
+        report.overdueDeadline,
+        report.overdueBadge || 'Overdue'
+      ]);
+    });
+    var csv = rows.map(function (row) {
+      return row.map(function (cell) { return '"' + String(cell == null ? '' : cell).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\n');
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var link = document.createElement('a');
+    var downloadUrl = URL.createObjectURL(blob);
+    link.href = downloadUrl;
+    link.download = 'overdue-reports-' + new Date().toISOString().slice(0, 10) + '.csv';
+    link.click();
+    setTimeout(function () { URL.revokeObjectURL(downloadUrl); }, 1000);
+  };
 
   /* ── Checkbox bulk selection + quick actions (same pattern as All Reports > Barangay Portal) ── */
   var rptBulk = null;
@@ -951,7 +1155,10 @@
   // Detail drawer with tabs
   var rptDetailTab = 'details';
   function rptResponseWorkflowDetails(r) {
-    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return '';
+    var progressHtml = typeof window.responseWorkflowProgressHtml === 'function'
+      ? window.responseWorkflowProgressHtml(r)
+      : '';
+    if (!window.DCVS_BARANGAY_RESPONSE_ENABLED || !r.responseState || r.responseState === 'awaiting_dcvs_decision') return progressHtml;
     var labels = {
       dcvs_dispatch: 'DCVS dispatch',
       barangay_response_approved: 'Barangay response approved',
@@ -969,13 +1176,12 @@
     var status = labels[r.responseState] || r.responseState.replace(/_/g, ' ');
     var mode = r.responseMode === 'barangay_response' ? 'Barangay Response'
       : (r.responseMode === 'dcvs_dispatch' ? 'DCVS Dispatch' : 'Undecided');
-    var deadline = r.responseDeadline || r.progressDeadline || '';
-    var overdue = deadline && new Date(deadline.replace(' ', 'T')).getTime() < Date.now();
-    return '<section class="rpt-col rpt-full-col rpt-response-custody-section"><div class="rpt-section-title">Response &amp; Custody</div>' +
+    var deadline = r.overdueDeadline || r.responseDeadline || r.progressDeadline || '';
+    return progressHtml + '<section class="rpt-col rpt-full-col rpt-response-custody-section"><div class="rpt-section-title">Response &amp; Custody</div>' +
       '<div class="info-rows info-rows-2col rpt-response-custody-grid">' +
       infoRow('activity', 'Response Status', status) +
       infoRow('activity', 'Response Mode', mode) +
-      (deadline && r.statusRaw !== 'resolved' ? infoRow('cal', overdue ? 'Overdue Response Target' : 'Next Response Target', deadline) : '') +
+      (deadline ? infoRow('cal', r.isOverdue ? 'Overdue Deadline' : 'Next Response Target', deadline) : '') +
       (r.urgentEscalatedAt ? infoRow('activity', 'Urgent DCVS Coordination', 'Notified on ' + r.urgentEscalatedAt) : '') +
       (r.lastProgressAt ? infoRow('cal', 'Last Progress Update', r.lastProgressAt) : '') +
       (r.holdingLocation ? infoRow('home', 'Holding Location', r.holdingLocation) : '') +
@@ -1044,6 +1250,7 @@
         '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;">Priority</span>' +
         priorityPill(r.urgency) +
         '</div>' +
+        supportingSubmissionsHtml(r) +
 
         rptResponseWorkflowDetails(r) +
 
@@ -1116,6 +1323,7 @@
       '<span style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:500;color:#18181b;">Priority</span>' +
       priorityPill(r.urgency) +
       '</div>' +
+      supportingSubmissionsHtml(r) +
 
       rptResponseWorkflowDetails(r) +
 

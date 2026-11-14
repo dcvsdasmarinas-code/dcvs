@@ -8,6 +8,10 @@
 if (!defined('DCVS_AETHER_INCLUDED')) {
     define('DCVS_AETHER_INCLUDED', true);
     require_once __DIR__ . '/waitlist.php';
+    require_once __DIR__ . '/appointment-filters.php';
+    if (!isset($appointmentFilters) || !is_array($appointmentFilters)) {
+        $appointmentFilters = dcvsAppointmentFilterState($_GET);
+    }
 
     $aeth_programSuccess = $_SESSION['program_success'] ?? null;
     $aeth_programError   = $_SESSION['program_error'] ?? null;
@@ -248,33 +252,33 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     }
 
     // 1) Total cases by incident date, regardless of current or archived status.
-    $aeth_kpiCases30 = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE incident_at >= NOW() - INTERVAL 30 DAY")->fetch_row()[0] ?? 0);
-    $aeth_kpiCasesPrev = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE incident_at >= NOW() - INTERVAL 60 DAY AND incident_at < NOW() - INTERVAL 30 DAY")->fetch_row()[0] ?? 0);
+    $aeth_kpiCases30 = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND incident_at >= NOW() - INTERVAL 30 DAY")->fetch_row()[0] ?? 0);
+    $aeth_kpiCasesPrev = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND incident_at >= NOW() - INTERVAL 60 DAY AND incident_at < NOW() - INTERVAL 30 DAY")->fetch_row()[0] ?? 0);
     $aeth_kpiCasesChg = $aeth_kpiCasesPrev > 0 ? round(($aeth_kpiCases30 - $aeth_kpiCasesPrev) / $aeth_kpiCasesPrev * 100, 1) : 0;
     $aeth_kpiCasesTrend = [];
-    $__r = $conn->query("SELECT DATE_FORMAT(incident_at,'%Y-%m') m, COUNT(*) c FROM reports WHERE incident_at IS NOT NULL GROUP BY m");
+    $__r = $conn->query("SELECT DATE_FORMAT(incident_at,'%Y-%m') m, COUNT(*) c FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND incident_at IS NOT NULL GROUP BY m");
     if ($__r) { $__map = []; while ($__row = $__r->fetch_assoc()) $__map[$__row['m']] = $__row['c']; $aeth_kpiCasesTrend = aeth_fillSeries($__map); }
 
     // 2) Avg. resolution time from incident date to resolution, including archived cases.
     $aeth_kpiResAvg = 0;
-    $__r = $conn->query("SELECT AVG(TIMESTAMPDIFF(SECOND, r.incident_at, cc.resolved_at) / 86400) a FROM confirmed_cases cc JOIN reports r ON r.report_id = cc.report_id WHERE cc.status='resolved' AND cc.resolved_at IS NOT NULL AND r.incident_at IS NOT NULL AND cc.resolved_at >= r.incident_at");
+    $__r = $conn->query("SELECT AVG(TIMESTAMPDIFF(SECOND, r.incident_at, cc.resolved_at) / 86400) a FROM confirmed_cases cc JOIN reports r ON r.report_id = cc.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND cc.status='resolved' AND cc.resolved_at IS NOT NULL AND r.incident_at IS NOT NULL AND cc.resolved_at >= r.incident_at");
     if ($__r && $__row = $__r->fetch_assoc()) $aeth_kpiResAvg = round((float)$__row['a'], 1);
     $aeth_kpiResTrend = [];
-    $__r = $conn->query("SELECT DATE_FORMAT(r.incident_at,'%Y-%m') m, AVG(TIMESTAMPDIFF(SECOND, r.incident_at, cc.resolved_at) / 86400) a FROM confirmed_cases cc JOIN reports r ON r.report_id = cc.report_id WHERE cc.status='resolved' AND cc.resolved_at IS NOT NULL AND r.incident_at IS NOT NULL AND cc.resolved_at >= r.incident_at GROUP BY m");
+    $__r = $conn->query("SELECT DATE_FORMAT(r.incident_at,'%Y-%m') m, AVG(TIMESTAMPDIFF(SECOND, r.incident_at, cc.resolved_at) / 86400) a FROM confirmed_cases cc JOIN reports r ON r.report_id = cc.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND cc.status='resolved' AND cc.resolved_at IS NOT NULL AND r.incident_at IS NOT NULL AND cc.resolved_at >= r.incident_at GROUP BY m");
     if ($__r) { $__map = []; while ($__row = $__r->fetch_assoc()) $__map[$__row['m']] = round((float)$__row['a'], 1); $aeth_kpiResTrend = aeth_fillSeries($__map); }
 
     // 3) Report Verification Rate (% verified/legit of total), including resolved and archived reports.
-    $aeth_kpiVerTot = (int)($conn->query("SELECT COUNT(*) FROM reports")->fetch_row()[0] ?? 0);
-    $aeth_kpiVerDone = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE status IN ('validated','confirmed','scheduled','resolved')")->fetch_row()[0] ?? 0);
+    $aeth_kpiVerTot = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected')")->fetch_row()[0] ?? 0);
+    $aeth_kpiVerDone = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND status IN ('validated','confirmed','scheduled','resolved')")->fetch_row()[0] ?? 0);
     $aeth_kpiVerRate = $aeth_kpiVerTot > 0 ? round($aeth_kpiVerDone / $aeth_kpiVerTot * 100, 1) : 0;
     $aeth_kpiVerTrend = [];
-    $__r = $conn->query("SELECT m, SUM(t) t, SUM(v) v FROM (SELECT DATE_FORMAT(incident_at,'%Y-%m') m, 1 t, IF(status IN ('validated','confirmed','scheduled','resolved'),1,0) v FROM reports WHERE incident_at IS NOT NULL) x GROUP BY m");
+    $__r = $conn->query("SELECT m, SUM(t) t, SUM(v) v FROM (SELECT DATE_FORMAT(incident_at,'%Y-%m') m, 1 t, IF(status IN ('validated','confirmed','scheduled','resolved'),1,0) v FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND incident_at IS NOT NULL) x GROUP BY m");
     if ($__r) { $__map = []; while ($__row = $__r->fetch_assoc()) $__map[$__row['m']] = (int)$__row['t'] > 0 ? round((int)$__row['v'] / (int)$__row['t'] * 100, 1) : 0; $aeth_kpiVerTrend = aeth_fillSeries($__map); }
 
     // 4) Current pending report count and monthly trend by incident date.
-    $aeth_kpiPending = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE status IN ('pending','validated')")->fetch_row()[0] ?? 0);
+    $aeth_kpiPending = (int)($conn->query("SELECT COUNT(*) FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND status IN ('pending','validated')")->fetch_row()[0] ?? 0);
     $__pendingMap = [];
-    $__r = $conn->query("SELECT DATE_FORMAT(incident_at,'%Y-%m') m, COUNT(*) c FROM reports WHERE status IN ('pending','validated') AND incident_at IS NOT NULL GROUP BY m");
+    $__r = $conn->query("SELECT DATE_FORMAT(incident_at,'%Y-%m') m, COUNT(*) c FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND status IN ('pending','validated') AND incident_at IS NOT NULL GROUP BY m");
     if ($__r) { while ($__row = $__r->fetch_assoc()) $__pendingMap[$__row['m']] = (int)$__row['c']; }
     $aeth_kpiPendingTrend = aeth_fillSeries($__pendingMap);
 
@@ -298,7 +302,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
     $aeth_priorityReports = [];
     $aeth_highPriorityCount = 0;
-    $__r = $conn->query("SELECT r.report_id, r.reference_id, r.report_type, r.urgency_level, r.status, r.created_at, r.validated_at, b.barangay_name, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON r.reporter_id = u.user_id LEFT JOIN barangays b ON r.barangay_id = b.barangay_id WHERE r.status = 'validated' AND r.archived_at IS NULL ORDER BY FIELD(r.urgency_level, 'critical','high','medium','low'), r.validated_at DESC");
+    $__r = $conn->query("SELECT r.report_id, r.reference_id, r.report_type, r.urgency_level, r.status, r.created_at, r.validated_at, b.barangay_name, u.full_name AS reporter_name FROM reports r LEFT JOIN users u ON r.reporter_id = u.user_id LEFT JOIN barangays b ON r.barangay_id = b.barangay_id WHERE r.status = 'validated' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') ORDER BY FIELD(r.urgency_level, 'critical','high','medium','low'), r.validated_at DESC");
     if ($__r) {
         while ($__row = $__r->fetch_assoc()) {
             $urgency = strtolower($__row['urgency_level'] ?: 'medium');
@@ -321,59 +325,116 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
     // ── Engine: daily filed reports and resolution time over the last 30 days ──
     $aeth_engine30 = [];
+    $aeth_engine30ByBarangay = [];
     $__dailyMap = [];
+    $__dailyBarangayMap = [];
     $__chartStart = date('Y-m-d', strtotime('-29 days'));
-    $__r = $conn->query("SELECT DATE(COALESCE(r.incident_at, r.created_at)) d, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE COALESCE(r.incident_at, r.created_at) >= '" . $conn->real_escape_string($__chartStart) . "' AND COALESCE(r.incident_at, r.created_at) < DATE_ADD(CURDATE(), INTERVAL 1 DAY) GROUP BY DATE(COALESCE(r.incident_at, r.created_at))");
+    $__chartStartSql = $conn->real_escape_string($__chartStart);
+    $__r = $conn->query("SELECT DATE(COALESCE(r.incident_at, r.created_at)) d, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(r.incident_at, r.created_at) >= '" . $__chartStartSql . "' AND COALESCE(r.incident_at, r.created_at) < DATE_ADD(CURDATE(), INTERVAL 1 DAY) GROUP BY DATE(COALESCE(r.incident_at, r.created_at))");
     if ($__r) { while ($__row = $__r->fetch_assoc()) $__dailyMap[$__row['d']] = $__row; }
-    for ($i = 29; $i >= 0; $i--) {
-      $__date = date('Y-m-d', strtotime('-' . $i . ' days'));
-      $__day = $__dailyMap[$__date] ?? [];
-        $aeth_engine30[] = [
-        'd' => date('M d', strtotime($__date)),
-        'cases' => (int)($__day['cases'] ?? 0),
-        'resTime' => isset($__day['resTime']) ? round((float)$__day['resTime'], 1) : 0,
-        ];
+    $__r = $conn->query("SELECT r.barangay_id, DATE(COALESCE(r.incident_at, r.created_at)) d, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND r.barangay_id IS NOT NULL AND COALESCE(r.incident_at, r.created_at) >= '" . $__chartStartSql . "' AND COALESCE(r.incident_at, r.created_at) < DATE_ADD(CURDATE(), INTERVAL 1 DAY) GROUP BY r.barangay_id, DATE(COALESCE(r.incident_at, r.created_at))");
+    if ($__r) {
+      while ($__row = $__r->fetch_assoc()) {
+        $__dailyBarangayMap[(int)$__row['barangay_id']][$__row['d']] = $__row;
+      }
     }
-
-    // ── Engine: actual report type counts by barangay ──
-    $aeth_radarLabels = ['Stray Animal', 'Rabies Report', 'Injured Animal', 'Dead Animal'];
-    $aeth_radarTypeKeys = ['stray', 'rabies', 'injured', 'dead'];
     $__brgyList = [];
     $__r = $conn->query("SELECT barangay_id, barangay_name FROM barangays ORDER BY barangay_name ASC");
     if ($__r) { while ($__row = $__r->fetch_assoc()) $__brgyList[] = ['id' => (int)$__row['barangay_id'], 'name' => $__row['barangay_name']]; }
-    $__radarByBarangay = [0 => array_fill(0, count($aeth_radarTypeKeys), 0)];
-    $__r = $conn->query("SELECT COALESCE(barangay_id, 0) AS barangay_id, report_type, COUNT(*) AS total FROM reports GROUP BY barangay_id, report_type");
+    foreach ($__brgyList as $__b) $aeth_engine30ByBarangay[$__b['id']] = [];
+    for ($i = 29; $i >= 0; $i--) {
+      $__date = date('Y-m-d', strtotime('-' . $i . ' days'));
+      $__day = $__dailyMap[$__date] ?? [];
+      $aeth_engine30[] = [
+        'd' => date('M d', strtotime($__date)),
+        'cases' => (int)($__day['cases'] ?? 0),
+        'resTime' => isset($__day['resTime']) ? round((float)$__day['resTime'], 1) : 0,
+      ];
+      foreach ($__brgyList as $__b) {
+        $__day = $__dailyBarangayMap[$__b['id']][$__date] ?? [];
+        $aeth_engine30ByBarangay[$__b['id']][] = [
+          'd' => date('M d', strtotime($__date)),
+          'cases' => (int)($__day['cases'] ?? 0),
+          'resTime' => isset($__day['resTime']) ? round((float)$__day['resTime'], 1) : 0,
+        ];
+      }
+    }
+
+    // ── Engine: actual report type counts by barangay and selected period ──
+    $aeth_radarLabels = ['Stray Animal', 'Rabies Report', 'Injured Animal', 'Dead Animal'];
+    $aeth_radarTypeKeys = ['stray', 'rabies', 'injured', 'dead'];
+    $__radarEmpty = array_fill(0, count($aeth_radarTypeKeys), 0);
+    $__radar30ByBarangay = [0 => $__radarEmpty];
+    $__radarYearByBarangay = [];
+    foreach ($__brgyList as $__b) {
+      $__radar30ByBarangay[$__b['id']] = $__radarEmpty;
+    }
+    $aeth_realYear = (int)date('Y');
+    $aeth_realMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    for ($year = 2021; $year <= $aeth_realYear; $year++) {
+      $__radarYearByBarangay[$year] = [0 => $__radarEmpty];
+      foreach ($__brgyList as $__b) $__radarYearByBarangay[$year][$__b['id']] = $__radarEmpty;
+    }
+    $__r = $conn->query("SELECT COALESCE(barangay_id, 0) AS barangay_id, report_type, COUNT(*) AS total FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(incident_at, created_at) >= '" . $__chartStartSql . "' AND COALESCE(incident_at, created_at) < DATE_ADD(CURDATE(), INTERVAL 1 DAY) GROUP BY barangay_id, report_type");
     if ($__r) {
       while ($__row = $__r->fetch_assoc()) {
         $typeIndex = array_search($__row['report_type'], $aeth_radarTypeKeys, true);
         if ($typeIndex === false) continue;
         $barangayId = (int)$__row['barangay_id'];
-        if (!isset($__radarByBarangay[$barangayId])) $__radarByBarangay[$barangayId] = array_fill(0, count($aeth_radarTypeKeys), 0);
-        $__radarByBarangay[$barangayId][$typeIndex] = (int)$__row['total'];
-        if ($barangayId !== 0) $__radarByBarangay[0][$typeIndex] += (int)$__row['total'];
+        if (!isset($__radar30ByBarangay[$barangayId])) $__radar30ByBarangay[$barangayId] = $__radarEmpty;
+        $__radar30ByBarangay[$barangayId][$typeIndex] += (int)$__row['total'];
+        if ($barangayId !== 0) $__radar30ByBarangay[0][$typeIndex] += (int)$__row['total'];
       }
     }
-    $aeth_radarData = $__radarByBarangay[0];
+    $__r = $conn->query("SELECT YEAR(COALESCE(incident_at, created_at)) y, COALESCE(barangay_id, 0) AS barangay_id, report_type, COUNT(*) AS total FROM reports WHERE duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(incident_at, created_at) IS NOT NULL AND YEAR(COALESCE(incident_at, created_at)) BETWEEN 2021 AND YEAR(CURDATE()) GROUP BY YEAR(COALESCE(incident_at, created_at)), barangay_id, report_type");
+    if ($__r) {
+      while ($__row = $__r->fetch_assoc()) {
+        $year = (int)$__row['y'];
+        $typeIndex = array_search($__row['report_type'], $aeth_radarTypeKeys, true);
+        if ($typeIndex === false || !isset($__radarYearByBarangay[$year])) continue;
+        $barangayId = (int)$__row['barangay_id'];
+        if (!isset($__radarYearByBarangay[$year][$barangayId])) $__radarYearByBarangay[$year][$barangayId] = $__radarEmpty;
+        $__radarYearByBarangay[$year][$barangayId][$typeIndex] += (int)$__row['total'];
+        if ($barangayId !== 0) $__radarYearByBarangay[$year][0][$typeIndex] += (int)$__row['total'];
+      }
+    }
+    $aeth_radarData = $__radar30ByBarangay[0];
     $aeth_radarBrgy = [['id' => 0, 'name' => 'All Barangays', 'data' => $aeth_radarData]];
     foreach ($__brgyList as $__b) {
       $aeth_radarBrgy[] = [
         'id' => $__b['id'],
         'name' => $__b['name'],
-        'data' => $__radarByBarangay[$__b['id']] ?? array_fill(0, count($aeth_radarTypeKeys), 0),
+        'data' => $__radar30ByBarangay[$__b['id']] ?? $__radarEmpty,
       ];
+    }
+    $aeth_radarPeriodData = ['30d' => [], 'year' => []];
+    foreach ($aeth_radarBrgy as $__b) {
+      $aeth_radarPeriodData['30d'][] = ['id' => $__b['id'], 'data' => $__radar30ByBarangay[$__b['id']] ?? $__radarEmpty];
+    }
+    foreach ($__radarYearByBarangay as $year => $__byBarangay) {
+      $aeth_radarPeriodData['year'][$year] = [];
+      foreach ($aeth_radarBrgy as $__b) {
+        $aeth_radarPeriodData['year'][$year][] = [
+          'id' => $__b['id'],
+          'data' => $__byBarangay[$__b['id']] ?? $__radarEmpty,
+        ];
+      }
     }
 
     // ── Engine: per-year real report and resolution data ──
-    $aeth_realYear = (int)date('Y');
-    $aeth_realMonths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     $aeth_engineYearData = [];
+    $aeth_engineYearDataByBarangay = [];
     for ($year = 2021; $year <= $aeth_realYear; $year++) {
       $aeth_engineYearData[$year] = [];
+      foreach ($__brgyList as $__b) $aeth_engineYearDataByBarangay[$__b['id']][$year] = [];
       for ($month = 1; $month <= 12; $month++) {
         $aeth_engineYearData[$year][] = ['d' => $aeth_realMonths[$month - 1], 'cases' => 0, 'resTime' => 0];
+        foreach ($__brgyList as $__b) {
+          $aeth_engineYearDataByBarangay[$__b['id']][$year][] = ['d' => $aeth_realMonths[$month - 1], 'cases' => 0, 'resTime' => 0];
+        }
       }
     }
-    $__r = $conn->query("SELECT YEAR(COALESCE(r.incident_at, r.created_at)) y, MONTH(COALESCE(r.incident_at, r.created_at)) m, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE COALESCE(r.incident_at, r.created_at) IS NOT NULL AND YEAR(COALESCE(r.incident_at, r.created_at)) BETWEEN 2021 AND YEAR(CURDATE()) GROUP BY YEAR(COALESCE(r.incident_at, r.created_at)), MONTH(COALESCE(r.incident_at, r.created_at))");
+    $__r = $conn->query("SELECT YEAR(COALESCE(r.incident_at, r.created_at)) y, MONTH(COALESCE(r.incident_at, r.created_at)) m, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(r.incident_at, r.created_at) IS NOT NULL AND YEAR(COALESCE(r.incident_at, r.created_at)) BETWEEN 2021 AND YEAR(CURDATE()) GROUP BY YEAR(COALESCE(r.incident_at, r.created_at)), MONTH(COALESCE(r.incident_at, r.created_at))");
     if ($__r) {
       while ($__row = $__r->fetch_assoc()) {
         $year = (int)$__row['y'];
@@ -383,11 +444,22 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
         $aeth_engineYearData[$year][$monthIndex]['resTime'] = isset($__row['resTime']) ? round((float)$__row['resTime'], 1) : 0;
       }
     }
+    $__r = $conn->query("SELECT r.barangay_id, YEAR(COALESCE(r.incident_at, r.created_at)) y, MONTH(COALESCE(r.incident_at, r.created_at)) m, COUNT(DISTINCT r.report_id) cases, AVG(CASE WHEN cc.resolved_at IS NOT NULL AND cc.resolved_at >= r.created_at THEN TIMESTAMPDIFF(SECOND, r.created_at, cc.resolved_at) / 86400 END) resTime FROM reports r LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id WHERE r.duplicate_status NOT IN ('merged', 'suspected') AND r.barangay_id IS NOT NULL AND COALESCE(r.incident_at, r.created_at) IS NOT NULL AND YEAR(COALESCE(r.incident_at, r.created_at)) BETWEEN 2021 AND YEAR(CURDATE()) GROUP BY r.barangay_id, YEAR(COALESCE(r.incident_at, r.created_at)), MONTH(COALESCE(r.incident_at, r.created_at))");
+    if ($__r) {
+      while ($__row = $__r->fetch_assoc()) {
+        $barangayId = (int)$__row['barangay_id'];
+        $year = (int)$__row['y'];
+        $monthIndex = (int)$__row['m'] - 1;
+        if (!isset($aeth_engineYearDataByBarangay[$barangayId][$year][$monthIndex])) continue;
+        $aeth_engineYearDataByBarangay[$barangayId][$year][$monthIndex]['cases'] = (int)$__row['cases'];
+        $aeth_engineYearDataByBarangay[$barangayId][$year][$monthIndex]['resTime'] = isset($__row['resTime']) ? round((float)$__row['resTime'], 1) : 0;
+      }
+    }
 
     // ── Engine: Barangay Breakdown (real data) ─────────────────────
     $aeth_reportProgressTarget = 100;
     $aeth_brgyBreakdown = [];
-    $__r = $conn->query("SELECT b.barangay_name, COUNT(r.report_id) filed, SUM(CASE WHEN r.status='resolved' THEN 1 ELSE 0 END) resolved, SUM(CASE WHEN r.validated_by IS NOT NULL OR r.confirmed_by IS NOT NULL THEN 1 ELSE 0 END) actions FROM barangays b LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.archived_at IS NULL GROUP BY b.barangay_id, b.barangay_name HAVING filed > 0 ORDER BY filed DESC LIMIT 8");
+    $__r = $conn->query("SELECT b.barangay_name, COUNT(r.report_id) filed, SUM(CASE WHEN r.status='resolved' THEN 1 ELSE 0 END) resolved, SUM(CASE WHEN r.validated_by IS NOT NULL OR r.confirmed_by IS NOT NULL THEN 1 ELSE 0 END) actions FROM barangays b LEFT JOIN reports r ON r.barangay_id = b.barangay_id AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') GROUP BY b.barangay_id, b.barangay_name HAVING filed > 0 ORDER BY filed DESC LIMIT 8");
     if ($__r) {
         while ($__row = $__r->fetch_assoc()) {
             $filed = (int)$__row['filed'];
@@ -407,39 +479,148 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     $aeth_apptTypeNames = ['kapon' => 'Kapon', 'vaccination' => 'Vaccination', 'adoption' => 'Adoption', 'checkup' => 'Check-up', 'deworming' => 'Deworming'];
     $aeth_apptTypeColors = ['#1A1A1A', '#D4D4D4', '#0E8131', '#F59E0B', '#8B5CF6'];
     $aeth_apptTypeCounts = array_fill_keys(array_keys($aeth_apptTypeNames), 0);
-    $__r = $conn->query("SELECT appointment_type, COUNT(*) AS total FROM appointments GROUP BY appointment_type");
-    if ($__r) {
+    $aeth_apptQueryFilter = dcvsAppointmentFilterSql($appointmentFilters);
+    $aeth_apptQueryError = false;
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT a.appointment_type, COUNT(DISTINCT a.appointment_id) AS total
+         FROM appointments a
+         INNER JOIN users u ON u.user_id = a.user_id
+        WHERE {$aeth_apptQueryFilter['where']}
+        GROUP BY a.appointment_type",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result())) {
       while ($__row = $__r->fetch_assoc()) {
-        if (isset($aeth_apptTypeCounts[$__row['appointment_type']])) $aeth_apptTypeCounts[$__row['appointment_type']] = (int)$__row['total'];
+        if (isset($aeth_apptTypeCounts[$__row['appointment_type']])) {
+          $aeth_apptTypeCounts[$__row['appointment_type']] = (int)$__row['total'];
+        }
       }
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
     }
     $aeth_apptTypeLabels = array_values($aeth_apptTypeNames);
     $aeth_apptLoc = [];
     $aeth_apptLocByType = ['all' => []];
     foreach (array_keys($aeth_apptTypeNames) as $__type) $aeth_apptLocByType[$__type] = [];
     $aeth_apptLocTotals = [];
-    $__r = $conn->query("SELECT b.barangay_name, a.appointment_type, COUNT(*) AS total FROM appointments a INNER JOIN users u ON u.user_id = a.user_id INNER JOIN barangays b ON b.barangay_id = u.barangay_id GROUP BY b.barangay_id, b.barangay_name, a.appointment_type ORDER BY total DESC, b.barangay_name ASC");
-    if ($__r) {
+    $__apptLocTotalsById = [];
+    $__apptLocTotalsByType = [];
+    $__apptLocCounts30 = [];
+    $__apptLocCountsYear = [];
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT b.barangay_id, b.barangay_name, a.appointment_type,
+              YEAR(a.created_at) AS year,
+              COUNT(DISTINCT a.appointment_id) AS total,
+              COUNT(DISTINCT CASE
+                WHEN a.created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+                 AND a.created_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                THEN a.appointment_id
+              END) AS total_30d
+         FROM appointments a
+         INNER JOIN users u ON u.user_id = a.user_id
+         INNER JOIN barangays b ON b.barangay_id = u.barangay_id
+        WHERE {$aeth_apptQueryFilter['where']}
+        GROUP BY b.barangay_id, b.barangay_name, a.appointment_type, YEAR(a.created_at)
+        ORDER BY total DESC, b.barangay_name ASC",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result())) {
       while ($__row = $__r->fetch_assoc()) {
-        $entry = [$__row['barangay_name'], (int)$__row['total']];
-        if (!isset($aeth_apptLocTotals[$__row['barangay_name']])) $aeth_apptLocTotals[$__row['barangay_name']] = 0;
-        $aeth_apptLocTotals[$__row['barangay_name']] += (int)$__row['total'];
-        if (isset($aeth_apptLocByType[$__row['appointment_type']]) && count($aeth_apptLocByType[$__row['appointment_type']]) < 8) $aeth_apptLocByType[$__row['appointment_type']][] = $entry;
+        $barangayId = (int)$__row['barangay_id'];
+        $type = (string)$__row['appointment_type'];
+        $year = (int)$__row['year'];
+        $total = (int)$__row['total'];
+        $total30 = (int)$__row['total_30d'];
+        if (!isset($__apptLocTotalsById[$barangayId])) $__apptLocTotalsById[$barangayId] = 0;
+        $__apptLocTotalsById[$barangayId] += $total;
+        if (!isset($__apptLocTotalsByType[$type])) $__apptLocTotalsByType[$type] = [];
+        if (!isset($__apptLocTotalsByType[$type][$barangayId])) $__apptLocTotalsByType[$type][$barangayId] = 0;
+        $__apptLocTotalsByType[$type][$barangayId] += $total;
+        if (!isset($__apptLocCounts30[$barangayId])) $__apptLocCounts30[$barangayId] = [];
+        if (!isset($__apptLocCounts30[$barangayId][$type])) $__apptLocCounts30[$barangayId][$type] = 0;
+        $__apptLocCounts30[$barangayId][$type] += $total30;
+        if ($year >= 2021 && $year <= $aeth_realYear) {
+          if (!isset($__apptLocCountsYear[$year])) $__apptLocCountsYear[$year] = [];
+          if (!isset($__apptLocCountsYear[$year][$barangayId])) $__apptLocCountsYear[$year][$barangayId] = [];
+          if (!isset($__apptLocCountsYear[$year][$barangayId][$type])) $__apptLocCountsYear[$year][$barangayId][$type] = 0;
+          $__apptLocCountsYear[$year][$barangayId][$type] += $total;
+        }
       }
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
+    }
+    foreach ($__brgyList as $__barangay) {
+      $barangayId = $__barangay['id'];
+      $barangayName = $__barangay['name'];
+      $aeth_apptLocTotals[$barangayName] = (int)($__apptLocTotalsById[$barangayId] ?? 0);
     }
     arsort($aeth_apptLocTotals);
     foreach (array_slice($aeth_apptLocTotals, 0, 8, true) as $__name => $__total) $aeth_apptLocByType['all'][] = [$__name, $__total];
+    foreach (array_keys($aeth_apptTypeNames) as $__type) {
+      $__typeTotals = [];
+      foreach ($__brgyList as $__barangay) {
+        $__typeTotals[$__barangay['name']] = (int)($__apptLocTotalsByType[$__type][$__barangay['id']] ?? 0);
+      }
+      arsort($__typeTotals);
+      foreach (array_slice($__typeTotals, 0, 8, true) as $__name => $__total) {
+        $aeth_apptLocByType[$__type][] = [$__name, $__total];
+      }
+    }
     $aeth_apptLoc = $aeth_apptLocByType['all'];
+    $aeth_apptLocByPeriod = ['30d' => ['all' => []], 'year' => []];
+    foreach (array_keys($aeth_apptTypeNames) as $__type) $aeth_apptLocByPeriod['30d'][$__type] = [];
+    foreach ($__brgyList as $__barangay) {
+      $barangayId = $__barangay['id'];
+      $barangayName = $__barangay['name'];
+      $allTypesTotal = 0;
+      foreach (array_keys($aeth_apptTypeNames) as $__type) {
+        $total = (int)($__apptLocCounts30[$barangayId][$__type] ?? 0);
+        $allTypesTotal += $total;
+        $aeth_apptLocByPeriod['30d'][$__type][] = ['id' => $barangayId, 'name' => $barangayName, 'total' => $total];
+      }
+      $aeth_apptLocByPeriod['30d']['all'][] = ['id' => $barangayId, 'name' => $barangayName, 'total' => $allTypesTotal];
+    }
+    for ($year = 2021; $year <= $aeth_realYear; $year++) {
+      $aeth_apptLocByPeriod['year'][$year] = ['all' => []];
+      foreach (array_keys($aeth_apptTypeNames) as $__type) $aeth_apptLocByPeriod['year'][$year][$__type] = [];
+      foreach ($__brgyList as $__barangay) {
+        $barangayId = $__barangay['id'];
+        $barangayName = $__barangay['name'];
+        $allTypesTotal = 0;
+        foreach (array_keys($aeth_apptTypeNames) as $__type) {
+          $total = (int)($__apptLocCountsYear[$year][$barangayId][$__type] ?? 0);
+          $allTypesTotal += $total;
+          $aeth_apptLocByPeriod['year'][$year][$__type][] = ['id' => $barangayId, 'name' => $barangayName, 'total' => $total];
+        }
+        $aeth_apptLocByPeriod['year'][$year]['all'][] = ['id' => $barangayId, 'name' => $barangayName, 'total' => $allTypesTotal];
+      }
+    }
 
     $aeth_apptSummary = ['total_30d' => 0, 'upcoming' => 0, 'completed_30d' => 0, 'no_show_30d' => 0];
-    $__r = $conn->query("SELECT
-      SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS total_30d,
-      SUM(CASE WHEN archived_at IS NULL AND preferred_date >= CURDATE() AND status IN ('pending','approved','scheduled','rescheduled','action_needed') THEN 1 ELSE 0 END) AS upcoming,
-      SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'completed' THEN 1 ELSE 0 END) AS completed_30d,
-      SUM(CASE WHEN created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND status = 'no_show' THEN 1 ELSE 0 END) AS no_show_30d
-      FROM appointments");
-    if ($__r && ($__row = $__r->fetch_assoc())) {
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT
+        SUM(CASE WHEN a.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS total_30d,
+        SUM(CASE WHEN COALESCE(a.scheduled_date, a.preferred_date) >= CURDATE() AND a.status IN ('pending','approved','scheduled','rescheduled','action_needed') THEN 1 ELSE 0 END) AS upcoming,
+        SUM(CASE WHEN a.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND a.status = 'completed' THEN 1 ELSE 0 END) AS completed_30d,
+        SUM(CASE WHEN a.created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND a.status = 'no_show' THEN 1 ELSE 0 END) AS no_show_30d
+        FROM appointments a
+        INNER JOIN users u ON u.user_id = a.user_id
+       WHERE {$aeth_apptQueryFilter['where']}",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result()) && ($__row = $__r->fetch_assoc())) {
       foreach ($aeth_apptSummary as $__key => $__value) $aeth_apptSummary[$__key] = (int)($__row[$__key] ?? 0);
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
     }
     $aeth_apptStatuses = [
       ['label' => 'Pending', 'count' => 0, 'color' => '#D4D4D4'],
@@ -448,32 +629,116 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
       ['label' => 'Cancelled / Rejected', 'count' => 0, 'color' => '#A1A1AA'],
       ['label' => 'No-Show', 'count' => 0, 'color' => '#EF4444'],
     ];
-    $__r = $conn->query("SELECT
-      SUM(status = 'pending') AS pending,
-      SUM(status IN ('approved','scheduled','rescheduled')) AS scheduled,
-      SUM(status = 'completed') AS completed,
-      SUM(status IN ('cancelled','rejected')) AS closed,
-      SUM(status = 'no_show') AS no_show
-      FROM appointments");
-    if ($__r && ($__row = $__r->fetch_assoc())) {
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT
+        SUM(a.status = 'pending') AS pending,
+        SUM(a.status IN ('approved','scheduled','rescheduled')) AS scheduled,
+        SUM(a.status = 'completed') AS completed,
+        SUM(a.status IN ('cancelled','rejected')) AS closed,
+        SUM(a.status = 'no_show') AS no_show
+        FROM appointments a
+        INNER JOIN users u ON u.user_id = a.user_id
+       WHERE {$aeth_apptQueryFilter['where']}",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result()) && ($__row = $__r->fetch_assoc())) {
       $aeth_apptStatuses[0]['count'] = (int)$__row['pending'];
       $aeth_apptStatuses[1]['count'] = (int)$__row['scheduled'];
       $aeth_apptStatuses[2]['count'] = (int)$__row['completed'];
       $aeth_apptStatuses[3]['count'] = (int)$__row['closed'];
       $aeth_apptStatuses[4]['count'] = (int)$__row['no_show'];
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
     }
+    $aeth_apptTypeKeys = array_keys($aeth_apptTypeNames);
+    $__apptStatusKeyIndexes = ['pending' => 0, 'approved' => 1, 'scheduled' => 1, 'rescheduled' => 1, 'completed' => 2, 'cancelled' => 3, 'rejected' => 3, 'no_show' => 4];
+    $__makeApptAnalyticsEntry = static function () use ($aeth_apptTypeKeys) {
+      $types = array_fill_keys($aeth_apptTypeKeys, 0);
+      $statusesByType = [];
+      foreach ($aeth_apptTypeKeys as $type) $statusesByType[$type] = array_fill(0, 5, 0);
+      return ['types' => $types, 'statusesByType' => $statusesByType];
+    };
+    $__addApptAnalyticsCount = static function (&$entry, $type, $statusIndex, $count) {
+      if (!isset($entry['types'][$type])) return;
+      $entry['types'][$type] += $count;
+      $entry['statusesByType'][$type][$statusIndex] += $count;
+    };
+    $__apptAnalytics30 = [0 => $__makeApptAnalyticsEntry()];
+    $__apptAnalyticsYear = [];
+    foreach ($__brgyList as $__barangay) {
+      $__apptAnalytics30[$__barangay['id']] = $__makeApptAnalyticsEntry();
+    }
+    for ($year = 2021; $year <= $aeth_realYear; $year++) {
+      $__apptAnalyticsYear[$year] = [0 => $__makeApptAnalyticsEntry()];
+      foreach ($__brgyList as $__barangay) {
+        $__apptAnalyticsYear[$year][$__barangay['id']] = $__makeApptAnalyticsEntry();
+      }
+    }
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT COALESCE(u.barangay_id, 0) AS barangay_id,
+              YEAR(a.created_at) AS year,
+              a.appointment_type, a.status,
+              COUNT(DISTINCT a.appointment_id) AS total,
+              COUNT(DISTINCT CASE
+                WHEN a.created_at >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+                 AND a.created_at < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
+                THEN a.appointment_id
+              END) AS total_30d
+         FROM appointments a
+         INNER JOIN users u ON u.user_id = a.user_id
+        WHERE {$aeth_apptQueryFilter['where']}
+        GROUP BY COALESCE(u.barangay_id, 0), YEAR(a.created_at), a.appointment_type, a.status",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result())) {
+      while ($__row = $__r->fetch_assoc()) {
+        $type = (string)$__row['appointment_type'];
+        $status = (string)$__row['status'];
+        if (!isset($__apptStatusKeyIndexes[$status]) || !isset($aeth_apptTypeNames[$type])) continue;
+        $statusIndex = $__apptStatusKeyIndexes[$status];
+        $barangayId = (int)$__row['barangay_id'];
+        $total30 = (int)$__row['total_30d'];
+        if ($total30 > 0) {
+          if (!isset($__apptAnalytics30[$barangayId])) $__apptAnalytics30[$barangayId] = $__makeApptAnalyticsEntry();
+          $__addApptAnalyticsCount($__apptAnalytics30[$barangayId], $type, $statusIndex, $total30);
+          if ($barangayId !== 0) $__addApptAnalyticsCount($__apptAnalytics30[0], $type, $statusIndex, $total30);
+        }
+        $year = (int)$__row['year'];
+        if ($year >= 2021 && $year <= $aeth_realYear) {
+          $total = (int)$__row['total'];
+          if (!isset($__apptAnalyticsYear[$year][$barangayId])) $__apptAnalyticsYear[$year][$barangayId] = $__makeApptAnalyticsEntry();
+          $__addApptAnalyticsCount($__apptAnalyticsYear[$year][$barangayId], $type, $statusIndex, $total);
+          if ($barangayId !== 0) $__addApptAnalyticsCount($__apptAnalyticsYear[$year][0], $type, $statusIndex, $total);
+        }
+      }
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
+    }
+    $aeth_apptAnalyticsByPeriod = ['30d' => $__apptAnalytics30, 'year' => $__apptAnalyticsYear];
 
     // ── Intel: Appointment Segments ──
     $aeth_apptSegments = [];
-    $__r = $conn->query("SELECT appointment_type, COUNT(*) AS total,
-      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN status IN ('approved','scheduled','rescheduled') THEN 1 ELSE 0 END) AS scheduled,
-      SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS completed,
-      SUM(CASE WHEN status IN ('cancelled','rejected','no_show') THEN 1 ELSE 0 END) AS closed
-      FROM appointments
-      GROUP BY appointment_type ORDER BY total DESC, appointment_type ASC");
-    if ($__r) {
+    $__stmt = dcvsAppointmentExecuteFilteredQuery(
+      $conn,
+      "SELECT a.appointment_type, COUNT(DISTINCT a.appointment_id) AS total,
+        SUM(CASE WHEN a.status = 'pending' THEN 1 ELSE 0 END) AS pending,
+        SUM(CASE WHEN a.status IN ('approved','scheduled','rescheduled') THEN 1 ELSE 0 END) AS scheduled,
+        SUM(CASE WHEN a.status = 'in_progress' THEN 1 ELSE 0 END) AS in_progress,
+        SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+        SUM(CASE WHEN a.status IN ('cancelled','rejected','no_show') THEN 1 ELSE 0 END) AS closed
+        FROM appointments a
+        INNER JOIN users u ON u.user_id = a.user_id
+       WHERE {$aeth_apptQueryFilter['where']}
+       GROUP BY a.appointment_type ORDER BY total DESC, a.appointment_type ASC",
+      $aeth_apptQueryFilter
+    );
+    if ($__stmt && ($__r = $__stmt->get_result())) {
       while ($__row = $__r->fetch_assoc()) {
         $type = trim(str_replace('_', ' ', (string)$__row['appointment_type']));
         $aeth_apptSegments[] = [
@@ -481,11 +746,18 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
           'total' => (int)$__row['total'],
           'pending' => (int)$__row['pending'],
           'scheduled' => (int)$__row['scheduled'],
-                'in_progress' => (int)$__row['in_progress'],
+          'in_progress' => (int)$__row['in_progress'],
           'completed' => (int)$__row['completed'],
           'closed' => (int)$__row['closed'],
         ];
       }
+      $__stmt->close();
+    } else {
+      $aeth_apptQueryError = true;
+      if ($__stmt) $__stmt->close();
+    }
+    if ($aeth_apptQueryError) {
+      error_log('Appointment Overview analytics query failed.');
     }
 
     // ── Budget: Rescue data ──
@@ -1236,7 +1508,9 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
     flex-direction: column;
     align-items: stretch;
   }
-  #ab-page-intel #abApptLocType {
+  #ab-page-intel #abApptLocType,
+  #ab-page-intel #abApptLocBrgy,
+  #ab-page-intel #abApptRangeYear {
     width: 100%;
     max-width: 100%;
   }
@@ -1402,7 +1676,11 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 <!-- ═══════════ ENGINE ═══════════ -->
 <div class="ab-page active" id="ab-page-engine">
-  <div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
+  <div class="staff-page-heading">
+    <div>
+      <h1>Analytics</h1>
+      <p>Monitor report volume, case outcomes, and response trends across Dasmariñas.</p>
+    </div>
     <button type="button" class="sd-btn sd-btn-outline" onclick="aethExportPdf()"><i class="fas fa-file-pdf"></i> Export PDF</button>
   </div>
   <div class="ab-grid-4" style="margin-bottom:1.5rem;">
@@ -1431,7 +1709,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
             <button class="ab-range-btn" data-aethrange="year" onclick="aethRange('year', this)">Per Year</button>
           </div>
           <div class="ab-range-extra" id="abRangeYearWrap" style="display:none;">
-            <select id="abRangeYear" class="ab-range-select" onchange="renderEngineChart('year')">
+            <select id="abRangeYear" class="ab-range-select" onchange="aethRangeYear(this.value)">
               <?php for ($y = date('Y'); $y >= 2021; $y--): ?><option value="<?php echo $y; ?>"><?php echo $y; ?></option><?php endfor; ?>
             </select>
           </div>
@@ -1495,7 +1773,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
       <p style="margin:0;font-size:14px;font-weight:600;color:#991B1B;"><?php echo $aeth_highPriorityCount; ?> high-priority report<?php echo $aeth_highPriorityCount !== 1 ? 's' : ''; ?> require immediate attention.</p>
       <p style="margin:0.15rem 0 0;font-size:13px;color:#991B1B;opacity:0.85;">Review these reports to confirm and assign the appropriate action.</p>
     </div>
-    <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
+    <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" onclick="aethOpenPriorityReports(event)" style="flex-shrink:0;font-size:13px;font-weight:600;color:#991B1B;text-decoration:none;white-space:nowrap;">View High Priority Reports &rarr;</a>
   </div>
   <?php endif; ?>
 
@@ -1506,7 +1784,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
           <h2>Priority Reports</h2>
           <span style="font-size:12px;font-weight:500;padding:0.2rem 0.55rem;border-radius:4px;background:rgba(234,179,8,0.12);color:#92400e;border:1px solid rgba(234,179,8,0.4);font-family:'Inter','Segoe UI',sans-serif;"><?php echo $aeth_priorityTotal; ?> need attention</span>
         </div>
-        <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
+        <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" onclick="aethOpenPriorityReports(event)" style="font-size:13px;font-weight:500;color:var(--ab-muted-fg);text-decoration:none;font-family:'Inter','Segoe UI',sans-serif;">View All &rarr;</a>
       </div>
       <div style="padding:0.6rem 1.25rem;border-bottom:1px solid var(--ab-border);font-size:13px;color:var(--ab-muted-fg);font-family:'Inter','Segoe UI',sans-serif;">Reports requiring staff review and confirmation</div>
       <div class="ab-feed-list">
@@ -1529,7 +1807,7 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
                   <?php echo htmlspecialchars($rpt['note']); ?> &middot; <?php echo htmlspecialchars($rpt['timeAgo']); ?>
                 </p>
               </div>
-              <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
+              <a href="<?php echo htmlspecialchars($appBaseUrl . '/dashboard-staff.php#reports-pending', ENT_QUOTES, 'UTF-8'); ?>" onclick="aethOpenPriorityReports(event)" style="flex-shrink:0;display:inline-flex;align-items:center;gap:0.35rem;padding:0.35rem 0.75rem;border-radius:6px;border:1px solid var(--ab-border);background:var(--ab-surface);color:var(--ab-fg);font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;text-decoration:none;white-space:nowrap;transition:background 0.12s;">Review</a>
             </div>
           <?php endforeach; ?>
         <?php endif; ?>
@@ -1540,9 +1818,23 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 <!-- ═══════════ INTEL ═══════════ -->
 <div class="ab-page" id="ab-page-intel">
-  <div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
+  <div class="staff-page-heading">
+    <div>
+      <h1>Appointment Overview</h1>
+      <p>Track appointment demand, service types, and scheduling trends.</p>
+    </div>
     <button type="button" class="sd-btn sd-btn-outline" onclick="aethExportAppointmentsPdf()"><i class="fas fa-file-pdf"></i> Export PDF</button>
   </div>
+  <?php if ($aeth_apptQueryError): ?>
+    <div role="alert" style="margin-bottom:1.5rem;padding:12px 16px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;">
+      Appointment Overview data could not be fully loaded. Check the application error log and database availability.
+    </div>
+  <?php endif; ?>
+  <?php if (!empty($appointmentFilters['errors'])): ?>
+    <div role="alert" style="margin-bottom:1.5rem;padding:12px 16px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;">
+      <?php echo htmlspecialchars(implode(' ', $appointmentFilters['errors']), ENT_QUOTES, 'UTF-8'); ?>
+    </div>
+  <?php endif; ?>
   <div class="ab-grid-4" style="margin-bottom:1.5rem;">
     <div class="ab-card ab-stat"><p class="ab-stat-label">Total Appointments (30d)</p><p class="ab-stat-val"><?php echo number_format($aeth_apptSummary['total_30d']); ?></p><p class="ab-stat-trend">From appointment records</p></div>
     <div class="ab-card ab-stat"><p class="ab-stat-label">Upcoming Appointments</p><p class="ab-stat-val"><?php echo number_format($aeth_apptSummary['upcoming']); ?></p><p class="ab-stat-trend">Scheduled or awaiting confirmation</p></div>
@@ -1564,22 +1856,42 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
       <h2>Appointment Status Overview</h2>
       <div style="margin-top:0.5rem;">
         <?php $apptStatusTotal = array_sum(array_column($aeth_apptStatuses, 'count')); ?>
-        <?php foreach ($aeth_apptStatuses as $status): ?>
-          <div class="ab-bar-row">
-            <div class="ab-bar-label-row"><span><?php echo htmlspecialchars($status['label']); ?></span><span class="ab-mono"><?php echo number_format($status['count']); ?></span></div>
-            <div class="ab-bar"><div class="ab-bar-fill" style="width:<?php echo $apptStatusTotal ? number_format($status['count'] / $apptStatusTotal * 100, 1) : '0'; ?>%;background:<?php echo htmlspecialchars($status['color']); ?>;"></div></div>
+        <?php foreach ($aeth_apptStatuses as $statusIndex => $status): ?>
+          <div class="ab-bar-row" data-appt-status-row="<?php echo $statusIndex; ?>">
+            <div class="ab-bar-label-row"><span><?php echo htmlspecialchars($status['label']); ?></span><span class="ab-mono" data-appt-status-count><?php echo number_format($status['count']); ?></span></div>
+            <div class="ab-bar"><div class="ab-bar-fill" data-appt-status-fill style="width:<?php echo $apptStatusTotal ? number_format($status['count'] / $apptStatusTotal * 100, 1) : '0'; ?>%;background:<?php echo htmlspecialchars($status['color']); ?>;"></div></div>
           </div>
         <?php endforeach; ?>
-        <?php if (!$apptStatusTotal): ?><p style="font-size:13px;color:#71717a;margin:1rem 0 0;">No appointment records yet.</p><?php endif; ?>
+        <p id="abApptStatusEmpty" style="font-size:13px;color:#71717a;margin:1rem 0 0;<?php echo $apptStatusTotal ? 'display:none;' : ''; ?>">No appointment records yet.</p>
       </div>
     </div>
     <div class="ab-card ab-chart-card">
       <div class="ab-chart-head">
-        <div><h2>Top Barangays by Appointment Volume</h2></div>
-        <select id="abApptLocType" class="ab-range-select" onchange="aethSetApptLoc(this.value)">
-          <option value="all">All Types</option>
-          <?php foreach ($aeth_apptTypeNames as $__type => $__label): ?><option value="<?php echo htmlspecialchars($__type); ?>"><?php echo htmlspecialchars($__label); ?></option><?php endforeach; ?>
-        </select>
+        <div>
+          <h2>Top Barangays by Appointment Volume</h2>
+          <p class="ab-chart-sub" id="abApptLocSub">Last 30 Days · All Barangays</p>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:0.5rem;flex-wrap:wrap;">
+          <div class="ab-range">
+            <button class="ab-range-btn active" data-aethrange="30d" onclick="aethRange('30d', this)">Last 30 Days</button>
+            <button class="ab-range-btn" data-aethrange="year" onclick="aethRange('year', this)">Per Year</button>
+          </div>
+          <div class="ab-range-extra" id="abApptRangeYearWrap" style="display:none;">
+            <select id="abApptRangeYear" class="ab-range-select" onchange="aethRangeYear(this.value)" aria-label="Appointment volume year">
+              <?php for ($y = date('Y'); $y >= 2021; $y--): ?><option value="<?php echo $y; ?>"><?php echo $y; ?></option><?php endfor; ?>
+            </select>
+          </div>
+          <select id="abApptLocType" class="ab-range-select" onchange="aethSetApptLoc(this.value)" aria-label="Filter appointment volume by service type">
+            <option value="all">All Types</option>
+            <?php foreach ($aeth_apptTypeNames as $__type => $__label): ?><option value="<?php echo htmlspecialchars($__type); ?>"><?php echo htmlspecialchars($__label); ?></option><?php endforeach; ?>
+          </select>
+          <select id="abApptLocBrgy" class="ab-range-select" onchange="aethSetApptBrgy(this.value)" aria-label="Filter appointment volume by barangay">
+            <option value="0">All Barangays</option>
+            <?php foreach ($__brgyList as $__b): ?>
+              <option value="<?php echo $__b['id']; ?>"><?php echo htmlspecialchars($__b['name'], ENT_QUOTES, 'UTF-8'); ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
       </div>
       <div class="ab-chart-canvas" style="height:256px;"><canvas id="abIntelLoc"></canvas></div>
     </div>
@@ -1624,7 +1936,11 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 <!-- ═══════════ BUDGET ═══════════ -->
 <div class="ab-page" id="ab-page-budget">
-  <div style="display:flex;justify-content:flex-end;margin-bottom:1rem;">
+  <div class="staff-page-heading">
+    <div>
+      <h1>Adoption Insights</h1>
+      <p>Track rescue and adoption outcomes across city programs.</p>
+    </div>
     <button type="button" class="sd-btn sd-btn-outline" onclick="aethExportAdoptionPdf()"><i class="fas fa-file-pdf"></i> Export PDF</button>
   </div>
 
@@ -1705,6 +2021,12 @@ if (!defined('DCVS_AETHER_INCLUDED')) {
 
 <!-- ═══════════ ARCHITECT ═══════════ -->
 <div class="ab-page" id="ab-page-architect">
+  <div class="staff-page-heading">
+    <div>
+      <h1>Programs &amp; Services</h1>
+      <p>Manage city programs and review the services delivered to residents.</p>
+    </div>
+  </div>
   <?php if ($aeth_programSuccess): ?>
     <script>document.addEventListener('DOMContentLoaded',function(){if(typeof showToast==='function'){showToast('Success',{type:'success',description:'<?php echo addslashes($aeth_programSuccess); ?>'});}});</script>
   <?php endif; ?>
@@ -1852,6 +2174,12 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
 
 <!-- ═══ City Drives Page (successful/completed programs) ═══ -->
 <div class="ab-page" id="ab-page-citydrives">
+  <div class="staff-page-heading">
+    <div>
+      <h1>City Drives</h1>
+      <p>Review completed city programs and their impact across barangays.</p>
+    </div>
+  </div>
   <?php
     $aeth_cityDrives = [];
     if (isset($conn)) {
@@ -2335,16 +2663,22 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   var AGE = <?php echo json_encode($aeth_ageData); ?>;
   var LOCS = <?php echo json_encode($aeth_locations); ?>;
   var APPT_TYPES_LABELS = <?php echo json_encode($aeth_apptTypeLabels); ?>;
+  var APPT_TYPE_KEYS = <?php echo json_encode($aeth_apptTypeKeys); ?>;
   var APPT_TYPES_COLORS = <?php echo json_encode(array_slice($aeth_apptTypeColors, 0, count($aeth_apptTypeNames))); ?>;
   var APPT_TYPES_COUNTS = <?php echo json_encode(array_values($aeth_apptTypeCounts)); ?>;
+  var APPT_ANALYTICS_BY_PERIOD = <?php echo json_encode($aeth_apptAnalyticsByPeriod); ?>;
   var APPT_LOCS = <?php echo json_encode($aeth_apptLoc); ?>;
   var APPT_LOCS_BY_TYPE = <?php echo json_encode($aeth_apptLocByType); ?>;
+  var APPT_LOCS_BY_PERIOD = <?php echo json_encode($aeth_apptLocByPeriod); ?>;
   var KPI_TRENDS = <?php echo json_encode($aeth_glanceTrends); ?>;
   var ENGINE30 = <?php echo json_encode($aeth_engine30); ?>;
   var RADAR_LABELS = <?php echo json_encode($aeth_radarLabels); ?>;
   var RADAR_DATA = <?php echo json_encode($aeth_radarData); ?>;
   var RADAR_BRGY = <?php echo json_encode($aeth_radarBrgy); ?>;
+  var RADAR_PERIOD_DATA = <?php echo json_encode($aeth_radarPeriodData); ?>;
   var ENGINE_YEAR_DATA = <?php echo json_encode($aeth_engineYearData); ?>;
+  var ENGINE30_BY_BRGY = <?php echo json_encode((object)$aeth_engine30ByBarangay); ?>;
+  var ENGINE_YEAR_DATA_BY_BRGY = <?php echo json_encode((object)$aeth_engineYearDataByBarangay); ?>;
   var AETHER_EXPORT_SOURCE = <?php echo json_encode([
       'overview' => array_map(function($card) { return ['label' => $card[0], 'value' => $card[1], 'suffix' => $card[2], 'change' => $card[3]]; }, $aeth_glanceCards),
       'typeLabels' => $aeth_radarLabels,
@@ -2505,30 +2839,147 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     });
   }
 
-  window.renderEngineChart = function(period) {
-    var data, pct = document.getElementById('abEnginePerfSub');
-    if (period === 'year') {
-      var yearSel = document.getElementById('abRangeYear');
-      var year = yearSel ? parseInt(yearSel.value, 10) : new Date().getFullYear();
-      data = ENGINE_YEAR_DATA[String(year)] || ENGINE_YEAR_DATA[year] || [];
-      if (pct) pct.textContent = year;
-    } else {
-      data = ENGINE30;
-      if (pct) pct.textContent = 'Last 30 days';
-    }
-    if (!charts['abEnginePerf']) return;
-    charts['abEnginePerf'].data.labels = data.map(function(p) { return p.d; });
-    charts['abEnginePerf'].data.datasets[0].data = data.map(function(p) { return p.resTime; });
-    charts['abEnginePerf'].data.datasets[1].data = data.map(function(p) { return p.cases; });
-    charts['abEnginePerf'].update();
+  function selectedEnginePeriod() {
+    var active = document.querySelector('.ab-range-btn.active');
+    return active ? active.getAttribute('data-aethrange') : '30d';
   }
+  function selectedRadarEntry(entries, barangayId) {
+    if (!entries) return null;
+    for (var i = 0; i < entries.length; i++) {
+      if (String(entries[i].id) === String(barangayId)) return entries[i];
+    }
+    return null;
+  }
+  function appointmentAnalyticsCounts() {
+    var period = selectedEnginePeriod();
+    var yearSelect = document.getElementById('abRangeYear');
+    var year = yearSelect ? String(yearSelect.value) : String(new Date().getFullYear());
+    var periodData = period === 'year'
+      ? (APPT_ANALYTICS_BY_PERIOD.year[String(year)] || {})
+      : APPT_ANALYTICS_BY_PERIOD['30d'];
+    var barangaySelect = document.getElementById('abApptLocBrgy');
+    var caseBarangaySelect = document.getElementById('abRadarBrgy');
+    var barangayId = barangaySelect ? barangaySelect.value : (caseBarangaySelect ? caseBarangaySelect.value : '0');
+    var entry = periodData[String(barangayId)] || periodData[barangayId] || { types: {}, statusesByType: {} };
+    var serviceSelect = document.getElementById('abApptLocType');
+    var selectedType = serviceSelect ? serviceSelect.value : 'all';
+    var typeCounts = APPT_TYPE_KEYS.map(function(type) {
+      return selectedType === 'all' || selectedType === type ? (entry.types[type] || 0) : 0;
+    });
+    var statusCounts = [0, 0, 0, 0, 0];
+    var typesToCount = selectedType === 'all' ? APPT_TYPE_KEYS : [selectedType];
+    typesToCount.forEach(function(type) {
+      var typeStatuses = entry.statusesByType[type] || [];
+      typeStatuses.forEach(function(count, index) {
+        statusCounts[index] += count;
+      });
+    });
+    return { typeCounts: typeCounts, statusCounts: statusCounts };
+  }
+  function updateAppointmentAnalytics() {
+    var counts = appointmentAnalyticsCounts();
+    var typeChart = charts['abIntelAge'];
+    if (typeChart) {
+      typeChart.data.datasets[0].data = counts.typeCounts;
+      typeChart.update();
+    }
+    var totalStatuses = counts.statusCounts.reduce(function(total, count) { return total + count; }, 0);
+    document.querySelectorAll('[data-appt-status-row]').forEach(function(row) {
+      var index = parseInt(row.getAttribute('data-appt-status-row'), 10);
+      var count = counts.statusCounts[index] || 0;
+      var countLabel = row.querySelector('[data-appt-status-count]');
+      var fill = row.querySelector('[data-appt-status-fill]');
+      if (countLabel) countLabel.textContent = count.toLocaleString();
+      if (fill) fill.style.width = (totalStatuses ? (count / totalStatuses * 100) : 0) + '%';
+    });
+    var empty = document.getElementById('abApptStatusEmpty');
+    if (empty) empty.style.display = totalStatuses ? 'none' : '';
+  }
+  function appointmentLocationRows(type) {
+    var period = selectedEnginePeriod();
+    var yearSelect = document.getElementById('abRangeYear');
+    var year = yearSelect ? String(yearSelect.value) : String(new Date().getFullYear());
+    var rangeData = period === 'year'
+      ? (APPT_LOCS_BY_PERIOD.year[year] || {})
+      : APPT_LOCS_BY_PERIOD['30d'];
+    var list = rangeData && rangeData[type] ? rangeData[type].slice() : [];
+    var barangaySelect = document.getElementById('abApptLocBrgy');
+    var caseBarangaySelect = document.getElementById('abRadarBrgy');
+    var barangayId = barangaySelect ? barangaySelect.value : (caseBarangaySelect ? caseBarangaySelect.value : '0');
+    if (barangayId !== '0') {
+      var selected = null;
+      for (var i = 0; i < list.length; i++) {
+        if (String(list[i].id) === String(barangayId)) { selected = list[i]; break; }
+      }
+      if (selected) return [selected];
+      return [];
+    }
+    list.sort(function(a, b) { return b.total - a.total; });
+    return list.slice(0, 8);
+  }
+  window.renderEngineChart = function(period) {
+    period = period || selectedEnginePeriod();
+    var barangaySelect = document.getElementById('abRadarBrgy');
+    var barangayId = barangaySelect ? barangaySelect.value : '0';
+    var barangayName = barangaySelect && barangaySelect.selectedOptions.length ? barangaySelect.selectedOptions[0].textContent : 'All Barangays';
+    var yearSel = document.getElementById('abRangeYear');
+    var year = yearSel ? parseInt(yearSel.value, 10) : new Date().getFullYear();
+    var periodLabel = period === 'year' ? String(year) : 'Last 30 Days';
+    var data;
+    if (period === 'year') {
+      var yearData = barangayId === '0' ? ENGINE_YEAR_DATA : (ENGINE_YEAR_DATA_BY_BRGY[barangayId] || {});
+      data = yearData[String(year)] || yearData[year] || [];
+    } else {
+      data = barangayId === '0' ? ENGINE30 : (ENGINE30_BY_BRGY[barangayId] || []);
+    }
+    var chart = charts['abEnginePerf'];
+    if (chart) {
+      chart.data.labels = data.map(function(p) { return p.d; });
+      chart.data.datasets[0].data = data.map(function(p) { return p.resTime; });
+      chart.data.datasets[1].data = data.map(function(p) { return p.cases; });
+      chart.update();
+    }
+    var perfSub = document.getElementById('abEnginePerfSub');
+    if (perfSub) perfSub.textContent = periodLabel + ' · ' + barangayName;
+
+    var radarPeriod = period === 'year' ? 'year' : '30d';
+    var radarEntries = radarPeriod === 'year'
+      ? (RADAR_PERIOD_DATA.year[String(year)] || RADAR_PERIOD_DATA.year[year] || [])
+      : RADAR_PERIOD_DATA['30d'];
+    var radarEntry = selectedRadarEntry(radarEntries, barangayId);
+    var radarChart = charts['abEngineRadar'];
+    if (radarEntry && radarChart) {
+      var radarData = radarEntry.data || RADAR_DATA;
+      radarChart.data.datasets[0].data = radarData;
+      radarChart.options.scales.r.max = Math.max(10, Math.max.apply(null, radarData));
+      radarChart.update();
+    }
+    var radarSub = document.getElementById('abRadarSub');
+    if (radarSub) radarSub.textContent = barangayName + ' · ' + periodLabel;
+    var apptTypeSelect = document.getElementById('abApptLocType');
+    if (typeof window.aethSetApptLoc === 'function') {
+      window.aethSetApptLoc(apptTypeSelect ? apptTypeSelect.value : 'all');
+    }
+  };
   window.aethRange = function(mode, btn) {
-    var wrap = btn.closest('.ab-range');
-    if (wrap) wrap.querySelectorAll('.ab-range-btn').forEach(function(b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    var yearWrap = document.getElementById('abRangeYearWrap');
-    if (yearWrap) yearWrap.style.display = mode === 'year' ? '' : 'none';
+    document.querySelectorAll('.ab-range-btn').forEach(function(button) {
+      button.classList.toggle('active', button.getAttribute('data-aethrange') === mode);
+    });
+    ['abRangeYearWrap', 'abApptRangeYearWrap'].forEach(function(id) {
+      var yearWrap = document.getElementById(id);
+      if (yearWrap) yearWrap.style.display = mode === 'year' ? '' : 'none';
+    });
+    var engineYear = document.getElementById('abRangeYear');
+    var apptYear = document.getElementById('abApptRangeYear');
+    if (engineYear && apptYear) apptYear.value = engineYear.value;
     renderEngineChart(mode);
+  };
+  window.aethRangeYear = function(year) {
+    ['abRangeYear', 'abApptRangeYear'].forEach(function(id) {
+      var yearSelect = document.getElementById(id);
+      if (yearSelect) yearSelect.value = year;
+    });
+    renderEngineChart('year');
   };
   function initEngine() {
     kill('abSpark'); kill('abEngine');
@@ -2564,22 +3015,12 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         plugins: []
       });
     }
+    renderEngineChart(selectedEnginePeriod());
   }
   window.aethSetRadarBrgy = function(id) {
-    var chart = charts['abEngineRadar'];
-    var sel = document.getElementById('abRadarBrgy');
-    var sub = document.getElementById('abRadarSub');
-    if (!chart) return;
-    var item = null;
-    for (var i = 0; i < RADAR_BRGY.length; i++) {
-      if (String(RADAR_BRGY[i].id) === String(id)) { item = RADAR_BRGY[i]; break; }
-    }
-    if (!item) return;
-    var data = item.data || RADAR_DATA;
-    chart.data.datasets[0].data = data;
-    chart.options.scales.r.max = 10;
-    chart.update();
-    if (sub) sub.textContent = item.name;
+    var apptBrgy = document.getElementById('abApptLocBrgy');
+    if (apptBrgy) apptBrgy.value = id;
+    renderEngineChart(selectedEnginePeriod());
   };
 
   window.aethExportPdf = function() {
@@ -2593,6 +3034,18 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.reportingPeriod = period;
     source.barangayId = barangayId;
     source.barangayName = barangayName;
+    var radarPeriod = range === 'year' ? 'year' : '30d';
+    var radarEntries = radarPeriod === 'year'
+      ? (RADAR_PERIOD_DATA.year[String(period)] || RADAR_PERIOD_DATA.year[period] || [])
+      : RADAR_PERIOD_DATA['30d'];
+    var selectedDistribution = selectedRadarEntry(radarEntries, barangayId);
+    if (selectedDistribution) {
+      source.barangayDistribution = [{
+        id: barangayId,
+        name: barangayName,
+        data: selectedDistribution.data || []
+      }];
+    }
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = window.dcvsStaffUrl('analytics-export.php');
@@ -2614,6 +3067,24 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     source.reportType = 'appointments';
     source.locationType = type;
     source.locationTypeLabel = typeSelect && typeSelect.selectedOptions.length ? typeSelect.selectedOptions[0].textContent : 'All Types';
+    source.locationsByType = {};
+    source.locationsByType[type] = appointmentLocationRows(type).map(function(location) {
+      return [location.name, location.total];
+    });
+    var range = selectedEnginePeriod();
+    source.reportingPeriod = range === 'year'
+      ? (document.getElementById('abRangeYear').value || String(new Date().getFullYear()))
+      : 'Last 30 Days';
+    var barangaySelect = document.getElementById('abApptLocBrgy');
+    source.barangayName = barangaySelect && barangaySelect.selectedOptions.length
+      ? barangaySelect.selectedOptions[0].textContent
+      : 'All Barangays';
+    var analyticsCounts = appointmentAnalyticsCounts();
+    source.typeCounts = analyticsCounts.typeCounts;
+    source.statuses = source.statuses.map(function(status, index) {
+      status.count = analyticsCounts.statusCounts[index] || 0;
+      return status;
+    });
     var form = document.createElement('form');
     form.method = 'POST';
     form.action = window.dcvsStaffUrl('analytics-export.php');
@@ -2689,6 +3160,8 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
         })
       });
     }
+    var apptTypeSelect = document.getElementById('abApptLocType');
+    window.aethSetApptLoc(apptTypeSelect ? apptTypeSelect.value : 'all');
   }
   var intelResizeFrame = 0;
   window.addEventListener('resize', function() {
@@ -2706,10 +3179,25 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
   window.aethSetApptLoc = function(key) {
     var chart = charts['abIntelLoc'];
     if (!chart) return;
-    var list = (APPT_LOCS_BY_TYPE && APPT_LOCS_BY_TYPE[key]) ? APPT_LOCS_BY_TYPE[key] : APPT_LOCS;
-    chart.data.labels = list.map(function(l) { return l[0]; });
-    chart.data.datasets[0].data = list.map(function(l) { return l[1]; });
+    var list = appointmentLocationRows(key);
+    chart.data.labels = list.map(function(l) { return l.name; });
+    chart.data.datasets[0].data = list.map(function(l) { return l.total; });
     chart.update();
+    var range = selectedEnginePeriod();
+    var yearSelect = document.getElementById('abRangeYear');
+    var periodLabel = range === 'year' ? String(yearSelect ? yearSelect.value : new Date().getFullYear()) : 'Last 30 Days';
+    var barangaySelect = document.getElementById('abApptLocBrgy');
+    var barangayName = barangaySelect && barangaySelect.selectedOptions.length
+      ? barangaySelect.selectedOptions[0].textContent
+      : 'All Barangays';
+    var subtitle = document.getElementById('abApptLocSub');
+    if (subtitle) subtitle.textContent = periodLabel + ' · ' + barangayName;
+    updateAppointmentAnalytics();
+  };
+  window.aethSetApptBrgy = function(id) {
+    var radarBrgy = document.getElementById('abRadarBrgy');
+    if (radarBrgy) radarBrgy.value = id;
+    renderEngineChart(selectedEnginePeriod());
   };
 
   window.aethOpenRescueDialog = function() {
@@ -2772,6 +3260,21 @@ else $abBarBg = ($c['progress'] >= 100) ? '#0E8131' : '#D9A441';
     var breadcrumb = document.getElementById('breadcrumbCurrent');
     if (breadcrumb && analyticsLabels[page]) breadcrumb.textContent = analyticsLabels[page];
     window.scrollTo({ top: 0 });
+  };
+  window.aethOpenPriorityReports = function(event) {
+    if (event) event.preventDefault();
+    var reportsLink = document.querySelector('.nav-link[data-section="reports-pending"]');
+    if (reportsLink) {
+      reportsLink.click();
+      return;
+    }
+    if (typeof window.switchSection === 'function' && document.getElementById('reports-pending')) {
+      window.switchSection('reports-pending');
+      return;
+    }
+    if (event && event.currentTarget && event.currentTarget.href) {
+      window.location.assign(event.currentTarget.href);
+    }
   };
   /* Re-trigger the Campaign Timeline row + bar animations when the page opens */
   function aethPlayGantt() {

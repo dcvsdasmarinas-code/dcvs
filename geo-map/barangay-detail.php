@@ -44,20 +44,20 @@ $confirmed = 0;
 $pending = 0;
 $resolved = 0;
 
-$ccQ = $conn->query("SELECT COUNT(CASE WHEN cc.status = 'active' THEN 1 END) AS confirmed, COUNT(CASE WHEN cc.status = 'resolved' THEN 1 END) AS resolved FROM confirmed_cases cc WHERE cc.barangay_id = $barangayId");
+$ccQ = $conn->query("SELECT COUNT(CASE WHEN cc.status = 'active' THEN 1 END) AS confirmed, COUNT(CASE WHEN cc.status = 'resolved' THEN 1 END) AS resolved FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE cc.barangay_id = $barangayId AND r.duplicate_status NOT IN ('merged', 'suspected')");
 if ($ccQ && ($ccRow = $ccQ->fetch_assoc())) {
     $confirmed = (int)$ccRow['confirmed'];
     $resolved = (int)$ccRow['resolved'];
 }
 
-$pendQ = $conn->query("SELECT COUNT(*) AS cnt FROM reports r WHERE r.barangay_id = $barangayId AND r.status = 'pending' AND r.archived_at IS NULL");
+$pendQ = $conn->query("SELECT COUNT(*) AS cnt FROM reports r WHERE r.barangay_id = $barangayId AND r.status = 'pending' AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')");
 if ($pendQ && ($pendRow = $pendQ->fetch_assoc())) {
     $pending = (int)$pendRow['cnt'];
 }
 
 $allTypes = ['rabies', 'rescue', 'stray', 'injured', 'dead'];
 $counts = array_fill_keys($allTypes, 0);
-$bkQ = $conn->query("SELECT r.report_type, COUNT(DISTINCT r.report_id) AS cnt FROM reports r WHERE r.barangay_id = $barangayId AND r.archived_at IS NULL GROUP BY r.report_type");
+$bkQ = $conn->query("SELECT r.report_type, COUNT(DISTINCT r.report_id) AS cnt FROM reports r WHERE r.barangay_id = $barangayId AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') GROUP BY r.report_type");
 if ($bkQ) {
     while ($bkRow = $bkQ->fetch_assoc()) {
         $counts[$bkRow['report_type']] = (int)$bkRow['cnt'];
@@ -69,7 +69,7 @@ foreach ($allTypes as $t) {
 }
 
 $recentCase = null;
-$rcQ = $conn->query("SELECT r.report_id, r.report_type, r.description, r.status, r.created_at, r.urgency_level, CONCAT('#RPT-', LPAD(r.report_id, 5, '0')) AS ref_code FROM reports r WHERE r.barangay_id = $barangayId AND r.archived_at IS NULL ORDER BY r.created_at DESC LIMIT 1");
+$rcQ = $conn->query("SELECT r.report_id, r.report_type, r.description, r.status, r.created_at, r.urgency_level, CONCAT('#RPT-', LPAD(r.report_id, 5, '0')) AS ref_code FROM reports r WHERE r.barangay_id = $barangayId AND r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected') ORDER BY r.created_at DESC LIMIT 1");
 if ($rcQ && ($rcRow = $rcQ->fetch_assoc())) {
     $recentCase = [
         'id' => (int)$rcRow['report_id'],

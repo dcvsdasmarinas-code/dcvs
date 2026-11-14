@@ -85,14 +85,34 @@ function setTextById(id, value) {
 
 function updateSummary(metadata) {
   if (!metadata) return;
-  const e1 = document.getElementById('geoTotalConfirmed');
-  const e2 = document.getElementById('geoAffectedBgy');
-  const e3 = document.getElementById('geoHighestRisk');
-  const e4 = document.getElementById('geoLastRefresh');
-  if (e1) e1.textContent = metadata.totalConfirmed || 0;
-  if (e2) e2.textContent = (metadata.affectedBarangays || 0) + ' / ' + (metadata.totalBarangays || 75);
-  if (e3) e3.textContent = metadata.highestRiskBarangay || 'None';
-  if (e4) e4.textContent = metadata.lastUpdated ? new Date(metadata.lastUpdated).toLocaleTimeString() : '--';
+  const affected = Number(metadata.affectedBarangays) || 0;
+  const total = Number(metadata.totalBarangays) || 75;
+  const affectedPercent = total > 0 ? ((affected / total) * 100).toFixed(1) : '0.0';
+  setTextById('geoTotalConfirmed', Number(metadata.totalConfirmed) || 0);
+  setTextById('geoAffectedBgy', `${affected} of ${total}`);
+  setTextById('geoAffectedPercent', `${affectedPercent}% of all barangays`);
+  setTextById('geoHighestRiskName', metadata.highestRiskBarangay || 'None');
+
+  const highestRiskFeature = cachedFeatures.find((feature) =>
+    normalizeBarangayName(feature.properties?.name) === normalizeBarangayName(metadata.highestRiskBarangay)
+  );
+  const riskChip = document.getElementById('geoHighestRiskChip');
+  if (riskChip) {
+    const confirmed = Number(highestRiskFeature?.properties?.confirmed) || 0;
+    const risk = highestRiskFeature?.properties?.risk || 'Green';
+    const riskLabel = confirmed === 0 ? '0 cases'
+      : confirmed <= 5 ? '1–5 cases'
+        : confirmed <= 15 ? '6–15 cases' : '16+ cases';
+    riskChip.textContent = riskLabel;
+    riskChip.className = `geo-risk-chip geo-risk-chip-${risk.toLowerCase()}`;
+  }
+
+  const lastUpdated = document.getElementById('geoLastRefresh');
+  if (lastUpdated) {
+    lastUpdated.textContent = metadata.lastUpdated
+      ? new Date(metadata.lastUpdated).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+      : '--';
+  }
 }
 
 function openInfoPanel(props) {
@@ -130,20 +150,214 @@ function fetchBarangayData() {
   });
 }
 
-function computeCentroid(coords) {
-  let lon = 0, lat = 0, n = 0;
-  if (Array.isArray(coords[0][0])) {
-    // MultiPolygon
-    for (const poly of coords) {
-      for (const ring of poly) {
-        for (const pt of ring) { lon += pt[0]; lat += pt[1]; n++; }
-      }
-    }
-  } else {
-    // Polygon (single ring, first element)
-    for (const pt of coords[0]) { lon += pt[0]; lat += pt[1]; n++; }
+function ringArea(ring) {
+  let area = 0;
+  for (let index = 0; index < ring.length; index++) {
+    const current = ring[index];
+    const next = ring[(index + 1) % ring.length];
+    area += current[0] * next[1] - next[0] * current[1];
   }
-  return [lon / n, lat / n];
+  return area / 2;
+}
+
+function getProjectedArea(ring) {
+  if (!Array.isArray(ring) || !ring.length) return 0;
+  const meanLatitude = ring.reduce((total, point) => total + Number(point[1]), 0) / ring.length;
+  const longitudeScale = 111320 * Math.cos(meanLatitude * Math.PI / 180);
+  return Math.abs(ringArea(ring.map((point) => [
+    Number(point[0]) * longitudeScale,
+    Number(point[1]) * 110540,
+  ])));
+}
+
+function isPointInRing(point, ring) {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const currentPoint = ring[index];
+    const previousPoint = ring[previous];
+    const crosses = (currentPoint[1] > point[1]) !== (previousPoint[1] > point[1])
+      && point[0] < ((previousPoint[0] - currentPoint[0]) * (point[1] - currentPoint[1]))
+        / (previousPoint[1] - currentPoint[1]) + currentPoint[0];
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function distanceToSegment(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const lengthSquared = dx * dx + dy * dy;
+  const projection = lengthSquared === 0
+    ? 0
+    : Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / lengthSquared));
+  const x = start[0] + projection * dx;
+  const y = start[1] + projection * dy;
+  return Math.hypot(point[0] - x, point[1] - y);
+}
+
+function getSignedDistance(point, rings) {
+  let minDistance = Infinity;
+  let inside = isPointInRing(point, rings[0]);
+  for (let ringIndex = 0; ringIndex < rings.length; ringIndex++) {
+    const ring = rings[ringIndex];
+    if (ringIndex > 0 && isPointInRing(point, ring)) inside = false;
+    for (let index = 0; index < ring.length; index++) {
+      minDistance = Math.min(
+        minDistance,
+        distanceToSegment(point, ring[index], ring[(index + 1) % ring.length])
+      );
+    }
+  }
+  return inside ? minDistance : -minDistance;
+}
+
+function pushCell(heap, cell) {
+  let index = heap.length;
+  heap.push(cell);
+  while (index > 0) {
+    const parentIndex = (index - 1) >> 1;
+    if (heap[parentIndex].max >= cell.max) break;
+    heap[index] = heap[parentIndex];
+    index = parentIndex;
+  }
+  heap[index] = cell;
+}
+
+function popCell(heap) {
+  const first = heap[0];
+  const last = heap.pop();
+  if (heap.length && last) {
+    let index = 0;
+    while (true) {
+      const left = index * 2 + 1;
+      const right = left + 1;
+      let largest = index;
+      if (left < heap.length && heap[left].max > heap[largest].max) largest = left;
+      if (right < heap.length && heap[right].max > heap[largest].max) largest = right;
+      if (largest === index) break;
+      heap[index] = heap[largest];
+      index = largest;
+    }
+    heap[index] = last;
+  }
+  return first;
+}
+
+function computePolygonInteriorPoint(polygon) {
+  if (!Array.isArray(polygon) || !Array.isArray(polygon[0]) || polygon[0].length < 4) return null;
+
+  let minLongitude = Infinity;
+  let maxLongitude = -Infinity;
+  let minLatitude = Infinity;
+  let maxLatitude = -Infinity;
+  for (const ring of polygon) {
+    for (const point of ring) {
+      if (!Array.isArray(point) || !Number.isFinite(Number(point[0])) || !Number.isFinite(Number(point[1]))) continue;
+      minLongitude = Math.min(minLongitude, Number(point[0]));
+      maxLongitude = Math.max(maxLongitude, Number(point[0]));
+      minLatitude = Math.min(minLatitude, Number(point[1]));
+      maxLatitude = Math.max(maxLatitude, Number(point[1]));
+    }
+  }
+  if (!Number.isFinite(minLongitude) || !Number.isFinite(minLatitude)) return null;
+  const originLongitude = (minLongitude + maxLongitude) / 2;
+  const originLatitude = (minLatitude + maxLatitude) / 2;
+  const longitudeScale = 111320 * Math.cos(originLatitude * Math.PI / 180);
+  const latitudeScale = 110540;
+  const rings = polygon.map((ring) => ring.map((point) => [
+    (Number(point[0]) - originLongitude) * longitudeScale,
+    (Number(point[1]) - originLatitude) * latitudeScale,
+  ]));
+  if (rings.some((ring) => ring.length < 4)) return null;
+
+  let area = Math.abs(ringArea(rings[0]));
+  for (let index = 1; index < rings.length; index++) area -= Math.abs(ringArea(rings[index]));
+  if (area <= 0) return null;
+
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const point of rings[0]) {
+    minX = Math.min(minX, point[0]);
+    maxX = Math.max(maxX, point[0]);
+    minY = Math.min(minY, point[1]);
+    maxY = Math.max(maxY, point[1]);
+  }
+  const width = maxX - minX;
+  const height = maxY - minY;
+  const cellSize = Math.min(width, height);
+  if (cellSize <= 0) return null;
+
+  let bestPoint = [(minX + maxX) / 2, (minY + maxY) / 2];
+  let bestDistance = getSignedDistance(bestPoint, rings);
+  const heap = [];
+  const makeCell = (x, y, halfSize) => {
+    const distance = getSignedDistance([x, y], rings);
+    return { x, y, halfSize, distance, max: distance + halfSize * Math.SQRT2 };
+  };
+
+  for (let x = minX; x < maxX; x += cellSize) {
+    for (let y = minY; y < maxY; y += cellSize) {
+      pushCell(heap, makeCell(x + cellSize / 2, y + cellSize / 2, cellSize / 2));
+    }
+  }
+
+  let iterations = 0;
+  while (heap.length && iterations++ < 20000) {
+    const cell = popCell(heap);
+    if (cell.distance > bestDistance) {
+      bestPoint = [cell.x, cell.y];
+      bestDistance = cell.distance;
+    }
+    if (cell.max - bestDistance <= 15 || cell.halfSize <= 7.5) continue;
+
+    const halfSize = cell.halfSize / 2;
+    pushCell(heap, makeCell(cell.x - halfSize, cell.y - halfSize, halfSize));
+    pushCell(heap, makeCell(cell.x + halfSize, cell.y - halfSize, halfSize));
+    pushCell(heap, makeCell(cell.x - halfSize, cell.y + halfSize, halfSize));
+    pushCell(heap, makeCell(cell.x + halfSize, cell.y + halfSize, halfSize));
+  }
+
+  if (bestDistance <= 0) return null;
+  return [
+    originLongitude + bestPoint[0] / longitudeScale,
+    originLatitude + bestPoint[1] / latitudeScale,
+  ];
+}
+
+export function computeInteriorLabelPoint(geometry) {
+  if (!geometry || !Array.isArray(geometry.coordinates)) return null;
+  const polygons = geometry.type === 'Polygon'
+    ? [geometry.coordinates]
+    : geometry.type === 'MultiPolygon' ? geometry.coordinates : [];
+  let largestArea = -1;
+  let labelPoint = null;
+  for (const polygon of polygons) {
+    if (!Array.isArray(polygon) || !Array.isArray(polygon[0])) continue;
+    const candidatePoint = computePolygonInteriorPoint(polygon);
+    if (!candidatePoint) continue;
+    const outerArea = getProjectedArea(polygon[0]);
+    if (outerArea > largestArea) {
+      largestArea = outerArea;
+      labelPoint = candidatePoint;
+    }
+  }
+  return labelPoint;
+}
+
+function getLabelMinZoom(area) {
+  if (area >= 1000000) return 12;
+  if (area >= 500000) return 12.5;
+  if (area >= 250000) return 13;
+  return 14;
+}
+
+function setLabelPalette(map, style) {
+  if (!map.getLayer('barangay-label')) return;
+  const satellite = style === 'satellite';
+  map.setPaintProperty('barangay-label', 'text-color', satellite ? '#ffffff' : '#4B5A50');
+  map.setPaintProperty('barangay-label', 'text-halo-color', satellite ? 'rgba(15, 23, 42, 0.9)' : '#ffffff');
 }
 
 function computeBounds(features) {
@@ -188,15 +402,26 @@ function addLayers(map, geojson) {
   if (map.getSource('barangays')) map.removeSource('barangays');
   if (map.getSource('brgy-labels')) map.removeSource('brgy-labels');
 
-  // Build label points (centroids)
+  // Place labels at interior points so narrow or concave barangays remain identifiable.
   const labelPoints = [];
   for (const f of (geojson.features || [])) {
-    if (!f.geometry) continue;
-    const centroid = computeCentroid(f.geometry.coordinates);
+    if (!f.geometry || !f.properties) continue;
+    const coordinates = computeInteriorLabelPoint(f.geometry);
+    if (!coordinates) continue;
+    const outerRing = f.geometry.type === 'Polygon'
+      ? f.geometry.coordinates[0]
+      : (f.geometry.coordinates || []).reduce((largest, polygon) =>
+        getProjectedArea(polygon[0] || []) > getProjectedArea(largest) ? polygon[0] || [] : largest, []);
+    const approximateArea = getProjectedArea(outerRing);
     labelPoints.push({
       type: 'Feature',
-      properties: { name: f.properties.name },
-      geometry: { type: 'Point', coordinates: centroid },
+      properties: {
+        id: f.properties.id,
+        name: f.properties.name,
+        rank: 1,
+        minzoom: getLabelMinZoom(approximateArea),
+      },
+      geometry: { type: 'Point', coordinates },
     });
   }
 
@@ -238,34 +463,46 @@ function addLayers(map, geojson) {
     },
   });
 
-  // Label layer (always visible)
+  // Collision-aware labels allow MapLibre to spread barangay names as the map zooms in.
   map.addLayer({
     id: 'barangay-label',
     type: 'symbol',
     source: 'brgy-labels',
+    filter: ['<=', ['get', 'minzoom'], ['zoom']],
     layout: {
-      'text-field': ['get', 'name'],
+      'text-field': ['upcase', ['get', 'name']],
       'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
       'text-size': [
         'interpolate', ['linear'], ['zoom'],
-        10, 11,
-        12, 13,
-        14, 16,
-        16, 20,
+        12, 12,
+        14, 13,
+        16, 14,
       ],
-      'text-offset': [0, 0],
-      'text-anchor': 'center',
-      'text-allow-overlap': true,
-      'text-ignore-placement': true,
+      'text-letter-spacing': 0.08,
+      'text-variable-anchor': ['top', 'bottom', 'left', 'right'],
+      'text-radial-offset': 0.8,
+      'text-padding': 4,
+      'text-max-width': 8,
+      'text-allow-overlap': false,
+      'icon-allow-overlap': false,
+      'text-optional': true,
+      'symbol-sort-key': ['get', 'rank'],
     },
     paint: {
-      'text-color': '#ffffff',
-      'text-halo-color': '#1e293b',
-      'text-halo-width': 3,
-      'text-halo-blur': 1,
+      'text-color': '#4B5A50',
+      'text-halo-color': '#ffffff',
+      'text-halo-width': 1.75,
       'text-opacity': 0.95,
     },
   });
+  const mapElement = map.getContainer()?.closest('[data-map-basemap-toggle]');
+  setLabelPalette(map, mapElement?.getAttribute('data-initial-basemap'));
+  if (mapElement && !mapElement.__dcvsBarangayLabelPaletteBound) {
+    mapElement.__dcvsBarangayLabelPaletteBound = true;
+    mapElement.addEventListener('dcvs:basemapstyleload', (event) => {
+      setLabelPalette(map, event.detail?.style);
+    });
+  }
 
   // Landscape camera viewport — heavy horizontal padding forces the
   // camera to zoom out laterally, revealing more left/right area
@@ -364,6 +601,7 @@ function searchBarangay(map, query) {
 
   if (feature) {
     const matchId = feature.properties.id;
+    const isMatch = ['==', ['to-number', ['get', 'id']], matchId];
     const highlightedRiskColor = [
       'match', ['get', 'risk'],
       'Green', RISK_COLORS.Green,
@@ -374,23 +612,24 @@ function searchBarangay(map, query) {
     ];
     map.setPaintProperty('barangay-fill', 'fill-color', [
       'case',
-      ['==', ['to-number', ['get', 'id']], matchId],
+      isMatch,
       highlightedRiskColor,
       '#cbd5e1',
     ]);
     map.setPaintProperty('barangay-fill', 'fill-opacity', [
-      'case', ['==', ['to-number', ['get', 'id']], matchId], 0.72, 0.42,
+      'case', isMatch, 0.72, 0.42,
     ]);
     map.setPaintProperty('barangay-outline', 'line-color', [
-      'case', ['==', ['to-number', ['get', 'id']], matchId], '#0e8131', '#ffffff',
+      'case', isMatch, '#0e8131', '#ffffff',
     ]);
     map.setPaintProperty('barangay-outline', 'line-width', [
-      'case', ['==', ['to-number', ['get', 'id']], matchId],
-      ['interpolate', ['linear'], ['zoom'], 10, 2.5, 12, 4, 15, 7],
-      ['interpolate', ['linear'], ['zoom'], 10, 0.5, 12, 1, 15, 2],
+      'interpolate', ['linear'], ['zoom'],
+      10, ['case', isMatch, 2.5, 0.5],
+      12, ['case', isMatch, 4, 1],
+      15, ['case', isMatch, 7, 2],
     ]);
     map.setPaintProperty('barangay-outline', 'line-opacity', [
-      'case', ['==', ['to-number', ['get', 'id']], matchId], 1, 0.55,
+      'case', isMatch, 1, 0.55,
     ]);
     if (feature.geometry) {
       map.fitBounds(computeBounds([feature]), {
@@ -473,6 +712,11 @@ window.MapCN.barangayOverlay = {
         map.getSource('barangays').setData(data);
         updateSummary(data.metadata);
       }
+    }).catch((error) => {
+      console.error('Barangay overlay refresh failed:', error);
+      const mapElement = map.getContainer()?.closest('[data-map-basemap-toggle]');
+      const status = mapElement?.querySelector('[data-basemap-status]');
+      if (status) status.textContent = 'Map data could not be refreshed. Please try again.';
     });
   },
   closePanel: () => document.getElementById('geoInfoPanel')?.classList.remove('open'),

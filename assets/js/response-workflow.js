@@ -38,6 +38,252 @@
       || (status === 'resolved' && liveAnimal);
   };
 
+  function inferOverdueAction(report) {
+    var reason = String(report.overdueReason || '').toLowerCase();
+    var state = String(report.responseState || '').toLowerCase();
+    var mode = String(report.responseMode || '').toLowerCase();
+    if (reason === 'not scheduled') {
+      return mode === 'dcvs_dispatch'
+        || ['escalated_to_dcvs', 'dcvs_dispatch', 'dcvs_processing'].indexOf(state) !== -1
+        ? 'Dispatch'
+        : 'Scheduling';
+    }
+    if (reason === 'past scheduled date') return 'Visit';
+    if (reason === 'initial response') return 'Review';
+    if (reason === 'progress update') return 'Resolution';
+    if (reason === 'dcvs turnover') return 'Turnover';
+    return '';
+  }
+
+  window.responseWorkflowProgressModel = function (report) {
+    report = report || {};
+    var status = String(report._db_status || report.statusRaw || '').toLowerCase();
+    var state = String(report.responseState || '').toLowerCase();
+    var responseFlow = !!state && state !== 'awaiting_dcvs_decision';
+    var dcvsDispatchFlow = responseFlow && String(report.responseMode || '').toLowerCase() === 'dcvs_dispatch';
+    var overdueAction = String(report.overdueAction || inferOverdueAction(report));
+    var steps, currentStep;
+
+    if (dcvsDispatchFlow) {
+      steps = ['Accepted', 'Escalated', 'Dispatched', 'Secured', 'Resolved'];
+      currentStep = state === 'escalated_to_dcvs' || state === 'unable_to_locate' ? 1
+        : (state === 'dcvs_dispatch' ? 2
+          : (state === 'dcvs_processing' || state === 'animal_secured' || state === 'awaiting_turnover'
+            || state === 'turned_over' || state === 'returned_to_barangay' ? 3
+            : (status === 'resolved' ? 4 : 0)));
+      if (window.responseWorkflowNeedsHandover(report)) {
+        steps.push('Turned over');
+        currentStep = report.turnoverStatus === 'receipt_confirmed' ? 5 : 4;
+      }
+    } else if (responseFlow) {
+      steps = ['Accepted', 'Responding', 'Secured', 'Resolved'];
+      currentStep = state === 'barangay_response_approved' || state === 'returned_to_barangay' ? 0
+        : (state === 'barangay_responding' || state === 'escalated_to_dcvs' || state === 'unable_to_locate' ? 1
+          : (state === 'animal_secured' ? 2 : (status === 'resolved' ? 3 : 2)));
+      if (window.responseWorkflowNeedsHandover(report)) {
+        steps.push('Turned over');
+        currentStep = report.turnoverStatus === 'receipt_confirmed' ? 5 : 4;
+      }
+      if (status === 'resolved' && !window.responseWorkflowNeedsHandover(report)) currentStep = 3;
+    } else if (status === 'rejected') {
+      steps = ['Submitted', 'Barangay Review', 'Closed'];
+      currentStep = 2;
+    } else {
+      steps = ['Submitted', 'Barangay Review', 'DCVS Review', 'In Progress', 'Resolved'];
+      currentStep = status === 'pending' ? 0
+        : (status === 'validated' ? 2
+          : (status === 'confirmed' || status === 'scheduled' ? 3
+            : (status === 'resolved' ? 4 : 0)));
+      if (window.responseWorkflowNeedsHandover(report)) {
+        steps.push('Turned over');
+        currentStep = report.turnoverStatus === 'receipt_confirmed' ? 6 : 5;
+      }
+    }
+
+    return {
+      title: responseFlow ? (dcvsDispatchFlow ? 'DCVS Response' : 'Barangay Response') : 'Report Progress',
+      steps: steps,
+      currentStep: currentStep,
+      responseFlow: responseFlow,
+      dcvsDispatchFlow: dcvsDispatchFlow,
+      overdue: !!report.isOverdue,
+      overdueReason: String(report.overdueReason || ''),
+      overdueAction: overdueAction,
+      overdueBadge: overdueAction ? overdueAction + ' overdue' : String(report.overdueBadge || ''),
+      overdueDeadline: String(report.overdueDeadline || '')
+    };
+  };
+
+  function displayDate(value) {
+    var rawValue = String(value || '');
+    var datePart = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (datePart) return Date.UTC(Number(datePart[1]), Number(datePart[2]) - 1, Number(datePart[3]));
+    var date = new Date(rawValue);
+    return isNaN(date.getTime()) ? null : Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function reportDateSummary(report) {
+    var submitted = String(report.submitted || '').trim();
+    var incident = String(report.incidentDate || '').trim();
+    if (!submitted && report.createdAt) submitted = String(report.createdAt);
+    if (!incident && (report._incident_at || report.incidentAt)) incident = String(report._incident_at || report.incidentAt);
+    if (!submitted && !incident) return '';
+
+    var submittedDay = displayDate(submitted);
+    var incidentDay = displayDate(incident);
+    var delayDays = submittedDay !== null && incidentDay !== null
+      ? Math.round((submittedDay - incidentDay) / 86400000)
+      : 0;
+    submitted = submitted.replace(/(\d{1,2}, \d{4}) (\d{1,2}:\d{2}\s*[AP]M)$/i, '$1 at $2');
+    var summary = submitted && incident
+      ? (delayDays > 0
+        ? 'This report was submitted on ' + submitted + ', ' + delayDays + ' ' + (delayDays === 1 ? 'day' : 'days') + ' after the incident on ' + incident + '.'
+        : 'This report was submitted on ' + submitted + ', about an incident that occurred on ' + incident + '.')
+      : (submitted
+        ? 'This report was submitted on ' + submitted + '.'
+        : 'The incident took place on ' + incident + '.');
+    return '<div class="response-date-summary">' + esc(summary) + '</div>';
+  }
+
+  function responseStatusSummary(report, model) {
+    if (model.overdue) {
+      switch (model.overdueAction.toLowerCase()) {
+        case 'dispatch':
+          return 'Dispatch is overdue for this case.';
+        case 'scheduling':
+          return 'Scheduling is overdue for this case.';
+        case 'visit':
+          return 'The scheduled visit is overdue for this case.';
+        case 'review':
+          return 'Barangay review is overdue for this case.';
+        case 'resolution':
+          return 'The case is still open past its target date.';
+        case 'turnover':
+          return 'The DCVS handover is overdue for this case.';
+      }
+      switch (model.overdueReason.toLowerCase()) {
+        case 'not scheduled':
+          return 'This case is overdue because it has not been scheduled yet.';
+        case 'past scheduled date':
+          return 'This case is overdue because its scheduled date has passed.';
+        case 'initial response':
+          return 'The initial response for this case is overdue.';
+        case 'progress update':
+          return 'The latest progress update for this case is overdue.';
+        case 'dcvs turnover':
+          return 'The DCVS turnover for this case is overdue.';
+        default:
+          return 'This case is overdue and needs follow-up.';
+      }
+    }
+
+    var status = String(report.statusLabel || report.status || report.statusRaw || 'submitted');
+    status = status.charAt(0).toLowerCase() + status.slice(1);
+    return (model.responseFlow ? 'The case is currently ' : 'The report is currently ') + status + '.';
+  }
+
+  function formatOverdueDeadline(value, includeTime) {
+    if (!value) return '';
+    var rawDeadline = String(value);
+    var date = new Date(rawDeadline.replace(' ', 'T') +
+      (/[zZ]|[+-]\d{2}:\d{2}$/.test(rawDeadline) ? '' : '+08:00'));
+    if (isNaN(date.getTime())) return rawDeadline;
+    var options = { month: 'short', day: 'numeric', timeZone: 'Asia/Manila' };
+    if (includeTime) {
+      options.hour = 'numeric';
+      options.minute = '2-digit';
+    }
+    return date.toLocaleString('en-US', options);
+  }
+
+  function overdueDetail(model) {
+    var dueTime = formatOverdueDeadline(model.overdueDeadline, true);
+    var dueDate = formatOverdueDeadline(model.overdueDeadline, false);
+    switch (model.overdueAction.toLowerCase()) {
+      case 'dispatch':
+        return 'No team has been dispatched yet.' + (dueTime ? ' This was due ' + dueTime + '.' : '');
+      case 'scheduling':
+        return 'No visit date has been set.' + (dueTime ? ' This was due ' + dueTime + '.' : '');
+      case 'visit':
+        return dueDate
+          ? 'The visit was scheduled for ' + dueDate + ' and is not marked done.'
+          : 'The scheduled visit is not marked done.';
+      case 'review':
+        return 'Barangay review was due' + (dueTime ? ' ' + dueTime : '') + '.';
+      case 'resolution':
+        return 'The case is still open past its target date.';
+      case 'turnover':
+        return 'The DCVS handover was due' + (dueTime ? ' ' + dueTime : '') + '.';
+      default:
+        return model.overdueBadge || 'This case is past its target date.';
+    }
+  }
+
+  window.responseWorkflowOverdueUpdate = function (report) {
+    var model = window.responseWorkflowProgressModel(report);
+    if (!model.overdue) return null;
+    return {
+      action: 'current_overdue',
+      title: model.overdueBadge || 'Overdue',
+      actor: 'System',
+      actorRole: 'system',
+      reason: overdueDetail(model),
+      createdAt: formatOverdueDeadline(model.overdueDeadline, true),
+      createdAtRaw: model.overdueDeadline
+    };
+  };
+
+  window.responseWorkflowProgressHtml = function (report, options) {
+    options = options || {};
+    var model = window.responseWorkflowProgressModel(report);
+    var stepHtml = model.steps.map(function (label, index) {
+      var stepClass = index < model.currentStep ? ' is-complete'
+        : (index === model.currentStep ? (model.overdue ? ' is-current is-overdue' : ' is-current') : '');
+      var check = index < model.currentStep
+        ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '';
+      return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + check + '</span><span>' + esc(label) + '</span></div>';
+    }).join('');
+    var deadline = '';
+    if (model.overdue && model.overdueDeadline) {
+      var rawDeadline = model.overdueDeadline;
+      var parsedDeadline = new Date(rawDeadline.replace(' ', 'T') + (/[zZ]|[+-]\d{2}:\d{2}$/.test(rawDeadline) ? '' : '+08:00'));
+      var deadlineLabel = isNaN(parsedDeadline.getTime())
+        ? rawDeadline
+        : parsedDeadline.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      deadline = '<span class="response-deadline is-overdue">' + esc(model.overdueBadge || ('Overdue: ' + (model.overdueReason || 'deadline'))) + ' · ' + esc(deadlineLabel) + '</span>';
+    } else if (options.deadlineText) {
+      deadline = '<span class="response-deadline">' + esc(options.deadlineText) + '</span>';
+    }
+    var hasOverdueAction = model.overdue && !!model.overdueAction;
+    var overdueAlert = '';
+    if (hasOverdueAction) {
+      overdueAlert = '<div class="response-overdue-alert" role="alert">' +
+        '<span class="response-notice-icon" aria-hidden="true"><i class="fas fa-exclamation-triangle"></i></span>' +
+        '<span class="response-notice-text"><strong class="response-overdue-alert-title">' + esc(model.overdueBadge || (model.overdueAction + ' overdue')) + '</strong>' +
+        '<span class="response-overdue-alert-detail">' + esc(overdueDetail(model)) + '</span></span></div>';
+      deadline = '';
+    }
+    var notice = options.notice || (model.overdue
+      ? (model.overdueBadge || ((model.overdueReason || 'Response') + ' deadline has passed. Follow-up is required; the report will not close automatically.'))
+      : '');
+    if (hasOverdueAction) notice = '';
+    var noticeHtml = notice
+      ? '<div class="response-notice' + (model.overdue ? ' is-overdue' : (options.warning ? ' is-warning' : '')) + '" role="' + (model.overdue ? 'alert' : 'status') + '">' +
+        '<span class="response-notice-icon" aria-hidden="true"><i class="fas ' + (model.overdue ? 'fa-exclamation-triangle' : 'fa-info-circle') + '"></i></span>' +
+        '<span class="response-notice-text">' + esc(notice) + '</span></div>'
+      : '';
+    var subtitle = options.subtitle || responseStatusSummary(report, model);
+    var cardClass = 'response-card response-progress-card' + (model.dcvsDispatchFlow ? ' is-dcvs' : '');
+    var dateSummary = model.dcvsDispatchFlow ? reportDateSummary(report) : '';
+    return '<section class="rpt-col rpt-full-col"><div class="' + cardClass + '" aria-label="' + esc(model.title) + '">' +
+      dateSummary + overdueAlert +
+      '<div class="response-card-header"><div class="response-card-heading"><div class="response-card-title">' + esc(options.title || model.title) +
+      '</div><div class="response-card-subtitle">' + esc(subtitle) + '</div></div>' + deadline + '</div>' +
+      '<div class="response-steps" aria-label="Report progress">' + stepHtml + '</div>' + noticeHtml +
+      (options.routeButton || '') + '</div></section>';
+  };
+
   window.responseWorkflowHandoverHtml = function (report, options) {
     if (!window.responseWorkflowNeedsHandover(report)) return '';
     options = options || {};

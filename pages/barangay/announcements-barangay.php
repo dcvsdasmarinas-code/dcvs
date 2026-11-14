@@ -121,6 +121,9 @@ function barangayAnnouncementCalendarDate(array $announcement): DateTimeImmutabl
     .user-name { display:block; color:var(--ann-ink); font-size:13px; font-weight:600; line-height:1.3; }
     .user-role { display:block; color:var(--ann-muted); font-size:12px; }
     .dashboard-content { width:100%; min-width:0; flex:1; padding:24px 20px 48px; }
+    .portal-page-heading { display:flex; flex-direction:column; gap:4px; margin:0 0 18px; }
+    .portal-page-heading h1 { margin:0; color:var(--ann-ink); font-size:22px; font-weight:600; letter-spacing:-.025em; }
+    .portal-page-heading p { margin:0; color:var(--ann-muted); font-size:14px; line-height:1.5; }
     .announcement-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; }
     .announcement-search-controls { display:flex; align-items:center; gap:8px; width:min(100%,540px); }
     .announcement-search-wrap { position:relative; flex:1 1 auto; min-width:0; }
@@ -278,6 +281,10 @@ function barangayAnnouncementCalendarDate(array $announcement): DateTimeImmutabl
   </header>
 
   <main class="dashboard-content">
+    <header class="portal-page-heading">
+      <h1>Announcements</h1>
+      <p>Updates, advisories, and community events published for your barangay.</p>
+    </header>
     <div class="announcement-toolbar portal-mobile-toolbar" aria-label="Announcement search and filters">
       <div class="announcement-search-controls portal-toolbar-controls">
         <div class="portal-toolbar-search-row">

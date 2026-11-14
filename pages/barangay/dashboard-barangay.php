@@ -82,7 +82,7 @@ $statusLabels = [
 
 // ── KPI pipeline counts (active reports only) ──
 $kpi = ['new' => 0, 'validation' => 0, 'progress' => 0, 'resolved' => 0, 'closed' => 0];
-$kq = $conn->prepare("SELECT status, COUNT(*) c FROM reports WHERE barangay_id = ? AND archived_at IS NULL GROUP BY status");
+$kq = $conn->prepare("SELECT status, COUNT(*) c FROM reports WHERE barangay_id = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected') GROUP BY status");
 $kq->bind_param('i', $barangayId);
 $kq->execute();
 $kr = $kq->get_result();
@@ -110,12 +110,12 @@ $kpiMap = [
 foreach ($kpiMap as $key => $statuses) {
     $cur = 0; $prev = 0;
     foreach ($statuses as $st) {
-        $s = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
+        $s = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected') AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
         $s->bind_param('is', $barangayId, $st);
         $s->execute();
         $cur += (int)$s->get_result()->fetch_row()[0];
         $s->close();
-        $s = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 60 DAY) AND DATE(created_at) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
+        $s = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected') AND DATE(created_at) >= DATE_SUB(CURDATE(), INTERVAL 60 DAY) AND DATE(created_at) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
         $s->bind_param('is', $barangayId, $st);
         $s->execute();
         $prev += (int)$s->get_result()->fetch_row()[0];
@@ -145,7 +145,7 @@ $rq = $conn->prepare("
     LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
     LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
     LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
-    WHERE r.barangay_id = ?
+    WHERE r.barangay_id = ? AND r.duplicate_status NOT IN ('merged', 'suspected')
     ORDER BY r.created_at DESC
     LIMIT 50
 ");
@@ -225,7 +225,7 @@ for ($i = 29; $i >= 0; $i--) {
   $cmpDailyReportMap[$day] = 0;
   $cmpDailyResolvedMap[$day] = 0;
 }
-$cmpStmt = $conn->prepare("SELECT DATE(COALESCE(incident_at, created_at)) AS report_day, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY DATE(COALESCE(incident_at, created_at))");
+$cmpStmt = $conn->prepare("SELECT DATE(COALESCE(incident_at, created_at)) AS report_day, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY DATE(COALESCE(incident_at, created_at))");
 if ($cmpStmt) {
   $cmpStmt->bind_param('iss', $barangayId, $cmpStart, $cmpEnd);
   $cmpStmt->execute();
@@ -233,7 +233,7 @@ if ($cmpStmt) {
   while ($cmpRow = $cmpResult->fetch_assoc()) $cmpDailyReportMap[$cmpRow['report_day']] = (int)$cmpRow['total'];
   $cmpStmt->close();
 }
-$cmpStmt = $conn->prepare("SELECT DATE(cc.resolved_at) AS resolved_day, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY DATE(cc.resolved_at)");
+$cmpStmt = $conn->prepare("SELECT DATE(cc.resolved_at) AS resolved_day, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND r.duplicate_status NOT IN ('merged', 'suspected') AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY DATE(cc.resolved_at)");
 if ($cmpStmt) {
   $cmpStmt->bind_param('iss', $barangayId, $cmpStart, $cmpEnd);
   $cmpStmt->execute();
@@ -249,7 +249,7 @@ $lastTrendYear = (int)date('Y');
 for ($year = $firstTrendYear; $year <= $lastTrendYear; $year++) {
   $cmpYearly[(string)$year] = ['reports' => array_fill(0, 12, 0), 'resolved' => array_fill(0, 12, 0)];
 }
-$cmpStmt = $conn->prepare("SELECT YEAR(COALESCE(incident_at, created_at)) AS report_year, MONTH(COALESCE(incident_at, created_at)) AS report_month, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY YEAR(COALESCE(incident_at, created_at)), MONTH(COALESCE(incident_at, created_at))");
+$cmpStmt = $conn->prepare("SELECT YEAR(COALESCE(incident_at, created_at)) AS report_year, MONTH(COALESCE(incident_at, created_at)) AS report_month, COUNT(*) AS total FROM reports WHERE barangay_id = ? AND duplicate_status NOT IN ('merged', 'suspected') AND COALESCE(incident_at, created_at) >= ? AND COALESCE(incident_at, created_at) < ? GROUP BY YEAR(COALESCE(incident_at, created_at)), MONTH(COALESCE(incident_at, created_at))");
 if ($cmpStmt) {
   $yearStart = $firstTrendYear . '-01-01';
   $yearEnd = ($lastTrendYear + 1) . '-01-01';
@@ -259,7 +259,7 @@ if ($cmpStmt) {
   while ($cmpRow = $cmpResult->fetch_assoc()) $cmpYearly[(string)$cmpRow['report_year']]['reports'][(int)$cmpRow['report_month'] - 1] = (int)$cmpRow['total'];
   $cmpStmt->close();
 }
-$cmpStmt = $conn->prepare("SELECT YEAR(cc.resolved_at) AS resolved_year, MONTH(cc.resolved_at) AS resolved_month, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY YEAR(cc.resolved_at), MONTH(cc.resolved_at)");
+$cmpStmt = $conn->prepare("SELECT YEAR(cc.resolved_at) AS resolved_year, MONTH(cc.resolved_at) AS resolved_month, COUNT(DISTINCT r.report_id) AS total FROM confirmed_cases cc INNER JOIN reports r ON r.report_id = cc.report_id WHERE r.barangay_id = ? AND r.duplicate_status NOT IN ('merged', 'suspected') AND cc.status = 'resolved' AND cc.resolved_at >= ? AND cc.resolved_at < ? GROUP BY YEAR(cc.resolved_at), MONTH(cc.resolved_at)");
 if ($cmpStmt) {
   $yearStart = $firstTrendYear . '-01-01';
   $yearEnd = ($lastTrendYear + 1) . '-01-01';
@@ -302,7 +302,7 @@ $cq2 = $conn->prepare("
            SUM(status NOT IN ('resolved', 'rejected')
                AND created_at >= CURDATE()) AS unresolved_today
     FROM reports
-    WHERE barangay_id = ?
+    WHERE barangay_id = ? AND duplicate_status NOT IN ('merged', 'suspected')
     GROUP BY report_type
 ");
 if (!$cq2) {
