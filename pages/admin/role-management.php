@@ -1130,7 +1130,7 @@ body { background:#ffffff; }
         <thead>
           <tr>
             <th style="width:40px;"><input type="checkbox" class="sd-table-cb" id="selectAll" onclick="toggleSelectAll(this)" /></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="RM.sortBy('ref')">Reference<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="RM.sortBy('ref')">Reference ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="name" onclick="RM.sortBy('name')">Full Name<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th>Contact</th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="role" onclick="RM.sortBy('role')">Role<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -1147,9 +1147,11 @@ body { background:#ffffff; }
             <?php foreach ($users as $u): ?>
               <tr data-userid="<?php echo $u['user_id']; ?>">
                 <td><input type="checkbox" class="sd-table-cb row-cb" value="<?php echo $u['user_id']; ?>" onclick="updateBulkBar()" /></td>
-                <td><span class="user-reference"><?php echo htmlspecialchars($u['reference_id'] ?? '—'); ?></span></td>
+                <td><span class="user-reference"><?php echo htmlspecialchars(!empty($u['reference_id']) ? $u['reference_id'] : fallbackRefId('#USR-', (int)$u['user_id'])); ?></span></td>
                 <td><div class="client-cell" style="flex-direction:row;align-items:center;gap:8px;">
-                  <?php if (!empty($u['avatar_url'])): ?>
+                  <?php if ($u['role'] === 'barangay'): ?>
+                    <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">
+                  <?php elseif (!empty($u['avatar_url'])): ?>
                     <img src="<?php echo htmlspecialchars($u['avatar_url']); ?>" alt="Avatar" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0;">
                   <?php else: ?>
                     <div style="width:32px;height:32px;border-radius:50%;background:#e4e4e7;color:#52525b;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;"><?php echo strtoupper(substr($u['full_name'] ?? 'U', 0, 1)); ?></div>

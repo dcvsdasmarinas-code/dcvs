@@ -198,7 +198,7 @@ $nextReview = count($reviews) > 1 ? $reviews[($selectedIndex + 1) % count($revie
     .pdr-queue-item { display: grid; gap: 5px; padding: 13px 14px; border: 0; border-bottom: 1px solid #f1f1f2; background: #fff; color: #18181b; text-align: left; text-decoration: none; transition: background .15s; }
     .pdr-queue-item:last-child { border-bottom: 0; }
     .pdr-queue-item:hover { background: #fafafa; }
-    .pdr-queue-item[aria-current="true"] { border-left: 3px solid #18181b; background: #f4f4f5; padding-left: 11px; }
+    .pdr-queue-item[aria-current="true"] { border-left: 3px solid #18181b; background: #fff; padding-left: 11px; }
     .pdr-queue-item[hidden] { display: none; }
     .pdr-queue-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; font-weight: 600; }
     .pdr-queue-subtitle,.pdr-queue-meta { color: #52525b; font-size: 12px; line-height: 1.45; }
