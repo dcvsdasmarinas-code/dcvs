@@ -2084,14 +2084,16 @@ $pageTitle = 'Submit Report';
 </div>
 
 <div class="duplicate-review-overlay" id="duplicate-review-overlay" hidden>
-  <section class="duplicate-review-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-review-title">
-    <h2 id="duplicate-review-title">Related reports found</h2>
-    <p>Select the closest existing report to help authorized personnel review your submission. Your report will remain separate unless the review team links it.</p>
+  <section class="duplicate-review-dialog" role="dialog" aria-modal="true" aria-labelledby="duplicate-review-title" aria-describedby="duplicate-review-description">
+    <header class="duplicate-review-header">
+      <h2 id="duplicate-review-title">Related reports found</h2>
+      <p id="duplicate-review-description">Select the closest existing report to help authorized personnel review your submission. Your report will remain separate unless the review team links it.</p>
+    </header>
     <div class="duplicate-candidate-list" id="duplicate-candidate-list"></div>
     <div class="duplicate-review-actions">
-      <button type="button" class="btn-continue" id="duplicate-same">Submit for review</button>
+      <button type="button" class="duplicate-review-button duplicate-review-button-outline" id="duplicate-cancel">Go back and review</button>
+      <button type="button" class="duplicate-review-button duplicate-review-button-primary" id="duplicate-same">Submit for review</button>
     </div>
-    <button type="button" class="duplicate-review-cancel" id="duplicate-cancel">Go back and review</button>
   </section>
 </div>
 
@@ -2130,7 +2132,116 @@ $pageTitle = 'Submit Report';
 
   (function addDuplicateReviewStyles() {
     var style = document.createElement('style');
-    style.textContent = '.duplicate-review-overlay{position:fixed;inset:0;z-index:10020;background:rgba(15,23,42,.58);display:flex;align-items:center;justify-content:center;padding:20px}.duplicate-review-overlay[hidden]{display:none}.duplicate-review-dialog{width:min(620px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(15,23,42,.28)}.duplicate-review-dialog h2{margin:0 0 8px;color:#0f172a;font-size:21px}.duplicate-review-dialog>p{margin:0 0 18px;color:#64748b;font-size:14px}.duplicate-candidate-list{display:grid;gap:12px}.duplicate-candidate{display:grid;grid-template-columns:22px 84px 1fr;gap:12px;align-items:center;border:1px solid #e2e8f0;border-radius:12px;padding:10px}.duplicate-candidate input{margin:0}.duplicate-candidate img,.duplicate-photo-placeholder{width:84px;height:72px;object-fit:cover;border-radius:8px;background:#f1f5f9}.duplicate-candidate-meta{display:grid;gap:4px;color:#334155;font-size:13px}.duplicate-candidate-meta strong{color:#0f172a}.duplicate-review-actions{display:flex;justify-content:flex-end;gap:10px;flex-wrap:wrap;margin-top:20px}.duplicate-review-cancel{display:block;margin:14px auto 0;border:0;background:none;color:#64748b;text-decoration:underline;cursor:pointer;font:inherit}@media(max-width:520px){.duplicate-review-actions{flex-direction:column-reverse}.duplicate-review-actions button{width:100%}}';
+    style.textContent = `
+      .duplicate-review-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 10020;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(0, 0, 0, .8);
+      }
+      .duplicate-review-overlay[hidden] { display: none; }
+      .duplicate-review-dialog {
+        box-sizing: border-box;
+        width: min(560px, 100%);
+        max-height: 90vh;
+        overflow: auto;
+        padding: 24px;
+        border: 1px solid #e4e4e7;
+        border-radius: 8px;
+        background: #fff;
+        color: #18181b;
+        font-family: Inter, 'Segoe UI', sans-serif;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, .1), 0 4px 6px -4px rgba(0, 0, 0, .1);
+      }
+      .duplicate-review-header { display: grid; gap: 8px; margin-bottom: 18px; }
+      .duplicate-review-dialog h2 {
+        margin: 0;
+        color: #18181b;
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 1.2;
+        letter-spacing: -.025em;
+      }
+      .duplicate-review-dialog p {
+        margin: 0;
+        color: #71717a;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .duplicate-candidate-list { display: grid; gap: 8px; }
+      .duplicate-candidate {
+        display: grid;
+        grid-template-columns: 16px 76px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+        min-width: 0;
+        padding: 12px;
+        border: 1px solid #e4e4e7;
+        border-radius: 6px;
+        background: #fff;
+        cursor: pointer;
+        transition: border-color .15s ease, background-color .15s ease;
+      }
+      .duplicate-candidate:hover { background: #fafafa; }
+      .duplicate-candidate.is-selected { border-color: #a1a1aa; background: #fafafa; }
+      .duplicate-candidate:focus-within { outline: 2px solid #a1a1aa; outline-offset: 2px; }
+      .duplicate-candidate input {
+        width: 16px;
+        height: 16px;
+        margin: 0;
+        accent-color: #18181b;
+        cursor: pointer;
+      }
+      .duplicate-candidate img,
+      .duplicate-photo-placeholder {
+        width: 76px;
+        height: 72px;
+        object-fit: cover;
+        border-radius: 6px;
+        background: #f4f4f5;
+      }
+      .duplicate-candidate-meta {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+        color: #52525b;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .duplicate-candidate-meta strong { color: #18181b; font-size: 14px; font-weight: 600; }
+      .duplicate-review-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+      .duplicate-review-button {
+        display: inline-flex;
+        min-height: 36px;
+        align-items: center;
+        justify-content: center;
+        padding: 0 14px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        font: 500 14px/1 Inter, 'Segoe UI', sans-serif;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+      }
+      .duplicate-review-button:focus-visible { outline: 2px solid #a1a1aa; outline-offset: 2px; }
+      .duplicate-review-button-primary { border-color: #18181b; background: #18181b; color: #fafafa; }
+      .duplicate-review-button-primary:hover { border-color: #27272a; background: #27272a; }
+      .duplicate-review-button-outline { border-color: #e4e4e7; background: #fff; color: #18181b; }
+      .duplicate-review-button-outline:hover { background: #f4f4f5; }
+      @media (max-width: 520px) {
+        .duplicate-review-overlay { padding: 16px; }
+        .duplicate-review-dialog { padding: 16px; }
+        .duplicate-candidate { grid-template-columns: 16px 60px minmax(0, 1fr); gap: 10px; padding: 10px; }
+        .duplicate-candidate img,
+        .duplicate-photo-placeholder { width: 60px; height: 60px; }
+        .duplicate-review-actions { flex-direction: column-reverse; }
+        .duplicate-review-actions button { width: 100%; }
+      }
+    `;
     document.head.appendChild(style);
   })();
 
@@ -2149,7 +2260,7 @@ $pageTitle = 'Submit Report';
     var list = document.getElementById('duplicate-candidate-list');
     list.textContent = '';
     candidates.forEach(function(candidate) {
-      var card = document.createElement('article');
+      var card = document.createElement('label');
       card.className = 'duplicate-candidate';
       var parentChoice = document.createElement('input');
       parentChoice.type = 'radio';
@@ -2157,6 +2268,12 @@ $pageTitle = 'Submit Report';
       parentChoice.value = String(candidate.report_id);
       parentChoice.checked = candidates[0].report_id === candidate.report_id;
       parentChoice.setAttribute('aria-label', 'Use report from ' + new Date(candidate.created_at.replace(' ', 'T')).toLocaleString() + ' as the suggested parent');
+      if (parentChoice.checked) card.classList.add('is-selected');
+      parentChoice.addEventListener('change', function() {
+        list.querySelectorAll('.duplicate-candidate').forEach(function(candidateCard) {
+          candidateCard.classList.toggle('is-selected', candidateCard === card);
+        });
+      });
       card.appendChild(parentChoice);
       if (candidate.photo_attachment_id) {
         var image = document.createElement('img');

@@ -59,12 +59,6 @@ if ($petQuery) {
 }
 natcasesort($barangays);
 
-function registeredPetPhotoUrl($photoUrl, $baseUrl) {
-    $photoUrl = trim((string)$photoUrl);
-    if ($photoUrl === '' || preg_match('#^(?:[a-z][a-z0-9+.-]*:|//|/)#i', $photoUrl)) return $photoUrl;
-    return rtrim($baseUrl, '/') . '/' . ltrim($photoUrl, '/');
-}
-
 function registeredPetVaccination($status) {
     $value = strtolower(trim((string)$status));
     if ($value === '') return ['Not recorded', 'vacc-unknown'];
@@ -186,7 +180,7 @@ function registeredPetVaccination($status) {
           $ref = $pet['reference_id'] ?: '#PET-' . fallbackRefId('#PET-', (int)$pet['pet_id']);
           $date = !empty($pet['created_at']) ? date('M d, Y', strtotime($pet['created_at'])) : '—';
           [$vaccinationLabel, $vaccinationClass] = registeredPetVaccination($pet['vaccination_status']);
-          $photoUrl = registeredPetPhotoUrl($pet['photo_url'], $appBaseUrl);
+          $photoUrl = staffPetPhotoUrl($pet['photo_url'], $appBaseUrl);
           $searchText = implode(' ', [$pet['pet_name'], $ref, $pet['owner_name'], $pet['owner_ref'], $pet['owner_email'], cpdTypeLabel($type), $pet['breed'], $pet['barangay_name']]);
         ?>
           <tr data-species="<?php echo htmlspecialchars($filterType, ENT_QUOTES, 'UTF-8'); ?>" data-barangay="<?php echo htmlspecialchars($barangayName, ENT_QUOTES, 'UTF-8'); ?>" data-recent="<?php echo !empty($pet['created_at']) && strtotime((string)$pet['created_at']) >= strtotime('-30 days') ? '1' : '0'; ?>" data-vaccinated="<?php echo $vaccinationClass === 'vacc-ok' ? '1' : '0'; ?>" data-search="<?php echo htmlspecialchars(strtolower($searchText), ENT_QUOTES, 'UTF-8'); ?>">

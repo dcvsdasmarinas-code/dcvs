@@ -3,7 +3,7 @@
     "metadata": {
         "source": "User-provided major landmarks coordinates CSV",
         "source_file": "dasmarinas_major_landmarks_coordinates.csv",
-        "updated_at": "2026-11-14T11:32:46+00:00",
+        "updated_at": "2026-11-15T16:45:42+00:00",
         "feature_count": 69,
         "unassigned_feature_count": 7,
         "category_counts": {
@@ -1021,8 +1021,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.961438,
-                    14.317813
+                    120.95643241190304,
+                    14.32833795886476
                 ]
             },
             "properties": {
@@ -1035,7 +1035,7 @@
                 "address": "Congressional Ave, Burol I, Dasmariñas, Cavite",
                 "source": "User-provided major landmarks coordinates CSV",
                 "accuracy": "user-provided",
-                "barangay": "Fatima I",
+                "barangay": "H-2",
                 "prominent": true,
                 "coordinate_source": "Coordinates supplied in major landmarks CSV",
                 "plus_code": "8X96+4H"

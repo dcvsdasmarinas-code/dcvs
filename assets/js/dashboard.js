@@ -5,6 +5,16 @@ function switchSection(sectionId) {
   var contentSectionId = sectionId === 'adoption' ? 'analytics' : sectionId;
   var target = document.getElementById(contentSectionId);
   if (!target) return;
+  if (sectionId !== 'appointments') {
+    var currentUrl = new URL(window.location.href);
+    var previousSearch = currentUrl.search;
+    Array.from(currentUrl.searchParams.keys()).forEach(function(parameter) {
+      if (parameter.toLowerCase().indexOf('appt_') === 0) currentUrl.searchParams.delete(parameter);
+    });
+    if (currentUrl.search !== previousSearch) {
+      history.replaceState(null, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+    }
+  }
   document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   target.style.display = 'block';
   document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments' || sectionId === 'account-settings');

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reportPage = fs.readFileSync(path.join(__dirname, '..', 'submit-report-page.php'), 'utf8');
+const reportMapPins = fs.readFileSync(path.join(__dirname, '..', 'assets', 'js', 'report-map-pins.js'), 'utf8');
 
 assert.match(reportPage, /map\.on\('click', function\(event\)/);
 assert.match(reportPage, /Number\(event\.lngLat\.lng\)/);
@@ -20,4 +21,16 @@ assert.match(reportPage, /reportMobilePinMoveTimer = window\.setTimeout\(functio
 assert.match(reportPage, /id="report-location-mobile-center-pin"/);
 assert.match(reportPage, /mapHint\.textContent = 'Move the map to place the pin'/);
 
-console.log('Report map click and draggable-pin checks passed.');
+const exactLocationSource = reportMapPins.match(/function exactLocation\(location, barangay\) \{[\s\S]*?\n  \}/);
+assert.ok(exactLocationSource, 'Report map exact-location formatter should exist.');
+const exactLocation = new Function(`${exactLocationSource[0]}\nreturn exactLocation;`)();
+assert.equal(
+  exactLocation('Augustine Avenue, 4114 Dasmariñas, Philippines', 'Burol'),
+  'Augustine Avenue'
+);
+assert.equal(
+  exactLocation('Augustine Avenue, 4114 Dasmarinas, Philippines', 'Burol'),
+  'Augustine Avenue'
+);
+
+console.log('Report map interaction and location-label checks passed.');

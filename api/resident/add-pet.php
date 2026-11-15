@@ -16,6 +16,7 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/pet-duplicates.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -24,6 +25,11 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        $_SESSION['pet_error'] = 'Your session could not be verified. Refresh the page and try again.';
+        header('Location: dashboard-resident.php#my-pets');
+        exit;
+    }
     $sec = isset($_POST['return_section']) && preg_match('/^[a-z0-9_-]+$/', $_POST['return_section']) ? '#' . $_POST['return_section'] : '';
     if (($_POST['from_adoption'] ?? '') === '1') {
         $applicationId = (int)($_POST['adoption_application_id'] ?? 0);
@@ -47,36 +53,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-resident.php#adoption');
         exit;
     }
-    error_log("POST request received for add-pet.php");
-    error_log("POST data: " . print_r($_POST, true));
-
-    $petName = trim($_POST['pet_name'] ?? '');
-    $species = $_POST['species'] ?? '';
-    if ($species === 'other' && !empty(trim($_POST['species_custom'] ?? ''))) {
-        $species = trim($_POST['species_custom']);
-    }
-    $breed = trim($_POST['breed'] ?? '');
-    $gender = $_POST['gender'] ?? '';
-    $age = intval($_POST['age'] ?? 0);
+    $identity = petDuplicateIdentityFromInput($_POST);
+    $petName = $identity['pet_name'];
+    $species = $identity['pet_type'];
+    $breed = $identity['breed'];
+    $gender = $identity['gender'];
+    $ageValue = $_POST['age'] ?? '';
+    $ageInput = is_scalar($ageValue) ? trim((string)$ageValue) : '';
+    $age = $ageInput === '' ? 0 : (int)$ageInput;
     $weight = floatval($_POST['weight'] ?? 0);
-    $color = trim($_POST['color'] ?? '');
+    $color = $identity['color'];
+    $dateOfBirth = $identity['date_of_birth'];
+    $microchipId = $identity['microchip_id'];
+    $dateOfBirthValue = $dateOfBirth === '' ? null : $dateOfBirth;
+    $microchipIdValue = $microchipId === '' ? null : $microchipId;
     $vaccinated = $_POST['vaccinated'] ?? 'no';
 
-    error_log("Extracted data - Name: $petName, Species: $species, Gender: $gender");
-    error_log("User ID: " . ($_SESSION['user_id'] ?? 'NOT SET'));
-
     // Server-side validation
-    $errors = [];
-
-    if (empty($petName)) {
-        $errors[] = "Pet name is required.";
-    }
-    if (empty($species)) {
-        $errors[] = "Species is required.";
-    }
-    if (empty($gender)) {
-        $errors[] = "Gender is required.";
-    }
+    $errors = petDuplicateIdentityErrors($identity, $_POST);
     if (!isset($_FILES['photo']) || !is_array($_FILES['photo'])
         || ($_FILES['photo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
         $errors[] = "A pet photo is required.";
@@ -92,6 +86,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         adoptionBeginResidentPetRegistration($conn, (int)$_SESSION['user_id']);
     } catch (AdoptionWorkflowException $exception) {
         $_SESSION['pet_error'] = $exception->getMessage();
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+
+    try {
+        $duplicateMatches = petDuplicateFindCandidates($conn, (int)$_SESSION['user_id'], $identity);
+    } catch (RuntimeException $exception) {
+        $conn->rollback();
+        error_log('Pet registration duplicate lookup failed: ' . $exception->getMessage());
+        $_SESSION['pet_error'] = 'Similar pet profiles could not be checked. Please try again.';
         header('Location: dashboard-resident.php' . $sec);
         exit;
     }
@@ -112,6 +116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Save the required resident-uploaded pet photo.
     $photoUrl = '';
+    $filepath = null;
     $photo = $_FILES['photo'];
     $allowedTypes = [
         'image/jpeg' => 'jpg',
@@ -155,18 +160,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $photoUrl = 'uploads/pets/' . $filename;
 
     // Insert pet into database
-    error_log("Attempting to insert pet into database");
-    error_log("User ID: " . $_SESSION['user_id']);
     $petRefId = generateReferenceId($conn, '#PET-', 'pets');
-    $stmt = $conn->prepare("INSERT INTO pets (owner_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, photo_url, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("isssidsssss", $_SESSION['user_id'], $petName, $species, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $photoUrl, $petRefId);
+    $stmt = $conn->prepare("INSERT INTO pets (owner_id, pet_name, pet_type, breed, age, weight, gender, color, date_of_birth, microchip_id, vaccination_status, photo_url, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if (!$stmt) {
+        $conn->rollback();
+        if ($filepath !== null && is_file($filepath)) {
+            unlink($filepath);
+        }
+        error_log('Could not prepare pet registration insert: ' . $conn->error);
+        $_SESSION['pet_error'] = "Failed to register pet. Please try again.";
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $stmt->bind_param("isssidsssssss", $_SESSION['user_id'], $petName, $species, $breed, $age, $weight, $gender, $color, $dateOfBirthValue, $microchipIdValue, $vaccinationStatus, $photoUrl, $petRefId);
 
     if ($stmt->execute()) {
         $petId = $stmt->insert_id;
-        adoptionCommit($conn);
-        error_log("Pet inserted successfully with ID: " . $petId);
+        $stmt->close();
+        try {
+            petDuplicateCreateReviewRows($conn, $petId, $duplicateMatches);
+            adoptionCommit($conn);
+        } catch (RuntimeException $exception) {
+            $conn->rollback();
+            if ($filepath !== null && is_file($filepath)) {
+                unlink($filepath);
+            }
+            error_log('Pet registration duplicate review save failed: ' . $exception->getMessage());
+            $_SESSION['pet_error'] = "Failed to register pet. Please try again.";
+            header('Location: dashboard-resident.php' . $sec);
+            exit;
+        }
 
-        $_SESSION['pet_success'] = "Pet registered successfully!";
+        $_SESSION['pet_success'] = $duplicateMatches
+            ? "Pet registered. A possible duplicate profile was sent to DCVS staff for review; no profile was merged or removed."
+            : "Pet registered successfully!";
 
         // Log activity for pet registration
         $logAction = "Pet Registered";
@@ -177,18 +204,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['pet_success'] = "Pet registered successfully!";
         header('Location: dashboard-resident.php' . $sec);
         exit;
     } else {
+        $insertError = $stmt->error;
+        $stmt->close();
         $conn->rollback();
-        error_log("Failed to insert pet. Error: " . $stmt->error);
+        if ($filepath !== null && is_file($filepath)) {
+            unlink($filepath);
+        }
+        error_log("Failed to insert pet. Error: " . $insertError);
         $_SESSION['pet_error'] = "Failed to register pet. Please try again.";
         header('Location: dashboard-resident.php' . $sec);
         exit;
     }
-
-    $stmt->close();
 }
 
 $conn->close();

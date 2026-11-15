@@ -3,7 +3,7 @@
     "metadata": {
         "source": "User-provided covered-court coordinates CSV",
         "source_file": "dasmarinas_covered_courts_coordinates.csv",
-        "updated_at": "2026-11-14T08:23:21+00:00",
+        "updated_at": "2026-11-15T16:48:58+00:00",
         "feature_count": 41,
         "unassigned_feature_count": 1,
         "coordinate_sources": [
@@ -274,8 +274,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.968234,
-                    14.323588
+                    120.9682254,
+                    14.3235948
                 ]
             },
             "properties": {
@@ -300,8 +300,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.968203,
-                    14.322237
+                    120.9682049,
+                    14.3222453
                 ]
             },
             "properties": {
@@ -326,8 +326,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.9693,
-                    14.3211
+                    120.9694991,
+                    14.3214553
                 ]
             },
             "properties": {
@@ -841,8 +841,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.970484,
-                    14.311413
+                    120.970471,
+                    14.3114084
                 ]
             },
             "properties": {
@@ -945,8 +945,8 @@
             "geometry": {
                 "type": "Point",
                 "coordinates": [
-                    120.97312,
-                    14.29145
+                    120.9681875,
+                    14.3191053
                 ]
             },
             "properties": {
@@ -959,7 +959,7 @@
                 "subcategory": "covered_court",
                 "address": "Blk J, San Francisco II, Dasmariñas, Cavite",
                 "area_cluster": "Sampaloc, San Francisco & Langkaan",
-                "barangay": "Sampaloc III",
+                "barangay": "San Francisco II",
                 "source": "User-provided covered-court coordinates",
                 "coordinate_source": "Google Maps Pin",
                 "accuracy": "user-provided"

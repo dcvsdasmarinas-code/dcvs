@@ -117,6 +117,7 @@
 
   function exactLocation(location, barangay) {
     var value = String(location || '').trim();
+    value = value.replace(/,\s*4114\s+Dasmari(?:n|ñ)as,\s*Philippines\s*$/i, '').trim();
     var barangayName = String(barangay || '').trim();
     if (!value || !barangayName) return value;
 

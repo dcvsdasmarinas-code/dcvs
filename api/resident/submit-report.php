@@ -465,7 +465,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-resident.php' . $sec);
         exit;
     }
-    $stmt->bind_param("isssssssissssisssddsss", $_SESSION['user_id'], $reportType, $animalType, $animalBreed, $animalCount, $animalBehavior, $storedDescription, $location, $barangayId, $urgency, $photoUrl, $videoUrl, $duplicateStatus, $duplicateParentId, $refId, $reportDatetime, $latitude, $longitude, $locationStatus, $unpinnedReason, $pinSource);
+    $stmt->bind_param("isssssssissssissddsss", $_SESSION['user_id'], $reportType, $animalType, $animalBreed, $animalCount, $animalBehavior, $storedDescription, $location, $barangayId, $urgency, $photoUrl, $videoUrl, $duplicateStatus, $duplicateParentId, $refId, $reportDatetime, $latitude, $longitude, $locationStatus, $unpinnedReason, $pinSource);
 
     if (!$stmt->execute()) {
         error_log('Report insert failed: ' . $stmt->error);

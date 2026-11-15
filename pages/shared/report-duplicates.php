@@ -164,7 +164,7 @@ $reports->free();
 $mappedLandmarks = [];
 if ($duplicatePairs !== []) {
     $landmarksQuery = $conn->query("
-        SELECT landmark_id, name, coordinates_lat, coordinates_long, location_accuracy
+        SELECT landmark_id, name, barangay_id, coordinates_lat, coordinates_long, location_accuracy
         FROM landmarks
         WHERE is_active = 1
           AND location_accuracy IN ('approximate', 'verified')
@@ -179,6 +179,7 @@ if ($duplicatePairs !== []) {
     while ($landmark = $landmarksQuery->fetch_assoc()) {
         $mappedLandmarks[(int)$landmark['landmark_id']] = [
             'name' => (string)$landmark['name'],
+            'barangay_id' => (int)$landmark['barangay_id'],
             'latitude' => (float)$landmark['coordinates_lat'],
             'longitude' => (float)$landmark['coordinates_long'],
             'accuracy' => (string)$landmark['location_accuracy'],
@@ -186,22 +187,37 @@ if ($duplicatePairs !== []) {
     }
     $landmarksQuery->free();
 }
-$nearestPinLandmark = static function ($latitude, $longitude, $assignedLandmarkId) use (&$mappedLandmarks): string {
-    $assignedId = (int)$assignedLandmarkId;
-    if ($assignedId > 0 && isset($mappedLandmarks[$assignedId])) {
-        return $mappedLandmarks[$assignedId]['name'];
-    }
-    if (!is_numeric($latitude) || !is_numeric($longitude)
+$pinLandmarkRadiusMeters = 100.0;
+$nearestPinLandmark = static function ($latitude, $longitude, $assignedLandmarkId, $reportBarangayId) use (&$mappedLandmarks, $pinLandmarkRadiusMeters): string {
+    $reportBarangayId = (int)$reportBarangayId;
+    if ($reportBarangayId <= 0
+        || !is_numeric($latitude) || !is_numeric($longitude)
         || (float)$latitude < -90 || (float)$latitude > 90
         || (float)$longitude < -180 || (float)$longitude > 180) {
         return '';
     }
+    $latitude = (float)$latitude;
+    $longitude = (float)$longitude;
+    $assignedId = (int)$assignedLandmarkId;
+    if ($assignedId > 0 && isset($mappedLandmarks[$assignedId])
+        && $mappedLandmarks[$assignedId]['barangay_id'] === $reportBarangayId
+        && dcvsReportDuplicateDistanceMeters(
+            $latitude,
+            $longitude,
+            $mappedLandmarks[$assignedId]['latitude'],
+            $mappedLandmarks[$assignedId]['longitude']
+        ) <= $pinLandmarkRadiusMeters) {
+        return $mappedLandmarks[$assignedId]['name'];
+    }
     $nearestName = '';
-    $nearestDistance = 1000;
+    $nearestDistance = $pinLandmarkRadiusMeters;
     foreach ($mappedLandmarks as $landmark) {
+        if ($landmark['barangay_id'] !== $reportBarangayId) {
+            continue;
+        }
         $distance = dcvsReportDuplicateDistanceMeters(
-            (float)$latitude,
-            (float)$longitude,
+            $latitude,
+            $longitude,
             $landmark['latitude'],
             $landmark['longitude']
         );
@@ -213,7 +229,11 @@ $nearestPinLandmark = static function ($latitude, $longitude, $assignedLandmarkI
     return $nearestName;
 };
 $sharedLandmarkRadiusMeters = 100.0;
-$nearestSharedVerifiedLandmark = static function ($latitudeA, $longitudeA, $latitudeB, $longitudeB) use (&$mappedLandmarks, $sharedLandmarkRadiusMeters): string {
+$nearestSharedVerifiedLandmark = static function ($latitudeA, $longitudeA, $barangayIdA, $latitudeB, $longitudeB, $barangayIdB) use (&$mappedLandmarks, $sharedLandmarkRadiusMeters): string {
+    $barangayIdA = (int)$barangayIdA;
+    if ($barangayIdA <= 0 || $barangayIdA !== (int)$barangayIdB) {
+        return '';
+    }
     foreach ([[$latitudeA, $longitudeA], [$latitudeB, $longitudeB]] as [$latitude, $longitude]) {
         if (!is_numeric($latitude) || !is_numeric($longitude)
             || (float)$latitude < -90 || (float)$latitude > 90
@@ -224,8 +244,8 @@ $nearestSharedVerifiedLandmark = static function ($latitudeA, $longitudeA, $lati
 
     $nearestSharedName = '';
     $nearestSharedDistance = $sharedLandmarkRadiusMeters;
-    foreach ($mappedLandmarks as $landmarkId => $landmark) {
-        if ($landmark['accuracy'] !== 'verified') {
+    foreach ($mappedLandmarks as $landmark) {
+        if ($landmark['accuracy'] !== 'verified' || $landmark['barangay_id'] !== $barangayIdA) {
             continue;
         }
         $distanceA = dcvsReportDuplicateDistanceMeters(
@@ -252,18 +272,22 @@ foreach ($duplicatePairs as &$pair) {
     $pair['child_pin_landmark_name'] = $nearestPinLandmark(
         $pair['coordinates_lat'],
         $pair['coordinates_long'],
-        $pair['landmark_id']
+        $pair['landmark_id'],
+        $pair['barangay_id']
     );
     $pair['parent_pin_landmark_name'] = $nearestPinLandmark(
         $pair['parent_lat'],
         $pair['parent_lng'],
-        $pair['parent_landmark_id']
+        $pair['parent_landmark_id'],
+        $pair['parent_barangay_id']
     );
     $pair['shared_verified_landmark_name'] = $nearestSharedVerifiedLandmark(
         $pair['parent_lat'],
         $pair['parent_lng'],
+        $pair['parent_barangay_id'],
         $pair['coordinates_lat'],
-        $pair['coordinates_long']
+        $pair['coordinates_long'],
+        $pair['barangay_id']
     );
 }
 unset($pair);
@@ -476,6 +500,8 @@ foreach ($duplicatePairs as $pair) {
     .duplicate-map-legend-dot { width: 9px; height: 9px; border-radius: 50%; }
     .duplicate-map-legend-dot.main { background: #15803d; }
     .duplicate-map-legend-dot.similar { background: #7c3aed; }
+    .duplicate-map-overlap-note { padding: 2px 7px; border-radius: 999px; background: #f4f4f5; color: #52525b; font-size: 11px; }
+    .duplicate-map-overlap-note[hidden] { display: none; }
     .duplicate-map-slot { position: relative; min-height: 120px; overflow: hidden; border: 1px solid #e4e4e7; border-radius: 7px; background: #f4f4f5; }
     .duplicate-geo-map { width: 100%; height: min(680px, max(560px, 80vh)); position: relative; }
     .duplicate-geo-map[hidden] { display: none !important; }
@@ -1127,6 +1153,7 @@ if ($portal['role'] === 'staff') {
               <div class="duplicate-map-legend" aria-hidden="true">
                 <span class="duplicate-map-legend-item" data-map-legend="main"><span class="duplicate-map-legend-dot main"></span>Main report</span>
                 <span class="duplicate-map-legend-item" data-map-legend="similar"><span class="duplicate-map-legend-dot similar"></span>Similar report</span>
+                <span class="duplicate-map-overlap-note" data-map-overlap-note hidden>Same GPS point - shown as one pin</span>
               </div>
               <div class="duplicate-map-slot">
                 <?php if ($index === 0): ?>
@@ -1826,6 +1853,11 @@ if ($portal['role'] === 'staff') {
       var points = [];
       if (mainPoint) points.push({ role: 'main', point: mainPoint });
       if (similarPoint) points.push({ role: 'similar', point: similarPoint });
+      var pointsShareCoordinates = points.length === 2
+        && points[0].point.latitude === points[1].point.latitude
+        && points[0].point.longitude === points[1].point.longitude;
+      var overlapNote = article.querySelector('[data-map-overlap-note]');
+      if (overlapNote) overlapNote.hidden = !pointsShareCoordinates;
       mapElement.hidden = points.length === 0;
       if (unavailable) unavailable.hidden = points.length > 0;
       if (boundaryError) boundaryError.hidden = true;
@@ -1835,7 +1867,10 @@ if ($portal['role'] === 'staff') {
 
       window.requestAnimationFrame(function () {
         mapInstance.resize();
-        var features = points.map(function (entry) {
+        var renderedPoints = pointsShareCoordinates
+          ? [{ role: 'overlap', point: points[0].point }]
+          : points;
+        var features = renderedPoints.map(function (entry) {
           return {
             type: 'Feature',
             properties: { role: entry.role },
@@ -1875,6 +1910,18 @@ if ($portal['role'] === 'staff') {
               'circle-translate': [7, 0]
             }
           });
+          mapInstance.addLayer({
+            id: 'similar-report-overlap-pin',
+            type: 'circle',
+            source: 'similar-report-pins',
+            filter: ['==', ['get', 'role'], 'overlap'],
+            paint: {
+              'circle-radius': 10,
+              'circle-color': '#15803d',
+              'circle-stroke-color': '#7c3aed',
+              'circle-stroke-width': 3
+            }
+          });
         } else {
           source.setData(geojson);
         }
@@ -1882,7 +1929,8 @@ if ($portal['role'] === 'staff') {
           reportPinInteractionsRegistered = true;
           [
             ['similar-report-main-pin', 'main'],
-            ['similar-report-similar-pin', 'similar']
+            ['similar-report-similar-pin', 'similar'],
+            ['similar-report-overlap-pin', 'similar']
           ].forEach(function(layer) {
             mapInstance.on('click', layer[0], function(event) {
               if (!event.features || !event.features[0]) return;

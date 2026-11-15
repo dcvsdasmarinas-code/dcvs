@@ -103,10 +103,13 @@ $stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.ani
     CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.status ELSE r.status END AS status,
     CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.duplicate_status ELSE r.duplicate_status END AS duplicate_status,
     CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.scheduled_at ELSE r.scheduled_at END AS scheduled_at,
-    r.created_at,
+    r.created_at, r.coordinates_lat, r.coordinates_long,
     CASE WHEN primary_report.report_id IS NOT NULL THEN GREATEST(r.updated_at, primary_report.updated_at) ELSE r.updated_at END AS updated_at,
     r.photo_url, r.video_url, r.urgency_level, r.parent_report_id,
     primary_report.reference_id AS primary_reference_id,
+    duplicate_parent.location_address AS duplicate_parent_location_address,
+    duplicate_parent.coordinates_lat AS duplicate_parent_coordinates_lat,
+    duplicate_parent.coordinates_long AS duplicate_parent_coordinates_long,
     (primary_report.report_id IS NOT NULL) AS is_supporting_report,
     COALESCE(primary_barangay.barangay_name, report_barangay.barangay_name) AS barangay_name,
     CASE WHEN primary_report.report_id IS NOT NULL THEN primary_case.status ELSE cc.status END AS case_status,
@@ -127,6 +130,7 @@ $stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.ani
     CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.received_at ELSE tt.received_at END AS turnover_received_at
     FROM reports r
     LEFT JOIN reports primary_report ON r.duplicate_status = 'merged' AND primary_report.report_id = r.parent_report_id
+    LEFT JOIN reports duplicate_parent ON duplicate_parent.report_id = r.parent_report_id
     LEFT JOIN barangays report_barangay ON report_barangay.barangay_id = r.barangay_id
     LEFT JOIN barangays primary_barangay ON primary_barangay.barangay_id = primary_report.barangay_id
     LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id
@@ -142,6 +146,17 @@ $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
 while ($row = $result->fetch_assoc()) {
+    $row['display_location_address'] = (string)$row['location_address'];
+    if ((int)($row['parent_report_id'] ?? 0) > 0
+        && is_numeric($row['coordinates_lat']) && is_numeric($row['coordinates_long'])
+        && is_numeric($row['duplicate_parent_coordinates_lat']) && is_numeric($row['duplicate_parent_coordinates_long'])
+        && (float)$row['coordinates_lat'] === (float)$row['duplicate_parent_coordinates_lat']
+        && (float)$row['coordinates_long'] === (float)$row['duplicate_parent_coordinates_long']) {
+        $parentLocationAddress = trim((string)($row['duplicate_parent_location_address'] ?? ''));
+        if ($parentLocationAddress !== '') {
+            $row['display_location_address'] = $parentLocationAddress;
+        }
+    }
     $isSimilarReportReview = strtolower((string)($row['duplicate_status'] ?? '')) === 'suspected';
     $overdueInfo = $isSimilarReportReview
         ? null
@@ -2597,7 +2612,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
                      <div class="report-table-row">
                        <span class="report-table-id" title="<?php echo htmlspecialchars($reportReference); ?>">RPT-...<?php echo htmlspecialchars($reportReferenceSuffix); ?></span>
                        <span class="report-table-type"><?php echo htmlspecialchars($rTypeLabel); ?></span>
-                       <span class="report-table-location"><?php echo htmlspecialchars($r['location_address']); ?></span>
+                       <span class="report-table-location"><?php echo htmlspecialchars($r['display_location_address'] ?? $r['location_address']); ?></span>
                        <span class="report-table-date"><?php echo date('M j, Y', strtotime($r['created_at'])); ?></span>
                        <span class="report-table-status"><span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span></span>
                        <a href="#" class="report-table-action" onclick="switchSection('my-reports');return false;" aria-label="View report <?php echo htmlspecialchars($r['reference_id']); ?>">View</a>
@@ -3576,6 +3591,14 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #addPetModal .sd-dialog-header, #editPetModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
     #addPetModal .sd-dialog-title, #editPetModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #addPetModal .sd-dialog-description, #editPetModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+    #petDuplicateAlertDialog { width:calc(100vw - 32px); max-width:420px; max-height:calc(100vh - 32px); margin:auto; padding:0; overflow:visible; border:0; background:transparent; color:#18181b; }
+    #petDuplicateAlertDialog::backdrop { background:rgba(24,24,27,.5); }
+    #petDuplicateAlertDialog .sd-dialog-content { box-sizing:border-box; width:100%; max-height:calc(100vh - 32px); overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:16px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; box-shadow:0 20px 25px rgba(15,23,32,.18); }
+    #petDuplicateAlertDialog .sd-dialog-header { display:flex; flex-direction:column; gap:8px; text-align:left; }
+    #petDuplicateAlertDialog .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1.25; letter-spacing:-.025em; color:#18181b; }
+    #petDuplicateAlertDialog .sd-dialog-description { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; line-height:1.5; white-space:pre-line; overflow-wrap:anywhere; color:#71717a; }
+    #petDuplicateAlertDialog .sd-dialog-footer { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+    #petDuplicateAlertDialog .sd-btn:focus-visible { outline:2px solid #18181b; outline-offset:2px; }
     #addPetModal .sd-field-group, #editPetModal .sd-field-group { display:flex; flex-direction:column; gap:16px; }
     #addPetModal .sd-form-grid, #editPetModal .sd-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     #addPetModal .sd-field-full, #editPetModal .sd-field-full { grid-column:1 / -1; }
@@ -4115,10 +4138,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
             $rResolvedRaw = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? $report['updated_at'] : '';
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['location_address'])); ?>" data-date="<?php echo (int)strtotime($incidentAt); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['display_location_address'] ?? $report['location_address'])); ?>" data-date="<?php echo (int)strtotime($incidentAt); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($rRef); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?> Report</div></td>
-            <td class="sd-td"><div class="contact-main contact-normal report-location-value"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
+            <td class="sd-td"><div class="contact-main contact-normal report-location-value"><?php echo htmlspecialchars($report['display_location_address'] ?? $report['location_address']); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rDate; ?></div></td>
             <td class="sd-td"><span class="appt-status-pill<?php echo $rStatus === 'resolved' ? ' report-status-resolved' : ''; ?>" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;border-color:<?php echo $rsc['border']; ?>;"><?php echo $rStatusLabel; ?></span></td>
             <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?></div></td>
@@ -6478,6 +6501,7 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
 <div class="modal" id="addPetModal">
   <form class="modal-form sd-dialog" id="addPetForm" action="add-pet.php" method="POST" enctype="multipart/form-data">
     <input type="hidden" name="return_section" value="my-pets">
+    <?php echo csrfField(); ?>
     <div class="sd-dialog-content" role="dialog" aria-modal="true">
       <button type="button" class="sd-dialog-close" onclick="closeModal('addPetModal')" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -6571,6 +6595,16 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
           <input type="text" name="color" class="sd-input" placeholder="e.g. brown with white spots" />
         <?php endif; ?>
       </div>
+      <?php if (!$showAdoptModal): ?>
+      <div class="sd-field">
+        <label class="sd-label" for="addPetDateOfBirth">Date of Birth</label>
+        <input type="date" name="date_of_birth" id="addPetDateOfBirth" class="sd-input" max="<?php echo date('Y-m-d'); ?>" />
+      </div>
+      <div class="sd-field">
+        <label class="sd-label" for="addPetMicrochipId">Microchip Number (Optional)</label>
+        <input type="text" name="microchip_id" id="addPetMicrochipId" class="sd-input" maxlength="50" autocomplete="off" />
+      </div>
+      <?php endif; ?>
       <div class="sd-field sd-field-full">
         <label class="sd-label">Vaccination Status</label>
         <select name="vaccinated" class="sd-input">
@@ -6608,6 +6642,18 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
   </form>
 </div>
 
+<dialog id="petDuplicateAlertDialog" role="alertdialog" aria-modal="true" aria-labelledby="petDuplicateAlertTitle" aria-describedby="petDuplicateAlertDescription">
+  <div class="sd-dialog-content">
+    <div class="sd-dialog-header">
+      <h2 class="sd-dialog-title" id="petDuplicateAlertTitle">Possible duplicate pet profile</h2>
+      <p class="sd-dialog-description" id="petDuplicateAlertDescription"></p>
+    </div>
+    <div class="sd-dialog-footer">
+      <button type="button" class="sd-btn sd-btn-outline" id="petDuplicateAlertCancel" autofocus>Cancel</button>
+      <button type="button" class="sd-btn sd-btn-default" id="petDuplicateAlertContinue">Continue registration</button>
+    </div>
+  </div>
+</dialog>
 
 <!-- Edit Pet Modal -->
 <div class="modal" id="editPetModal">
@@ -7177,7 +7223,7 @@ window.__reportList = <?php
           'createdRaw' => date('Y-m-d\TH:i', strtotime($report['created_at'])),
           'updatedAt' => (string)($report['updated_at'] ?? $report['created_at']),
           'incidentRaw' => !empty($report['incident_at']) ? date('Y-m-d\TH:i', strtotime($report['incident_at'])) : date('Y-m-d\TH:i', strtotime($report['created_at'])),
-          'location' => $report['location_address'] ?? '-',
+          'location' => $report['display_location_address'] ?? $report['location_address'] ?? '-',
           'supportingReport' => (bool)($report['is_supporting_report'] ?? false),
           'primaryReference' => (string)($report['primary_reference_id'] ?? ''),
           'date' => date('F d, Y', strtotime($report['created_at'])),
@@ -11279,6 +11325,130 @@ function reworkUpdateGreetingDate() {
 }
 reworkUpdateGreetingDate();
 setInterval(reworkUpdateGreetingDate, 60000);
+
+var addPetForm = document.getElementById('addPetForm');
+if (addPetForm) {
+  var petDuplicateAlertDialog = document.getElementById('petDuplicateAlertDialog');
+  var petDuplicateAlertDescription = document.getElementById('petDuplicateAlertDescription');
+  var petDuplicateAlertCancel = document.getElementById('petDuplicateAlertCancel');
+  var petDuplicateAlertContinue = document.getElementById('petDuplicateAlertContinue');
+  var resolvePetDuplicateAlert = null;
+
+  if (petDuplicateAlertDialog) {
+    petDuplicateAlertDialog.addEventListener('close', function () {
+      var resolve = resolvePetDuplicateAlert;
+      resolvePetDuplicateAlert = null;
+      if (resolve) resolve(petDuplicateAlertDialog.returnValue === 'continue');
+    });
+    petDuplicateAlertDialog.addEventListener('click', function (event) {
+      if (event.target === petDuplicateAlertDialog) petDuplicateAlertDialog.close('cancel');
+    });
+    if (petDuplicateAlertCancel) {
+      petDuplicateAlertCancel.addEventListener('click', function () {
+        petDuplicateAlertDialog.close('cancel');
+      });
+    }
+    if (petDuplicateAlertContinue) {
+      petDuplicateAlertContinue.addEventListener('click', function () {
+        petDuplicateAlertDialog.close('continue');
+      });
+    }
+  }
+
+  function confirmPetDuplicateRegistration(messages) {
+    if (!petDuplicateAlertDialog || !petDuplicateAlertDescription
+        || !petDuplicateAlertCancel || !petDuplicateAlertContinue
+        || typeof petDuplicateAlertDialog.showModal !== 'function') {
+      return Promise.reject(new Error('The pet confirmation dialog is unavailable. Refresh and try again.'));
+    }
+    petDuplicateAlertDescription.textContent = messages.join('\n\n')
+      + '\n\nA matching name alone does not trigger this warning. If this is a different pet, you can still register it. Would you like to continue?';
+    petDuplicateAlertDialog.returnValue = '';
+    return new Promise(function (resolve) {
+      resolvePetDuplicateAlert = resolve;
+      petDuplicateAlertDialog.showModal();
+    });
+  }
+
+  addPetForm.addEventListener('submit', function (event) {
+    if (addPetForm.dataset.petDuplicateChecked === '1' || addPetForm.querySelector('[name="from_adoption"]')) return;
+    event.preventDefault();
+
+    var submitButton = addPetForm.querySelector('button[type="submit"]');
+    var previousButtonText = submitButton ? submitButton.textContent : '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Checking profiles...';
+    }
+
+    var fields = ['pet_name', 'species', 'species_custom', 'breed', 'gender', 'age', 'color', 'date_of_birth', 'microchip_id', 'csrf_token'];
+    var payload = new URLSearchParams();
+    fields.forEach(function (name) {
+      var field = addPetForm.elements.namedItem(name);
+      if (field) payload.append(name, field.value);
+    });
+
+    fetch(<?php echo json_encode(rtrim($appBaseUrl, '/') . '/api/resident/check-pet-duplicates.php', JSON_UNESCAPED_SLASHES); ?>, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Accept': 'application/json'},
+      body: payload
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || 'Similar pet profiles could not be checked. Please try again.');
+        }
+        return data;
+      });
+    }).then(function (data) {
+      var messages = [];
+      if (data.resident_matches && data.resident_matches.length) {
+        var matchedFieldLabels = {
+          breed: 'breed',
+          gender: 'gender',
+          color: 'color / markings',
+          date_of_birth: 'date of birth',
+          age: 'age'
+        };
+        var ownMatches = data.resident_matches.map(function (pet) {
+          var petLabel = pet.pet_name + ' (' + pet.pet_type + ')';
+          var matchedFields = Array.isArray(pet.matched_fields) ? pet.matched_fields : [];
+          if (matchedFields.indexOf('microchip_id') !== -1) {
+            return 'I found a pet in your profile named ' + petLabel + ' with the same microchip number.';
+          }
+          var matchedDetails = matchedFields.map(function (field) {
+            return matchedFieldLabels[field] || '';
+          }).filter(Boolean);
+          var detailSummary = '';
+          if (matchedDetails.length === 1) {
+            detailSummary = ' Its ' + matchedDetails[0] + ' also matches.';
+          } else if (matchedDetails.length > 1) {
+            detailSummary = ' Its ' + matchedDetails.slice(0, -1).join(', ')
+              + ' and ' + matchedDetails[matchedDetails.length - 1] + ' also match.';
+          }
+          return 'I found a pet in your profile with the same name and species: '
+            + petLabel + '.' + detailSummary;
+        });
+        messages.push(ownMatches.join('\n'));
+      }
+      if (data.staff_review_possible) {
+        messages.push('A similar pet profile may belong to another account. For privacy, its details are not shown; DCVS staff may review this registration.');
+      }
+      return messages.length ? confirmPetDuplicateRegistration(messages) : Promise.resolve(true);
+    }).then(function (confirmed) {
+      if (!confirmed) return;
+      addPetForm.dataset.petDuplicateChecked = '1';
+      addPetForm.submit();
+    }).catch(function (error) {
+      window.alert(error.message || 'Similar pet profiles could not be checked. Please try again.');
+    }).finally(function () {
+      if (submitButton && addPetForm.dataset.petDuplicateChecked !== '1') {
+        submitButton.disabled = false;
+        submitButton.textContent = previousButtonText;
+      }
+    });
+  });
+}
 </script>
 </body>
 </html>

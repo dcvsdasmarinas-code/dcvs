@@ -138,6 +138,13 @@ $sbActiveModule = $sbPageToModule[$activePage] ?? 'operations';
 function sbItem($label, $icon, $opts = []) {
     return ['label' => $label, 'icon' => $icon] + $opts;
 }
+function sbHref($href) {
+    global $appBaseUrl;
+    $href = trim((string)$href);
+    if ($href === '') return '#';
+    if (preg_match('~^(?:[a-z][a-z0-9+.-]*:|//|/|#)~i', $href)) return $href;
+    return rtrim((string)$appBaseUrl, '/') . '/' . ltrim($href, '/');
+}
 function sbAttrs($item) {
     $a = '';
     if (!empty($item['section'])) $a .= ' data-section="' . htmlspecialchars($item['section']) . '"';
@@ -212,6 +219,7 @@ $sbModules = [
                 'items' => [
                     sbItem('All Clients', 'fa-users', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'all']),
                     sbItem('Registered Pets', 'fa-paw', ['href' => 'registered-pets.php', 'initialActive' => $activePage === 'registered-pets']),
+                    sbItem('Duplicate Pet Reviews', 'fa-clone', ['href' => 'pet-duplicate-reviews.php', 'initialActive' => $activePage === 'pet-duplicate-reviews']),
                     sbItem('With Pets', 'fa-paw', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'with']),
                     sbItem('No Pets', 'fa-user-slash', ['section' => 'client-pets', 'href' => 'dashboard-staff.php#client-pets', 'fn' => 'setGroup', 'arg' => 'none']),
                 ],
@@ -354,7 +362,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
               <?php if ($single):
                 $item = $sec['items'][0]; ?>
                 <li class="sb2-menu-item">
-                  <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
+                  <a href="<?php echo htmlspecialchars(sbHref($item['href'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>"
                      class="sb2-menu-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
                      title="<?php echo htmlspecialchars($item['label']); ?>"
                      <?php echo sbAttrs($item); ?>>
@@ -375,7 +383,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
                   <ul class="sb2-menu-sub">
                     <?php foreach ($sec['items'] as $item): ?>
                       <li class="sb2-menu-item">
-                        <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
+                        <a href="<?php echo htmlspecialchars(sbHref($item['href'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>"
                            class="sb2-menu-sub-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
                            title="<?php echo htmlspecialchars($item['label']); ?>"
                            <?php echo sbAttrs($item); ?>>
@@ -398,7 +406,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
                           <ul class="sb2-menu-sub">
                             <?php foreach ($subSec['items'] as $item): ?>
                               <li class="sb2-menu-item">
-                                <a href="<?php echo htmlspecialchars($item['href'] ?? '#'); ?>"
+                                <a href="<?php echo htmlspecialchars(sbHref($item['href'] ?? '#'), ENT_QUOTES, 'UTF-8'); ?>"
                                    class="sb2-menu-sub-button <?php echo !empty($item['initialActive']) ? 'active' : ''; ?>"
                                    title="<?php echo htmlspecialchars($item['label']); ?>"
                                    <?php echo sbAttrs($item); ?>>
@@ -439,7 +447,7 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
         'reports-all' => 'All Reports', 'reports-pending' => 'Pending Validation',
         'reports-accepted' => 'Accepted by Barangay', 'reports-active' => 'Active Cases', 'reports-resolved' => 'Resolved Cases',
         'appointments' => 'Appointment Requests', 'calendar-schedule' => 'Calendar Schedule',
-        'client-pets' => 'All Clients', 'registered-pets' => 'Registered Pets', 'communication' => 'Communication',
+        'client-pets' => 'All Clients', 'registered-pets' => 'Registered Pets', 'pet-duplicate-reviews' => 'Duplicate Pet Reviews', 'communication' => 'Communication',
         'adoption-pool' => 'Adoption Pool', 'announcements' => 'Announcements', 'turnover' => 'Turnover',
         'availability' => empty($_GET['panel']) ? 'Weekly Schedule' : (($_GET['panel'] ?? '') === 'overrides' ? 'Date Overrides' : (($_GET['panel'] ?? '') === 'bulk' ? 'Bulk Schedule' : 'Schedule Preview')),
         'waitlist' => 'Waitlist', 'geo' => 'Geo-Mapping', 'activity-logs' => 'Activity Logs',
@@ -784,6 +792,13 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
     if (bc) bc.textContent = bcLabels[sectionId] || sectionId;
   }
 
+  function navigateToStaffSection(item, sectionId) {
+    var targetUrl = new URL(item.href, window.location.href);
+    targetUrl.search = '';
+    targetUrl.hash = sectionId;
+    window.location.assign(targetUrl.href);
+  }
+
   // Highlight a specific sidebar item (and open its ancestor collapsible)
   function activateItem(item) {
     document.querySelectorAll('.sb2-menu-button, .sb2-menu-sub-button').forEach(function(el) {
@@ -872,6 +887,12 @@ window.DCVS_PORTAL_USER_ID = <?php echo (int)($_SESSION['user_id'] ?? 0); ?>;
       var href = item.getAttribute('data-href');
       var sectionTarget = section === 'adoption' ? 'analytics' : section;
       var isCurrentPageSection = item.pathname === window.location.pathname;
+
+      if (section === 'reports-all') {
+        e.preventDefault();
+        navigateToStaffSection(item, section);
+        return;
+      }
 
       if (section && isCurrentPageSection &&
           typeof switchSection === 'function' && document.getElementById(sectionTarget)) {

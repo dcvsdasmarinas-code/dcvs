@@ -1606,7 +1606,7 @@ if (!empty($_GET['waitlist_booking'])) {
   <?php if ($freshDashboard): ?>
   <script>try { localStorage.removeItem('activeSection'); } catch (e) {}</script>
   <?php endif; ?>
-  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/dashboard.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/dashboard.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/dashboard.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
   <!-- MapCN bundle -->
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/geo-map/map.css', ENT_QUOTES, 'UTF-8'); ?>" />
@@ -8558,13 +8558,15 @@ document.addEventListener('DOMContentLoaded', function() {
       const savedTab = hashTab || localStorage.getItem('staffActiveTab');
       if (savedTab) {
         const contentTab = ['engine', 'intel', 'architect', 'citydrives', 'adoption', 'cases-analytics', 'appointment-overview', 'programs-services', 'city-drives'].indexOf(savedTab) !== -1 ? 'analytics' : savedTab;
-        const targetLink = document.querySelector(`.nav-link[data-section="${contentTab}"]`);
-          if (targetLink) {
-              targetLink.click();
-        } else if (contentTab === 'analytics') {
+        if (contentTab === 'analytics') {
           sections.forEach(s => s.classList.remove('active'));
           document.getElementById('analytics').classList.add('active');
-          }
+        } else if (typeof switchSection === 'function' && document.getElementById(contentTab)) {
+          switchSection(contentTab);
+        } else if (document.getElementById(contentTab)) {
+          sections.forEach(s => s.classList.remove('active'));
+          document.getElementById(contentTab).classList.add('active');
+        }
       }
     } else {
       localStorage.removeItem('staffActiveTab');

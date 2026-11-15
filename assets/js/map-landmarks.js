@@ -138,13 +138,10 @@
       var properties = feature.properties;
       var group = getPlaceGroup(properties);
       properties.map_label = formatMapLabel(properties.name);
-      var rank = group === 'halls' ? 2
-        : (properties.category === 'healthcare'
-          || properties.category === 'education'
-          || properties.category === 'government') ? 3 : 4;
+      var rank = group === 'halls' ? 1 : properties.prominent === true ? 2 : 3;
       properties.place_group = group;
       properties.rank = rank;
-      properties.minzoom = rank === 2 ? 14 : rank === 3 ? 16 : 17;
+      properties.minzoom = rank === 1 ? 12 : rank === 2 ? 13 : 14;
     });
   }
 
@@ -334,7 +331,7 @@
       var zoomRankFilters = isReportMap ? [] : [[
         '<=',
         ['get', 'rank'],
-        ['step', ['zoom'], 0, 12, 1, 14, 2, 16, 3, 17, 4]
+        ['step', ['zoom'], 0, 11, 1, 12, 2, 14, 3]
       ], ['<=', ['get', 'minzoom'], ['zoom']]];
       if (isStaffMap) scopeFilters.push(['!=', ['get', 'is_dcvs_office'], true]);
       if (isBarangayMap) scopeFilters.push(['!=', ['get', 'is_own_barangay_hall'], true]);
