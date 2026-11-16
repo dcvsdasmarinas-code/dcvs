@@ -25,8 +25,10 @@ $startDate = $_GET['start_date'] ?? '';
 $endDate = $_GET['end_date'] ?? '';
 $startTime = $_GET['start_time'] ?? '';
 $endTime = $_GET['end_time'] ?? '';
-$staffRequired = (int)($_GET['staff_required_count'] ?? 0);
 $programId = (int)($_GET['program_id'] ?? 0);
+$barangayIds = array_values(array_unique(array_filter(array_map('intval', explode(',', (string)($_GET['barangay_ids'] ?? ''))), static function ($id) {
+    return $id > 0;
+})));
 $isValidDate = static function ($date) {
     return preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)
         && checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4));
@@ -35,18 +37,17 @@ $isValidDate = static function ($date) {
 if (!$isValidDate($startDate) || !$isValidDate($endDate) || $startDate > $endDate
     || !preg_match('/^\d{2}:\d{2}$/', $startTime)
     || !preg_match('/^\d{2}:\d{2}$/', $endTime)
-    || $startTime >= $endTime
-    || $staffRequired < 1) {
+    || $startTime >= $endTime) {
     http_response_code(400);
-    echo json_encode(['success' => false, 'message' => 'Valid program dates, hours, and required staff count are required.']);
+    echo json_encode(['success' => false, 'message' => 'Valid program dates and hours are required.']);
     exit;
 }
 
-$appointments = dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $programId, $startTime, $endTime, $staffRequired);
-$reports = dcvsProgramReportWarnings($conn, $startDate, $endDate);
+$appointments = dcvsProgramAppointmentConflicts($conn, $startDate, $endDate, $programId, $startTime, $endTime);
+$reports = dcvsProgramReportWarnings($conn, $startDate, $endDate, $barangayIds);
 $scheduleUnchanged = false;
 if ($programId > 0) {
-    $programStmt = $conn->prepare("SELECT start_date, end_date, program_start_time, program_end_time, staff_required_count FROM programs WHERE program_id = ?");
+    $programStmt = $conn->prepare("SELECT start_date, end_date, program_start_time, program_end_time FROM programs WHERE program_id = ?");
     if ($programStmt) {
         $programStmt->bind_param('i', $programId);
         $programStmt->execute();
@@ -56,8 +57,7 @@ if ($programId > 0) {
             && $currentProgram['start_date'] === $startDate
             && $currentProgram['end_date'] === $endDate
             && substr((string)$currentProgram['program_start_time'], 0, 5) === $startTime
-            && substr((string)$currentProgram['program_end_time'], 0, 5) === $endTime
-            && (int)$currentProgram['staff_required_count'] === $staffRequired;
+            && substr((string)$currentProgram['program_end_time'], 0, 5) === $endTime;
     }
 }
 

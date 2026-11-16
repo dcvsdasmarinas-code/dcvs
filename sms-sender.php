@@ -235,8 +235,10 @@ function sendAppointmentSms($conn, $appointmentId, $newStatus, $staffName = 'DCV
     if (!$data || empty($data['phone'])) return false;
 
     $petName = $data['pet_name'] ?? 'your pet';
-    $date = date('M j, Y', strtotime($data['preferred_date']));
-    $time = date('g:i A', strtotime($data['preferred_time']));
+    $appointmentDate = $data['scheduled_date'] ?: $data['preferred_date'];
+    $appointmentTime = $data['scheduled_time'] ?: $data['preferred_time'];
+    $date = date('F j, Y', strtotime($appointmentDate));
+    $time = date('g:i A', strtotime($appointmentTime));
 
     $typeLabels = ['vaccination'=>'Vaccination','checkup'=>'Checkup','kapon'=>'Kapon (Spay/Neuter)','adoption'=>'Adoption'];
     $apptType = $typeLabels[$data['appointment_type']] ?? ucfirst($data['appointment_type']);

@@ -150,7 +150,10 @@
   }
 
   function restoreForm(root) {
-    if (isDraftIgnored(root)) return;
+    if (isDraftIgnored(root)) {
+      clearForm(root);
+      return;
+    }
     if (restoredForms.has(root)) return;
     restoredForms.add(root);
 
@@ -198,7 +201,6 @@
   }
 
   function clearForm(root) {
-    if (isDraftIgnored(root)) return;
     try {
       sessionStorage.removeItem(storageKey(root));
     } catch (error) {

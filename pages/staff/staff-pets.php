@@ -13,6 +13,8 @@ session_start();
 
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -22,7 +24,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 $pageTitle = 'Pet Listings';
 $activePage = 'pet-listings';
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 
 $listings = [];
 $lq = $conn->query(
@@ -116,8 +118,8 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     /* ── Pet Listings (CPD design system) ── */
@@ -597,29 +599,35 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
           </div>
 
           <div class="db-table-area">
-            <div class="db-toolbar">
-              <div class="search-grow-wrap">
+            <div class="db-toolbar staff-mobile-toolbar staff-toolbar-search-only">
+              <div class="staff-toolbar-search-row staff-toolbar-no-filter">
+              <div class="search-grow-wrap staff-toolbar-search">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" id="mainSearch" placeholder="Search pet name, ID, species, owner..." oninput="setSearch(this.value)">
+                <input type="text" id="mainSearch" placeholder="Search pets..." oninput="setSearch(this.value)">
+              </div>
               </div>
               <div class="toolbar-actions">
-                <select class="select-input" id="speciesSelect" onchange="setSpecies(this.value)">
+                <div class="staff-toolbar-filters" style="display:flex;align-items:center;gap:8px;">
+                <select class="select-input staff-toolbar-select" id="speciesSelect" onchange="setSpecies(this.value)">
                   <option value="all">All Species</option>
                   <option value="Dog">Dog</option>
                   <option value="Cat">Cat</option>
                 </select>
-                <select class="select-input" id="sexSelect" onchange="setSex(this.value)">
+                <select class="select-input staff-toolbar-select" id="sexSelect" onchange="setSex(this.value)">
                   <option value="all">All Sex</option>
                   <option value="male">Male</option>
                   <option value="female">Female</option>
                 </select>
-                <select class="select-input" id="vaccSelect" onchange="setVacc(this.value)">
+                <select class="select-input staff-toolbar-select staff-toolbar-last-filter" id="vaccSelect" onchange="setVacc(this.value)">
                   <option value="all">Adoption Readiness</option>
                   <option value="vaccinated">Vaccinated</option>
                   <option value="not_vaccinated">Not Vaccinated</option>
                   <option value="needs_review">Medical Review Needed</option>
                 </select>
-                <button type="button" class="sd-btn sd-btn-default" onclick="openCreate()"><i class="fas fa-plus"></i> Add New Pet</button>
+                </div>
+                <div class="staff-toolbar-actions" style="display:flex;align-items:center;gap:8px;">
+                  <button type="button" class="sd-btn sd-btn-default staff-toolbar-primary" onclick="openCreate()"><i class="fas fa-plus"></i> Add New Pet</button>
+                </div>
               </div>
             </div>
             <div id="tableWrap" class="dt-container">
@@ -764,7 +772,7 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
       @media (max-width:560px){ #petModal .sd-form-grid{ grid-template-columns:1fr; } }
     </style>
     <div id="petModal" class="modal">
-      <form id="petForm" method="POST" enctype="multipart/form-data" action="staff-pets-handler.php" class="sd-dialog">
+      <form id="petForm" method="POST" enctype="multipart/form-data" action="<?php echo htmlspecialchars($appBaseUrl . '/api/staff/staff-pets-handler.php', ENT_QUOTES, 'UTF-8'); ?>" class="sd-dialog">
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="id" id="formId" value="0">
         <input type="hidden" name="current_photo" id="formCurrentPhoto" value="">
@@ -864,7 +872,33 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
                   <input type="text" name="exam" id="formExam" class="sd-input" placeholder="mm/dd/yyyy">
                 </div>
                 <div class="sd-field sd-field-full">
-                  <label class="sd-label" for="formVax">Vaccinations</label>
+                  <label class="sd-label" for="formVaccinationStatus">Vaccination Status</label>
+                  <select name="vaccination_status" id="formVaccinationStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="vaccinated">Vaccinated</option>
+                    <option value="partially_vaccinated">Partially vaccinated</option>
+                    <option value="not_vaccinated">Not vaccinated</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formSterilizationStatus">Spay / Neuter Status</label>
+                  <select name="sterilization_status" id="formSterilizationStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="spayed">Spayed</option>
+                    <option value="neutered">Neutered</option>
+                    <option value="not_sterilized">Not yet spayed / neutered</option>
+                  </select>
+                </div>
+                <div class="sd-field">
+                  <label class="sd-label" for="formDewormingStatus">Deworming Status</label>
+                  <select name="deworming_status" id="formDewormingStatus" class="sd-input">
+                    <option value="unknown">Not recorded</option>
+                    <option value="dewormed">Dewormed</option>
+                    <option value="not_dewormed">Not dewormed</option>
+                  </select>
+                </div>
+                <div class="sd-field sd-field-full">
+                  <label class="sd-label" for="formVax">Vaccination Details</label>
                   <textarea name="vaccinations" id="formVax" class="sd-input" placeholder="Rabies, Tetanus..."></textarea>
                 </div>
                 <div class="sd-field">
@@ -975,6 +1009,13 @@ unset($_SESSION['pet_success'], $_SESSION['pet_error']);
 
 <script>
 const PL_DATA = <?php echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+const STAFF_PETS_HANDLER = <?php echo json_encode($appBaseUrl . '/api/staff/staff-pets-handler.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+function staffPetPhotoUrl(photoUrl) {
+  const photo = String(photoUrl || '').trim();
+  if (!photo || /^(?:https?:|data:|blob:|\/\/)/i.test(photo) || photo.startsWith('/')) return photo;
+  return <?php echo json_encode($appBaseUrl, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> + '/' + photo.replace(/^(?:\.\/)+/, '');
+}
 
 const LS_META = {
   available: { label: 'Available', cls: 'ls-available' },
@@ -1202,7 +1243,7 @@ function toggleSort(col){
 }
 
 function petAvatarHtml(p){
-  if(p.photo_url) return '<img src="' + esc(p.photo_url) + '" alt="">';
+  if(p.photo_url) return '<img src="' + esc(staffPetPhotoUrl(p.photo_url)) + '" alt="">';
   return '<i class="fas fa-paw" style="font-size:18px;"></i>';
 }
 function rowHtml(p){
@@ -1333,7 +1374,7 @@ function renderDetail(){
   if(!p){ closeProfile(); return; }
   const lm = listingMeta(p.status);
   const img = p.photo_url
-    ? '<img src="' + esc(p.photo_url) + '" alt="">'
+    ? '<img src="' + esc(staffPetPhotoUrl(p.photo_url)) + '" alt="">'
     : '<i class="fas fa-paw"></i>';
   box.innerHTML = '<div id="tabBody"></div>';
 
@@ -1454,7 +1495,7 @@ function setPetStatus(id, status){
   fd.append('action', 'set_status');
   fd.append('id', id);
   fd.append('status', status);
-  fetch('staff-pets-handler.php', { method: 'POST', body: fd })
+  fetch(STAFF_PETS_HANDLER, { method: 'POST', body: fd })
     .then(function(res){ return res.json(); })
     .then(function(data){
       if(data.success){
@@ -1496,7 +1537,7 @@ function executeDelete(){
   const fd = new FormData();
   fd.append('action', 'delete');
   fd.append('id', deleteId);
-  fetch('staff-pets-handler.php', { method: 'POST', body: fd })
+  fetch(STAFF_PETS_HANDLER, { method: 'POST', body: fd })
     .then(function(res){ return res.json(); })
     .then(function(data){
       if(data.success){
@@ -1560,7 +1601,7 @@ function openEdit(id){
   document.getElementById('modalDescription').textContent = 'Make changes to the pet\'s details here. Click save when you\'re done.';
   document.getElementById('submitBtnText').textContent = 'Update';
 
-  fetch('staff-pets-handler.php?action=get&id=' + id)
+  fetch(STAFF_PETS_HANDLER + '?action=get&id=' + id)
     .then(function(res){ return res.json(); })
     .then(function(data){
       if(data.success){
@@ -1577,10 +1618,15 @@ function openEdit(id){
         document.getElementById('formRescued').value = p.rescued_date;
         document.getElementById('formDesc').value = p.description;
         document.getElementById('formStatus').value = p.status;
+        document.getElementById('formVaccinationStatus').value = p.vaccination_status || 'unknown';
+        document.getElementById('formSterilizationStatus').value = p.sterilization_status || 'unknown';
+        document.getElementById('formDewormingStatus').value = p.deworming_status || 'unknown';
+        document.getElementById('formVax').value = p.vaccinations || '';
+        document.getElementById('formTemperament').value = p.temperament || '';
 
         if(p.photo_url){
           const preview = document.getElementById('photoPreview');
-          preview.src = p.photo_url;
+          preview.src = staffPetPhotoUrl(p.photo_url);
           preview.style.display = 'block';
           document.getElementById('photoPlaceholder').style.display = 'none';
           document.getElementById('photoArea').classList.add('has-image');
@@ -1602,7 +1648,7 @@ document.getElementById('petForm').addEventListener('submit', function(e){
   btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
   btn.disabled = true;
 
-  fetch('staff-pets-handler.php', { method: 'POST', body: formData })
+  fetch(STAFF_PETS_HANDLER, { method: 'POST', body: formData })
     .then(function(res){ return res.json(); })
     .then(function(data){
       if(data.success){

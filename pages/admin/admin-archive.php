@@ -218,6 +218,7 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
 .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
 .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
 </style>
+<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>" />
 </head>
 <body>
 <?php include __DIR__ . '/../../includes/admin-sidebar.php'; ?>
@@ -227,19 +228,25 @@ body{margin:0;font-family:'Inter','Segoe UI',sans-serif;background:#ffffff;color
   <script>document.addEventListener('DOMContentLoaded',function(){showToast('<?php echo $_SESSION["flash_type"] === "error" ? "Error" : "Success"; ?>',{type:'<?php echo $_SESSION["flash_type"] === "error" ? "error" : "success"; ?>',description:'<?php echo addslashes($_SESSION["flash_msg"]); ?>'});});</script>
 <?php unset($_SESSION['flash_msg']); unset($_SESSION['flash_type']); endif; ?>
 
-<div class="appt-card-header">
-  <div class="appt-header-right">
+<div class="appt-card-header portal-mobile-toolbar">
+  <div class="appt-header-right portal-toolbar-controls">
+    <div class="portal-toolbar-search-row">
     <div class="appt-search-wrap">
       <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <input type="text" id="searchInput" class="appt-search-input" placeholder="Search by name, email, or reference ID..." value="<?php echo htmlspecialchars($search); ?>" />
     </div>
-    <select class="appt-status-select" id="barangayFilter">
+    </div>
+    <div class="portal-toolbar-filter-grid">
+    <select class="appt-status-select portal-toolbar-last-filter" id="barangayFilter">
       <option value="">All Barangays</option>
       <?php foreach ($barangays as $br): ?>
         <option value="<?php echo $br['barangay_id']; ?>" <?php echo $barangayFilter==$br['barangay_id']?'selected':''; ?>><?php echo htmlspecialchars($br['barangay_name']); ?></option>
       <?php endforeach; ?>
     </select>
-    <button class="pet-action-btn" id="clearFiltersBtn" style="display:<?php echo ($search||$barangayFilter)?'inline-flex':'none'; ?>;" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+    </div>
+    <div class="portal-toolbar-actions portal-toolbar-single-secondary">
+      <button class="pet-action-btn portal-toolbar-secondary" id="clearFiltersBtn" style="display:<?php echo ($search||$barangayFilter)?'inline-flex':'none'; ?>;" onclick="clearSearch()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg> Clear Filters</button>
+    </div>
   </div>
 </div>
 

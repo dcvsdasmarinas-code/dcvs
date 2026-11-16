@@ -12,7 +12,7 @@ session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 
 $listingId = (int)($_GET['listing_id'] ?? 0);
 

@@ -26,13 +26,16 @@ function confirmScheduleRespond($success, $message, $data = []) {
     exit;
 }
 
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'staff'
+    || empty($_SESSION['user_id'])) {
     header('Location: login-staff.php');
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reportId = intval($_POST['report_id'] ?? 0);
+    $dispatchStaffId = (int)($_SESSION['user_id'] ?? 0);
+    $stageChangedAt = (new DateTimeImmutable('now', new DateTimeZone('Asia/Manila')))->format('Y-m-d H:i:s');
     $scheduledAtInput = trim($_POST['scheduled_at'] ?? '');
     $scheduledAt = null;
     $dcvsNotes = trim($_POST['dcvs_notes'] ?? '');
@@ -42,7 +45,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($scheduledAtInput !== '') {
-        $parsedSchedule = DateTime::createFromFormat('Y-m-d\\TH:i', $scheduledAtInput);
+        $parsedSchedule = DateTime::createFromFormat(
+            'Y-m-d\\TH:i',
+            $scheduledAtInput,
+            new DateTimeZone('Asia/Manila')
+        );
         $dateErrors = DateTime::getLastErrors();
         if (!$parsedSchedule || ($dateErrors && ($dateErrors['warning_count'] || $dateErrors['error_count']))) {
             confirmScheduleRespond(false, 'Invalid schedule date and time.');
@@ -77,6 +84,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $insertStmt->execute();
         $caseId = (int)$insertStmt->insert_id;
         $insertStmt->close();
+
+        $workflowInsert = $conn->prepare("
+            INSERT IGNORE INTO report_response_workflow
+                (report_id, response_mode, state, escalated_at, assigned_at, dispatch_officer_id)
+            VALUES (?, 'dcvs_dispatch', 'dcvs_dispatch', ?, ?, ?)
+        ");
+        if (!$workflowInsert) throw new RuntimeException('Could not prepare the DCVS stage timestamps.');
+        $workflowInsert->bind_param('issi', $reportId, $stageChangedAt, $stageChangedAt, $dispatchStaffId);
+        if (!$workflowInsert->execute()) throw new RuntimeException('Could not record the DCVS stage timestamps.');
+        $workflowInsert->close();
+
+        $workflowUpdate = $conn->prepare("
+            UPDATE report_response_workflow
+            SET response_mode = 'dcvs_dispatch', state = 'dcvs_dispatch',
+                escalated_at = ?, assigned_at = ?, dispatch_officer_id = ?
+            WHERE report_id = ? AND state = 'awaiting_dcvs_decision'
+        ");
+        if (!$workflowUpdate) throw new RuntimeException('Could not prepare the DCVS stage update.');
+        $workflowUpdate->bind_param('ssii', $stageChangedAt, $stageChangedAt, $dispatchStaffId, $reportId);
+        if (!$workflowUpdate->execute()) throw new RuntimeException('Could not update the DCVS stage timestamps.');
+        $workflowUpdate->close();
 
         $actionMsg = $scheduledAt !== null
             ? 'scheduled for action on ' . date('F j, Y \\a\\t g:i A', strtotime($scheduledAt))

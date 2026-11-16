@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS `report_response_workflow` (
         'returned_to_barangay',
         'closed_not_actionable'
     ) NOT NULL DEFAULT 'awaiting_dcvs_decision',
+    `escalated_at` DATETIME DEFAULT NULL,
+    `assigned_at` DATETIME DEFAULT NULL,
     `barangay_proposed` TINYINT(1) NOT NULL DEFAULT 0,
     `approved_by` INT(11) DEFAULT NULL,
     `approved_at` DATETIME DEFAULT NULL,

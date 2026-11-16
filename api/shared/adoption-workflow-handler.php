@@ -72,7 +72,8 @@ try {
                 $residentId,
                 adoptionIntegerValue($_POST['application_id'] ?? 0),
                 $action,
-                adoptionInputText($_POST['response'] ?? null)
+                adoptionInputText($_POST['response'] ?? null),
+                $_FILES['residency_proof'] ?? null
             );
             adoptionHandlerRespond(true, $action === 'respond' ? 'Your response was sent to staff.' : 'Your application was withdrawn.');
         }

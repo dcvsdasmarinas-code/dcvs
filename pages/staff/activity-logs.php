@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
     header('Location: login-staff.php');
@@ -250,12 +252,12 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <style>
     .activity-cms { background: #ffffff; }
-    .al-wrap { padding: 1.5rem 2rem 3rem; background: #ffffff; }
+    .al-wrap { padding: 0 0 3rem; background: #ffffff; }
 
     .table-card { display: flex; flex-direction: column; border: 1px solid #e4e4e7; border-radius: 8px; background: #ffffff; overflow: hidden; }
 
@@ -271,13 +273,26 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
     /* ── Table ── */
     .table-card .sd-data-table-wrap { overflow-x: auto; min-height: 31.5rem; flex: 1; }
-    .table-card .sd-data-table { width: 100%; border-collapse: collapse; }
-    .table-card .sd-data-table .sd-tr { border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
+    .table-card .sd-data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .table-card .sd-data-table .sd-tr { height: 44px; border-bottom: 1px solid #e4e4e7; transition: background 0.12s; }
     .table-card .sd-data-table .sd-tr:last-child { border-bottom: none; }
     .table-card .sd-data-table .sd-tr.sd-last-row { border-bottom: none; }
-    .table-card .sd-data-table tbody .sd-tr:hover { background: #f4f4f5; }
-    .table-card .sd-th { height: 40px; padding: 0 12px; text-align: left; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 12px; font-weight: 500; color: #71717a; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: transparent; }
-    .table-card .sd-td { padding: 12px; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; color: #18181b; line-height: 1.4; }
+    .table-card .sd-data-table tbody .sd-tr:hover { background: #fafafa; }
+    .table-card .sd-th { height: 40px; padding: 0 8px; text-align: left; vertical-align: middle; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 500; color: #71717a; white-space: nowrap; text-transform: none; border-bottom: 1px solid #e4e4e7; background: #fafafa; }
+    .table-card .sd-td { padding: 8px; vertical-align: middle; text-align: left; font-family: 'Inter','Segoe UI',sans-serif; font-size: 14px; font-weight: 400; color: #18181b; line-height: 1.4; overflow-wrap: anywhere; }
+    .table-card .sd-th:nth-child(1) { width: 4%; }
+    .table-card .sd-th:nth-child(2) { width: 10%; }
+    .table-card .sd-th:nth-child(3) { width: 15%; }
+    .table-card .sd-th:nth-child(4) { width: 10%; }
+    .table-card .sd-th:nth-child(5) { width: 18%; }
+    .table-card .sd-th:nth-child(6) { width: 29%; }
+    .table-card .sd-th:nth-child(7) { width: 14%; }
+    .table-card .activity-log-number,
+    .table-card .activity-log-id,
+    .table-card .activity-log-details,
+    .table-card .activity-log-timestamp { color: #71717a; }
+    .table-card .activity-log-user strong { font-weight: 600; }
+    .table-card .activity-log-timestamp { white-space: nowrap; }
 
     /* ── Pagination (all-clients design) ── */
     .activity-cms .dt-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid #e4e4e7; }
@@ -302,7 +317,26 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
     .table-card .sd-pagination-link.sd-pagination-next { padding-right: 10px; }
 
     @media (max-width: 900px) {
-      .al-wrap { padding: 1rem 0.75rem 2rem; }
+      .al-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; padding: 0 0 2rem; }
+      .al-filters { min-width: 0; }
+      .appt-search-wrap { flex: 1 1 100%; width: 100%; min-width: 0; }
+      .appt-search-input { box-sizing: border-box; width: 100%; }
+      .activity-cms .dt-pagination { justify-content: center; padding: 12px 8px; }
+      .activity-cms .dt-pagination-right { justify-content: center; gap: 12px; }
+    }
+
+    @media (max-width: 768px) {
+      .al-filters > .appt-status-select { box-sizing: border-box; flex: 1 1 calc(50% - 4px); width: calc(50% - 4px); min-width: 0; }
+      .act-date-filter-wrap { flex: 0 0 36px; }
+      .al-filters #actClearBtn { flex: 1 1 calc(50% - 4px); justify-content: center; min-width: 0; }
+      .table-card { min-width: 0; }
+      .table-card .sd-data-table-wrap { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; min-height: 0; flex: 0 0 auto; -webkit-overflow-scrolling: touch; }
+      .table-card .activities-table { width: 100%; min-width: 1000px; }
+    }
+
+    @media (max-width: 480px) {
+      .activity-cms .dt-pagination-right { gap: 8px; }
+      .activity-cms .dt-rows { flex-basis: 100%; justify-content: center; }
     }
   </style>
 </head>
@@ -310,12 +344,15 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
   <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
   <main class="main-content activity-cms">
     <div class="al-wrap">
-      <div class="al-filters">
-        <div class="appt-search-wrap">
+      <div class="al-filters staff-mobile-toolbar">
+        <div class="staff-toolbar-search-row">
+        <div class="appt-search-wrap staff-toolbar-search">
           <svg class="appt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="actSearch" class="appt-search-input" placeholder="Search activity, user, or details..." value="<?php echo htmlspecialchars($actSearch); ?>">
         </div>
-        <select class="appt-status-select" id="actActionFilter">
+        </div>
+        <div class="staff-toolbar-filters">
+        <select class="appt-status-select staff-toolbar-select" id="actActionFilter">
           <option value="">All Actions</option>
           <option value="Login" <?php echo $actAction==='Login'?'selected':''; ?>>Login</option>
           <option value="Logout" <?php echo $actAction==='Logout'?'selected':''; ?>>Logout</option>
@@ -328,13 +365,13 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
           <option value="Status Changed" <?php echo $actAction==='Status Changed'?'selected':''; ?>>Status Changed</option>
           <option value="Password Reset" <?php echo $actAction==='Password Reset'?'selected':''; ?>>Password Reset</option>
         </select>
-        <select class="appt-status-select" id="actUserFilter">
+        <select class="appt-status-select staff-toolbar-select" id="actUserFilter">
           <option value="">All Users</option>
           <?php foreach ($allActUsers as $au): ?>
             <option value="<?php echo $au['user_id']; ?>" <?php echo $actUser==$au['user_id']?'selected':''; ?>><?php echo htmlspecialchars($au['full_name']); ?></option>
           <?php endforeach; ?>
         </select>
-        <select class="appt-status-select" id="actSourceFilter">
+        <select class="appt-status-select staff-toolbar-select staff-toolbar-last-filter" id="actSourceFilter">
           <option value="">All Sources</option>
           <option value="authentication" <?php echo $actSource==='authentication'?'selected':''; ?>>Authentication</option>
           <option value="user_management" <?php echo $actSource==='user_management'?'selected':''; ?>>User Management</option>
@@ -345,7 +382,8 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
           <option value="reports_analytics" <?php echo $actSource==='reports_analytics'?'selected':''; ?>>Reports & Analytics</option>
           <option value="settings" <?php echo $actSource==='settings'?'selected':''; ?>>Settings</option>
         </select>
-        <div style="position:relative;display:inline-block;">
+        </div>
+        <div class="act-date-filter-wrap staff-toolbar-filter" style="position:relative;display:inline-block;">
           <button id="actDateFilter" onclick="toggleActCalendar()" title="Filter by date" style="height:36px;width:36px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#71717a;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);<?php echo ($actDateFrom||$actDateTo)?'background:#f4f4f5;color:#18181b;border-color:#d4d4d8;':'' ?>"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg></button>
           <div id="actCalendarPopup" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9999;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,0.12);padding:16px;width:280px;font-family:'Inter','Segoe UI',sans-serif;">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
@@ -374,10 +412,10 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
 
       <div class="table-card" id="recentActivitiesCard">
         <div class="sd-data-table-wrap">
-        <table class="sd-data-table activities-table">
+        <table class="sd-data-table activities-table no-responsive">
           <thead>
             <tr class="sd-tr">
-              <th class="sd-th" style="width:45px;">No.</th>
+              <th class="sd-th">No.</th>
               <th class="sd-th">Log ID</th>
               <th class="sd-th">User</th>
               <th class="sd-th">Role</th>
@@ -392,13 +430,13 @@ if ($auResult) $allActUsers = $auResult->fetch_all(MYSQLI_ASSOC);
             <?php else: ?>
               <?php $actNum = 1; foreach ($allActivity as $act): ?>
                 <tr class="sd-tr" data-action="<?php echo htmlspecialchars(strtolower($act['action'])); ?>">
-                  <td class="sd-td" style="color:#71717a; font-size:0.85rem; font-weight:600;"><?php echo $actNum++; ?></td>
-                  <td class="sd-td" style="color:#71717a;">#LOG-<?php echo str_pad($act['log_id'], 4, '0', STR_PAD_LEFT); ?></td>
-                  <td class="sd-td"><strong><?php echo htmlspecialchars($act['full_name']); ?></strong></td>
-                  <td class="sd-td" style="font-weight:500; color:#18181b;"><?php echo ucfirst($act['role'] ?? ''); ?></td>
-                  <td class="sd-td" style="color:#18181b;"><?php echo htmlspecialchars($act['action']); ?></td>
-                  <td class="sd-td" style="color:#71717a; font-size:0.9rem;"><?php echo htmlspecialchars(formatActivityLogDetails($act['details'], $activityEntityMaps)); ?></td>
-                  <td class="sd-td" style="color:#71717a; font-size:0.85rem;"><?php echo date('M d, Y h:i A', strtotime($act['created_at'])); ?></td>
+                  <td class="sd-td activity-log-number"><?php echo $actNum++; ?></td>
+                  <td class="sd-td activity-log-id">#LOG-<?php echo str_pad($act['log_id'], 4, '0', STR_PAD_LEFT); ?></td>
+                  <td class="sd-td activity-log-user"><strong><?php echo htmlspecialchars($act['full_name']); ?></strong></td>
+                  <td class="sd-td"><?php echo ucfirst($act['role'] ?? ''); ?></td>
+                  <td class="sd-td"><?php echo htmlspecialchars($act['action']); ?></td>
+                  <td class="sd-td activity-log-details"><?php echo htmlspecialchars(formatActivityLogDetails($act['details'], $activityEntityMaps)); ?></td>
+                  <td class="sd-td activity-log-timestamp"><?php echo date('M d, Y h:i A', strtotime($act['created_at'])); ?></td>
                 </tr>
               <?php endforeach; ?>
             <?php endif; ?>

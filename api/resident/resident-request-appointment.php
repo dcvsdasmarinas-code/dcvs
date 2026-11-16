@@ -35,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         || ($urgency_level === 'urgent' && !in_array($appointment_type, ['vaccination', 'checkup', 'deworming'], true))
         || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferred_date)
         || !checkdate((int)substr($preferred_date, 5, 2), (int)substr($preferred_date, 8, 2), (int)substr($preferred_date, 0, 4))
+        || strtotime($preferred_date . ' ' . substr($preferred_time, 0, 5)) <= time()
         || !dcvsIsStandardTime($preferred_time)) {
         echo json_encode(['success' => false, 'message' => 'Appointment type, date, and time must be valid.']);
         exit;
@@ -42,13 +43,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $preferred_time = substr($preferred_time, 0, 5) . ':00';
     $time = substr($preferred_time, 0, 5);
+    dcvsLockAppointmentCapacityDates($conn, [$preferred_date]);
+    $duplicateStmt = $conn->prepare("SELECT COUNT(*) FROM appointments
+        WHERE user_id = ? AND COALESCE(scheduled_date, preferred_date) = ?
+          AND COALESCE(scheduled_time, preferred_time) = ?
+          AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+          AND archived_at IS NULL");
+    $duplicateStmt->bind_param('iss', $user_id, $preferred_date, $preferred_time);
+    $duplicateStmt->execute();
+    $hasDuplicate = (int)$duplicateStmt->get_result()->fetch_row()[0] > 0;
+    $duplicateStmt->close();
+    if ($hasDuplicate) {
+        echo json_encode(['success' => false, 'message' => 'You already have an appointment at this date and time.']);
+        exit;
+    }
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $preferred_date, $urgency_level);
+    if (!$dailyCapacity['has_program'] && $urgency_level === 'urgent') {
+        echo json_encode(['success' => false, 'message' => 'Appointment priority is only available on dates with a scheduled program.']);
+        exit;
+    }
+    if (!$dailyCapacity['available']) {
+        echo json_encode(['success' => false, 'message' => 'This date has reached its appointment capacity.']);
+        exit;
+    }
     if ($urgency_level === 'urgent') {
         if (!dcvsUrgentSlotAvailable($conn, $preferred_date, $time)) {
             echo json_encode(['success' => false, 'message' => 'This clinic time is closed. For urgent care, call (046) 432-1234 or visit the DCVS office.']);
-            exit;
-        }
-        if (dcvsAppointmentDayCount($conn, $preferred_date, 0, 'urgent') >= DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY) {
-            echo json_encode(['success' => false, 'message' => 'The urgent appointment slots for this day are full. Call (046) 432-1234 or visit the DCVS office for urgent assistance.']);
             exit;
         }
         if (dcvsSlotHeld($conn, $preferred_date, $preferred_time, 0, 'urgent')) {
@@ -58,10 +78,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         if (!dcvsSlotAvailable($conn, $preferred_date, $time)) {
             echo json_encode(['success' => false, 'message' => 'No routine staff capacity is available for this time. Please choose another slot.']);
-            exit;
-        }
-        if (dcvsAppointmentDayCount($conn, $preferred_date) >= DCVS_MAX_APPOINTMENTS_PER_DAY) {
-            echo json_encode(['success' => false, 'message' => 'This date has reached its routine appointment limit of ' . DCVS_MAX_APPOINTMENTS_PER_DAY . '.']);
             exit;
         }
         if (dcvsSlotHeld($conn, $preferred_date, $preferred_time)) {

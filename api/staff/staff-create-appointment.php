@@ -56,7 +56,26 @@ if (!dcvsIsStandardTime($time)) {
     echo json_encode(['success' => false, 'message' => 'Invalid time.']);
     exit;
 }
+if (strtotime($date . ' ' . $time) <= time()) {
+    echo json_encode(['success' => false, 'message' => 'Choose an appointment time that has not passed.']);
+    exit;
+}
 $time = substr($time, 0, 5) . ':00';
+dcvsLockAppointmentCapacityDates($conn, [$date]);
+
+$duplicateStmt = $conn->prepare("SELECT COUNT(*) FROM appointments
+    WHERE user_id = ? AND COALESCE(scheduled_date, preferred_date) = ?
+      AND COALESCE(scheduled_time, preferred_time) = ?
+      AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+      AND archived_at IS NULL");
+$duplicateStmt->bind_param('iss', $residentId, $date, $time);
+$duplicateStmt->execute();
+$hasDuplicate = (int)$duplicateStmt->get_result()->fetch_row()[0] > 0;
+$duplicateStmt->close();
+if ($hasDuplicate) {
+    echo json_encode(['success' => false, 'message' => 'This resident already has an appointment at this date and time.']);
+    exit;
+}
 
 $userStmt = $conn->prepare("SELECT user_id, full_name FROM users WHERE user_id = ? AND role = 'resident' AND archived_at IS NULL");
 $userStmt->bind_param("i", $residentId);
@@ -86,11 +105,13 @@ if ($petId) {
 $slotAvailable = $urgencyLevel === 'urgent'
     ? dcvsUrgentSlotAvailable($conn, $date, $time)
     : dcvsSlotAvailable($conn, $date, $time);
-$dailyLimit = $urgencyLevel === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
+$dailyCapacity = dcvsAppointmentDailyCapacity($conn, $date, $urgencyLevel);
 $slotCapacity = $urgencyLevel === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $time);
-if (!$slotAvailable
-    || dcvsAppointmentSlotCount($conn, $date, $time, 0, $urgencyLevel) >= $slotCapacity
-    || dcvsAppointmentDayCount($conn, $date, 0, $urgencyLevel) >= $dailyLimit) {
+if ((!$dailyCapacity['has_program'] && $urgencyLevel === 'urgent')
+    || !$dailyCapacity['available']
+    || !$slotAvailable
+    || dcvsAppointmentSlotCount($conn, $date, $time, 0, $dailyCapacity['has_program'] ? $urgencyLevel : 'all') >= $slotCapacity
+    ) {
     echo json_encode(['success' => false, 'message' => 'That time slot has no remaining ' . $urgencyLevel . ' capacity.']);
     exit;
 }

@@ -20,6 +20,7 @@
     var POLL_INTERVAL = 7000;
     var lastPoll = new Date().toISOString().slice(0, 19).replace('T', ' ');
     var pollTimer = null;
+    var scriptUrl = document.currentScript ? document.currentScript.src : '';
 
     // Start only on pages that opt in
     if (!document.querySelector('[data-realtime-page]')) return;
@@ -284,7 +285,8 @@
 
     // ── Poll ──
     function poll() {
-        var url = 'includes/poll-updates.php?sess=' + encodeURIComponent(sessName) + '&since=' + encodeURIComponent(lastPoll);
+        var pollEndpoint = scriptUrl ? new URL('poll-updates.php', scriptUrl).href : 'includes/poll-updates.php';
+        var url = pollEndpoint + '?sess=' + encodeURIComponent(sessName) + '&since=' + encodeURIComponent(lastPoll);
         fetch(url)
             .then(function (r) { return r.json(); })
             .then(function (data) {

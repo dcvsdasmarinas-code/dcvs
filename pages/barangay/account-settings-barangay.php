@@ -11,6 +11,8 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/barangay-app-base.php';
+$appBaseUrl = dcvsBarangayAppBaseUrl();
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'barangay') {
     header('Location: login-barangay.php');
@@ -70,7 +72,8 @@ $pageTitle = 'Account Settings';
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-  <link rel="stylesheet" href="assets/css/sb2.css">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/sb2.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/notification.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #ffffff !important; color: #18181b; --topbar-h: 64px; --bg: #ffffff !important; }
@@ -116,8 +119,7 @@ $pageTitle = 'Account Settings';
     .notif-time{font-size:.65rem;color:#94a3b8;margin-top:3px;}
     .notif-empty{text-align:center;padding:2rem;color:#94a3b8;font-size:.82rem;}
     @media(max-width:640px){.notif-panel{width:calc(100vw - 2rem)!important;right:.5rem!important;}}
-    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);border:1px solid transparent;}
-    .user-profile:hover{background:#F3F4F6;border-color:#F0F2F5;}
+    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;border:1px solid transparent;}
     .user-avatar{width:34px;height:34px;border-radius:50%;background:#D5ECE0;border:1px solid #B8DEC9;display:flex;align-items:center;justify-content:center;color:#0B4D26;font-weight:700;font-size:12px;overflow:hidden;}
     .user-meta{display:flex;flex-direction:column;line-height:1.25;}
     .user-name{font-size:14px;font-weight:600;color:#18181B;}
@@ -126,7 +128,7 @@ $pageTitle = 'Account Settings';
 
     /* Profile Settings */
     .profile-settings-wrapper * { box-sizing: border-box; }
-    .profile-settings-wrapper { max-width: 680px; margin: 0 auto; }
+    .profile-settings-wrapper { width:100%; min-width:0; max-width: 680px; margin: 0 auto; }
     .profile-settings-wrapper .ps-card { background: #fff; border: 1px solid #e6e8eb; border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
     .profile-settings-wrapper .ps-profile-card { display: flex; align-items: center; justify-content: space-between; }
     .profile-settings-wrapper .ps-profile-left { display: flex; align-items: center; gap: 16px; }
@@ -191,14 +193,31 @@ $pageTitle = 'Account Settings';
     .btn-secondary:hover { background: #f5f6f8; }
 
     @media(max-width:768px) {
-      .main-content { padding: 1rem; }
-      .topbar { padding: 0 1rem; }
+      .main-content { min-width:0; padding: 1rem; }
+      .topbar { gap:10px; padding: 0 1rem; }
+      .topbar-right { gap:6px; }
+      .user-meta { display:none; }
+      .profile-settings-wrapper .ps-form-row { grid-template-columns:minmax(0,1fr); }
+      .profile-settings-wrapper .ps-profile-left { min-width:0; }
+      .profile-settings-wrapper .ps-profile-left>div:last-child { min-width:0; overflow-wrap:anywhere; }
+    }
+    @media(max-width:480px) {
+      .main-content { padding:12px; }
+      .topbar { padding:0 10px; }
+      .topbar-left { min-width:0; gap:10px; }
+      .topbar-breadcrumb { font-size:12px; }
+      .profile-settings-wrapper .ps-card { padding:18px 16px; }
+      .profile-settings-wrapper .ps-profile-left { align-items:flex-start; gap:12px; }
+      .profile-settings-wrapper .ps-profile-name { line-height:1.25; overflow-wrap:anywhere; }
+      .profile-settings-wrapper .ps-profile-sub { font-size:13px; overflow-wrap:anywhere; }
+      .profile-settings-wrapper .ps-footer-actions { flex-direction:column; }
+      .profile-settings-wrapper .ps-footer-actions .ps-btn { width:100%; min-height:44px; }
     }
   </style>
 </head>
 <body class="sb2-active">
 
-<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
+<?php $barangaySidebarStylesheetInHead = true; include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
   <header class="topbar">
     <div class="topbar-left">
@@ -222,8 +241,8 @@ $pageTitle = 'Account Settings';
         </button>
         <div class="notif-panel" id="notifPanel" data-notification-panel data-portal="barangay"
           data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
-          data-action-url="includes/staff-notification-action.php?portal=barangay"
-          data-load-url="get-notifications.php?limit=30" data-app-base-url="">
+          data-action-url="<?php echo htmlspecialchars($appBaseUrl . '/includes/staff-notification-action.php?portal=barangay', ENT_QUOTES, 'UTF-8'); ?>"
+          data-load-url="<?php echo htmlspecialchars($appBaseUrl . '/get-notifications.php?limit=30', ENT_QUOTES, 'UTF-8'); ?>" data-app-base-url="<?php echo htmlspecialchars($appBaseUrl, ENT_QUOTES, 'UTF-8'); ?>">
           <div class="notif-panel-header">
             <h4>Notifications</h4>
             <button class="notif-mark-all" type="button" <?php echo $unreadNotifs === 0 ? 'disabled' : ''; ?>><i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read</button>
@@ -239,7 +258,7 @@ $pageTitle = 'Account Settings';
           </div>
         </div>
       </div>
-      <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-profile">
         <div class="user-avatar">
           <?php if (!empty($avatarUrl)): ?>
             <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
@@ -483,7 +502,6 @@ if (toggle && sidebar) {
 }
 
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/notification-panel.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
 </body>
 </html>

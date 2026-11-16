@@ -41,7 +41,7 @@ $apptsQuery = $conn->query("
     JOIN users u ON a.user_id = u.user_id
     LEFT JOIN pets p ON a.pet_id = p.pet_id
     WHERE a.archived_at IS NULL
-      AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress')
+      AND a.status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
 ");
 if ($apptsQuery) {
     while ($row = $apptsQuery->fetch_assoc()) {

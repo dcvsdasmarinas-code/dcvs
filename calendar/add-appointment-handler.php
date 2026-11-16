@@ -43,7 +43,10 @@ if (!$user_id || !in_array($appointment_type, $validTypes, true) || !$preferred_
     echo json_encode(['success' => false, 'message' => 'All fields are required.']);
     exit;
 }
-if (!dcvsIsStandardTime($preferred_time)) {
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferred_date)
+    || !checkdate((int)substr($preferred_date, 5, 2), (int)substr($preferred_date, 8, 2), (int)substr($preferred_date, 0, 4))
+    || !dcvsIsStandardTime($preferred_time)
+    || strtotime($preferred_date . ' ' . $preferred_time) <= time()) {
     echo json_encode(['success' => false, 'message' => 'Please choose one of the available clinic appointment times.']);
     exit;
 }
@@ -62,9 +65,10 @@ if (!$resident) {
 }
 $checkUser->close();
 
+dcvsLockAppointmentCapacityDates($conn, [$preferred_date]);
 $activeStatuses = "'pending','approved','scheduled'";
 
-$dupStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND preferred_date = ? AND preferred_time = ? AND status IN ($activeStatuses,'in_progress') AND archived_at IS NULL");
+$dupStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND COALESCE(scheduled_date, preferred_date) = ? AND COALESCE(scheduled_time, preferred_time) = ? AND status IN ($activeStatuses,'in_progress','rescheduled','action_needed') AND archived_at IS NULL");
 $dupStmt->bind_param('iss', $user_id, $preferred_date, $preferred_time);
 $dupStmt->execute();
 if ($dupStmt->get_result()->fetch_row()[0] > 0) {
@@ -74,8 +78,8 @@ if ($dupStmt->get_result()->fetch_row()[0] > 0) {
 }
 $dupStmt->close();
 
-$dCount = dcvsAppointmentDayCount($conn, $preferred_date);
-if ($dCount >= DCVS_MAX_APPOINTMENTS_PER_DAY) {
+$dailyCapacity = dcvsAppointmentDailyCapacity($conn, $preferred_date, 'routine');
+if (!$dailyCapacity['available']) {
     echo json_encode(['success' => false, 'message' => 'This date is fully booked (max ' . DCVS_MAX_APPOINTMENTS_PER_DAY . ').']);
     exit;
 }
@@ -88,7 +92,7 @@ if (dcvsSlotHeld($conn, $preferred_date, $preferred_time)) {
     echo json_encode(['success' => false, 'message' => 'This time slot is already reserved (max 1).']);
     exit;
 }
-if (dcvsAppointmentSlotCount($conn, $preferred_date, $preferred_time) >= dcvsRoutineSlotCapacity($conn, $preferred_date, substr($preferred_time, 0, 5))) {
+if (dcvsAppointmentSlotCount($conn, $preferred_date, $preferred_time, 0, 'all') >= dcvsRoutineSlotCapacity($conn, $preferred_date, substr($preferred_time, 0, 5))) {
     echo json_encode(['success' => false, 'message' => 'This time slot is already at its staff capacity.']);
     exit;
 }

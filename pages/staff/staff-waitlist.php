@@ -12,6 +12,8 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 
 if (empty($_SESSION['logged_in']) || ($_SESSION['role'] ?? '') !== 'staff') {
     header('Location: login-staff.php');
@@ -106,8 +108,9 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <link rel="stylesheet" href="assets/css/dashboard.css">
-  <link rel="stylesheet" href="assets/css/responsive.css">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>">
   <style>
     body.staff-theme { background:#fff; }
     .waitlist-page { padding-bottom:32px; font-family:'Inter','Segoe UI',sans-serif; color:#18181b; }
@@ -118,19 +121,19 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
     .waitlist-kpi-value { margin:0 0 6px; color:#18181b; font-size:26px; font-weight:600; letter-spacing:-.02em; line-height:1; }
     .waitlist-kpi-sub { margin:0; color:#71717a; font-size:14px; font-weight:400; }
     .waitlist-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
-    .waitlist-toolbar input,.waitlist-toolbar select { height:36px; box-sizing:border-box; padding:0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    .waitlist-toolbar input[name=search],.waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter { height:36px; box-sizing:border-box; padding:0 10px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; box-shadow:0 1px 2px rgba(0,0,0,.05); }
     .waitlist-toolbar input[name=search] { flex:0 1 280px; width:280px; min-width:180px; }
-    .waitlist-toolbar select { min-width:150px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; appearance:none; -webkit-appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; }
-    .waitlist-toolbar select:focus,.waitlist-toolbar input:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
+    .waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter { min-width:150px; padding:0 26px 0 10px; border-radius:6px; border:1px solid #e4e4e7; appearance:none; -webkit-appearance:none; background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center; font-size:14px; font-weight:500; color:#18181b; font-family:inherit; cursor:pointer; }
+    .waitlist-toolbar .waitlist-service-filter:focus,.waitlist-toolbar .waitlist-status-filter:focus,.waitlist-toolbar input[name=search]:focus { outline:none; border-color:#18181b; box-shadow:0 0 0 1px #18181b; }
     .waitlist-date-filter { position:relative; display:inline-flex; }
     .waitlist-date-filter input { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
-    .waitlist-toolbar button,.waitlist-action { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-    .waitlist-toolbar button:hover,.waitlist-action:hover { background:#f4f4f5; }
+    .waitlist-toolbar .waitlist-date-button,.waitlist-toolbar .waitlist-date-clear,.waitlist-action { height:36px; padding:0 12px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; gap:8px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+    .waitlist-toolbar .waitlist-date-button:hover,.waitlist-toolbar .waitlist-date-clear:hover,.waitlist-action:hover { background:#f4f4f5; }
     .waitlist-toolbar .waitlist-date-button { width:36px; min-width:36px; padding:0; justify-content:center; }
     .waitlist-toolbar .waitlist-date-button.has-date { border-color:#18181b; }
     .waitlist-date-clear { width:30px; min-width:30px; padding:0 !important; margin-left:-7px; }
     .waitlist-card { overflow:hidden; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
-    .waitlist-table-wrap { min-height:560px; overflow-x:auto; }
+    .waitlist-table-wrap { min-height:0; overflow-x:auto; }
     .waitlist-table { width:100%; min-width:1180px; border-collapse:collapse; table-layout:auto; }
     .waitlist-table th { height:42px; padding:0 12px; border-bottom:1px solid #e4e4e7; background:#fafafa; color:#71717a; font-size:14px; font-weight:500; text-align:left; white-space:nowrap; }
     .waitlist-table td { padding:12px; border-bottom:1px solid #e4e4e7; font-size:14px; vertical-align:middle; }
@@ -179,36 +182,97 @@ $paginationBase = 'staff-waitlist.php?' . http_build_query($queryParams);
     .dt-page-btn:hover:not(:disabled) { background:#f4f4f5; }
     .dt-page-btn:disabled { opacity:.5; cursor:not-allowed; }
     @media(max-width:1180px) { .waitlist-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-    @media(max-width:800px) { .waitlist-kpis { grid-template-columns:1fr 1fr; gap:10px; } .dt-pagination-right { justify-content:center; gap:12px; } }
-    @media(max-width:480px) { .waitlist-kpis { grid-template-columns:1fr; } }
+    @media(max-width:800px) {
+      .waitlist-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+      .waitlist-toolbar {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
+      }
+      .waitlist-toolbar input[name=search] {
+        grid-column:1 / -1;
+        width:100%;
+        min-width:0;
+      }
+      .waitlist-toolbar .waitlist-date-filter { grid-column:1; }
+      .waitlist-toolbar .waitlist-date-clear { grid-column:2; justify-self:start; }
+      .waitlist-toolbar .waitlist-service-filter { grid-column:1; grid-row:3; }
+      .waitlist-toolbar .waitlist-status-filter { grid-column:2; grid-row:3; }
+      .waitlist-toolbar .waitlist-service-filter,.waitlist-toolbar .waitlist-status-filter {
+        width:100%;
+        min-width:0;
+      }
+      .waitlist-table-wrap {
+        width:100%;
+        max-width:100%;
+        min-width:0;
+        -webkit-overflow-scrolling:touch;
+        overscroll-behavior-x:contain;
+      }
+      .waitlist-table { width:max-content; min-width:100%; }
+      .waitlist-table th:first-child,
+      .waitlist-table td:first-child {
+        position:sticky;
+        left:0;
+        z-index:1;
+        background:#fff;
+      }
+      .waitlist-table thead th:first-child { z-index:2; background:#fafafa; }
+      .dt-pagination,
+      .dt-pagination-right {
+        justify-content:center;
+        gap:10px;
+      }
+      .dt-pagination-right { width:100%; }
+    }
+    @media(max-width:480px) {
+      .waitlist-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .waitlist-kpi { min-height:78px; }
+      .dt-rows { flex-wrap:wrap; justify-content:center; }
+      .waitlist-confirm-overlay { padding:12px; }
+      .waitlist-confirm-dialog { max-width:100%; padding:20px; }
+      .waitlist-confirm-footer { flex-direction:column-reverse; }
+      .waitlist-confirm-button { width:100%; }
+    }
   </style>
 </head>
 <body class="staff-theme" data-portal="staff">
 <?php include __DIR__ . '/../../includes/staff-sidebar.php'; ?>
 <main class="main-content">
   <div class="waitlist-page">
+    <header class="staff-page-heading">
+      <div>
+        <h1>Waitlist</h1>
+        <p>Monitor residents waiting for appointment openings and manage slot notifications.</p>
+      </div>
+    </header>
     <section class="waitlist-kpis" aria-label="Waitlist summary">
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Total Entries</p><p class="waitlist-kpi-value"><?php echo $totalWaitlistEntries; ?></p><p class="waitlist-kpi-sub">All waitlist requests</p></article>
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Pending</p><p class="waitlist-kpi-value"><?php echo $kpis['waiting']; ?></p><p class="waitlist-kpi-sub">Waiting for an open slot</p></article>
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Notified</p><p class="waitlist-kpi-value"><?php echo $kpis['notified']; ?></p><p class="waitlist-kpi-sub">Awaiting resident claim</p></article>
       <article class="waitlist-kpi"><p class="waitlist-kpi-label">Highest Demand Date</p><p class="waitlist-kpi-value" style="font-size:20px;"><?php echo $demandDate ? date('M d, Y', strtotime($demandDate)) : '—'; ?></p><p class="waitlist-kpi-sub"><?php echo $demandCount; ?> waiting resident<?php echo $demandCount === 1 ? '' : 's'; ?></p></article>
     </section>
-    <form class="waitlist-toolbar" method="get" action="staff-waitlist.php" data-draft-ignore>
-      <input type="search" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search resident or pet" aria-label="Search resident or pet">
-      <span class="waitlist-date-filter">
-        <button type="button" class="waitlist-date-button <?php echo $dateFilter !== '' ? 'has-date' : ''; ?>" id="waitlistDateButton" aria-label="Filter by date" title="Filter by date">
+    <form class="waitlist-toolbar staff-mobile-toolbar" method="get" action="staff-waitlist.php" data-draft-ignore>
+      <div class="staff-toolbar-search-row">
+      <input class="staff-toolbar-search" type="search" name="search" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search resident or pet" aria-label="Search resident or pet">
+      <span class="staff-date-filter waitlist-date-filter staff-toolbar-filter" data-date-filter="waitlist">
+        <button type="button" class="waitlist-date-button staff-date-filter-button <?php echo $dateFilter !== '' ? 'has-date' : ''; ?>" id="waitlistDateButton" aria-label="Filter waitlist by preferred date" title="Filter by date" aria-expanded="false">
           <i class="fas fa-filter" aria-hidden="true"></i>
         </button>
-        <input type="date" name="date" id="waitlistDate" value="<?php echo htmlspecialchars($dateFilter); ?>" aria-label="Filter by preferred date">
+        <input type="hidden" name="date" id="waitlistDateFrom" value="<?php echo htmlspecialchars($dateFilter); ?>">
+        <input type="hidden" id="waitlistDateTo" value="<?php echo htmlspecialchars($dateFilter); ?>">
       </span>
-      <?php if ($dateFilter !== ''): ?><button type="button" class="waitlist-date-clear" id="clearWaitlistDate" aria-label="Clear date filter"><i class="fas fa-times"></i></button><?php endif; ?>
-      <select name="service" aria-label="Filter by service" onchange="this.form.submit()">
+      </div>
+      <div class="staff-toolbar-filters">
+      <?php if ($dateFilter !== ''): ?><button type="button" class="waitlist-date-clear staff-toolbar-reset" id="clearWaitlistDate" aria-label="Clear date filter"><i class="fas fa-times"></i></button><?php endif; ?>
+      <select class="waitlist-service-filter staff-toolbar-select" name="service" aria-label="Filter by service" onchange="this.form.submit()">
         <option value="">All services</option>
         <?php foreach ($services as $service): ?><option value="<?php echo $service; ?>" <?php echo $serviceFilter === $service ? 'selected' : ''; ?>><?php echo htmlspecialchars(ucfirst($service)); ?></option><?php endforeach; ?>
       </select>
-      <select name="status" aria-label="Filter by status" onchange="this.form.submit()">
+      <select class="waitlist-status-filter staff-toolbar-select" name="status" aria-label="Filter by status" onchange="this.form.submit()">
         <?php foreach (array_merge(['all'], $statuses) as $status): ?><option value="<?php echo $status; ?>" <?php echo $statusFilter === $status ? 'selected' : ''; ?>><?php echo $status === 'all' ? 'All statuses' : ($status === 'waiting' ? 'Pending' : htmlspecialchars(ucfirst($status))); ?></option><?php endforeach; ?>
       </select>
+      </div>
     </form>
     <section class="waitlist-card">
       <div class="waitlist-table-wrap">
@@ -413,14 +477,9 @@ function waitlistSubmitWith(values) {
 }
 function waitlistGoToPage(page) { waitlistSubmitWith({page: String(page)}); }
 function waitlistSetPerPage(value) { waitlistSubmitWith({per_page: value, page: '1'}); }
-var waitlistDateInput = document.getElementById('waitlistDate');
-document.getElementById('waitlistDateButton').addEventListener('click', function() {
-  if (waitlistDateInput.showPicker) waitlistDateInput.showPicker();
-  else waitlistDateInput.click();
-});
-waitlistDateInput.addEventListener('change', function() {
-  waitlistDateInput.form.submit();
-});
+window.waitlistSetDate = function() {
+  waitlistSubmitWith({date: document.getElementById('waitlistDateFrom').value});
+};
 var clearWaitlistDate = document.getElementById('clearWaitlistDate');
 if (clearWaitlistDate) clearWaitlistDate.addEventListener('click', function() { waitlistSubmitWith({date: null}); });
 var waitlistSearchInput = document.querySelector('.waitlist-toolbar input[name="search"]');
@@ -435,5 +494,6 @@ if (waitlistSearchInput) waitlistSearchInput.addEventListener('input', function(
   }, 350);
 });
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

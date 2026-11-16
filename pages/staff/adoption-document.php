@@ -51,16 +51,11 @@ $stmt->execute();
 $row = $stmt->get_result()->fetch_row();
 $stmt->close();
 $filename = $row[0] ?? '';
-if (!is_string($filename) || !preg_match('/^[a-z]+_[a-f0-9]{48}\.(jpg|png|webp|pdf)$/', $filename)) {
+if (!adoptionPrivateDocumentExists($filename)) {
     http_response_code(404);
     exit('Document not found.');
 }
-
 $path = adoptionPrivateDirectory() . DIRECTORY_SEPARATOR . $filename;
-if (!is_file($path) || !is_readable($path)) {
-    http_response_code(404);
-    exit('Document not found.');
-}
 $finfo = finfo_open(FILEINFO_MIME_TYPE);
 if ($finfo === false) {
     http_response_code(500);

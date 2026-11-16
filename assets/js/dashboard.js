@@ -2,10 +2,21 @@
 
 // ── Section Switching ──
 function switchSection(sectionId) {
-  document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
   var contentSectionId = sectionId === 'adoption' ? 'analytics' : sectionId;
   var target = document.getElementById(contentSectionId);
-  if (target) target.style.display = 'block';
+  if (!target) return;
+  if (sectionId !== 'appointments') {
+    var currentUrl = new URL(window.location.href);
+    var previousSearch = currentUrl.search;
+    Array.from(currentUrl.searchParams.keys()).forEach(function(parameter) {
+      if (parameter.toLowerCase().indexOf('appt_') === 0) currentUrl.searchParams.delete(parameter);
+    });
+    if (currentUrl.search !== previousSearch) {
+      history.replaceState(null, '', currentUrl.pathname + currentUrl.search + currentUrl.hash);
+    }
+  }
+  document.querySelectorAll('.content-section').forEach(function(s) { s.style.display = 'none'; });
+  target.style.display = 'block';
   document.body.classList.toggle('white-page', sectionId === 'calendar-schedule' || sectionId === 'appointments' || sectionId === 'account-settings');
   document.querySelectorAll('.nav-link').forEach(function(l) { l.classList.remove('active'); });
   var nav = document.querySelector('.nav-link[data-section="' + sectionId + '"]');
@@ -16,7 +27,7 @@ function switchSection(sectionId) {
     'users':'Users','activity':'Activity Logs',
     'settings':'Settings','client-pets':'Client & Pet DB',
     'barangay':'Barangay Validation','geomapping':'Geo-Mapping','pet-listings':'Pet Listings',
-    'reports-all':'All Reports','reports-pending':'Pending Validation','reports-active':'Active Cases','reports-resolved':'Resolved Cases'
+    'reports-all':'All Reports','reports-pending':'Pending Validation','reports-accepted':'Accepted by Barangay','reports-active':'Active Cases','reports-resolved':'Resolved Cases','reports-overdue':'Overdue Reports'
   };
   var bc = document.getElementById('breadcrumbCurrent');
   var analyticsLabels = { engine:'Cases Analytics', intel:'Appointment Overview', architect:'Programs & Services', citydrives:'City Drives' };

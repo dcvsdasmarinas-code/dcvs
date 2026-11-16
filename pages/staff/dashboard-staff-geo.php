@@ -10,7 +10,10 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/staff-app-base.php';
+$appBaseUrl = dcvsStaffAppBaseUrl();
 require_once __DIR__ . '/../../includes/reports/location.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['role'] !== 'staff') {
@@ -34,8 +37,28 @@ $roleCheck->close();
 
 $reportPinsEnabled = false;
 loadDcvsEnv();
-$reportRoutingEnabled = trim((string)env('DCVS_ROUTING_API_URL', '')) !== '';
 $mapTilerApiKey = trim((string)env('DCVS_MAPTILER_API_KEY', ''));
+$geoSatelliteStyle = [
+    'version' => 8,
+    'glyphs' => 'https://tiles.basemaps.cartocdn.com/v/20261026-01/fonts/{fontstack}/{range}.pbf',
+    'sources' => [
+        'esri-world-imagery' => [
+            'type' => 'raster',
+            'tiles' => ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'],
+            'tileSize' => 256,
+            'maxzoom' => 19,
+            'attribution' => 'Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+        ],
+    ],
+    'layers' => [
+        [
+            'id' => 'esri-world-imagery',
+            'type' => 'raster',
+            'source' => 'esri-world-imagery',
+            'paint' => ['raster-brightness-max' => 0.82],
+        ],
+    ],
+];
 if (env('DCVS_REPORT_PIN_FEATURE_ENABLED', '0') === '1') {
     $reportPinFeatures = dcvsLoadOfficialBarangayPolygons(
         __DIR__ . '/../../DCVS_Dasmariñas_75_Barangay_Crosswalk_Template.csv',
@@ -64,14 +87,15 @@ $activePage = 'geo';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/map-place-search.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/map-place-search.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 
   <!-- MapCN bundle -->
-  <link rel="stylesheet" href="dist/mapcn.css" />
-  <link rel="stylesheet" href="geo-map/map.css?v=<?php echo (int)filemtime(__DIR__ . '/../../geo-map/map.css'); ?>">
-  <link rel="stylesheet" href="assets/css/geo-drawer.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'); ?>">
-  <script src="dist/mapcn.umd.cjs"></script>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/geo-map/map.css?v=' . (int)filemtime(__DIR__ . '/../../geo-map/map.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/geo-drawer.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/geo-drawer.css'), ENT_QUOTES, 'UTF-8'); ?>">
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/dist/mapcn.umd.cjs?v=' . (int)filemtime(__DIR__ . '/../../dist/mapcn.umd.cjs'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 
   <style>
     :root {
@@ -86,21 +110,21 @@ $activePage = 'geo';
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Inter', 'Segoe UI', sans-serif; background: var(--bg-body); color: var(--text); min-height: 100vh; display: flex; }
     .staff-layout { display: flex; width: 100%; min-height: 100vh; }
-    .staff-main { flex: 1; margin-left: 80px; margin-top: var(--topbar-h, 64px); padding: 1.75rem 2rem; min-height: calc(100vh - var(--topbar-h, 64px)); }
+    .staff-main { box-sizing: border-box; display: flex; flex: 1; flex-direction: column; margin-left: 80px; margin-top: var(--topbar-h, 64px); padding: 0 2rem; height: calc(100vh - var(--topbar-h, 64px)); min-height: calc(100vh - var(--topbar-h, 64px)); background: #fff; }
 
     .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
     .page-title { font-size:1.35rem; font-weight:800; color:#0f172a; margin:0; font-family:'Inter',sans-serif; display:flex; align-items:center; gap:10px; }
     .page-title i { color:#0E8131; }
     .page-subtitle { font-size:0.88rem; color:#64748b; margin:4px 0 0; }
 
-    .geo-full-page { margin: -1.75rem -2rem; }
-    .geo-full-page .geo-map-section { height: calc(100vh - var(--topbar-h, 64px)); margin-bottom: 0; }
-    .geo-full-page .geo-map-card { border-radius: 0; height: 100%; display: flex; flex-direction: column; }
+    .geo-full-page { flex: 1 1 0; min-height: 0; margin: 0 -2rem; }
+    .geo-full-page .geo-map-section { height: 100%; min-height: 0; margin-bottom: 0; }
+    .geo-full-page .geo-map-card { border-top: 0; border-radius: 0; height: 100%; display: flex; flex-direction: column; }
     .geo-full-page #geoMap { height: auto !important; flex: 1; min-height: 0; }
 
     @media (max-width: 768px) {
-      .staff-main { margin-left: 0; padding: 1rem; }
-      .geo-full-page { margin: -1rem; }
+      body.staff-theme.sb2-active .staff-main { box-sizing: border-box; width: 100%; min-width: 0; margin-left: 0; padding: 0 !important; }
+      .geo-full-page { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; margin: 0; }
     }
 
     /* Buttons */
@@ -110,6 +134,9 @@ $activePage = 'geo';
     .sd-btn-primary:hover{background:#27272a;}
     .sd-btn-outline{background:#ffffff;border-color:#e4e4e7;color:#18181b;}
     .sd-btn-outline:hover{background:#f4f4f5;}
+    .geo-search-status{flex-basis:100%;min-height:0;color:#64748b;font-size:12px;}
+    .geo-search-status:empty{display:none;}
+    .geo-search-wrap{position:relative;z-index:90;}
   </style>
 </head>
 <body class="staff-theme">
@@ -123,17 +150,48 @@ $activePage = 'geo';
       <div class="geo-map-card">
         <!-- Summary bar -->
         <div class="geo-summary-bar">
-          <span class="geo-summary-item"><i class="fas fa-certificate" style="color:#0E8131;"></i> Confirmed: <strong id="geoTotalConfirmed">0</strong></span>
-          <span class="geo-summary-item"><i class="fas fa-map-marker-alt" style="color:#6266ea;"></i> Affected: <strong id="geoAffectedBgy">0 / 75</strong></span>
-          <span class="geo-summary-item"><i class="fas fa-exclamation-triangle" style="color:#ef4444;"></i> Highest Risk: <strong id="geoHighestRisk">--</strong></span>
-          <span class="geo-summary-item"><i class="fas fa-sync-alt" style="color:#94a3b8;"></i> Updated: <strong id="geoLastRefresh">--</strong></span>
-          <span class="geo-search-wrap">
-            <i class="fas fa-search"></i>
-            <input type="text" id="geoSearch" placeholder="Search barangay..." oninput="MapCN.barangayOverlay.search(this.value)">
-          </span>
+          <div class="geo-summary-item">
+            <div class="geo-summary-label">Confirmed cases</div>
+            <div class="geo-summary-value" id="geoTotalConfirmed">0</div>
+          </div>
+          <div class="geo-summary-item">
+            <div class="geo-summary-label">Barangays affected</div>
+            <div class="geo-summary-value" id="geoAffectedBgy">0 of 75</div>
+            <div class="geo-summary-note" id="geoAffectedPercent">0.0% of all barangays</div>
+          </div>
+          <div class="geo-summary-item">
+            <div class="geo-summary-label">Highest risk</div>
+            <div class="geo-summary-highest">
+              <span class="geo-summary-value" id="geoHighestRiskName">None</span>
+              <span class="geo-risk-chip geo-risk-chip-green" id="geoHighestRiskChip">0 cases</span>
+            </div>
+          </div>
+          <div class="geo-summary-item geo-summary-updated">
+            <div class="geo-summary-label">Last updated</div>
+            <div class="geo-summary-updated-value">
+              <span class="geo-summary-value" id="geoLastRefresh">--</span>
+              <button class="geo-summary-refresh" type="button" aria-label="Refresh map data" onclick="MapCN.barangayOverlay.refresh()">
+                <i class="fas fa-sync-alt" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="geo-search-wrap dcvs-place-search"
+             data-map-target="geoMap"
+             data-geocode-endpoint="<?php echo htmlspecialchars($appBaseUrl . '/api/shared/location-geocode.php', ENT_QUOTES, 'UTF-8'); ?>"
+             data-portal="staff"
+             data-status-target="#geoSearchStatus">
+          <i class="fas fa-search dcvs-place-search-icon" aria-hidden="true"></i>
+          <input type="search" id="geoSearch" placeholder="Search barangays, addresses, landmarks, and places..."
+                 role="combobox" aria-autocomplete="list" aria-controls="geoSearchResults"
+                 aria-expanded="false" aria-label="Search barangays, addresses, landmarks, and places"
+                 autocomplete="off">
+          <div class="dcvs-place-results" id="geoSearchResults" role="listbox"
+               aria-label="Map search results" hidden></div>
+          <span id="geoSearchStatus" class="dcvs-place-status geo-search-status" role="status" aria-live="polite"></span>
         </div>
         <!-- Map container -->
-        <div id="geoMap" data-mapcn='{"center":[120.968,14.306],"zoom":12,"barangayOverlay":true,"geojsonUrl":"geo-map/barangays-public.geojson.php","style":"https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"}' data-map-basemap-toggle="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" data-report-route-enabled="<?php echo $reportRoutingEnabled ? '1' : '0'; ?>" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>" data-preserve-map-view="true"<?php endif; ?> style="width:100%;position:relative;">
+        <div id="geoMap" data-mapcn='<?php echo htmlspecialchars(json_encode(["center" => [120.968, 14.306], "zoom" => 15, "barangayOverlay" => true, "controlsPosition" => "bottom-right", "geojsonUrl" => $appBaseUrl . "/geo-map/barangays-public.geojson.php", "style" => "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json"], JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>' data-map-basemap-toggle="true" data-max-map-zoom="19" data-initial-basemap="street" data-satellite-style='<?php echo htmlspecialchars(json_encode($geoSatelliteStyle, JSON_UNESCAPED_SLASHES), ENT_QUOTES, "UTF-8"); ?>' data-preserve-map-view="true" data-city-boundary="true" data-map-risk-overlay="true" data-map-landmarks-session="DCVS_STAFF_SESSION" <?php if ($reportPinsEnabled): ?>data-report-pins-session="DCVS_STAFF_SESSION"<?php endif; ?> <?php if ($mapTilerApiKey !== ''): ?>data-maptiler-key="<?php echo htmlspecialchars($mapTilerApiKey, ENT_QUOTES, 'UTF-8'); ?>"<?php endif; ?> style="width:100%;position:relative;">
           <div class="mapcn-loading"><i class="fas fa-spinner"></i> Loading map...</div>
           <div class="geo-basemap-status" data-basemap-status role="status" aria-live="polite"></div>
         </div>
@@ -154,13 +212,12 @@ $activePage = 'geo';
         <?php include __DIR__ . '/../../includes/geo-drawer.php'; ?>
         <!-- Legend -->
         <div class="geo-legend">
-          <span style="font-weight:600;color:#18181b;font-size:12px;">Risk Level:</span>
-          <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#22c55e;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">0 cases</span></div>
-          <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#eab308;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">1–5 cases</span></div>
-          <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#f97316;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">6–15 cases</span></div>
-          <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#ef4444;border:1px solid rgba(255,255,255,0.8);"></span><span class="geo-legend-label">16+ cases</span></div>
-          <div style="margin-left:auto;">
-            <button class="action-btn-sm blue" onclick="MapCN.barangayOverlay.refresh()"><i class="fas fa-sync-alt"></i> Refresh</button>
+          <div class="geo-legend-title">Confirmed cases per barangay</div>
+          <div class="geo-legend-items">
+            <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#22c55e;"></span><span class="geo-legend-label">0 cases</span></div>
+            <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#eab308;"></span><span class="geo-legend-label">1–5 cases</span></div>
+            <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#f97316;"></span><span class="geo-legend-label">6–15 cases</span></div>
+            <div class="geo-legend-item"><span class="geo-legend-swatch" style="background:#ef4444;"></span><span class="geo-legend-label">16+ cases</span></div>
           </div>
         </div>
       </div>
@@ -169,46 +226,6 @@ $activePage = 'geo';
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  var mapEl = document.getElementById('geoMap');
-  if (!mapEl) return;
-  function addGeoLabels(map) {
-    if (!map || !map.getSource('barangays')) return false;
-    try {
-      if (map.getLayer('barangay-label')) {
-        map.setLayoutProperty('barangay-label', 'visibility', 'none');
-      }
-      if (!map.getLayer('geo-brgy-label')) {
-        map.addLayer({
-          id: 'geo-brgy-label', type: 'symbol', source: 'barangays',
-          layout: {
-            'text-field': ['get', 'name'],
-            'text-size': 11, 'text-anchor': 'center', 'text-allow-overlap': false
-          },
-          paint: { 'text-color': '#1e293b', 'text-halo-color': '#ffffff', 'text-halo-width': 2 }
-        });
-      }
-      return true;
-    } catch (e) { return false; }
-  }
-  function tryStyle(map) {
-    if (addGeoLabels(map)) {
-      map.on('sourcedata', function() { addGeoLabels(map); });
-      map.on('styledata', function() { addGeoLabels(map); });
-      return true;
-    }
-    return false;
-  }
-  var tries = 0;
-  var iv = setInterval(function() {
-    if (tryStyle(window.MapCN && window.MapCN.map) || tries++ > 100) clearInterval(iv);
-  }, 200);
-  mapEl.addEventListener('mapcn:load', function(e) {
-    var map = e.detail && e.detail.map;
-    if (map && tryStyle(map)) clearInterval(iv);
-  });
-});
-
 document.addEventListener('DOMContentLoaded', function() {
   var q = new URLSearchParams(window.location.search).get('brgy');
   if (!q) return;
@@ -232,7 +249,7 @@ document.addEventListener('DOMContentLoaded', function() {
       });
       if (!ids.length) return;
       var inIds = ['match', ['get', 'id'], ids, true, false];
-      map.setPaintProperty('barangay-fill', 'fill-opacity', ['case', inIds, 0.7, 0.2]);
+      map.setPaintProperty('barangay-fill', 'fill-opacity', ['case', inIds, 0.24, 0.12]);
       map.setPaintProperty('barangay-outline', 'line-width', ['case', inIds, ['interpolate', ['linear'], ['zoom'], 10, 2.5, 12, 4, 15, 7], ['interpolate', ['linear'], ['zoom'], 10, 0.5, 12, 1, 15, 2]]);
       map.setPaintProperty('barangay-outline', 'line-opacity', ['case', inIds, 1, 0.3]);
       if (first && first.geometry) {
@@ -458,9 +475,10 @@ document.addEventListener('DOMContentLoaded', function() {
 })();
 </script>
 <?php if ($reportPinsEnabled): ?>
-<script src="assets/js/report-map-pins.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/report-map-pins.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/report-map-pins.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 <?php endif; ?>
-<script src="assets/js/map-landmarks.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'); ?>"></script>
-<script src="assets/js/map-basemap-toggle.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/map-landmarks.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-landmarks.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/map-basemap-toggle.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-basemap-toggle.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/map-place-search.js?v=' . (int)filemtime(__DIR__ . '/../../assets/js/map-place-search.js'), ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

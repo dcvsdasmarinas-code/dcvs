@@ -15,6 +15,7 @@ session_set_cookie_params([
 ]);
 session_start();
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/registration-validation.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
@@ -56,8 +57,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Please enter a valid email address.";
     }
-    if (empty($phone)) {
-        $errors[] = "Phone is required.";
+    $phoneError = dcvsRegistrationPhoneError($phone);
+    if ($phoneError !== '') {
+        $_SESSION['profile_phone_error'] = $phoneError;
+        $errors[] = $phoneError;
+    } else {
+        unset($_SESSION['profile_phone_error']);
     }
 
     if (!empty($errors)) {

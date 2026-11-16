@@ -23,6 +23,6 @@ if (isset($_SESSION['user_id'])) {
 $_SESSION = array();
 session_destroy();
 setcookie(session_name(), '', time() - 3600, '/');
-header('Location: login-barangay.php');
+header('Location: login.php');
 exit;
 ?>

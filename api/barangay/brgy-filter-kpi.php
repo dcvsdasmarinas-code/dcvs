@@ -48,7 +48,7 @@ if ($period === '1') {
 $total = [];
 $statuses = ['pending', 'validated', 'confirmed', 'rejected'];
 foreach ($statuses as $st) {
-    $q = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL");
+    $q = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')");
     $q->bind_param("is", $barangayId, $st);
     $q->execute();
     $total[$st] = (int)$q->get_result()->fetch_row()[0];
@@ -58,13 +58,13 @@ foreach ($statuses as $st) {
 // Period counts
 $cur = $prev = $pct = [];
 foreach ($statuses as $st) {
-    $cq = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL $curClause");
+    $cq = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected') $curClause");
     $cq->bind_param("is", $barangayId, $st);
     $cq->execute();
     $cur[$st] = (int)$cq->get_result()->fetch_row()[0];
     $cq->close();
 
-    $pq = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL $prevClause");
+    $pq = $conn->prepare("SELECT COUNT(*) FROM reports WHERE barangay_id = ? AND status = ? AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected') $prevClause");
     $pq->bind_param("is", $barangayId, $st);
     $pq->execute();
     $prev[$st] = (int)$pq->get_result()->fetch_row()[0];

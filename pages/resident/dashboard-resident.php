@@ -9,23 +9,38 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/appointment-reschedule-offers.php';
+require_once __DIR__ . '/../../includes/appointment-workflow.php';
+require_once __DIR__ . '/../../includes/reports/deadlines.php';
+require_once __DIR__ . '/../../includes/reports/resident-presentation.php';
 
 // Check if user is logged in
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
-    header('Location: login.php');
+    header('Location: ' . $appBaseUrl . '/login.php');
     exit;
 }
 
 // Check if user has resident role
 if ($_SESSION['role'] !== 'resident') {
-    header('Location: login.php');
+    header('Location: ' . $appBaseUrl . '/login.php');
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+$reportOverdueSlaSettings = dcvsLoadReportOverdueSlaSettings($conn);
+expireAdoptionReservations($conn);
+dcvsExpireAppointmentRescheduleOffers($conn);
+dcvsMarkOverdueAppointmentsNoShow($conn);
+$adoptionClockResult = $conn->query('SELECT UNIX_TIMESTAMP(NOW()) AS server_now');
+if (!$adoptionClockResult) {
+    throw new RuntimeException('The adoption reservation clock could not be loaded.');
+}
+$adoptionServerNow = (int)$adoptionClockResult->fetch_assoc()['server_now'];
+$adoptionClockResult->free();
 
 if (!empty($_SESSION['adoption_apply_listing_id'])) {
     $pendingAdoptionListingId = (int)$_SESSION['adoption_apply_listing_id'];
@@ -84,14 +99,165 @@ $stmt->close();
 
 // Fetch user's reports from database (excluding archived)
 $reports = [];
-$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address, r.status, r.created_at, r.updated_at, r.photo_url, r.video_url, r.urgency_level, rw.response_mode, rw.state AS response_state, rw.response_deadline, rw.progress_deadline, rw.turnover_deadline, rw.holding_location, rr.resolution_details, rr.animal_disposition, rr.resolved_at AS response_resolved_at, tt.status AS turnover_status, tt.due_at AS turnover_due_at, tt.received_at AS turnover_received_at FROM reports r LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
+$stmt = $conn->prepare("SELECT r.report_id, r.reference_id, r.report_type, r.animal_type, r.animal_breed, r.animal_count, r.animal_behavior, r.description, r.incident_at, r.location_address,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.status ELSE r.status END AS status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.duplicate_status ELSE r.duplicate_status END AS duplicate_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_report.scheduled_at ELSE r.scheduled_at END AS scheduled_at,
+    r.created_at, r.coordinates_lat, r.coordinates_long,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN GREATEST(r.updated_at, primary_report.updated_at) ELSE r.updated_at END AS updated_at,
+    r.photo_url, r.video_url, r.urgency_level, r.parent_report_id,
+    primary_report.reference_id AS primary_reference_id,
+    duplicate_parent.location_address AS duplicate_parent_location_address,
+    duplicate_parent.coordinates_lat AS duplicate_parent_coordinates_lat,
+    duplicate_parent.coordinates_long AS duplicate_parent_coordinates_long,
+    (primary_report.report_id IS NOT NULL) AS is_supporting_report,
+    COALESCE(primary_barangay.barangay_name, report_barangay.barangay_name) AS barangay_name,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_case.status ELSE cc.status END AS case_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.response_mode ELSE rw.response_mode END AS response_mode,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.state ELSE rw.state END AS response_state,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.response_deadline ELSE rw.response_deadline END AS response_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.progress_deadline ELSE rw.progress_deadline END AS progress_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.turnover_deadline ELSE rw.turnover_deadline END AS turnover_deadline,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.escalated_at ELSE rw.escalated_at END AS escalated_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.assigned_at ELSE rw.assigned_at END AS assigned_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_workflow.holding_location ELSE rw.holding_location END AS holding_location,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.resolution_details ELSE rr.resolution_details END AS resolution_details,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.animal_disposition ELSE rr.animal_disposition END AS animal_disposition,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.turnover_required ELSE rr.turnover_required END AS turnover_required,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_resolution.resolved_at ELSE rr.resolved_at END AS response_resolved_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.status ELSE tt.status END AS turnover_status,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.due_at ELSE tt.due_at END AS turnover_due_at,
+    CASE WHEN primary_report.report_id IS NOT NULL THEN primary_turnover.received_at ELSE tt.received_at END AS turnover_received_at
+    FROM reports r
+    LEFT JOIN reports primary_report ON r.duplicate_status = 'merged' AND primary_report.report_id = r.parent_report_id
+    LEFT JOIN reports duplicate_parent ON duplicate_parent.report_id = r.parent_report_id
+    LEFT JOIN barangays report_barangay ON report_barangay.barangay_id = r.barangay_id
+    LEFT JOIN barangays primary_barangay ON primary_barangay.barangay_id = primary_report.barangay_id
+    LEFT JOIN confirmed_cases cc ON cc.report_id = r.report_id
+    LEFT JOIN confirmed_cases primary_case ON primary_case.report_id = primary_report.report_id
+    LEFT JOIN report_response_workflow rw ON rw.report_id = r.report_id
+    LEFT JOIN report_response_workflow primary_workflow ON primary_workflow.report_id = primary_report.report_id
+    LEFT JOIN report_response_resolutions rr ON rr.report_id = r.report_id
+    LEFT JOIN report_response_resolutions primary_resolution ON primary_resolution.report_id = primary_report.report_id
+    LEFT JOIN report_turnover_tasks tt ON tt.report_id = r.report_id
+    LEFT JOIN report_turnover_tasks primary_turnover ON primary_turnover.report_id = primary_report.report_id
+    WHERE r.reporter_id = ? AND r.archived_at IS NULL ORDER BY r.report_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
 while ($row = $result->fetch_assoc()) {
+    $row['display_location_address'] = (string)$row['location_address'];
+    if ((int)($row['parent_report_id'] ?? 0) > 0
+        && is_numeric($row['coordinates_lat']) && is_numeric($row['coordinates_long'])
+        && is_numeric($row['duplicate_parent_coordinates_lat']) && is_numeric($row['duplicate_parent_coordinates_long'])
+        && (float)$row['coordinates_lat'] === (float)$row['duplicate_parent_coordinates_lat']
+        && (float)$row['coordinates_long'] === (float)$row['duplicate_parent_coordinates_long']) {
+        $parentLocationAddress = trim((string)($row['duplicate_parent_location_address'] ?? ''));
+        if ($parentLocationAddress !== '') {
+            $row['display_location_address'] = $parentLocationAddress;
+        }
+    }
+    $isSimilarReportReview = strtolower((string)($row['duplicate_status'] ?? '')) === 'suspected';
+    $overdueInfo = $isSimilarReportReview
+        ? null
+        : dcvsReportOverdueInfo($row, null, $reportOverdueSlaSettings);
+    $row['overdue_info'] = $overdueInfo;
+    $row['resident_presentation'] = dcvsResidentReportPresentation($row, $overdueInfo);
     $reports[] = $row;
 }
 $stmt->close();
+
+$reportMediaById = [];
+$mediaStmt = $conn->prepare("SELECT ra.attachment_id, ra.report_id, ra.attachment_type, ra.attachment_source, ra.file_url,
+        ra.mime_type, ra.caption, ra.shared_with_resident, ra.response_history_id, ra.created_at,
+        ra.uploaded_by, u.full_name AS actor_name, u.role AS actor_role,
+        COALESCE(b.barangay_name, rb.barangay_name) AS barangay_name
+    FROM report_attachments ra
+    JOIN reports r ON r.report_id = ra.report_id
+    LEFT JOIN users u ON u.user_id = ra.uploaded_by
+    LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
+    LEFT JOIN barangays rb ON rb.barangay_id = r.barangay_id
+    WHERE r.reporter_id = ? AND r.archived_at IS NULL
+      AND (ra.attachment_source = 'resident'
+        OR (ra.attachment_type = 'photo' AND ra.attachment_source IN (
+            'barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action', 'staff_action'
+        )))
+    ORDER BY ra.report_id, ra.created_at, ra.attachment_id");
+if (!$mediaStmt) {
+    error_log('Could not prepare resident report evidence query: ' . $conn->error);
+} else {
+    $mediaStmt->bind_param('i', $_SESSION['user_id']);
+    if (!$mediaStmt->execute()) {
+        error_log('Could not load resident report evidence: ' . $mediaStmt->error);
+    } else {
+        $mediaResult = $mediaStmt->get_result();
+        while ($media = $mediaResult->fetch_assoc()) {
+            $source = (string)$media['attachment_source'];
+            $actor = (string)($media['actor_role'] ?? '');
+            if ($actor === '') {
+                $actor = in_array($source, ['barangay_validation', 'barangay_secured', 'barangay_turnover', 'barangay_action'], true)
+                    ? 'barangay'
+                    : ($source === 'staff_action' ? 'staff' : '');
+            }
+            $agency = $actor === 'barangay' && !empty($media['barangay_name'])
+                ? 'Brgy. ' . $media['barangay_name']
+                : ($actor === 'staff' ? 'DCVS' : 'You');
+            $reportMediaById[(int)$media['report_id']][] = [
+                'type' => (string)$media['attachment_type'],
+                'source' => $source,
+                'url' => in_array($source, ['barangay_action', 'staff_action'], true)
+                    ? 'api/shared/report-evidence-file.php?id=' . (int)$media['attachment_id'] . '&sess=PHPSESSID'
+                    : (string)$media['file_url'],
+                'mimeType' => (string)$media['mime_type'],
+                'caption' => (string)($media['caption'] ?? ''),
+                'shared' => (int)$media['shared_with_resident'] === 1,
+                'historyId' => (int)($media['response_history_id'] ?? 0),
+                'createdAt' => (string)$media['created_at'],
+                'actor' => $agency,
+                'role' => $actor,
+            ];
+        }
+    }
+    $mediaStmt->close();
+}
+
+$reportUpdatesById = [];
+$historyStmt = $conn->prepare("SELECT resident_report.report_id AS display_report_id, h.history_id, h.actor_role, h.action, h.to_state,
+        h.created_at, u.full_name AS actor_name, b.barangay_name
+    FROM report_response_history h
+    JOIN reports resident_report ON h.report_id = CASE
+        WHEN resident_report.duplicate_status = 'merged' THEN resident_report.parent_report_id
+        ELSE resident_report.report_id
+    END
+    LEFT JOIN users u ON u.user_id = h.actor_id
+    LEFT JOIN barangays b ON b.barangay_id = u.barangay_id
+    WHERE resident_report.reporter_id = ? AND resident_report.archived_at IS NULL
+    ORDER BY resident_report.report_id, h.created_at, h.history_id");
+if (!$historyStmt) {
+    error_log('Could not prepare resident report updates query: ' . $conn->error);
+} else {
+    $historyStmt->bind_param('i', $_SESSION['user_id']);
+    if (!$historyStmt->execute()) {
+        error_log('Could not load resident report updates: ' . $historyStmt->error);
+    } else {
+        $historyResult = $historyStmt->get_result();
+        while ($entry = $historyResult->fetch_assoc()) {
+            $actor = (string)$entry['actor_role'];
+            $agency = $actor === 'barangay' && !empty($entry['barangay_name'])
+                ? 'Brgy. ' . $entry['barangay_name']
+                : ($actor === 'staff' ? 'DCVS' : ($actor === 'resident' ? 'You' : ($actor === 'system' ? 'System' : 'DCVS')));
+            $reportUpdatesById[(int)$entry['display_report_id']][] = [
+                'id' => (int)$entry['history_id'],
+                'action' => (string)$entry['action'],
+                'state' => (string)$entry['to_state'],
+                'actor' => $agency,
+                'role' => $actor,
+                'createdAt' => (string)$entry['created_at'],
+            ];
+        }
+    }
+    $historyStmt->close();
+}
 
 // Fetch archived reports
 $archivedReports = [];
@@ -106,7 +272,35 @@ $stmt->close();
 
 // Fetch user's appointments from database (excluding archived)
 $appointments = [];
-$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level, a.preferred_date, a.preferred_time, a.status, a.pet_id, a.notes, a.created_at, COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
+$stmt = $conn->prepare("SELECT a.appointment_id, a.reference_id, a.appointment_type, a.urgency_level,
+    a.preferred_date, a.preferred_time, a.scheduled_date, a.scheduled_time,
+    a.original_schedule_date, a.original_schedule_time, a.reschedule_response_deadline,
+    a.cancelled_by, a.cancellation_reason, a.status,
+    a.pet_id, a.notes, a.created_at,
+    rr.request_id AS reschedule_request_id, rr.status AS reschedule_request_status,
+    rr.requested_date, rr.requested_time, rr.requested_urgency, rr.resident_reason,
+    rr.staff_message AS reschedule_staff_message, rr.decline_reason AS reschedule_decline_reason,
+    rr.offered_date, rr.offered_time, rr.offered_urgency, rr.requested_at AS reschedule_requested_at,
+    cooldown.cooldown_until AS reschedule_cooldown_until,
+    COALESCE(cooldown.cooldown_until > NOW(), 0) AS reschedule_cooldown_active,
+    TIMESTAMP(COALESCE(a.scheduled_date, a.preferred_date), COALESCE(a.scheduled_time, a.preferred_time)) > DATE_ADD(NOW(), INTERVAL 24 HOUR) AS can_cancel,
+    COALESCE(p.pet_name, '-') AS pet_name, COALESCE(p.photo_url, '') AS pet_photo
+    FROM appointments a LEFT JOIN pets p ON a.pet_id = p.pet_id
+    LEFT JOIN (
+        SELECT approved.appointment_id,
+            DATE_ADD(COALESCE(approved.responded_at, approved.reviewed_at, approved.requested_at), INTERVAL 24 HOUR) AS cooldown_until
+        FROM appointment_reschedule_requests approved
+        JOIN (
+            SELECT appointment_id, MAX(request_id) AS request_id
+            FROM appointment_reschedule_requests
+            WHERE status = 'approved'
+            GROUP BY appointment_id
+        ) latest_approved ON latest_approved.request_id = approved.request_id
+    ) cooldown ON cooldown.appointment_id = a.appointment_id
+    LEFT JOIN appointment_reschedule_requests rr ON rr.request_id = (
+        SELECT MAX(r2.request_id) FROM appointment_reschedule_requests r2 WHERE r2.appointment_id = a.appointment_id
+    )
+    WHERE a.user_id = ? AND a.archived_at IS NULL ORDER BY a.appointment_id ASC");
 $stmt->bind_param("i", $_SESSION['user_id']);
 $stmt->execute();
 $result = $stmt->get_result();
@@ -302,12 +496,16 @@ $alq->close();
 $residentAdoptionApplications = [];
 $applicationStmt = $conn->prepare("
     SELECT aa.application_id, aa.application_date, aa.status, aa.pet_listing_id, aa.resulting_pet_id,
+           aa.requested_info, aa.resident_response, aa.residency_proof_file,
            pl.name AS pet_name, pl.species, pl.breed, pl.age, pl.gender, pl.photo_url,
-           aa.approved_pickup_at, aa.finalized_at
+           aa.approved_pickup_at, aa.reserved_at, aa.response_deadline, aa.confirmed_at,
+           aa.pickup_deadline, aa.decline_reason, aa.rejection_reason, aa.finalized_at, aa.reviewed_at,
+           UNIX_TIMESTAMP(aa.response_deadline) AS response_deadline_epoch,
+           UNIX_TIMESTAMP(aa.pickup_deadline) AS pickup_deadline_epoch
     FROM adoption_applications aa
     JOIN pet_listings pl ON pl.listing_id = aa.pet_listing_id
     WHERE aa.applicant_id = ?
-      AND aa.status IN ('pending','under_review','needs_info','approved','adopted','expired')
+      AND aa.status IN ('pending','under_review','needs_info','reserved','confirmed','approved','adopted','declined','expired','rejected','withdrawn')
     ORDER BY aa.application_date DESC, aa.application_id DESC
 ");
 if (!$applicationStmt) {
@@ -317,6 +515,7 @@ $applicationStmt->bind_param('i', $userId);
 $applicationStmt->execute();
 $applicationResult = $applicationStmt->get_result();
 while ($row = $applicationResult->fetch_assoc()) {
+    $row['residency_proof_available'] = adoptionPrivateDocumentExists($row['residency_proof_file'] ?? '');
     $residentAdoptionApplications[] = $row;
 }
 $applicationStmt->close();
@@ -366,9 +565,9 @@ $uaResult = $uaStmt->get_result();
 while ($row = $uaResult->fetch_assoc()) $upcomingAppts[] = $row;
 $uaStmt->close();
 
-// Active treatments count (appointments with status scheduled/in_progress)
+// Active treatments count (appointments with an upcoming or active schedule)
 $activeTreatments = 0;
-$atStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND status IN ('scheduled','in_progress') AND archived_at IS NULL");
+$atStmt = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ? AND status IN ('scheduled','rescheduled','in_progress') AND archived_at IS NULL");
 $atStmt->bind_param("i", $_SESSION['user_id']);
 $atStmt->execute();
 $activeTreatments = (int)$atStmt->get_result()->fetch_row()[0];
@@ -424,9 +623,11 @@ $annResult = $annStmt->get_result();
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/dashboard.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=2" />
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>" />
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=9" />
+  <link rel="stylesheet" href="assets/css/staff-date-filter.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'); ?>" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
@@ -456,9 +657,12 @@ $annResult = $annStmt->get_result();
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
     }
-    .page-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
-    .page-title { font-size:1.5rem; font-weight:600; color:#18181b; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.025em; }
-    .page-subtitle { font-size:0.9rem; color:#71717a; margin:4px 0 0; font-family:'Inter',sans-serif; }
+    .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; flex-wrap:wrap; gap:0.75rem; }
+    .page-title { font-size:20px; font-weight:600; color:#14201A; line-height:1.3; margin:0; font-family:'Inter',sans-serif; letter-spacing:-0.025em; }
+    .page-subtitle { font-size:14px; color:#5B675F; line-height:1.45; margin:4px 0 0; font-family:'Inter',sans-serif; }
+    .resident-section-heading { margin:0 0 1.5rem; font-family:'Inter','Segoe UI',sans-serif; }
+    .resident-section-heading h1 { margin:0; color:#14201A; font-size:20px; font-weight:600; letter-spacing:-0.025em; line-height:1.3; }
+    .resident-section-heading p { margin:4px 0 0; color:#5B675F; font-size:14px; line-height:1.45; }
     .header-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .dashboard-card { background:#fff; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.04); }
     .card-header { padding: 1.25rem 1.5rem; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
@@ -736,19 +940,19 @@ $annResult = $annStmt->get_result();
 .calendar-tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border-width:5px;border-style:solid;border-color:#1f2937 transparent transparent transparent;}
 .calendar-date:hover .calendar-tooltip{opacity:1;visibility:visible;}
 /* Dedicated page container */
-.bk-page{max-width:960px;margin:0 auto;padding:32px 40px;font-family:'Inter',sans-serif;}
+.bk-page{max-width:1040px;margin:0 auto;padding:24px 40px 32px;font-family:'Inter',sans-serif;}
 .bk-card2{background:#fff;border:1px solid #e4e4e7;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.04);padding:28px 32px;font-family:'Inter',sans-serif;}
 @media (max-width:640px){ .bk-page{padding:16px 20px;} .bk-card2{padding:20px 18px;} }
 /* Two-column body: LEFT = calendar, RIGHT = pet/service/time */
 .bk-heading{font-family:'Inter',sans-serif;}
-.bk-heading-title{font-family:'Inter',sans-serif;font-size:18px;font-weight:600;color:#18181b;letter-spacing:-0.025em;line-height:1;margin:0;}
-.bk-heading-sub{font-family:'Inter',sans-serif;font-size:14px;color:#71717a;line-height:1.5;margin:6px 0 0;}
+.bk-heading-title{font-family:'Inter',sans-serif;font-size:20px;font-weight:600;color:#14201A;letter-spacing:-0.025em;line-height:1.3;margin:0;}
+.bk-heading-sub{font-family:'Inter',sans-serif;font-size:14px;color:#5B675F;line-height:1.45;margin:4px 0 0;}
 /* Two-column body: LEFT ~45% (calendar), RIGHT ~55% (fields) */
-.bk-body{display:grid;grid-template-columns:minmax(0,45%) minmax(0,55%);gap:40px;align-items:start;margin-top:28px;}
+.bk-body{display:grid;grid-template-columns:minmax(320px,390px) minmax(0,1fr);gap:36px;align-items:start;margin-top:28px;}
 .bk-col{min-width:0;}
 .bk-col-left{display:flex;flex-direction:column;gap:8px;}
 .bk-col-right{display:flex;flex-direction:column;gap:18px;}
-@media (max-width:720px){ .bk-body{grid-template-columns:1fr;gap:24px;} }
+@media (max-width:820px){ .bk-body{grid-template-columns:minmax(0,1fr);gap:24px;} .bk-cal-area{max-width:420px;} }
 /* Compact, professional form fields */
 .bk-dropdowns{display:flex;flex-direction:column;gap:18px;}
 .bk-field{display:flex;flex-direction:column;gap:8px;}
@@ -787,16 +991,16 @@ $annResult = $annStmt->get_result();
 .bk-cal-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;padding:12px 14px 8px;}
 .bk-month-nav{display:flex;align-items:center;gap:8px;min-width:0;}
 .bk-cal-controls{display:flex;align-items:center;gap:4px;flex:none;}
-.bk-cal-title{font-family:inherit;font-size:16px;font-weight:600;color:#18181b;min-width:0;text-align:left;white-space:nowrap;}
+.bk-cal-title{font-family:inherit;font-size:17px;font-weight:700;color:#18181b;min-width:0;text-align:left;white-space:nowrap;}
 .bk-cal-btn{width:32px;height:32px;flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;border:none;background:transparent;color:#71717a;cursor:pointer;transition:background 0.15s,color 0.15s;font-size:18px;}
 .bk-cal-btn:hover{background:#f4f4f5;color:#18181b;}
 .bk-cal-btn svg{width:18px;height:18px;}
 .bk-cal-today{border:none;background:transparent;color:#18181b;font-family:inherit;font-size:14px;font-weight:500;padding:6px 8px;border-radius:4px;cursor:pointer;}
 .bk-cal-today:hover{background:#f4f4f5;}
-.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 14px;}
-.bk-weekdays span{text-align:center;font-size:12px;font-weight:600;color:#71717a;height:34px;line-height:34px;text-transform:uppercase;letter-spacing:.04em;}
-.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;margin:0 14px 14px;background:#e4e4e7;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden;}
-.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:1/1;max-width:none;margin:0;border:0;border-radius:0;font-family:inherit;font-size:14px;font-weight:500;color:#18181b;background:#fff;cursor:pointer;transition:background 0.12s,color 0.12s;}
+.bk-weekdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));margin:0 16px;}
+.bk-weekdays span{text-align:center;font-size:12px;font-weight:500;color:#71717a;height:34px;line-height:34px;text-transform:none;letter-spacing:0;}
+.bk-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin:0 16px 12px;background:transparent;border:0;border-radius:0;overflow:visible;}
+.bk-day{position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:auto;aspect-ratio:1/1;max-width:none;margin:0;border:0;border-radius:9px;font-family:inherit;font-size:14px;font-weight:500;color:#18181b;background:#fff;cursor:pointer;transition:background 0.12s,color 0.12s;}
 .bk-day:hover:not(:disabled){background:#f4f4f5;color:#18181b;}
 .bk-day.bk-day-today{font-weight:700;}
 .bk-day.bk-day-selected{background:#f0fdf4;color:#166534;font-weight:600;box-shadow:inset 0 0 0 2px #0e8131;}
@@ -804,17 +1008,47 @@ $annResult = $annStmt->get_result();
 .bk-day.bk-day-dim{color:#a1a1aa;background:#f1f1f2;cursor:default;pointer-events:none;}
 .bk-day.bk-day-custom:not(.bk-day-disabled)::after{content:'';position:absolute;bottom:4px;width:4px;height:4px;border-radius:50%;background:#0e8131;}
 .bk-day.bk-day-selected.bk-day-custom::after{background:#166534;}
+.bk-day.bk-day-program:not(.bk-day-disabled)::after{content:'';position:absolute;bottom:5px;width:13px;height:3px;border-radius:999px;background:#18181b;}
+.bk-day.bk-day-selected.bk-day-program::after{background:#15803d;}
+.bk-day.bk-day-full{padding-bottom:8px;}
+.bk-day.bk-day-full::after{display:none;}
+.bk-day-full-label{position:absolute;bottom:2px;font-size:9px;font-weight:500;line-height:1;color:#71717a;}
+.bk-cal-legend{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;padding:12px 16px 14px;border-top:1px solid #e4e4e7;font-size:13px;color:#71717a;}
+.bk-cal-legend-item{display:flex;align-items:center;gap:7px;min-width:0;}
+.bk-cal-legend-mark{display:inline-block;flex:none;width:12px;height:12px;border-radius:3px;background:#f1f1f2;border:1px solid #e4e4e7;}
+.bk-cal-legend-mark.program{width:13px;height:3px;border:0;border-radius:999px;background:#18181b;}
+.bk-cal-legend-full{grid-column:1/-1;font-size:12px;color:#71717a;}
 /* Available Time section */
 .bk-slots-wrap{display:flex;flex-direction:column;gap:0;margin-top:4px;}
-.bk-slots-title{font-family:inherit;font-size:15px;font-weight:600;color:var(--bk-fg);margin-bottom:4px;}
+.bk-slots-heading{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 12px;padding:0 0 12px;border-bottom:1px solid #e4e4e7;}
+.bk-slots-title{font-family:inherit;font-size:20px;font-weight:700;color:var(--bk-fg);margin:0;}
+.bk-slots-remaining{font-size:13px;color:#71717a;white-space:nowrap;}
+.bk-slots-remaining.full{color:#71717a;font-weight:500;}
+.bk-next-availability{margin:12px 0 0;color:#18181b;font-size:14px;line-height:1.5;}
+.bk-next-availability.program-full{padding-top:16px;border-top:1px solid #e4e4e7;}
+.bk-next-date-link{display:inline;padding:0;border:0;background:transparent;color:#0e8131;font-family:inherit;font-size:inherit;font-weight:500;text-decoration:underline;text-underline-offset:2px;cursor:pointer;}
+.bk-urgent-care-notice{margin:-4px 0 0;color:#71717a;font-size:13px;line-height:1.5;}
+.bk-urgent-care-help{margin:10px 0 0;padding-left:14px;border-left:3px solid #dc2626;color:#18181b;font-size:14px;line-height:1.55;}
+.bk-urgent-care-help p{margin:0;}
+.bk-urgent-care-help p + p{margin-top:8px;}
+.bk-urgent-care-help strong{color:#b91c1c;font-weight:600;}
+.bk-urgent-care-help a{color:inherit;text-decoration:underline;text-underline-offset:2px;}
+.bk-program-notice{margin:0 0 12px;color:#09090b;font-family:inherit;font-size:0.875rem;font-weight:400;line-height:1.5;}
+.bk-program-notice-heading{display:flex;align-items:center;gap:7px;margin:0 0 8px;padding:7px 10px;border-radius:4px;background:#333;color:#fff;font-size:13px;font-weight:600;line-height:1.3;}
+.bk-program-notice-heading svg{width:14px;height:14px;flex:none;}
+.bk-program-notice-message{margin:6px 0 0;padding-left:12px;border-left:2px solid #e4e4e7;color:#71717a;font-size:13px;line-height:1.5;}
+.bk-program-entry + .bk-program-entry{margin-top:10px;}
+.bk-program-entry-time{font-family:inherit;font-size:13px;font-weight:600;color:#18181b;}
+.bk-program-entry-name{font-family:inherit;font-size:16px;font-weight:700;color:#18181b;}
+.bk-program-entry-location{margin-top:2px;color:#71717a;font-size:14px;}
 .bk-slots-hint{font-size:13px;color:var(--bk-muted);margin-bottom:12px;line-height:1.4;}
 .bk-cal-hint{font-size:14px;color:var(--bk-muted);margin-top:2px;line-height:1.4;}
-.bk-slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.bk-slot-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
 .bk-slot-btn{width:100%;padding:12px 6px;border-radius:10px;border:1px solid var(--bk-border);background:#fff;font-family:inherit;font-size:14px;font-weight:600;color:var(--bk-fg);cursor:pointer;transition:background 0.15s,border-color 0.15s,color 0.15s;text-align:center;}
 .bk-slot-btn:hover:not(:disabled){background:#f4f4f5;border-color:#d4d4d8;color:#18181b;}
 .bk-slot-btn.bk-slot-selected{background:#18181b;color:#fff;border-color:#18181b;font-weight:700;}
 .bk-slot-btn.bk-slot-unavailable,.bk-slot-btn:disabled{color:#a1a1aa;cursor:not-allowed;background:#f8f8f8;border-color:#ececec;font-weight:500;}
-.bk-slot-none{grid-column:1 / -1;font-size:13px;color:#919aa5;padding:8px 2px;}
+@media (max-width:480px){ .bk-slots-heading{flex-wrap:wrap;gap:4px 12px;} .bk-slots-title{font-size:19px;} .bk-cal-legend{gap:7px;} }
 /* Bottom actions */
 .bk-actions{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:28px;padding-top:20px;border-top:1px solid #eef2f6;}
 .bk-btn-ghost{height:42px;padding:0 20px;border-radius:10px;border:1px solid #e4e4e7;background:#fff;color:#525252;font-family:inherit;font-size:14px;font-weight:500;cursor:pointer;transition:background 0.15s,border-color 0.15s;}
@@ -1041,11 +1275,11 @@ $annResult = $annStmt->get_result();
   /* ========== RESIDENT DASHBOARD REWORK - SCOPED STYLES ========== */
   .resident-rework{--primary-green:#0B4D26;--primary-green-hover:#07381B;--primary-green-light:#EBF7EE;--primary-green-soft:#D1F0DA;--accent-green:#107C41;--bg-body:#FFFFFF;--bg-card:#FFFFFF;--bg-subtle:#F9FBF9;--bg-hover:#F1F5F1;--border-color:#E6ECE6;--border-light:#F0F4F0;--border-dark:#D4DDD4;--text-main:#111827;--text-secondary:#4B5563;--text-muted:#6B7280;--text-faint:#9CA3AF;--badge-green-bg:#ECFDF3;--badge-green-text:#027A48;--badge-green-border:#D1FADF;--badge-amber-bg:#FEF0C7;--badge-amber-text:#B54708;--badge-amber-border:#FEDF89;--badge-blue-bg:#E0F2FE;--badge-blue-text:#0284C7;--badge-blue-border:#BAE6FD;--badge-purple-bg:#F4EBFF;--badge-purple-text:#6941C6;--badge-purple-border:#E9D7FE;--radius-sm:8px;--radius-md:12px;--radius-lg:16px;--radius-xl:20px;--radius-full:9999px;--shadow-sm:0 1px 2px 0 rgba(16,24,40,0.04);--shadow-card:0 1px 3px 0 rgba(16,24,40,0.05),0 1px 2px -1px rgba(16,24,40,0.04);--shadow-popover:0 12px 28px -4px rgba(15,23,42,0.12),0 4px 10px -2px rgba(15,23,42,0.05);font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;color:var(--text-main);line-height:1.5;-webkit-font-smoothing:antialiased}
   .resident-rework *,.resident-rework *::before,.resident-rework *::after{box-sizing:border-box;margin:0;padding:0}
-  .resident-rework .dashboard-content{padding:24px 28px 60px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1440px;margin:0 auto}
+  .resident-rework .dashboard-content{padding:16px 20px 48px;display:flex;flex-direction:column;gap:24px;width:100%;max-width:1440px;margin:0 auto}
   .resident-rework .greeting-banner{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;flex-wrap:wrap}
   .resident-rework .greeting-date{font-family:'Inter',sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:#71717a;margin-bottom:4px}
-  .resident-rework .greeting-headline{font-family:'Inter',sans-serif;font-size:28px;font-weight:700;color:#18181b;letter-spacing:-0.025em;line-height:1.2}
-  .resident-rework .greeting-subtext{font-family:'Inter',sans-serif;font-size:15px;color:#71717a;margin-top:4px}
+  .resident-rework .greeting-headline{font-family:'Inter',sans-serif;font-size:20px;font-weight:600;color:#14201A;letter-spacing:-0.025em;line-height:1.3}
+  .resident-rework .greeting-subtext{font-family:'Inter',sans-serif;font-size:14px;color:#5B675F;line-height:1.45;margin-top:4px}
   .resident-rework .greeting-actions{display:flex;align-items:center;gap:10px}
   .resident-rework .btn-secondary-white{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 16px;border-radius:6px;border:1px solid #e4e4e7;background:#ffffff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);transition:background 0.15s ease,border-color 0.15s ease}
   .resident-rework .btn-secondary-white:hover{background:#f4f4f5;border-color:#d4d4d8}
@@ -1099,6 +1333,7 @@ $annResult = $annStmt->get_result();
   .resident-rework .badge-reviewing{background-color:#dbeafe;color:#1d4ed8;border-color:#bfdbfe}
   .resident-rework .badge-confirmed{background-color:#dcebe0;color:#045e1f;border-color:#bbf7d0}
   .resident-rework .badge-scheduled{background-color:#0E8131;color:#ffffff;border-color:#0E8131}
+  .resident-rework .badge-closed{background-color:#fee2e2;color:#991b1b;border-color:#fecaca}
   .resident-rework .badge-completed{background-color:#dbeafe;color:#1e40af;border-color:#bfdbfe}
   .resident-rework .appointment-chevron{color:var(--text-faint);margin-left:8px;flex-shrink:0}
   .resident-rework .card-bottom-link-center{text-align:center;padding-top:4px;margin-top:auto}
@@ -1201,15 +1436,881 @@ $annResult = $annStmt->get_result();
   .resident-rework .toast-popup.show{opacity:1;transform:translateY(0);pointer-events:auto}
   .resident-rework .toast-icon{color:#10B981;flex-shrink:0}
   .resident-rework .rework-empty{padding:28px 0;text-align:center;color:var(--text-muted);font-size:12px}
-  @media(max-width:1200px){.resident-rework .dashboard-workflow-layout{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:1200px){.resident-rework .dashboard-workflow-layout{grid-template-columns:minmax(0,1fr)}.resident-rework .primary-vertical-column,.resident-rework .secondary-vertical-column,.resident-rework .card-box{min-width:0}.resident-rework .pets-cards-flow{grid-template-columns:repeat(2,1fr)}}
   @media(max-width:860px){.resident-rework .dashboard-content{padding:16px 12px 48px}.resident-rework .metrics-grid{grid-template-columns:1fr}.resident-rework .reports-cards-grid{grid-template-columns:1fr}.resident-rework .pets-cards-flow{grid-template-columns:1fr}}
 </style>
-<link rel="stylesheet" href="assets/css/resident-overview.css" />
+<link rel="stylesheet" href="assets/css/resident-overview.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/resident-overview.css'); ?>" />
+<style>
+  .adoption-countdown{display:inline-block;margin-left:5px;font-size:12px;font-weight:600;color:#92400e}
+  .adoption-confirm-row{margin-top:5px;padding:4px 10px;font-size:12px;white-space:nowrap}
+  .adoption-progress{min-width:180px;max-width:290px}
+  .adoption-progress-bars{display:grid;grid-template-columns:repeat(5,minmax(16px,1fr));gap:4px;margin-bottom:7px}
+  .adoption-progress-segment{height:5px;border-radius:99px;background:#e4e4e7}
+  .adoption-progress-segment.is-done{background:#0e8131}
+  .adoption-progress-segment.is-current{background:#0e8131}
+  .adoption-progress-segment.is-terminal{background:#dc2626}
+  .adoption-progress-heading{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+  .adoption-progress-title{font-size:13px;font-weight:600;color:#18181b}
+  .adoption-progress-step{font-size:11px;color:#71717a;white-space:nowrap}
+  .adoption-progress-note{font-size:12px;line-height:1.4;color:#71717a;margin-top:3px}
+  .adoption-progress .adoption-confirm-row{margin-top:7px}
+  .adoption-timeline{position:relative;margin:0 0 20px;padding:0;list-style:none}
+  .adoption-timeline::before{content:"";position:absolute;left:8px;top:10px;bottom:12px;width:2px;background:#e4e4e7}
+  .adoption-timeline-item{position:relative;display:flex;gap:12px;padding-bottom:18px}
+  .adoption-timeline-item:last-child{padding-bottom:0}
+  .adoption-timeline-dot{position:relative;z-index:1;width:18px;height:18px;flex:0 0 18px;border:2px solid #d4d4d8;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center}
+  .adoption-timeline-item.is-done .adoption-timeline-dot,
+  .adoption-timeline-item.is-current .adoption-timeline-dot{border-color:#0e8131;background:#0e8131}
+  .adoption-timeline-item.is-terminal .adoption-timeline-dot{border-color:#dc2626;background:#dc2626}
+  .adoption-timeline-item.is-done .adoption-timeline-dot::after,
+  .adoption-timeline-item.is-current .adoption-timeline-dot::after,
+  .adoption-timeline-item.is-terminal .adoption-timeline-dot::after{content:"";width:4px;height:7px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg) translate(-1px,-1px)}
+  .adoption-timeline-copy{min-width:0;flex:1}
+  .adoption-timeline-title{font-size:14px;font-weight:600;color:#18181b}
+  .adoption-timeline-date{font-size:12px;color:#71717a;margin-top:2px}
+  .adoption-timeline-note{font-size:13px;line-height:1.45;color:#52525b;margin-top:4px}
+  .adoption-browse-link{display:inline-flex;align-items:center;margin:4px 0 18px;color:#0e8131;font-size:13px;font-weight:600;text-decoration:none}
+  .adoption-browse-link:hover{text-decoration:underline}
+  .adoption-confirm-pet{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+  .adoption-confirm-pet img{width:64px;height:64px;object-fit:cover;border-radius:8px;background:#f4f4f5}
+  .adoption-confirm-warning{padding:12px;border:1px solid #fecaca;border-radius:6px;background:#fef2f2;color:#991b1b;font-weight:500}
+  .adoption-confirm-error{color:#b91c1c}
+</style>
 <style>
   html, body.dashboard, body.dashboard .main-content { background: #ffffff !important; }
 </style>
+<link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>" />
+<style>
+  @media (max-width: 1024px) {
+    html.resident-portal,
+    body.resident-portal {
+      max-width: 100%;
+      overflow-x: clip;
+    }
+
+    body.resident-portal.sb2-active { --sidebar-w: 0px; }
+    body.resident-portal.sb2-active .topbar { left: 0 !important; right: 0; }
+    body.resident-portal.sb2-active .main-content {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
+      margin-left: 0 !important;
+      padding: clamp(12px, 3vw, 32px);
+    }
+
+    .resident-portal .resident-rework,
+    .resident-portal .resident-rework > *,
+    .resident-portal .resident-rework .primary-vertical-column,
+    .resident-portal .resident-rework .secondary-vertical-column,
+    .resident-portal .resident-rework .card-box,
+    .resident-portal .resident-rework .metric-card {
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .resident-portal .resident-rework .metrics-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  .resident-portal .resident-rework .attention-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) repeat(2, minmax(0, 1.1fr));
+    align-items: stretch;
+    background: #fffaf0;
+    border: 1px solid #f1dfb8;
+    border-left: 3px solid #d99014;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .resident-rework .attention-summary-main,
+  .resident-rework .attention-summary-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-width: 0;
+    padding: 13px 15px;
+  }
+  .resident-rework .attention-summary-main { flex-direction: column; justify-content: center; gap: 3px; }
+  .resident-rework .attention-summary-kicker {
+    color: #92400e;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .resident-rework .attention-summary-main strong,
+  .resident-rework .attention-summary-item strong {
+    color: #292524;
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  .resident-rework .attention-summary-note { color: #78716c; font-size: 11px; line-height: 1.35; }
+  .resident-rework .attention-summary-item { border-left: 1px solid #efdfc0; align-items: center; }
+  .resident-rework .attention-summary-item > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .resident-rework .attention-summary-item a {
+    color: #166534;
+    font-size: 11px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .resident-rework .attention-summary-item a:hover { text-decoration: underline; }
+  .resident-rework .attention-summary-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    border-radius: 50%;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .resident-rework .attention-summary-icon-report { background: #e0f2fe; color: #075985; }
+
+  .resident-portal .resident-rework .dashboard-workflow-layout {
+    grid-template-columns: minmax(0, 1.75fr) minmax(0, .95fr) !important;
+    grid-template-areas: "next pets" "schedule pets" "reports help";
+    gap: 16px;
+    align-items: start;
+  }
+  .resident-rework .primary-vertical-column,
+  .resident-rework .secondary-vertical-column { display: contents; }
+  .resident-rework .dashboard-workflow-layout .card-box {
+    min-height: 0 !important;
+    padding: 16px;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+  .resident-rework .dashboard-next-card { grid-area: next; }
+  .resident-rework .dashboard-schedule-card { grid-area: schedule; }
+  .resident-rework .dashboard-reports-card { grid-area: reports; }
+  .resident-rework .dashboard-pet-health-card { grid-area: pets; }
+  .resident-rework .dashboard-help-card { grid-area: help; }
+  .resident-rework .card-header-bar { margin-bottom: 12px; }
+  .resident-rework .card-meta-tag { font-size: 10px; letter-spacing: .07em; }
+  .resident-rework .card-title-text { font-size: 16px; }
+
+  .resident-rework .next-visit-hero-card { gap: 10px; padding: 12px; margin-bottom: 12px; }
+  .resident-rework .next-visit-pet-avatar { display: none; }
+  .resident-rework .date-big-badge { min-width: 50px; padding: 8px; border-radius: 8px; }
+  .resident-rework .date-big-num { font-size: 22px; }
+  .resident-rework .next-visit-title { font-size: 14px; }
+  .resident-rework .visit-details-row { gap: 8px; margin-bottom: 12px; }
+  .resident-rework .visit-detail-item { gap: 5px; }
+  .resident-rework .visit-detail-item svg { width: 14px; height: 14px; }
+  .resident-rework .detail-item-label { font-size: 10px; }
+  .resident-rework .detail-item-value { font-size: 11px; }
+  .resident-rework .next-step-callout { display: none; }
+  .resident-rework .visit-action-buttons { gap: 8px; }
+  .resident-rework .visit-action-buttons .btn-primary-green,
+  .resident-rework .visit-action-buttons .btn-secondary-white { height: 34px; padding: 0 10px; font-size: 12px; }
+
+  .resident-rework .appointment-table-header,
+  .resident-rework .appointment-item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+  }
+  .resident-rework .appointment-table-header {
+    padding: 0 10px 8px;
+    color: #71717a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .resident-rework .appointment-items-list { gap: 0; margin: 0; }
+  .resident-rework .appointment-item-row {
+    min-width: 0;
+    padding: 9px 10px;
+    border: 0;
+    border-top: 1px solid #f0f0f1;
+    border-radius: 0;
+    background: #fff;
+    cursor: pointer;
+  }
+  .resident-rework .appointment-item-row:hover,
+  .resident-rework .appointment-item-row.active-visit { background: #f8faf8; }
+  .resident-rework .appointment-item-row.active-visit { border-left: 2px solid var(--primary-green); }
+  .resident-rework .appointment-time-col { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+  .resident-rework .appointment-schedule-date { color: #27272a; font-size: 11px; font-weight: 600; }
+  .resident-rework .appointment-schedule-time { color: #71717a; font-size: 10px; }
+  .resident-rework .appointment-details-col { display: block; min-width: 0; padding: 0; }
+  .resident-rework .appointment-pet-name { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .appointment-service-col { overflow: hidden; color: #52525b; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .appointment-status-col { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+  .resident-rework .appointment-status-col .status-pill-badge { padding: 2px 6px; font-size: 9px; }
+  .resident-rework .appointment-row-view { color: #166534; font-size: 10px; font-weight: 600; }
+  .resident-rework .dashboard-schedule-card .rework-empty,
+  .resident-rework .dashboard-reports-card .rework-empty { padding: 18px 0; }
+
+  .resident-rework .report-table-header,
+  .resident-rework .report-table-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(65px, .7fr) minmax(76px, .85fr) 30px;
+    align-items: center;
+    gap: 8px;
+  }
+  .resident-rework .report-table-header {
+    padding: 0 8px 8px;
+    color: #71717a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .resident-rework .report-table-row { padding: 9px 8px; border-top: 1px solid #f0f0f1; }
+  .resident-rework .report-table-description { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+  .resident-rework .report-table-description strong { overflow: hidden; color: #27272a; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-description span { overflow: hidden; color: #71717a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-description small { overflow: hidden; color: #a1a1aa; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .report-table-date { color: #52525b; font-size: 10px; white-space: nowrap; }
+  .resident-rework .report-table-row .status-pill-badge { padding: 2px 6px; font-size: 9px; }
+  .resident-rework .report-table-action { color: #166534; font-size: 10px; font-weight: 600; text-decoration: none; }
+  .resident-rework .report-table-action:hover { text-decoration: underline; }
+
+  .resident-rework .pet-health-summary { margin: 0 0 8px; }
+  .resident-rework .pet-health-summary-text { display: flex; flex-direction: column; gap: 3px; }
+  .resident-rework .pet-health-summary-text strong { color: #27272a; font-size: 12px; }
+  .resident-rework .pet-health-summary-text span { color: #71717a; font-size: 10px; }
+  .resident-rework .pet-health-progress { height: 6px; margin-top: 8px; overflow: hidden; border-radius: 99px; background: #f1f5f9; }
+  .resident-rework .pet-health-progress span { display: block; height: 100%; border-radius: inherit; background: #16803c; }
+  .resident-rework .pets-list-rework { margin-top: 8px; }
+  .resident-rework .pet-row-rework {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-areas: "avatar info" "avatar vaccine";
+    gap: 3px 8px;
+    padding: 8px 0;
+  }
+  .resident-rework .pet-avatar-rework { grid-area: avatar; width: 32px; height: 32px; font-size: 13px; }
+  .resident-rework .pet-info-rework { grid-area: info; gap: 2px; }
+  .resident-rework .pet-name-rework { font-size: 11px; }
+  .resident-rework .pet-meta-rework { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+  .resident-rework .pet-vax-pill-rework { grid-area: vaccine; justify-self: start; max-width: 100%; padding: 1px 5px; font-size: 9px; white-space: nowrap; }
+  .resident-rework .pet-row-rework > svg { display: none; }
+
+  .resident-rework .dashboard-help-card { align-self: start; }
+  .resident-rework .dashboard-help-card .card-title-text { margin-top: 4px; }
+  .resident-rework .dashboard-help-copy { margin: 6px 0 12px; color: #71717a; font-size: 11px; line-height: 1.45; }
+  .resident-rework .dashboard-help-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .resident-rework .dashboard-help-actions .btn-primary-green,
+  .resident-rework .dashboard-help-actions .btn-secondary-white {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    text-align: center;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .resident-rework .need-help-footer { display: none; }
+
+  @media (max-width: 600px) {
+    .resident-portal .resident-rework .attention-summary { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary-main,
+    .resident-rework .attention-summary-item { padding: 11px 13px; }
+    .resident-rework .attention-summary-item { border-top: 1px solid #efdfc0; border-left: 0; }
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: "next" "pets" "schedule" "reports" "help";
+      gap: 12px;
+    }
+    .resident-rework .appointment-table-header,
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .appointment-item-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "date status" "pet status" "service status";
+      gap: 4px 10px;
+      padding: 10px 8px;
+    }
+    .resident-rework .appointment-time-col { grid-area: date; }
+    .resident-rework .appointment-details-col { grid-area: pet; }
+    .resident-rework .appointment-service-col { grid-area: service; }
+    .resident-rework .appointment-status-col { grid-area: status; align-items: flex-end; justify-content: center; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "description status" "date action";
+      gap: 5px 8px;
+    }
+    .resident-rework .report-table-description { grid-area: description; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > span:nth-child(3) { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+  }
+  .resident-portal .resident-rework .dashboard-content { gap: 10px; }
+  @media (max-width: 860px) {
+    .resident-rework .dashboard-content { padding-top: 0; }
+  }
+  .resident-rework .greeting-headline { color: #18181b; font-size: 24px; line-height: 1.25; letter-spacing: -.025em; }
+  .resident-rework .greeting-date { margin-bottom: 4px; color: #71717a; font-size: 11px; }
+  .resident-rework .greeting-subtext { margin-top: 4px; color: #71717a; font-size: 13px; line-height: 1.45; }
+  .resident-rework .greeting-actions { gap: 8px; }
+  .resident-rework .greeting-actions .btn-secondary-white,
+  .resident-rework .btn-action-primary {
+    height: 36px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .resident-rework .btn-action-primary,
+  .resident-rework .btn-primary-green {
+    background: #176b3a;
+    color: #fff;
+  }
+  .resident-rework .btn-action-primary:hover,
+  .resident-rework .btn-primary-green:hover { background: #14532d; }
+
+  .resident-portal .resident-rework .attention-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    min-height: 78px;
+    border-radius: 8px;
+    border-left-width: 1px;
+  }
+  .resident-rework .attention-summary-main,
+  .resident-rework .attention-summary-item { justify-content: center; gap: 4px; padding: 11px 16px; }
+  .resident-rework .attention-summary-main { flex-direction: column; }
+  .resident-rework .attention-summary-kicker {
+    color: #8a5200;
+    font-size: 10px;
+    line-height: 1.25;
+    letter-spacing: .06em;
+  }
+  .resident-rework .attention-summary-main strong,
+  .resident-rework .attention-summary-item strong {
+    color: #18181b;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .resident-rework .attention-summary-note { display: none; }
+  .resident-rework .attention-summary-item { border-left: 0; }
+  .resident-rework .attention-summary-item > div { gap: 5px; }
+  .resident-rework .attention-summary-link,
+  .resident-rework .attention-summary-item a {
+    color: #176b3a;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+
+  .resident-portal .resident-rework .dashboard-workflow-layout {
+    grid-template-columns: minmax(0, 2.1fr) minmax(0, 1fr) !important;
+    grid-template-areas: none;
+    gap: 16px;
+    align-items: start;
+  }
+  .resident-rework .primary-vertical-column,
+  .resident-rework .secondary-vertical-column {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+  }
+  .resident-rework .dashboard-workflow-layout .card-box {
+    min-height: 0 !important;
+    padding: 16px;
+    border: 1px solid #e4e4e7;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  }
+  .resident-rework .dashboard-next-card { padding: 0 !important; overflow: hidden; }
+  .resident-rework .dashboard-schedule-card { grid-area: auto; }
+  .resident-rework .dashboard-reports-card { grid-area: auto; }
+  .resident-rework .dashboard-pet-health-card { grid-area: auto; }
+  .resident-rework .dashboard-help-card { grid-area: auto; }
+  .resident-rework .dashboard-workflow-layout .card-header-bar { margin-bottom: 10px; }
+  .resident-rework .dashboard-workflow-layout .card-meta-tag { display: none; }
+  .resident-rework .dashboard-workflow-layout .card-title-text { color: #18181b; font-size: 16px; line-height: 1.3; }
+  .resident-rework .dashboard-workflow-layout .card-action-link { gap: 4px; color: #18181b; font-size: 12px; }
+  .resident-rework .next-appointment-header {
+    padding: 8px 16px;
+    background: #edf6ef;
+    color: #176b3a;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.45;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .resident-rework .next-appointment-row {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    min-height: 98px;
+    padding: 12px 16px;
+  }
+  .resident-rework .next-appointment-date {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: 58px;
+    height: 58px;
+    border: 1px solid #dce8df;
+    border-radius: 7px;
+    background: #fff;
+    color: #176b3a;
+  }
+  .resident-rework .next-appointment-date span { font-size: 9px; line-height: 1.25; }
+  .resident-rework .next-appointment-date strong { font-size: 22px; line-height: 1.05; }
+  .resident-rework .next-appointment-date span:last-child { color: #71717a; font-size: 9px; }
+  .resident-rework .next-appointment-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+  .resident-rework .next-appointment-copy > strong { color: #18181b; font-size: 14px; line-height: 1.35; }
+  .resident-rework .next-appointment-location,
+  .resident-rework .next-appointment-step { color: #71717a; font-size: 11px; line-height: 1.35; }
+  .resident-rework .next-appointment-copy .status-pill-badge { padding: 2px 7px; font-size: 10px; line-height: 1.35; }
+  .resident-rework .visit-action-buttons { display: flex; align-items: center; gap: 8px; margin: 0; }
+  .resident-rework .visit-action-buttons button {
+    height: 36px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
+  .resident-rework .appointment-table-header,
+  .resident-rework .appointment-item-row {
+    grid-template-columns: minmax(100px, 1.15fr) minmax(68px, .8fr) minmax(78px, 1fr) minmax(88px, .9fr);
+    gap: 8px;
+  }
+  .resident-rework .appointment-table-header { padding: 0 0 6px; color: #71717a; font-size: 11px; }
+  .resident-rework .appointment-item-row { padding: 9px 8px; border-top: 1px solid #f0f0f1; }
+  .resident-rework .appointment-schedule-date { color: #18181b; font-size: 13px; }
+  .resident-rework .appointment-schedule-time,
+  .resident-rework .appointment-pet-name,
+  .resident-rework .appointment-service-col { color: #52525b; font-size: 13px; }
+  .resident-rework .appointment-schedule-time { font-size: 12px; }
+  .resident-rework .appointment-status-col { flex-direction: row; align-items: center; justify-content: space-between; gap: 6px; }
+  .resident-rework .appointment-status-col .status-pill-badge { padding: 3px 8px; font-size: 10px; }
+  .resident-rework .appointment-row-view { color: #166534; font-size: 12px; }
+
+  .resident-rework .report-table-header,
+  .resident-rework .report-table-row {
+    grid-template-columns: minmax(64px, 1fr) minmax(67px, 1.05fr) minmax(90px, 1.4fr) minmax(65px, 1fr) minmax(68px, 1.05fr) minmax(24px, .4fr);
+    gap: 10px;
+  }
+  .resident-rework .report-table-header { padding: 0 0 6px; color: #71717a; font-size: 10px; }
+  .resident-rework .report-table-row { padding: 9px 0; border-top: 1px solid #f0f0f1; }
+  .resident-rework .report-table-id,
+  .resident-rework .report-table-type,
+  .resident-rework .report-table-location,
+  .resident-rework .report-table-date { color: #3f3f46; font-size: 12px; line-height: 1.4; }
+  .resident-rework .report-table-id { color: #71717a; font-size: 11px; }
+  .resident-rework .report-table-location { color: #52525b; }
+  .resident-rework .report-table-location { min-width: 0; overflow-wrap: anywhere; }
+  .resident-rework .report-table-status .status-pill-badge { padding: 2px 7px; font-size: 10px; }
+  .resident-rework .report-table-action { color: #166534; font-size: 12px; }
+
+  .resident-rework .pet-health-summary { margin: 0 0 4px; }
+  .resident-rework .pet-health-summary-text strong { color: #3f3f46; font-size: 13px; font-weight: 400; line-height: 1.4; }
+  .resident-rework .pet-health-progress {
+    display: flex;
+    gap: 4px;
+    height: 6px;
+    margin: 8px 0 10px;
+    overflow: visible;
+    background: transparent;
+  }
+  .resident-rework .pet-health-progress span { flex: 1 1 0; min-width: 0; border-radius: 99px; background: #e0524d; }
+  .resident-rework .pet-health-progress span.is-current { background: #2f9a61; }
+  .resident-rework .pets-list-rework { margin-top: 0; }
+  .resident-rework .pet-row-rework {
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    grid-template-areas: none;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 0;
+    border-top: 1px solid #f0f0f1;
+  }
+  .resident-rework .pet-avatar-rework { grid-area: auto; width: 32px; height: 32px; background: #f4f4f5; color: #52525b; font-size: 12px; }
+  .resident-rework .pet-info-rework { grid-area: auto; gap: 2px; }
+  .resident-rework .pet-name-rework { color: #18181b; font-size: 13px; line-height: 1.3; }
+  .resident-rework .pet-meta-rework { color: #71717a; font-size: 11px; line-height: 1.35; }
+  .resident-rework .pet-vax-pill-rework { grid-area: auto; max-width: 96px; padding: 2px 6px; font-size: 10px; line-height: 1.3; }
+
+  .resident-rework .dashboard-help-card { width: 100%; align-self: stretch; }
+  .resident-rework .dashboard-help-card .card-title-text { margin: 0; font-size: 16px; }
+  .resident-rework .dashboard-help-copy { margin: 6px 0 12px; color: #71717a; font-size: 13px; line-height: 1.5; }
+  .resident-rework .dashboard-help-actions { gap: 8px; }
+  .resident-rework .dashboard-help-actions .btn-primary-green,
+  .resident-rework .dashboard-help-actions .btn-secondary-white {
+    min-height: 36px;
+    padding: 0 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  @media (max-width: 600px) {
+    .resident-portal .resident-rework .attention-summary { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary { min-height: 0; }
+    .resident-rework .attention-summary-main,
+    .resident-rework .attention-summary-item { padding: 10px 12px; }
+    .resident-rework .attention-summary-item { border-top: 1px solid #efdfc0; }
+    .resident-rework .attention-summary-kicker { font-size: 9px; }
+    .resident-rework .attention-summary-main strong,
+    .resident-rework .attention-summary-item strong { font-size: 12px; }
+    .resident-rework .attention-summary-link,
+    .resident-rework .attention-summary-item a { font-size: 11px; }
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: none;
+      gap: 12px;
+    }
+    .resident-rework .dashboard-workflow-layout .card-box { padding: 14px; }
+    .resident-rework .dashboard-next-card { padding: 0 !important; }
+    .resident-rework .next-appointment-header { padding: 8px 12px; font-size: 10px; }
+    .resident-rework .appointment-item-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "date status" "pet status" "service status";
+      gap: 5px 10px;
+      padding: 10px 8px;
+    }
+    .resident-rework .appointment-time-col { grid-area: date; }
+    .resident-rework .appointment-details-col { grid-area: pet; }
+    .resident-rework .appointment-service-col { grid-area: service; }
+    .resident-rework .appointment-status-col { grid-area: status; align-items: flex-end; justify-content: center; }
+    .resident-rework .appointment-schedule-date,
+    .resident-rework .appointment-pet-name,
+    .resident-rework .appointment-service-col { font-size: 12px; }
+    .resident-rework .appointment-schedule-time { font-size: 11px; }
+    .resident-rework .appointment-status-col .status-pill-badge { font-size: 10px; }
+    .resident-rework .appointment-row-view { font-size: 11px; }
+    .resident-rework .next-appointment-row {
+      grid-template-columns: 48px minmax(0, 1fr);
+      gap: 10px;
+      min-height: 0;
+      padding: 12px;
+    }
+    .resident-rework .next-appointment-date { width: 48px; height: 52px; }
+    .resident-rework .next-appointment-copy > strong { font-size: 13px; }
+    .resident-rework .next-appointment-location,
+    .resident-rework .next-appointment-step { font-size: 10px; }
+    .resident-rework .visit-action-buttons { grid-column: 2; gap: 6px; }
+    .resident-rework .visit-action-buttons button { height: 34px; padding: 0 10px; font-size: 11px; }
+    .resident-rework .dashboard-help-card { width: 100%; align-self: stretch; }
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "id status" "type date" "location action";
+      gap: 6px 8px;
+      padding: 9px 0;
+    }
+    .resident-rework .report-table-id { grid-area: id; }
+    .resident-rework .report-table-type { grid-area: type; }
+    .resident-rework .report-table-row > span.report-table-location { grid-area: location; justify-self: start; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > .report-table-status { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+    .resident-rework .report-table-id,
+    .resident-rework .report-table-type,
+    .resident-rework .report-table-date,
+    .resident-rework .report-table-location { font-size: 11px; }
+    .resident-rework .report-table-location { line-height: 1.4; }
+    .resident-rework .report-table-status .status-pill-badge { font-size: 9px; }
+    .resident-rework .report-table-action { font-size: 11px; }
+    .resident-rework .pet-row-rework { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 9px; padding: 8px 0; }
+    .resident-rework .pet-avatar-rework { width: 32px; height: 32px; font-size: 12px; }
+    .resident-rework .pet-name-rework { font-size: 12px; }
+    .resident-rework .pet-meta-rework { font-size: 10px; }
+    .resident-rework .pet-vax-pill-rework { max-width: 96px; padding: 2px 6px; font-size: 9px; }
+    .resident-rework .dashboard-help-card .card-title-text { font-size: 16px; }
+    .resident-rework .dashboard-help-copy { font-size: 12px; }
+    .resident-rework .dashboard-help-actions .btn-primary-green,
+    .resident-rework .dashboard-help-actions .btn-secondary-white { min-height: 36px; font-size: 11px; }
+  }
+  @media (min-width: 601px) and (max-width: 860px) {
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) !important;
+    }
+    .resident-rework .next-appointment-row {
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 10px;
+      padding: 12px;
+    }
+    .resident-rework .visit-action-buttons { grid-column: 2; justify-content: flex-start; }
+    .resident-rework .dashboard-help-actions { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .report-table-header,
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(50px, .9fr) minmax(58px, 1fr) minmax(60px, 1.2fr) minmax(58px, 1fr) minmax(58px, 1fr) minmax(22px, .5fr);
+      gap: 6px;
+    }
+    .resident-rework .appointment-schedule-date,
+    .resident-rework .appointment-pet-name,
+    .resident-rework .appointment-service-col { font-size: 12px; }
+    .resident-rework .appointment-schedule-time { font-size: 11px; }
+    .resident-rework .report-table-id,
+    .resident-rework .report-table-type,
+    .resident-rework .report-table-date,
+    .resident-rework .report-table-location { font-size: 11px; }
+    .resident-rework .pet-name-rework { font-size: 12px; }
+    .resident-rework .pet-meta-rework { font-size: 10px; }
+    .resident-rework .dashboard-help-copy { font-size: 12px; }
+  }
+  @media (min-width: 601px) and (max-width: 680px) {
+    .resident-portal .resident-rework .dashboard-workflow-layout {
+      grid-template-columns: minmax(0, 1fr) !important;
+      grid-template-areas: none;
+    }
+    .resident-rework .report-table-header { display: none; }
+    .resident-rework .report-table-row {
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas: "id status" "type date" "location action";
+      gap: 6px 8px;
+      padding: 9px 0;
+    }
+    .resident-rework .report-table-id { grid-area: id; }
+    .resident-rework .report-table-type { grid-area: type; }
+    .resident-rework .report-table-row > span.report-table-location { grid-area: location; justify-self: start; }
+    .resident-rework .report-table-date { grid-area: date; }
+    .resident-rework .report-table-row > .report-table-status { grid-area: status; justify-self: end; }
+    .resident-rework .report-table-action { grid-area: action; justify-self: end; }
+  }
+  .resident-portal .resident-rework .attention-summary {
+    display: block;
+    min-height: 0;
+    background: #fff;
+    border: 1px solid #e4e4e7;
+    border-top: 2px solid #d97706;
+    border-radius: 8px;
+    overflow: hidden;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .resident-rework .attention-summary-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 16px;
+    border-bottom: 1px solid #f0f0f1;
+  }
+  .resident-rework .attention-summary-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+    color: #18181b;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -.02em;
+  }
+  .resident-rework .attention-summary-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: #18181b;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .resident-rework .attention-summary-overview {
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .resident-rework .attention-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .resident-rework .attention-summary-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 7px;
+    min-width: 0;
+    min-height: 126px;
+    padding: 14px 16px;
+    border-right: 1px solid #f0f0f1;
+  }
+  .resident-rework .attention-summary-card:last-child { border-right: 0; }
+  .resident-rework .attention-summary-card.is-action-required { background: #fffaf0; }
+  .resident-rework .attention-summary-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #71717a;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .resident-rework .attention-summary-card.is-action-required .attention-summary-status { color: #92400e; }
+  .resident-rework .attention-summary-dot {
+    width: 6px;
+    height: 6px;
+    flex: 0 0 6px;
+    border-radius: 50%;
+    background: #a1a1aa;
+  }
+  .resident-rework .attention-summary-card.is-action-required .attention-summary-dot { background: #d97706; }
+  .resident-rework .attention-summary-card > strong {
+    color: #18181b;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    letter-spacing: -.01em;
+  }
+  .resident-rework .attention-summary-card > p {
+    margin: 0;
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .resident-rework .attention-summary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+    margin-top: auto;
+    padding: 0 12px;
+    border: 1px solid #d4d4d8;
+    border-radius: 6px;
+    background: #fff;
+    color: #18181b;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .resident-rework .attention-summary-button:hover { background: #f4f4f5; }
+  .resident-rework .attention-summary-button.is-primary {
+    border-color: #176b3a;
+    background: #176b3a;
+    color: #fff;
+  }
+  .resident-rework .attention-summary-button.is-primary:hover { background: #14532d; }
+  @media (max-width: 600px) {
+    .resident-rework .attention-summary-header {
+      flex-wrap: wrap;
+      gap: 4px 10px;
+      padding: 9px 14px;
+    }
+    .resident-rework .attention-summary-overview { flex-basis: 100%; }
+    .resident-rework .attention-summary-grid { grid-template-columns: minmax(0, 1fr); }
+    .resident-rework .attention-summary-card {
+      min-height: 0;
+      padding: 13px 14px;
+      border-right: 0;
+      border-bottom: 1px solid #f0f0f1;
+    }
+    .resident-rework .attention-summary-card:last-child { border-bottom: 0; }
+    .resident-rework .attention-summary-card > strong { font-size: 14px; }
+    .resident-rework .attention-summary-card > p { font-size: 12px; }
+  }
+  .resident-rework .dashboard-pet-health-card {
+    padding: 18px;
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  .resident-rework .dashboard-pet-health-card .card-title-text {
+    color: #18181b;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+  }
+  .resident-rework .dashboard-pet-health-card .card-action-link { font-size: 13px; }
+  .resident-rework .pet-health-summary-text strong {
+    color: #3f3f46;
+    font-size: 15px;
+    font-weight: 500;
+    line-height: 1.45;
+  }
+  .resident-rework .pet-health-progress { height: 8px; margin: 10px 0 12px; }
+  .resident-rework .pet-row-rework {
+    grid-template-columns: 48px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 10px 0;
+  }
+  .resident-rework .pet-avatar-rework {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    background: #f4f4f5;
+    font-size: 18px;
+  }
+  .resident-rework .pet-avatar-rework > span {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .resident-rework .pet-avatar-rework img {
+    position: absolute;
+    z-index: 1;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .resident-rework .pet-info-rework { gap: 3px; }
+  .resident-rework .pet-name-rework {
+    overflow: hidden;
+    color: #18181b;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .resident-rework .pet-meta-rework {
+    overflow: hidden;
+    color: #71717a;
+    font-size: 12px;
+    line-height: 1.4;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .resident-rework .pet-vax-pill-rework {
+    max-width: 100px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    font-size: 10px;
+    line-height: 1.35;
+    text-align: center;
+  }
+  @media (max-width: 600px) {
+    .resident-rework .dashboard-pet-health-card { padding: 16px; }
+    .resident-rework .pet-row-rework { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 10px; padding: 11px 0; }
+  }
+  @media (max-width: 860px) {
+    .resident-rework .pet-row-rework {
+      grid-template-columns: 48px minmax(0, 1fr);
+      grid-template-areas: "avatar info" "avatar vaccine";
+      gap: 4px 12px;
+      align-items: center;
+    }
+    .resident-rework .pet-avatar-rework { grid-area: avatar; }
+    .resident-rework .pet-info-rework { grid-area: info; }
+    .resident-rework .pet-vax-pill-rework {
+      grid-area: vaccine;
+      justify-self: start;
+      max-width: 100%;
+    }
+  }
+</style>
 </head>
-<body class="dashboard resident-portal" data-realtime-page="resident">
+<body class="dashboard resident-portal sb2-active" data-realtime-page="resident">
 
 <?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 
@@ -1278,12 +2379,42 @@ include __DIR__ . '/../../includes/portal-toast.php';
          $firstAppt = null;
          if (!empty($todayAppts)) { $firstAppt = $todayAppts[0]; }
          elseif (!empty($upcomingAppts)) { $firstAppt = $upcomingAppts[0]; }
+         $pendingAppointments = array_values(array_filter($todayAppts, fn($appointment) => strtolower((string)$appointment['status']) === 'pending'));
+         $pendingAppointmentCount = count($pendingAppointments);
+         $pendingAppointmentSummary = implode(' and ', array_map(static function ($appointment) {
+             return ucfirst((string)($appointment['appointment_type'] ?? 'Appointment'))
+                 . ' · ' . (string)($appointment['pet_name'] ?? '-');
+         }, $pendingAppointments));
+         $attentionReport = null;
+         foreach ($reports as $report) {
+             if (!in_array(strtolower((string)$report['status']), ['resolved', 'rejected'], true)) {
+                 $attentionReport = $report;
+                 break;
+             }
+         }
+         $attentionReportPresentation = $attentionReport['resident_presentation'] ?? null;
+         $petCount = count($pets);
+         $upToDatePetIds = [];
+         $petNeedingVaccination = null;
+         foreach ($pets as $pet) {
+             $vaccinationStatus = strtolower(trim((string)($pet['vaccination_status'] ?? '')));
+             if (in_array($vaccinationStatus, ['vaccinated', 'complete', 'fully vaccinated', 'up to date'], true)) {
+                 $upToDatePetIds[(int)$pet['pet_id']] = true;
+             } elseif ($petNeedingVaccination === null) {
+                 $petNeedingVaccination = $pet;
+             }
+         }
+         $upToDatePetCount = count($upToDatePetIds);
+         $petVaccineStatus = strtolower(trim((string)($petNeedingVaccination['vaccination_status'] ?? '')));
+         $attentionActionCount = $petNeedingVaccination ? 1 : 0;
+         $attentionWaitingCount = ($pendingAppointmentCount > 0 ? 1 : 0) + ($attentionReport ? 1 : 0);
+         $attentionCardCount = $attentionActionCount + $attentionWaitingCount;
          ?>
 
          <section class="greeting-banner">
            <div>
              <div class="greeting-date" id="rework-live-date"><?php echo date('l, F j, Y'); ?></div>
-             <h2 class="greeting-headline"><?php echo $greetingWord . ', ' . htmlspecialchars($firstName); ?>.</h2>
+             <h2 class="greeting-headline"><?php echo $greetingWord; ?>, <?php echo htmlspecialchars($firstName); ?>.</h2>
              <p class="greeting-subtext">Here's what needs your attention today.</p>
            </div>
             <div class="greeting-actions">
@@ -1315,63 +2446,105 @@ include __DIR__ . '/../../includes/portal-toast.php';
             </div>
          </section>
 
-         <section class="metrics-grid">
-           <div class="metric-card">
-             <div class="metric-icon-box icon-box-green">
-               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-             </div>
-             <div class="metric-info">
-               <span class="metric-label">Upcoming appointments</span>
-               <span class="metric-value"><?php echo $upcomingApptCount; ?></span>
-               <span class="metric-subtext"><?php echo $upcomingApptCount > 0 ? 'Scheduled' : 'No appointments'; ?></span>
-             </div>
+         <section class="attention-summary" aria-labelledby="attention-summary-title">
+           <div class="attention-summary-header">
+             <h2 id="attention-summary-title">
+               Needs your attention
+               <span class="attention-summary-count"><?php echo $attentionCardCount; ?></span>
+             </h2>
+             <span class="attention-summary-overview">
+               <?php if ($attentionCardCount > 0): ?>
+                 <?php echo $attentionActionCount; ?> action<?php echo $attentionActionCount === 1 ? '' : 's'; ?> required
+                 &middot; <?php echo $attentionWaitingCount; ?> waiting for updates
+               <?php else: ?>
+                 You're all caught up
+               <?php endif; ?>
+             </span>
            </div>
-            <div class="metric-card">
-              <div class="metric-icon-box icon-box-blue">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
-              </div>
-              <div class="metric-info">
-                <span class="metric-label">Reports submitted</span>
-                <span class="metric-value"><?php echo count($reports); ?></span>
-                <span class="metric-subtext">Total filed</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon-box icon-box-amber">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              </div>
-              <div class="metric-info">
-                <span class="metric-label">Pending reports</span>
-                <span class="metric-value"><?php echo $activeCases; ?></span>
-                <span class="metric-subtext">Awaiting review</span>
-              </div>
-            </div>
-           <div class="metric-card">
-             <div class="metric-icon-box icon-box-purple">
-               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-             </div>
-             <div class="metric-info">
-               <span class="metric-label">Active care plans</span>
-               <span class="metric-value"><?php echo count($pets); ?></span>
-               <span class="metric-subtext">Across <?php echo count($pets); ?> pet<?php echo count($pets) !== 1 ? 's' : ''; ?></span>
-             </div>
+           <div class="attention-summary-grid">
+             <article class="attention-summary-card <?php echo $petNeedingVaccination ? 'is-action-required' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo $petNeedingVaccination ? 'Action required' : 'Pet health'; ?>
+               </div>
+               <?php if ($petNeedingVaccination): ?>
+                 <strong><?php echo htmlspecialchars($petNeedingVaccination['pet_name']); ?> <?php echo $petVaccineStatus === 'not vaccinated' ? 'is not vaccinated' : 'needs a vaccine update'; ?></strong>
+                 <p>Book a vaccination appointment for <?php echo htmlspecialchars($petNeedingVaccination['pet_name']); ?>.</p>
+                 <a href="#" class="attention-summary-button is-primary" onclick="reworkBookVaccination(<?php echo (int)$petNeedingVaccination['pet_id']; ?>);return false;">Book vaccination</a>
+               <?php else: ?>
+                 <strong>Your pets are up to date</strong>
+                 <p>There are no vaccination actions to take right now.</p>
+                 <a href="#" class="attention-summary-button" onclick="switchSection('my-pets');return false;">View pets</a>
+               <?php endif; ?>
+             </article>
+             <article class="attention-summary-card <?php echo $pendingAppointmentCount > 0 ? 'is-waiting' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo $pendingAppointmentCount > 0 ? 'Waiting on DCVS' : 'Appointments'; ?>
+               </div>
+               <strong><?php echo $pendingAppointmentCount; ?> appointment<?php echo $pendingAppointmentCount === 1 ? '' : 's'; ?> awaiting confirmation</strong>
+               <p><?php echo $pendingAppointmentCount > 0 ? htmlspecialchars($pendingAppointmentSummary) : 'No appointments awaiting confirmation.'; ?></p>
+               <a href="#" class="attention-summary-button" onclick="switchSection('appointments');return false;">View appointments</a>
+             </article>
+             <article class="attention-summary-card <?php echo $attentionReport ? 'is-waiting' : 'is-clear'; ?>">
+               <div class="attention-summary-status">
+                 <span class="attention-summary-dot" aria-hidden="true"></span>
+                 <?php echo htmlspecialchars($attentionReportPresentation['statusLabel'] ?? 'Reports'); ?>
+               </div>
+               <strong><?php echo htmlspecialchars($attentionReportPresentation['statusMessage'] ?? 'No reports are awaiting review'); ?></strong>
+               <p>
+                 <?php if ($attentionReportPresentation): ?>
+                   Next: <?php echo htmlspecialchars($attentionReportPresentation['nextStep']); ?>
+                 <?php else: ?>
+                   Your submitted reports will appear here.
+                 <?php endif; ?>
+               </p>
+               <a href="#" class="attention-summary-button" onclick="switchSection('my-reports');return false;">View report</a>
+             </article>
            </div>
-
          </section>
 
          <div class="dashboard-workflow-layout">
            <div class="primary-vertical-column">
 
-             <div class="card-box">
+             <div class="card-box dashboard-next-card">
+               <div class="next-appointment-header">Next appointment</div>
+               <?php if ($firstAppt): ?>
+                 <div class="next-appointment-row">
+                   <div class="next-appointment-date">
+                     <span id="rework-visit-weekday"><?php echo strtoupper(date('D', strtotime($firstAppt['preferred_date']))); ?></span>
+                     <strong id="rework-visit-day"><?php echo date('d', strtotime($firstAppt['preferred_date'])); ?></strong>
+                     <span id="rework-visit-month"><?php echo strtoupper(date('M Y', strtotime($firstAppt['preferred_date']))); ?></span>
+                   </div>
+                   <div class="next-appointment-copy">
+                     <strong><span id="rework-visit-title"><?php echo htmlspecialchars(ucfirst($firstAppt['appointment_type'])); ?></span> &middot; <span id="rework-visit-pet"><?php echo htmlspecialchars($firstAppt['pet_name']); ?></span></strong>
+                     <span class="next-appointment-location"><span id="rework-visit-time"><?php echo date('g:i A', strtotime($firstAppt['preferred_time'])); ?></span> &middot; DCVS, Dasmari&ntilde;as City</span>
+                     <span class="status-pill-badge <?php echo strtolower($firstAppt['status']) === 'pending' ? 'badge-pending' : 'badge-confirmed'; ?>" id="rework-visit-status"><?php echo ucfirst($firstAppt['status']); ?></span>
+                     <span class="next-appointment-step">Next step: <span id="rework-visit-instruction">bring your pet records.</span></span>
+                   </div>
+                   <div class="visit-action-buttons">
+                     <button class="btn-primary-green" id="rework-view-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" onclick="reworkViewAppointment()">View appointment</button>
+                     <button class="btn-secondary-white" id="rework-reschedule-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" data-appt-type="<?php echo htmlspecialchars($firstAppt['appointment_type']); ?>" data-appt-pet="<?php echo (int)($firstAppt['pet_id'] ?? 0); ?>" data-appt-date="<?php echo htmlspecialchars($firstAppt['preferred_date']); ?>" data-appt-time="<?php echo htmlspecialchars($firstAppt['preferred_time']); ?>" data-appt-notes="<?php echo htmlspecialchars($firstAppt['notes'] ?? ''); ?>" onclick="reworkRescheduleVisit()">Reschedule</button>
+                   </div>
+                 </div>
+               <?php else: ?>
+                 <div class="rework-empty">No upcoming appointments.</div>
+               <?php endif; ?>
+             </div>
+
+             <div class="card-box dashboard-schedule-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag"><?php echo $upcomingApptCount; ?> appointment<?php echo $upcomingApptCount !== 1 ? 's' : ''; ?></div>
-                   <h3 class="card-title-text">Upcoming Appointments</h3>
+                   <div class="card-meta-tag">Your schedule</div>
+                   <h3 class="card-title-text">Upcoming schedule</h3>
                  </div>
                   <a href="#" class="card-action-link" onclick="switchSection('calendar-booking');return false;">
                     <span>View calendar</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                   </a>
+                </div>
+                <div class="appointment-table-header" aria-hidden="true">
+                  <span>Date &amp; time</span><span>Pet</span><span>Service</span><span>Status</span>
                 </div>
                 <div class="appointment-items-list" id="rework-appointments-container">
                  <?php if (empty($todayAppts)): ?>
@@ -1380,32 +2553,35 @@ include __DIR__ . '/../../includes/portal-toast.php';
                    <?php foreach (array_slice($todayAppts, 0, 3) as $apt): ?>
                      <?php
                      $aptIsPending = strtolower($apt['status']) === 'pending';
-                     $aptDotClass = $aptIsPending ? 'dot-amber' : 'dot-green';
                      $aptBadgeClass = $aptIsPending ? 'badge-pending' : (strtolower($apt['status']) === 'completed' ? 'badge-completed' : 'badge-scheduled');
                      $aptDay = date('d', strtotime($apt['preferred_date']));
                      $aptMonth = date('M Y', strtotime($apt['preferred_date']));
+                     $aptWeekday = strtoupper(date('D', strtotime($apt['preferred_date'])));
+                     $aptTimeLabel = date('g:i A', strtotime($apt['preferred_time']));
                      ?>
-                     <div class="appointment-item-row" onclick="reworkSelectVisit(this,{apptId:<?php echo (int)$apt['appointment_id']; ?>,type:'<?php echo htmlspecialchars(addslashes($apt['appointment_type'])); ?>',petId:<?php echo (int)($apt['pet_id'] ?? 0); ?>,date:'<?php echo htmlspecialchars($apt['preferred_date']); ?>',timeRaw:'<?php echo htmlspecialchars($apt['preferred_time']); ?>',notes:'<?php echo htmlspecialchars(addslashes($apt['notes'] ?? '')); ?>',pet:'<?php echo htmlspecialchars(addslashes($apt['pet_name'])); ?>',service:'<?php echo htmlspecialchars(addslashes(ucfirst($apt['appointment_type']))); ?>',time:'<?php echo date('g:i A', strtotime($apt['preferred_time'])); ?>',status:'<?php echo ucfirst($apt['status']); ?>',day:'<?php echo $aptDay; ?>',month:'<?php echo $aptMonth; ?>',nextStep:'Bring your pet records'})">
+                     <div class="appointment-item-row" data-live-appt-id="<?php echo (int)$apt['appointment_id']; ?>" onclick="reworkSelectVisit(this,{apptId:<?php echo (int)$apt['appointment_id']; ?>,type:'<?php echo htmlspecialchars(addslashes($apt['appointment_type'])); ?>',petId:<?php echo (int)($apt['pet_id'] ?? 0); ?>,date:'<?php echo htmlspecialchars($apt['preferred_date']); ?>',timeRaw:'<?php echo htmlspecialchars($apt['preferred_time']); ?>',notes:'<?php echo htmlspecialchars(addslashes($apt['notes'] ?? '')); ?>',pet:'<?php echo htmlspecialchars(addslashes($apt['pet_name'])); ?>',service:'<?php echo htmlspecialchars(addslashes(ucfirst($apt['appointment_type']))); ?>',time:'<?php echo $aptTimeLabel; ?>',status:'<?php echo ucfirst($apt['status']); ?>',day:'<?php echo $aptDay; ?>',weekday:'<?php echo $aptWeekday; ?>',month:'<?php echo $aptMonth; ?>',nextStep:'bring your pet records.'})">
                        <div class="appointment-time-col">
-                         <span><?php echo date('g:i A', strtotime($apt['preferred_time'])); ?></span>
-                         <span class="status-dot-indicator <?php echo $aptDotClass; ?>"></span>
+                         <span class="appointment-schedule-date"><?php echo date('D, M d', strtotime($apt['preferred_date'])); ?></span>
+                         <span class="appointment-schedule-time"><?php echo $aptTimeLabel; ?></span>
                        </div>
                        <div class="appointment-details-col">
                          <span class="appointment-pet-name"><?php echo htmlspecialchars($apt['pet_name']); ?></span>
-                         <span class="appointment-reason-meta"><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?> &bull; <?php echo $aptIsPending ? 'Awaiting confirmation' : 'Veterinary Services'; ?></span>
                        </div>
-                        <span class="status-pill-badge <?php echo $aptBadgeClass; ?>"><?php echo ucfirst($apt['status']); ?></span>
-                       <svg class="appointment-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+                       <span class="appointment-service-col"><?php echo htmlspecialchars(ucfirst($apt['appointment_type'])); ?></span>
+                       <span class="appointment-status-col">
+                         <span class="status-pill-badge <?php echo $aptBadgeClass; ?>"><?php echo ucfirst($apt['status']); ?></span>
+                         <span class="appointment-row-view">View</span>
+                       </span>
                      </div>
                    <?php endforeach; ?>
                  <?php endif; ?>
                 </div>
               </div>
 
-             <div class="card-box">
+             <div class="card-box dashboard-reports-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag">Service Requests</div>
+                   <div class="card-meta-tag">Recent activity</div>
                    <h3 class="card-title-text">My reports</h3>
                  </div>
                  <a href="#" class="card-action-link" onclick="switchSection('my-reports');return false;">
@@ -1416,33 +2592,31 @@ include __DIR__ . '/../../includes/portal-toast.php';
                <?php if (empty($reports)): ?>
                  <div class="rework-empty">No reports submitted yet.</div>
                <?php else: ?>
-                 <div class="reports-cards-grid">
+                 <div class="report-table-header" aria-hidden="true">
+                   <span>Report</span><span>Type</span><span>Location</span><span>Submitted</span><span>Status</span><span></span>
+                 </div>
+                 <div class="report-table">
                    <?php foreach (array_slice($reports, 0, 4) as $r): ?>
                      <?php
                      $rStatus = strtolower($r['status']);
-                      if ($rStatus === 'pending') { $rBadge = 'badge-pending'; $rBadgeText = 'Pending'; $rProgress = 20; $rBarColor = 'fill-blue'; }
-                      elseif ($rStatus === 'validated') { $rBadge = 'badge-reviewing'; $rBadgeText = 'Reviewing'; $rProgress = 40; $rBarColor = 'fill-blue'; }
-                      elseif ($rStatus === 'active') { $rBadge = 'badge-scheduled'; $rBadgeText = 'Active'; $rProgress = 70; $rBarColor = 'fill-purple'; }
-                      else { $rBadge = 'badge-confirmed'; $rBadgeText = 'Resolved'; $rProgress = 100; $rBarColor = 'fill-blue'; }
+                     $reportReference = (string)$r['reference_id'];
+                     $referenceForDisplay = preg_replace('/-\d+$/', '', $reportReference);
+                     $reportReferenceSuffix = substr($referenceForDisplay ?? $reportReference, -4);
+                     $rTypeLabel = ucfirst((string)$r['report_type']);
+                     if (strtolower((string)$r['report_type']) === 'stray') { $rTypeLabel = 'Stray animal'; }
+                     elseif (strtolower((string)$r['report_type']) === 'injured') { $rTypeLabel = 'Injured animal'; }
+                     $residentPresentation = $r['resident_presentation'];
+                     $tableStatusPresentation = dcvsResidentReportTableStatusPresentation($r);
+                     $rBadge = $tableStatusPresentation['badgeClass'];
+                     $rBadgeText = dcvsResidentReportTableStatusLabel($r);
                      ?>
-                     <div class="report-item-box">
-                       <div class="report-header-row">
-                         <span class="report-id-code"><?php echo htmlspecialchars($r['reference_id']); ?></span>
-                       <span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span>
-                       </div>
-                       <h4 class="report-title-heading"><?php echo htmlspecialchars(ucfirst($r['report_type'])); ?></h4>
-                        <div class="report-sub-meta">
-                          <span><?php echo htmlspecialchars($r['location_address']); ?></span>
-                          <span>Submitted <?php echo date('M d, Y', strtotime($r['created_at'])); ?></span>
-                        </div>
-                       <div class="report-progress-wrapper">
-                         <div class="progress-header"><span>Progress</span><span><?php echo $rProgress; ?>%</span></div>
-                         <div class="progress-track"><div class="progress-bar-fill <?php echo $rBarColor; ?>" style="width:<?php echo $rProgress; ?>%"></div></div>
-                       </div>
-                       <a href="#" class="report-link-footer" onclick="switchSection('my-reports');return false;">
-                         <span>View report</span>
-                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-                       </a>
+                     <div class="report-table-row">
+                       <span class="report-table-id" title="<?php echo htmlspecialchars($reportReference); ?>">RPT-...<?php echo htmlspecialchars($reportReferenceSuffix); ?></span>
+                       <span class="report-table-type"><?php echo htmlspecialchars($rTypeLabel); ?></span>
+                       <span class="report-table-location"><?php echo htmlspecialchars($r['display_location_address'] ?? $r['location_address']); ?></span>
+                       <span class="report-table-date"><?php echo date('M j, Y', strtotime($r['created_at'])); ?></span>
+                       <span class="report-table-status"><span class="status-pill-badge <?php echo $rBadge; ?>"><?php echo $rBadgeText; ?></span></span>
+                       <a href="#" class="report-table-action" onclick="switchSection('my-reports');return false;" aria-label="View report <?php echo htmlspecialchars($r['reference_id']); ?>">View</a>
                      </div>
                    <?php endforeach; ?>
                  </div>
@@ -1453,138 +2627,75 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
             <div class="secondary-vertical-column">
 
-             <div class="card-box">
+             <div class="card-box dashboard-pet-health-card">
                <div class="card-header-bar">
                  <div>
-                   <div class="card-meta-tag">Next Appointment</div>
-                   <h3 class="card-title-text">Your next visit</h3>
-                 </div>
-               </div>
-
-               <?php if ($firstAppt): ?>
-                 <div class="next-visit-hero-card">
-                    <div class="date-big-badge">
-                      <span class="date-big-num" id="rework-visit-day"><?php echo date('d', strtotime($firstAppt['preferred_date'])); ?></span>
-                      <span class="date-big-month" id="rework-visit-month"><?php echo date('M Y', strtotime($firstAppt['preferred_date'])); ?></span>
-                    </div>
-                    <div class="next-visit-pet-avatar">
-                      <?php if (!empty($firstAppt['pet_photo'])): ?>
-                        <img src="<?php echo htmlspecialchars($firstAppt['pet_photo']); ?>" alt="">
-                      <?php else: ?>
-                        <span><?php echo strtoupper(substr($firstAppt['pet_name'], 0, 1)); ?></span>
-                      <?php endif; ?>
-                    </div>
-                    <div class="next-visit-hero-info">
-                      <span class="status-pill-badge <?php echo strtolower($firstAppt['status']) === 'pending' ? 'badge-pending' : 'badge-confirmed'; ?>" id="rework-visit-status" style="align-self:flex-start;margin-bottom:2px"><?php echo ucfirst($firstAppt['status']); ?></span>
-                     <span class="next-visit-title" id="rework-visit-title"><?php echo htmlspecialchars(ucfirst($firstAppt['appointment_type'])); ?></span>
-                     <span class="next-visit-pet" id="rework-visit-pet">For <?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
-                   </div>
-                 </div>
-
-                 <div class="visit-details-row">
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Time</span>
-                       <span class="detail-item-value" id="rework-visit-time"><?php echo date('g:i A', strtotime($firstAppt['preferred_time'])); ?></span>
-                     </div>
-                   </div>
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Pet</span>
-                       <span class="detail-item-value"><?php echo htmlspecialchars($firstAppt['pet_name']); ?></span>
-                     </div>
-                   </div>
-                   <div class="visit-detail-item">
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                     <div class="detail-item-meta">
-                       <span class="detail-item-label">Date</span>
-                       <span class="detail-item-value"><?php echo date('M d, Y', strtotime($firstAppt['preferred_date'])); ?></span>
-                     </div>
-                   </div>
-                 </div>
-
-                 <div class="next-step-callout">
-                    <div class="next-step-text-group">
-                      <span class="next-step-label">Next step</span>
-                      <span class="next-step-instruction" id="rework-visit-instruction">Bring your pet records</span>
-                    </div>
-                  </div>
-
-                 <div class="visit-action-buttons" style="margin-top:auto">
-                    <button class="btn-primary-green" id="rework-view-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" onclick="reworkViewAppointment()">View appointment</button>
-                    <button class="btn-secondary-white" id="rework-reschedule-btn" data-appt-id="<?php echo (int)$firstAppt['appointment_id']; ?>" data-appt-type="<?php echo htmlspecialchars($firstAppt['appointment_type']); ?>" data-appt-pet="<?php echo (int)($firstAppt['pet_id'] ?? 0); ?>" data-appt-date="<?php echo htmlspecialchars($firstAppt['preferred_date']); ?>" data-appt-time="<?php echo htmlspecialchars($firstAppt['preferred_time']); ?>" data-appt-notes="<?php echo htmlspecialchars($firstAppt['notes'] ?? ''); ?>" onclick="reworkRescheduleVisit()">Reschedule</button>
-                 </div>
-               <?php else: ?>
-                 <div class="rework-empty">No upcoming appointments.</div>
-               <?php endif; ?>
-             </div>
-
-             <div class="card-box">
-               <div class="card-header-bar">
-                 <div>
-                   <div class="card-meta-tag">Registered Pets</div>
-                   <h3 class="card-title-text">My Pets</h3>
+                   <h3 class="card-title-text">Pet health</h3>
                  </div>
                  <a href="#" class="card-action-link" onclick="switchSection('my-pets');return false;">
-                   <span>View all pets</span>
+                   <span>All pets</span>
                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
                  </a>
                </div>
                <?php if (empty($pets)): ?>
                  <div class="rework-empty">No pets registered yet.</div>
                <?php else: ?>
+                 <div class="pet-health-summary">
+                   <div class="pet-health-summary-text">
+                     <strong><?php echo $upToDatePetCount; ?> of <?php echo $petCount; ?> pets are up to date on vaccines</strong>
+                   </div>
+                 </div>
+                 <div class="pet-health-progress" role="progressbar" aria-label="Pets up to date on vaccines" aria-valuemin="0" aria-valuemax="<?php echo $petCount; ?>" aria-valuenow="<?php echo $upToDatePetCount; ?>">
+                   <?php foreach ($pets as $pet): ?>
+                     <span class="<?php echo isset($upToDatePetIds[(int)$pet['pet_id']]) ? 'is-current' : 'is-due'; ?>" title="<?php echo htmlspecialchars($pet['pet_name'] . ': ' . ($pet['vaccination_status'] ?: 'Not vaccinated')); ?>"></span>
+                   <?php endforeach; ?>
+                 </div>
                  <div class="pets-list-rework">
                    <?php foreach (array_slice($pets, 0, 4) as $pet): ?>
                      <?php
                        $pVaxText = !empty($pet['vaccination_status']) ? $pet['vaccination_status'] : 'Not vaccinated';
-                       $pVaxLower = strtolower($pVaxText);
-                       if (in_array($pVaxLower, ['vaccinated', 'complete', 'fully vaccinated'])) { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
-                       elseif ($pVaxLower === 'up to date') { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
+                       $pVaxLower = strtolower(trim($pVaxText));
+                       if (isset($upToDatePetIds[(int)$pet['pet_id']])) { $pVaxBg = '#ECFDF3'; $pVaxColor = '#0B4D26'; $pVaxBorder = '#D1EEDB'; }
                        elseif ($pVaxLower === 'due soon') { $pVaxBg = '#fef3c7'; $pVaxColor = '#92400e'; $pVaxBorder = '#fde68a'; }
                        else { $pVaxBg = '#fee2e2'; $pVaxColor = '#991b1b'; $pVaxBorder = '#fecaca'; }
-                       $pPhoto = $pet['photo_url'] ?? '';
                        $pInitial = strtoupper(substr($pet['pet_name'], 0, 1));
+                       $petPhotoUrl = trim((string)($pet['photo_url'] ?? ''));
+                       if ($petPhotoUrl !== '' && !preg_match('#^(?:[a-z][a-z0-9+.-]*:|//)#i', $petPhotoUrl)) {
+                         $mediaBasePath = rtrim($appBaseUrl, '/');
+                         if ($mediaBasePath === '' || ($petPhotoUrl !== $mediaBasePath && strpos($petPhotoUrl, $mediaBasePath . '/') !== 0)) {
+                           $petPhotoUrl = $mediaBasePath . '/' . ltrim($petPhotoUrl, '/');
+                         }
+                       }
                      ?>
                      <div class="pet-row-rework" onclick="window.location.href='pet-profile.php?id=<?php echo (int)$pet['pet_id']; ?>&ref=resident'">
                        <div class="pet-avatar-rework">
-                         <?php if ($pPhoto): ?>
-                           <img src="<?php echo htmlspecialchars($pPhoto); ?>" alt="">
-                         <?php else: ?>
-                           <span><?php echo $pInitial; ?></span>
+                         <?php if ($petPhotoUrl !== ''): ?>
+                           <img src="<?php echo htmlspecialchars($petPhotoUrl, ENT_QUOTES, 'UTF-8'); ?>" alt="" loading="lazy" decoding="async" onerror="this.remove()">
                          <?php endif; ?>
+                         <span aria-hidden="true"><?php echo $pInitial; ?></span>
                        </div>
                        <div class="pet-info-rework">
                          <span class="pet-name-rework"><?php echo htmlspecialchars($pet['pet_name']); ?></span>
-                         <span class="pet-meta-rework"><?php echo ucfirst(htmlspecialchars($pet['pet_type'])); ?> &bull; <?php echo htmlspecialchars($pet['breed'] ?: '-'); ?> &bull; <?php echo ucfirst(htmlspecialchars($pet['gender'] ?: '-')); ?> &bull; <?php echo htmlspecialchars($pet['age'] ? $pet['age'].' year'.((int)$pet['age']!==1?'s':'') : '-'); ?></span>
+                         <span class="pet-meta-rework"><?php echo ucfirst(htmlspecialchars($pet['pet_type'])); ?> &bull; <?php echo ucfirst(htmlspecialchars($pet['gender'] ?: '-')); ?> &bull; <?php echo htmlspecialchars($pet['age'] ? $pet['age'].' yr'.((int)$pet['age']!==1?'s':'') : '-'); ?></span>
                        </div>
                        <span class="pet-vax-pill-rework" style="background:<?php echo $pVaxBg; ?>;color:<?php echo $pVaxColor; ?>;border-color:<?php echo $pVaxBorder; ?>"><?php echo htmlspecialchars(ucfirst($pVaxText)); ?></span>
-                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a1a1aa" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
                      </div>
                    <?php endforeach; ?>
                  </div>
                <?php endif; ?>
              </div>
 
+             <div class="card-box dashboard-help-card">
+               <h3 class="card-title-text">Need help?</h3>
+               <p class="dashboard-help-copy">Contact the DCVS team about an appointment or a report.</p>
+               <div class="dashboard-help-actions">
+                 <a href="contact.php" class="btn-primary-green">Message DCVS</a>
+                 <a href="tel:+63464321234" class="btn-secondary-white">Call the office</a>
+               </div>
+             </div>
+
             </div>
           </div>
-
-          <div class="need-help-footer">
-            <div class="need-help-banner-card">
-              <div>
-                <span class="help-tag-label">Need Help?</span>
-                <h3 class="help-headline">We're here for you and your pets.</h3>
-                <p class="help-subtext">Contact the DCVS team for appointment or report assistance.</p>
-              </div>
-              <a href="#" class="help-cta-link" onclick="switchSection('account-settings');return false;">
-                <span>Contact support</span>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-              </a>
-            </div>
-          </div>
-
-
 
        </div>
      </div>
@@ -1943,6 +3054,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
     if (page < 1 || page > tp) return;
     currentPage = page;
     renderTable();
+  };
+  window.APPT.viewCalendar = function() {
+    closeApptDrawer();
+    if (typeof window.switchSection === 'function') window.switchSection('calendar-booking');
   };
   renderTable();
 })();
@@ -2313,6 +3428,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
   <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY PETS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-pets" class="content-section">
+    <header class="resident-section-heading">
+      <h1>My Pets</h1>
+      <p>View and manage your registered pets, health details, and records.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="pets-kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px;">
       <div class="pets-kpi-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
@@ -2339,25 +3458,28 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
     <?php if (empty($pets)): ?>
       <div class="pet-empty">
-        <i class="fas fa-paw"></i>
         <h3>No pets registered yet</h3>
         <p>Register your first pet to start managing its profile.</p>
-        <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')"><i class="fas fa-plus"></i> Register a Pet</button>
+        <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')">Register a Pet</button>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="petSearchInput" class="appt-search-input" placeholder="Search by name, breed, or ID">
         </div>
-        <select id="petStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="petStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Categories</option>
           <option value="owned">Owned</option>
           <option value="adopted">Adopted</option>
         </select>
+        </div>
       </div>
-      <button type="button" class="sd-btn sd-btn-default" onclick="openModal('addPetModal')" style="margin-left:auto;">
+      <button type="button" class="sd-btn sd-btn-default resident-toolbar-primary" onclick="openModal('addPetModal')" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Register a Pet
       </button>
     </div>
@@ -2470,6 +3592,14 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #addPetModal .sd-dialog-header, #editPetModal .sd-dialog-header { display:flex; flex-direction:column; gap:6px; text-align:left; }
     #addPetModal .sd-dialog-title, #editPetModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
     #addPetModal .sd-dialog-description, #editPetModal .sd-dialog-description { margin:0; font-size:14px; color:#71717a; line-height:1.5; }
+    #petDuplicateAlertDialog { width:calc(100vw - 32px); max-width:420px; max-height:calc(100vh - 32px); margin:auto; padding:0; overflow:visible; border:0; background:transparent; color:#18181b; }
+    #petDuplicateAlertDialog::backdrop { background:rgba(24,24,27,.5); }
+    #petDuplicateAlertDialog .sd-dialog-content { box-sizing:border-box; width:100%; max-height:calc(100vh - 32px); overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:16px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; box-shadow:0 20px 25px rgba(15,23,32,.18); }
+    #petDuplicateAlertDialog .sd-dialog-header { display:flex; flex-direction:column; gap:8px; text-align:left; }
+    #petDuplicateAlertDialog .sd-dialog-title { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; line-height:1.25; letter-spacing:-.025em; color:#18181b; }
+    #petDuplicateAlertDialog .sd-dialog-description { margin:0; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; line-height:1.5; white-space:pre-line; overflow-wrap:anywhere; color:#71717a; }
+    #petDuplicateAlertDialog .sd-dialog-footer { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+    #petDuplicateAlertDialog .sd-btn:focus-visible { outline:2px solid #18181b; outline-offset:2px; }
     #addPetModal .sd-field-group, #editPetModal .sd-field-group { display:flex; flex-direction:column; gap:16px; }
     #addPetModal .sd-form-grid, #editPetModal .sd-form-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
     #addPetModal .sd-field-full, #editPetModal .sd-field-full { grid-column:1 / -1; }
@@ -2510,6 +3640,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .appt-search-input::placeholder{color:#a1a1aa;}
     .appt-status-select{height:36px;padding:0 28px 0 12px;border:1px solid #e4e4e7;border-radius:6px;background-color:#fff;color:#18181b;font-family:'Inter',sans-serif;font-size:14px;font-weight:500;box-shadow:0 1px 2px 0 rgba(0,0,0,0.05);cursor:pointer;appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;transition:border-color .15s,box-shadow .15s;}
     .appt-status-select:focus{outline:none;border-color:#18181b;box-shadow:0 0 0 1px #18181b;}
+    .appt-reschedule-table-tag{display:inline-flex;margin-top:4px;padding:2px 7px;border:1px solid #d4d4d8;border-radius:4px;background:#f4f4f5;color:#52525b;font-size:11px;font-weight:500;line-height:1.3;}
+    .appt-reschedule-table-tag.reply-needed{border-color:#fbbf24;background:#fef3c7;color:#92400e;font-weight:700;}
 
     /* ?? HubSpot-style table ?? */
     .appt-db-table-area{overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;padding:0;}
@@ -2595,7 +3727,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .dt-page-btn:disabled{opacity:.5;cursor:not-allowed;}
 
     .pet-empty{text-align:center;padding:3.5rem 1.5rem;color:#64748b;border:2px dashed #e2e8f0;border-radius:16px;}
-    .pet-empty i{font-size:3rem;color:#94a3b8;display:block;margin-bottom:1rem;}
+    .pet-empty > i{font-size:3rem;color:#94a3b8;display:block;margin-bottom:1rem;}
+    .pet-empty .sd-btn i{font-size:12px;display:inline-block;margin:0;}
     .pet-empty h3{font-size:1.05rem;font-weight:700;color:#0f172a;margin:0 0 4px;}
     .pet-empty p{font-size:0.85rem;margin:0 0 1.25rem;}
     .pet-empty .sd-btn{margin:0 auto;}
@@ -2868,6 +4001,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
   <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? MY REPORTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="my-reports" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Reports</h1>
+      <p>Track your submitted reports and follow their latest status updates.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="rpt-kpis">
       <div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:20px;text-align:center;font-family:'Inter',sans-serif;">
@@ -2894,7 +4031,20 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
     <?php
     $knownReportTypes = ['stray' => 'Stray Animal', 'rabies' => 'Rabies Case', 'injured' => 'Injured Animal', 'dead' => 'Dead Animal', 'other' => 'Other'];
-    function rptStatusLabel($s) {
+    function rptStatusLabel($s, $responseState = '') {
+        $responseLabels = [
+            'barangay_response_approved' => 'Accepted by Barangay',
+            'barangay_responding' => 'Barangay Responding',
+            'animal_secured' => 'Animal Secured',
+            'awaiting_turnover' => 'Awaiting Turnover',
+            'turned_over' => 'Turned Over to DCVS',
+            'dcvs_processing' => 'DCVS Processing',
+            'dcvs_dispatch' => 'DCVS Dispatched',
+            'escalated_to_dcvs' => 'Escalated to DCVS',
+            'returned_to_barangay' => 'Returned to Barangay',
+            'closed_not_actionable' => 'Closed - Not Actionable',
+        ];
+        if (isset($responseLabels[$responseState])) return $responseLabels[$responseState];
         switch ($s) {
         case 'pending': return 'Pending Barangay Review';
         case 'validated': return 'Pending DCVS Review';
@@ -2905,7 +4055,12 @@ include __DIR__ . '/../../includes/portal-toast.php';
             default: return ucfirst(str_replace('_', ' ', $s));
         }
     }
-    function rptStatusClass($s) {
+    function rptStatusClass($s, $responseState = '') {
+        if (in_array($responseState, [
+            'barangay_response_approved', 'barangay_responding', 'animal_secured',
+            'awaiting_turnover', 'turned_over', 'dcvs_processing', 'dcvs_dispatch',
+            'escalated_to_dcvs', 'returned_to_barangay',
+        ], true)) return 'st-review';
         switch ($s) {
             case 'pending': return 'st-pending';
           case 'validated': return 'st-awaiting';
@@ -2927,32 +4082,35 @@ include __DIR__ . '/../../includes/portal-toast.php';
     ?>
     <?php if (empty($reports)): ?>
       <div class="rpt-empty">
-        <i class="fas fa-file-medical-alt"></i>
         <h3>No reports submitted yet</h3>
         <p>Submit your first report to help us keep the community safe.</p>
-        <a href="submit-report-page.php" class="sd-btn sd-btn-default"><i class="fas fa-plus"></i> Submit a Report</a>
+        <a href="submit-report-page.php" class="sd-btn sd-btn-default">Submit a Report</a>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="reportSearchInput" class="appt-search-input" placeholder="Search by ID, type, or location">
         </div>
-        <select id="reportStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="reportStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
           <option value="review">Under Review</option>
           <option value="resolved">Resolved</option>
           <option value="rejected">Rejected</option>
         </select>
+        </div>
       </div>
-      <a href="submit-report-page.php" class="sd-btn sd-btn-default" style="margin-left:auto;">
+      <a href="submit-report-page.php" class="sd-btn sd-btn-default resident-toolbar-primary" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Submit a Report
       </a>
     </div>
 
-    <div class="appt-db-table-area dt-container">
+    <div class="appt-db-table-area table-responsive dt-container">
       <table class="appt-table" id="reportTable">
         <thead>
           <tr class="sd-tr">
@@ -2972,18 +4130,19 @@ include __DIR__ . '/../../includes/portal-toast.php';
             $rType = $report['report_type'];
             $rTypeLabel = $knownReportTypes[strtolower($rType)] ?? ucfirst($rType);
             $rStatus = $report['status'];
-            $rStatusLabel = rptStatusLabel($rStatus);
-            $rStatusClass = rptStatusClass($rStatus);
-            $rsc = $rptStatusColors[$rStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
+            $rStatusLabel = dcvsResidentReportTableStatusLabel($report);
+            $tableStatusPresentation = dcvsResidentReportTableStatusPresentation($report);
+            $rStatusClass = $tableStatusPresentation['class'];
+            $rsc = $tableStatusPresentation['style'];
             $incidentAt = !empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'];
             $rDate = date('M d, Y', strtotime($incidentAt));
             $rResolvedDate = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? date('M d, Y', strtotime($report['updated_at'])) : '-';
             $rResolvedRaw = ($rStatus === 'resolved' && !empty($report['updated_at'])) ? $report['updated_at'] : '';
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['location_address'])); ?>" data-date="<?php echo (int)strtotime($incidentAt); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$report['report_id']; ?>" data-status="<?php echo $rStatus; ?>" data-statuscls="<?php echo $rStatusClass; ?>" data-type="<?php echo htmlspecialchars(strtolower($rTypeLabel)); ?>" data-location="<?php echo htmlspecialchars(strtolower($report['display_location_address'] ?? $report['location_address'])); ?>" data-date="<?php echo (int)strtotime($incidentAt); ?>" data-resolved="<?php echo htmlspecialchars($rResolvedRaw); ?>" onclick="RPT.view(<?php echo (int)$report['report_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($rRef); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?> Report</div></td>
-            <td class="sd-td"><div class="contact-main contact-normal report-location-value"><?php echo htmlspecialchars($report['location_address']); ?></div></td>
+            <td class="sd-td"><div class="contact-main contact-normal report-location-value"><?php echo htmlspecialchars($report['display_location_address'] ?? $report['location_address']); ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $rDate; ?></div></td>
             <td class="sd-td"><span class="appt-status-pill<?php echo $rStatus === 'resolved' ? ' report-status-resolved' : ''; ?>" style="background:<?php echo $rsc['bg']; ?>;color:<?php echo $rsc['color']; ?>;border-color:<?php echo $rsc['border']; ?>;"><?php echo $rStatusLabel; ?></span></td>
             <td class="sd-td"><div class="contact-main contact-normal report-type-value"><?php echo htmlspecialchars($rTypeLabel); ?></div></td>
@@ -3006,7 +4165,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #my-reports { font-family:'Inter',sans-serif; }
 
     .rpt-empty { text-align:center; padding:3.5rem 1.5rem; color:#64748b; border:2px dashed #e2e8f0; border-radius:16px; }
-    .rpt-empty i { font-size:3rem; color:#94a3b8; display:block; margin-bottom:1rem; }
+    .rpt-empty > i { font-size:3rem; color:#94a3b8; display:block; margin-bottom:1rem; }
+    .rpt-empty .sd-btn i { font-size:12px; display:inline-block; margin:0; }
     .rpt-empty h3 { font-size:1.05rem; font-weight:700; color:#0f172a; margin:0 0 4px; }
     .rpt-empty p { font-size:0.85rem; margin:0 0 1.25rem; }
     .rpt-empty .sd-btn { margin:0 auto; }
@@ -3032,6 +4192,55 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #rptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
     #rptDrawer .pet-drawer-info-item .k { font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:600; line-height:1.4; color:#71717a; margin:0; }
     #rptDrawer .rpt-photo-none { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; color:#71717a; margin:0; }
+    #rptDrawer .rpt-update-meta { color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.5;margin:0 0 8px; }
+    #rptDrawer .rpt-evidence-grid { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px; }
+    #rptDrawer .rpt-evidence-thumb { width:100%;aspect-ratio:1;border:1px solid #e4e4e7;border-radius:7px;overflow:hidden;background:#f4f4f5;padding:0;cursor:pointer; }
+    #rptDrawer .rpt-evidence-thumb img { width:100%;height:100%;object-fit:cover;display:block; }
+    #rptDrawer #rdYourPhotos .rpt-evidence-grid { display:flex;flex-wrap:wrap; }
+    #rptDrawer #rdYourPhotos .rpt-evidence-thumb { width:88px;height:88px;flex:0 0 88px;aspect-ratio:auto; }
+    #rptDrawer .response-steps { display:flex;align-items:flex-start;padding:8px 2px 16px; }
+    #rptDrawer .response-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
+    #rptDrawer .response-step:not(:last-child)::after { position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
+    #rptDrawer .response-step.is-complete:not(:last-child)::after { background:#22c55e; }
+    #rptDrawer .response-step-dot { position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
+    #rptDrawer .response-step.is-complete .response-step-dot { border-color:#16a34a;background:#16a34a; }
+    #rptDrawer .response-step.is-current { color:#2563eb;font-weight:600; }
+    #rptDrawer .response-step.is-current .response-step-dot { border-color:#2563eb;background:#fff; }
+    #rptDrawer .response-step.is-overdue .response-step-dot { border-color:#2563eb;background:#fff; }
+    #rptDrawer .response-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
+    #apptDrawer .appt-status-steps { display:flex;align-items:flex-start;padding:8px 28px 16px;font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-status-step { position:relative;display:flex;flex:1;flex-direction:column;align-items:center;gap:6px;text-align:center;color:#a1a1aa;font-size:11px;font-weight:500;line-height:1.35; }
+    #apptDrawer .appt-status-step:not(:last-child)::after { position:absolute;z-index:0;top:8px;left:calc(50% + 10px);width:calc(100% - 20px);height:2px;content:"";background:#d4d4d8; }
+    #apptDrawer .appt-status-step.is-complete:not(:last-child)::after { background:#22c55e; }
+    #apptDrawer .appt-status-step-dot { position:relative;z-index:1;display:flex;width:18px;height:18px;flex:0 0 18px;align-items:center;justify-content:center;border:2px solid #d4d4d8;border-radius:50%;background:#fff;color:#fff; }
+    #apptDrawer .appt-status-step.is-complete .appt-status-step-dot { border-color:#16a34a;background:#16a34a; }
+    #apptDrawer .appt-status-step.is-current { color:#18181b;font-weight:600; }
+    #apptDrawer .appt-status-step.is-current .appt-status-step-dot { border-color:#16a34a;background:#fff; }
+    #apptDrawer .appt-status-step>span:last-child { max-width:100%;overflow-wrap:anywhere; }
+    @media(max-width:480px) { #apptDrawer .appt-status-steps { padding-right:24px;padding-left:24px; } }
+    #rptDrawer .rpt-updates-timeline { position:relative;margin:0 0 14px 3px;padding-left:14px;border-left:2px solid #e4e4e7;color:#09090b;font-family:'Inter','Segoe UI',sans-serif; }
+    #rptDrawer .rpt-updates-entry { position:relative;padding:0 0 17px; }
+    #rptDrawer .rpt-updates-entry:last-child { padding-bottom:0; }
+    #rptDrawer .rpt-updates-entry:before { position:absolute;top:3px;left:-20px;width:10px;height:10px;border-radius:50%;background:#22c55e;content:"";box-shadow:0 0 0 2px #fff; }
+    #rptDrawer .rpt-updates-entry-head { display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:3px; }
+    #rptDrawer .rpt-updates-entry-title { color:#09090b;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:600;line-height:1.35; }
+    #rptDrawer .rpt-updates-entry-date { flex:0 0 auto;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;line-height:1.4;text-align:right; }
+    #rptDrawer .rpt-updates-entry-copy { margin:0 0 8px;color:#27272a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;line-height:1.45; }
+    #rptDrawer .rpt-updates-photo-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,112px));gap:8px;margin-top:10px; }
+    #rptDrawer .rpt-updates-photo { width:100%;aspect-ratio:1;padding:0;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#f4f4f5;cursor:pointer; }
+    #rptDrawer .rpt-updates-photo img { display:block;width:100%;height:100%;object-fit:cover; }
+    #rptDrawer .rpt-evidence-caption { color:#18181b;font-size:13px;font-weight:500;margin:7px 0 2px; }
+    .rpt-evidence-lightbox { position:fixed;inset:0;z-index:1200;display:none;align-items:center;justify-content:center;padding:18px;background:rgba(24,24,27,.88); }
+    .rpt-evidence-lightbox.open { display:flex; }
+    .rpt-evidence-lightbox-dialog { position:relative;width:min(760px,100%);max-height:94vh;padding:16px;background:#fff;border-radius:10px;display:flex;flex-direction:column;gap:10px; }
+    .rpt-evidence-lightbox-stage { width:100%;height:min(62vh,560px);display:flex;align-items:center;justify-content:center;background:#18181b;border-radius:7px;overflow:hidden; }
+    .rpt-evidence-lightbox-stage img { width:100%;height:100%;object-fit:contain; }
+    .rpt-evidence-lightbox-caption { margin:0;color:#18181b;font-size:15px;font-weight:600; }
+    .rpt-evidence-lightbox-meta { margin:0;color:#71717a;font-size:13px;line-height:1.5; }
+    .rpt-evidence-lightbox-controls { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .rpt-evidence-lightbox-controls button { min-height:34px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:inherit;cursor:pointer; }
+    .rpt-evidence-lightbox-controls button:disabled { opacity:.45;cursor:not-allowed; }
+    @media(max-width:560px){ #rptDrawer .rpt-tabs{gap:16px;} #rptDrawer .rpt-tab{font-size:13px;} .rpt-evidence-lightbox-dialog{padding:12px;} }
     .rpt-drawer-close { margin-left:auto; width:24px; height:24px; border-radius:4px; background:transparent; border:none; color:#71717a; font-size:16px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; transition:background .15s,color .15s; flex-shrink:0; }
     .rpt-drawer-close:hover { background:#f4f4f5; color:#18181b; }
     .rpt-drawer-body { flex:1; overflow-y:auto; padding:24px; }
@@ -3050,20 +4259,118 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .rpt-status-line { display:flex; align-items:center; gap:8px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#18181b; }
     .rpt-status-line i { color:#057b2d; }
     /* appointment drawer sections */
-    #apptDrawer .rpt-drawer-head { border-bottom:none; padding-bottom:0; }
-    #apptDrawer .rpt-drawer-body { padding-top:18px; }
-    #apptDrawer .pet-drawer-section-title { font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; color:#18181b; text-transform:none; letter-spacing:0; margin:0 0 10px; }
+    #apptDrawer .rpt-drawer-head { position:relative; top:auto; right:auto; z-index:2; padding:24px 24px 0; border:0; }
+    #apptDrawer .rpt-drawer-head > div { display:flex; flex-direction:column; gap:6px; }
+    #apptDrawer .rpt-drawer-head .rpt-drawer-close { width:24px; height:24px; border:0; border-radius:4px; background:transparent; }
+    #apptDrawer .rpt-drawer-head .rpt-drawer-close:hover { background:#f4f4f5; }
+    #apptDrawer .rpt-drawer-body { padding:24px 28px; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-summary-head { display:flex; align-items:center; gap:12px; margin:0 0 20px; }
+    #apptDrawer .appt-summary-avatar { display:flex; width:85px; height:85px; flex:0 0 85px; align-items:center; justify-content:center; overflow:hidden; border-radius:8px; background:#e4e4e7; color:#64748b; font-family:'Inter','Segoe UI',sans-serif; font-size:28px; font-weight:600; }
+    #apptDrawer .appt-summary-avatar img { width:100%; height:100%; object-fit:cover; }
+    #apptDrawer .appt-summary-pet { display:flex; min-width:0; flex-direction:column; gap:2px; }
+    #apptDrawer .appt-summary-label { color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:12px; font-weight:400; }
+    #apptDrawer .appt-summary-pet-name { overflow:hidden; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:18px; font-weight:600; text-overflow:ellipsis; white-space:nowrap; }
+    #apptDrawer .appt-summary-status { margin-left:auto; padding:4px 12px; border:1px solid #e4e4e7; border-radius:6px; font-family:'Inter','Segoe UI',sans-serif; font-size:13px; font-weight:500; white-space:nowrap; }
+    #apptDrawer .appt-summary-date { display:flex; align-items:flex-start; gap:8px; margin:0 0 18px; padding-bottom:16px; border-bottom:1px solid #e4e4e7; color:#64748b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-summary-date-marker { flex:0 0 8px; width:8px; height:8px; margin-top:5px; border:2px solid #15803d; border-radius:50%; }
+    #apptDrawer .appt-summary-date-marker.is-confirmed { background:#15803d; }
+    #apptDrawer .appt-summary-date-marker.is-pending { border-color:#15803d; }
+    #apptDrawer .appt-summary-date-marker.is-completed { width:auto; height:auto; flex-basis:auto; margin-top:0; border:0; color:#15803d; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-summary-date-marker.is-cancelled { width:auto; height:auto; flex-basis:auto; margin-top:0; border:0; color:#64748b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-summary-at { margin:0 4px; color:#64748b; }
+    #apptDrawer .appt-detail-section { margin:0 0 16px; padding-bottom:14px; border-bottom:1px solid #e4e4e7; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-detail-title { margin:0 0 10px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-detail-row { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:4px 0; font-family:'Inter','Segoe UI',sans-serif; font-size:15px; line-height:1.4; }
+    #apptDrawer .appt-detail-label { flex:0 0 112px; color:#71717a; font-size:13px; font-weight:600; }
+    #apptDrawer .appt-detail-value { min-width:0; color:#18181b; font-size:15px; font-weight:400; text-align:right; overflow-wrap:anywhere; }
+    #apptDrawer .appt-note-section { margin:0 0 16px; padding-bottom:16px; border-bottom:1px solid #e4e4e7; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-note-title { margin:0 0 10px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-note-content { margin:0; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:15px; font-weight:400; line-height:1.45; }
+    #apptDrawer .rpt-next.appt-next-section { margin:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .rpt-next.appt-next-section .rpt-next-title { margin:0 0 12px; color:#18181b; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-next-section ol { margin:0; padding:0; list-style:none; }
+    #apptDrawer .appt-next-section li { margin:0 0 8px; color:#71717a; font-family:'Inter','Segoe UI',sans-serif; font-size:14px; font-weight:400; line-height:1.5; }
+    #apptDrawer .appt-next-section li:last-child { margin-bottom:0; }
+    #apptDrawer .appt-original-request[hidden] { display:none; }
+    #apptDrawer .appt-drawer-legacy { display:none; }
+    #apptDrawer .appt-footer-hint { margin:0; color:#64748b; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-footer-hint[hidden] { display:none; }
+    #apptDrawer .appt-footer-hint a { color:#18181b; text-decoration:underline; }
+    #apptDrawer [hidden] { display:none !important; }
+    #apptDrawer .appt-reschedule-reply { padding:14px 24px; border-bottom:1px solid #e4e4e7; background:#fffbeb; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-reply strong { display:block; margin-bottom:4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-reply p { margin:4px 0; color:#475569; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-reply > div { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    #apptDrawer .appt-reschedule-request-card { margin:0 0 16px; padding:12px 14px; border:1px solid #e4e4e7; border-radius:7px; background:#f8fafc; }
+    #apptDrawer .appt-reschedule-request-card strong { display:block; margin-bottom:4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-request-card p { margin:3px 0 0; color:#64748b; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-flow { font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-back { margin:0 0 8px; padding:0; border:0; background:transparent; color:#52525b; font:500 14px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-current-schedule { display:flex; justify-content:space-between; gap:12px; margin:0 0 20px; padding:12px; border-radius:6px; background:#f4f4f5; color:#71717a; font-size:14px; }
+    #apptDrawer .appt-current-schedule strong { font-weight:600; }
+    #apptDrawer .appt-reschedule-step-title { margin:0 0 14px; color:#18181b; font-size:16px; font-weight:600; }
+    #apptDrawer .appt-reschedule-label { display:block; margin:14px 0 6px; color:#18181b; font-size:13px; font-weight:600; }
+    #apptDrawer .appt-reschedule-date,#apptDrawer #apptRescheduleReason { width:100%; box-sizing:border-box; padding:9px 10px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-reschedule-calendar { margin:8px 0 12px; border:1px solid #e4e4e7; border-radius:8px; padding:12px; }
+    #apptDrawer .appt-reschedule-calendar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
+    #apptDrawer .appt-reschedule-calendar-head strong { color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-calendar-head button { width:32px; height:32px; border:1px solid #e4e4e7; border-radius:6px; background:#fff; color:#18181b; cursor:pointer; }
+    #apptDrawer .appt-reschedule-calendar-head button:disabled { color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:4px; }
+    #apptDrawer .appt-reschedule-calendar-weekday { padding:4px 0; color:#71717a; font-size:11px; font-weight:600; text-align:center; }
+    #apptDrawer .appt-reschedule-calendar-day { position:relative; min-width:0; min-height:42px; border:1px solid transparent; border-radius:6px; background:#fff; color:#18181b; font:13px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-calendar-day[aria-pressed="true"] { border-color:#15803d; background:#f0fdf4; color:#166534; font-weight:600; }
+    #apptDrawer .appt-reschedule-calendar-day:disabled { background:#f4f4f5; color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-calendar-day .day-weekday { display:none; }
+    #apptDrawer .appt-reschedule-calendar-day .day-marker { position:absolute; right:4px; bottom:4px; left:4px; height:3px; border-radius:3px; background:#15803d; }
+    #apptDrawer .appt-reschedule-calendar-day[data-program="true"] .day-marker { background:#7c3aed; }
+    #apptDrawer .appt-reschedule-calendar-day[data-full="true"] .day-marker { background:#dc2626; }
+    #apptDrawer .appt-reschedule-calendar-day[data-closed="true"] .day-marker { background:#a1a1aa; }
+    #apptDrawer .appt-reschedule-calendar-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; color:#71717a; font-size:11px; }
+    #apptDrawer .appt-reschedule-calendar-legend span { display:flex; align-items:center; gap:4px; }
+    #apptDrawer .appt-reschedule-calendar-legend i { width:7px; height:7px; border-radius:50%; background:#15803d; }
+    #apptDrawer .appt-reschedule-calendar-legend .program { background:#7c3aed; }
+    #apptDrawer .appt-reschedule-calendar-legend .full { background:#dc2626; }
+    #apptDrawer .appt-reschedule-calendar-legend .closed { background:#a1a1aa; }
+    @media (max-width:600px) {
+      #apptDrawer .appt-reschedule-calendar-grid { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; scroll-snap-type:x mandatory; }
+      #apptDrawer .appt-reschedule-calendar-weekday,
+      #apptDrawer .appt-reschedule-calendar-grid > span[aria-hidden="true"] { display:none; }
+      #apptDrawer .appt-reschedule-calendar-day { display:flex; flex:0 0 46px; flex-direction:column; align-items:center; justify-content:center; gap:3px; min-height:54px; scroll-snap-align:start; }
+      #apptDrawer .appt-reschedule-calendar-day .day-weekday { display:block; color:#71717a; font-size:10px; line-height:1; }
+      #apptDrawer .appt-reschedule-calendar-day .day-number { font-size:13px; line-height:1; }
+      #apptDrawer .appt-reschedule-calendar-day .day-marker { right:8px; left:8px; }
+    }
+    #apptDrawer .appt-reschedule-day-note { min-height:20px; margin:8px 0; color:#64748b; font-size:13px; line-height:1.4; }
+    #apptDrawer .appt-reschedule-priorities { display:flex; gap:8px; }
+    #apptDrawer .appt-reschedule-priorities button { min-height:34px; padding:0 12px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:14px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-priorities button[aria-pressed="true"] { border-color:#18181b; background:#f4f4f5; font-weight:600; }
+    #apptDrawer .appt-reschedule-slots { display:flex; flex-wrap:wrap; gap:8px; min-height:34px; }
+    #apptDrawer .appt-reschedule-slots button { min-height:34px; padding:0 12px; border:1px solid #d4d4d8; border-radius:6px; background:#fff; color:#18181b; font:13px 'Inter','Segoe UI',sans-serif; cursor:pointer; }
+    #apptDrawer .appt-reschedule-slots button[aria-pressed="true"] { border-color:#18181b; background:#18181b; color:#fff; }
+    #apptDrawer .appt-reschedule-slots button:disabled { background:#f4f4f5; color:#a1a1aa; cursor:not-allowed; }
+    #apptDrawer .appt-reschedule-not-reserved { margin:12px 0; color:#64748b; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-error { margin:8px 0; color:#b91c1c; font-size:13px; }
+    #apptDrawer .appt-reschedule-flow > div > .sd-btn { margin-top:8px; }
+    #apptDrawer .appt-reschedule-comparison { display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:12px; margin:12px 0 18px; }
+    #apptDrawer .appt-reschedule-comparison div { display:flex; flex-direction:column; gap:6px; }
+    #apptDrawer .appt-reschedule-comparison span { color:#71717a; font-size:13px; }
+    #apptDrawer .appt-reschedule-comparison strong { color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-review-reason { color:#475569; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-review-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:18px; }
+    #apptDrawer .appt-reschedule-alert { margin:0 0 16px; padding:11px 13px; border:1px solid #e4e4e7; border-radius:6px; background:#f8fafc; font-size:14px; line-height:1.45; }
+    #apptDrawer .appt-reschedule-alert.approved { border-color:#bbf7d0; background:#f0fdf4; color:#166534; }
+    #apptDrawer .appt-reschedule-alert.declined { border-color:#fecaca; background:#fef2f2; color:#991b1b; }
+    #apptDrawer .appt-reschedule-alert[hidden] { display:none !important; }
     .rpt-divider { border:0; border-top:1px solid #e4e4e7; margin:20px 0; }
-    #apptDrawer .rpt-drawer-foot { justify-content:center; }
-    #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 0 auto; }
-    /* drawer status badge + timeline */
-    .rpt-status-badge { display:inline-flex; align-items:center; gap:6px; font-family:'Inter',sans-serif; font-size:12px; font-weight:600; padding:3px 10px; border:1px solid transparent; border-radius:20px; white-space:nowrap; }
-    .rpt-status-badge .st-dot { width:7px; height:7px; border-radius:50%; }
-    .rpt-status-badge.st-pending { background:#FEF3C7; color:#92400E; border-color:#FDE68A; } .rpt-status-badge.st-pending .st-dot { background:#92400E; }
-    .rpt-status-badge.st-awaiting { background:#dcebe0; color:#045e1f; border-color:#bbf7d0; } .rpt-status-badge.st-awaiting .st-dot { background:#045e1f; }
-    .rpt-status-badge.st-review { background:#EFF6FF; color:#1E40AF; border-color:#BFDBFE; } .rpt-status-badge.st-review .st-dot { background:#1E40AF; }
-    .rpt-status-badge.st-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; } .rpt-status-badge.st-resolved .st-dot { background:#ffffff; }
-    .rpt-status-badge.st-rejected { background:#FEE2E2; color:#991B1B; border-color:#FECACA; } .rpt-status-badge.st-rejected .st-dot { background:#991B1B; }
+    #apptDrawer .rpt-drawer-foot { align-items:flex-start; flex-direction:column; gap:8px; }
+    #apptDrawer .appt-footer-actions { display:flex; align-items:center; justify-content:flex-start; gap:8px; width:100%; }
+    #apptDrawer .rpt-drawer-foot .sd-btn { flex:0 1 auto; min-width:0; white-space:nowrap; }
+    /* drawer status + timeline */
+    #rptDrawer .rpt-resident-status { margin-bottom:14px; padding:12px 14px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; }
+    #rptDrawer .rpt-resident-status-heading { margin:0; color:#18181b; font-size:16px; font-weight:600; line-height:1.35; }
+    #rptDrawer .rpt-resident-status-message { margin:8px 0 0; color:#3f3f46; font-size:14px; line-height:1.5; }
+    #rptDrawer .rpt-resident-status-updated { margin:8px 0 0; color:#71717a; font-size:12px; line-height:1.4; }
     #my-reports #reportTable .appt-status-pill.report-status-resolved { background:#0E8131; color:#ffffff; border-color:#0E8131; }
     .rpt-timeline { display:flex; align-items:center; gap:8px; }
     .tl-step { display:inline-flex; align-items:center; gap:5px; font-family:'Inter',sans-serif; font-size:14px; font-weight:500; color:#a1a1aa; }
@@ -3074,8 +4381,46 @@ include __DIR__ . '/../../includes/portal-toast.php';
     .rpt-timeline-rejected .tl-step.done { color:#991b1b; }
     .rpt-next { background:#fafafa; border:1px solid #e4e4e7; border-radius:8px; padding:16px 20px; }
     .rpt-next-title { font-family:'Inter',sans-serif; font-size:14px; font-weight:600; color:#18181b; margin-bottom:8px; }
-    .rpt-next ol { margin:0; padding-left:1.15rem; }
-    .rpt-next li { font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    .rpt-next p { margin:0; font-family:'Inter',sans-serif; font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
+    #apptDrawer .appt-status-notice { margin:-2px 0 22px; padding:0; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-status-notice[hidden] { display:none; }
+    #apptDrawer .appt-status-notice strong { display:block; margin-bottom:3px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-status-notice p { margin:0; color:#475569; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-action-needed { margin:-2px 0 22px; padding:0; border:0 !important; box-shadow:none !important; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-action-needed::before,
+    #apptDrawer .appt-action-needed::after { display:none !important; content:none !important; }
+    #apptDrawer .appt-action-needed[hidden] { display:none; }
+    #apptDrawer .appt-action-needed h3 { margin:0 0 4px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-action-needed p { margin:0; color:#475569; font-size:14px; line-height:1.5; }
+    #apptDrawer .appt-reschedule-times { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:10px 0; font-size:13px; }
+    #apptDrawer .appt-reschedule-times span { display:block; margin-bottom:2px; color:#64748b; }
+    #apptDrawer .appt-reschedule-times strong { display:block; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-reschedule-times .requested strong { text-decoration:line-through; text-decoration-thickness:1px; }
+    #apptDrawer .appt-reschedule-actions { display:flex; gap:8px; margin:8px 0; }
+    #apptDrawer .appt-reschedule-actions .sd-btn { justify-content:center; }
+    #apptDrawer .appt-response-deadline { margin-top:6px !important; color:#334155 !important; font-size:13px !important; }
+    #apptDrawer .appt-scheduled-notice { margin:-2px 0 22px; padding:12px 14px; border:1px solid #dbeafe; border-radius:8px; background:#eff6ff; font-family:'Inter','Segoe UI',sans-serif; }
+    #apptDrawer .appt-scheduled-notice[hidden] { display:none; }
+    #apptDrawer .appt-scheduled-notice strong { display:block; margin-bottom:4px; color:#1e3a8a; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-scheduled-notice p { margin:0; color:#334155; font-size:13px; line-height:1.5; }
+    #apptDrawer .appt-cancel-cutoff { margin:-14px 0 18px; color:#92400e; font-size:13px; line-height:1.45; }
+    #apptDrawer .appt-cancel-cutoff[hidden] { display:none; }
+    #apptDrawer .appt-footer-reschedule { display:flex; flex-direction:column; align-items:stretch; gap:4px; }
+    #apptDrawer .appt-reschedule-soon { color:#71717a; font-size:12px; line-height:1.3; text-align:center; }
+    #apptDrawer .appt-progress { margin-top:38px; }
+    #apptDrawer .appt-progress-title { margin-bottom:12px; color:#18181b; font-size:14px; font-weight:600; }
+    #apptDrawer .appt-progress-list { margin:0; padding:0; list-style:none; }
+    #apptDrawer .appt-progress-step { position:relative; min-height:38px; padding:0 0 10px 26px; color:#64748b; font-size:14px; line-height:1.35; }
+    #apptDrawer .appt-progress-step:last-child { min-height:0; padding-bottom:0; }
+    #apptDrawer .appt-progress-step::before { position:absolute; top:1px; left:0; width:14px; height:14px; box-sizing:border-box; border:2px solid #d6ddd8; border-radius:50%; background:#fff; content:''; }
+    #apptDrawer .appt-progress-step:not(:last-child)::after { position:absolute; top:15px; bottom:-1px; left:6px; width:2px; background:#d6ddd8; content:''; }
+    #apptDrawer .appt-progress-step.done { color:#18181b; }
+    #apptDrawer .appt-progress-step.done::before { border-color:#15803d; background:#15803d; }
+    #apptDrawer .appt-progress-step.done:not(:last-child)::after { background:#15803d; }
+    #apptDrawer .appt-progress-step.current { color:#18181b; font-weight:600; }
+    #apptDrawer .appt-progress-step.current::before { border-color:#15803d; background:#fff; box-shadow:inset 0 0 0 3px #fff; outline:2px solid #15803d; outline-offset:-4px; }
+    #apptDrawer .appt-progress-step-title { display:block; }
+    #apptDrawer .appt-progress-step-detail { display:block; margin-top:2px; color:#64748b; font-size:13px; font-weight:400; }
     .rpt-drawer-foot { display:flex; gap:8px; padding:16px 24px; border-top:1px solid #e4e4e7; align-items:center; }
     .rpt-drawer-foot .sd-btn { flex:1; justify-content:center; }
     .rpt-more-wrap { position:relative; }
@@ -3098,13 +4443,26 @@ include __DIR__ . '/../../includes/portal-toast.php';
     #apptDrawer .rpt-next-title { font-size:14px; font-weight:600; color:#18181b; line-height:1.4; margin-bottom:8px; }
     #apptDrawer .rpt-next li { font-size:14px; font-weight:400; color:#71717a; line-height:1.5; }
     @media (max-width:560px){
-      .rpt-drawer-head, .rpt-drawer-body { padding-left:20px; padding-right:20px; }
-      .rpt-drawer-foot { padding-left:20px; padding-right:20px; }
+      .rpt-drawer-head, .rpt-drawer-body { padding-left:24px; padding-right:24px; }
+      .rpt-drawer-foot { padding:12px 20px 18px; }
+      #apptDrawer { width:100vw; }
+      #apptDrawer .rpt-drawer-body { padding:24px 24px 18px; }
+      #apptDrawer .rpt-drawer-foot { align-items:flex-start; flex-direction:column; gap:8px; }
+      #apptDrawer .appt-footer-hint { width:100%; min-width:0; margin:0; }
+      #apptDrawer .appt-footer-actions { width:100%; max-width:100%; margin:0; }
       #apptDrawer .pet-drawer-info { grid-template-columns:1fr; }
-      #apptDrawer .rpt-drawer-foot { flex-wrap:wrap; }
-      #apptDrawer .rpt-drawer-foot .sd-btn { flex:1 1 100%; }
+      #apptDrawer .rpt-drawer-foot .sd-btn { box-sizing:border-box; width:auto; min-height:40px; padding:0 9px; flex:0 1 auto; font-size:12px; }
+      #apptDrawer .appt-footer-reschedule { width:auto; }
+      #apptDrawer .appt-reschedule-soon { text-align:left; }
+      #apptDrawer .appt-reschedule-actions { flex-direction:column; }
+      #apptDrawer .appt-reschedule-times { grid-template-columns:1fr; gap:8px; }
+      #apptDrawer .appt-summary-avatar { width:64px; height:64px; flex-basis:64px; }
+      #apptDrawer .appt-summary-status { padding:4px 8px; font-size:12px; }
+      #apptDrawer .appt-detail-label { flex-basis:96px; }
+      #apptDrawer .appt-reschedule-reply { padding:12px 20px; }
+      #apptDrawer .appt-reschedule-review-actions { flex-direction:column-reverse; }
+      #apptDrawer .appt-reschedule-review-actions .sd-btn { width:100%; }
     }
-
     /* ï¿½"?ï¿½"? Submit Report wizard ï¿½"?ï¿½"? */
     .rpt-step-indicator { display:flex; align-items:center; gap:8px; margin-bottom:1.5rem; }
     .rpt-step { display:flex; align-items:center; gap:6px; }
@@ -3249,21 +4607,32 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
 <!-- ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? APPOINTMENTS ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"?ï¿½"? -->
   <section id="calendar-booking" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Calendar Booking</h1>
+      <p>View your appointments on the calendar and select a date to review details.</p>
+    </header>
     <?php include __DIR__ . '/../../calendar-booking.php'; ?>
   </section>
   <section id="my-waitlist" class="content-section">
+    <header class="resident-section-heading">
+      <h1>My Waitlist</h1>
+      <p>Track your waitlist requests and check when a preferred slot becomes available.</p>
+    </header>
     <section class="resident-waitlist-kpis" aria-label="My waitlist summary">
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Total Entries</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['total']; ?></p><p class="resident-waitlist-kpi-sub">All your waitlist requests</p></article>
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Pending</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['waiting']; ?></p><p class="resident-waitlist-kpi-sub">Waiting for an open slot</p></article>
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Notified</p><p class="resident-waitlist-kpi-value"><?php echo $residentWaitlistStats['notified']; ?></p><p class="resident-waitlist-kpi-sub">Slot available to claim</p></article>
       <article class="resident-waitlist-kpi"><p class="resident-waitlist-kpi-label">Most Requested Date</p><p class="resident-waitlist-kpi-value" style="font-size:20px;"><?php echo $residentWaitlistDemandDate ? date('M d, Y', strtotime($residentWaitlistDemandDate)) : '--'; ?></p><p class="resident-waitlist-kpi-sub"><?php echo $residentWaitlistDemandCount; ?> of your waiting requests</p></article>
     </section>
-    <form class="resident-waitlist-toolbar" id="residentWaitlistToolbar" onsubmit="return false;">
-      <input type="search" id="residentWaitlistSearch" placeholder="Search by pet or service" aria-label="Search waitlist">
+    <form class="resident-waitlist-toolbar resident-list-toolbar" id="residentWaitlistToolbar" onsubmit="return false;">
+      <div class="resident-toolbar-search-row resident-toolbar-has-filter">
+      <input type="search" id="residentWaitlistSearch" placeholder="Search..." aria-label="Search waitlist">
       <span class="resident-waitlist-date-filter">
         <button type="button" class="resident-waitlist-date-button" id="residentWaitlistDateButton" aria-label="Filter by date" title="Filter by date"><i class="fas fa-filter" aria-hidden="true"></i></button>
         <input type="date" id="residentWaitlistDate" aria-label="Filter by preferred date">
       </span>
+      </div>
+      <div class="resident-toolbar-filters">
       <button type="button" class="resident-waitlist-date-clear" id="residentWaitlistClearDate" aria-label="Clear date filter" hidden><i class="fas fa-times"></i></button>
       <select id="residentWaitlistService" aria-label="Filter by service">
         <option value="">All services</option>
@@ -3279,6 +4648,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <option value="expired">Expired</option>
         <option value="cancelled">Cancelled</option>
       </select>
+      </div>
     </form>
     <section class="resident-waitlist-card">
       <div class="resident-waitlist-table-wrap">
@@ -3344,6 +4714,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
     </div>
   </section>
   <section id="appointments" class="content-section">
+    <header class="resident-section-heading">
+      <h1>Appointments</h1>
+      <p>View your upcoming and past veterinary appointments.</p>
+    </header>
     <!-- Overview KPIs -->
     <div class="appt-kpis">
       <div class="appt-kpi-card">
@@ -3367,41 +4741,56 @@ include __DIR__ . '/../../includes/portal-toast.php';
         <p class="appt-kpi-sub">Finished</p>
       </div>
     </div>
+    <div id="apptReplySummary" class="appt-reschedule-alert" hidden role="status">
+      <span id="apptReplySummaryText"></span>
+      <button type="button" class="sd-btn sd-btn-outline" id="apptReplySummaryButton">Review</button>
+    </div>
 
     <?php
     $apptStatusColors = [
         'pending'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
         'scheduled'   => ['bg' => '#0E8131', 'color' => '#ffffff', 'border' => '#0E8131'],
         'rescheduled' => ['bg' => '#ede9fe', 'color' => '#6d28d9', 'border' => '#ddd6fe'],
+        'action_needed' => ['bg' => '#ffedd5', 'color' => '#9a3412', 'border' => '#fed7aa'],
+        'expired' => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
         'completed'   => ['bg' => '#dbeafe', 'color' => '#1e40af', 'border' => '#bfdbfe'],
         'cancelled'   => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
-        'no_show'     => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
+        'no_show'     => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+        'rejected'    => ['bg' => '#fee2e2', 'color' => '#991b1b', 'border' => '#fecaca'],
+        'waitlisted'  => ['bg' => '#fef3c7', 'color' => '#92400e', 'border' => '#fde68a'],
     ];
     ?>
     <?php if (empty($appointments)): ?>
       <div class="rpt-empty">
-        <i class="fas fa-calendar-alt"></i>
         <h3>No appointments yet</h3>
         <p>Request an appointment to get started.</p>
-        <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()"><i class="fas fa-plus"></i> Request Appointment</button>
+        <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()">Request Appointment</button>
       </div>
     <?php else: ?>
-    <div class="appt-card-header">
-      <div class="appt-header-right">
+    <div class="appt-card-header resident-list-toolbar">
+      <div class="appt-header-right resident-toolbar-controls">
+        <div class="resident-toolbar-search-row">
         <div class="appt-search-wrap">
           <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" id="apptSearchInput" class="appt-search-input" placeholder="Search by ID, service, or pet">
         </div>
-        <select id="apptStatusSelect" class="appt-status-select">
+        </div>
+        <div class="resident-toolbar-filters">
+        <select id="apptStatusSelect" class="appt-status-select resident-toolbar-last-filter">
           <option value="all">All Statuses</option>
           <option value="pending">Pending</option>
+          <option value="action_needed">Action needed</option>
           <option value="scheduled">Scheduled</option>
+          <option value="waitlisted">Waitlisted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
           <option value="rescheduled">Rescheduled</option>
+          <option value="no_show">No Show</option>
+          <option value="rejected">Rejected</option>
         </select>
+        </div>
       </div>
-      <button type="button" class="sd-btn sd-btn-default" onclick="openBookApptModal()" style="margin-left:auto;">
+      <button type="button" class="sd-btn sd-btn-default resident-toolbar-primary" onclick="openBookApptModal()" style="margin-left:auto;">
         <i class="fas fa-plus"></i> Request Appointment
       </button>
     </div>
@@ -3413,8 +4802,8 @@ include __DIR__ . '/../../includes/portal-toast.php';
             <th class="sd-th"><button type="button" class="th-sort" data-col="ref" onclick="APPT.sortBy('ref')">Request ID<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="service" onclick="APPT.sortBy('service')">Service<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="pet" onclick="APPT.sortBy('pet')">Pet<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="APPT.sortBy('date')">Preferred Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
-            <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="APPT.sortBy('time')">Preferred Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="date" onclick="APPT.sortBy('date')">Appointment Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
+            <th class="sd-th"><button type="button" class="th-sort" data-col="time" onclick="APPT.sortBy('time')">Appointment Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="submitted" onclick="APPT.sortBy('submitted')">Submitted Date<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="submittedtime" onclick="APPT.sortBy('submittedtime')">Submitted Time<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
             <th class="sd-th"><button type="button" class="th-sort" data-col="status" onclick="APPT.sortBy('status')">Status<svg class="th-sort-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></button></th>
@@ -3425,14 +4814,29 @@ include __DIR__ . '/../../includes/portal-toast.php';
           <?php foreach ($appointments as $appt):
             $aptRef = $appt['reference_id'] ?? fallbackRefId('#APT-', $appt['appointment_id']);
             $ast = $appt['status'];
-            $asc = $apptStatusColors[$ast] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
-            $astLabel = ucfirst(str_replace('_', ' ', $ast));
-            $aDate = date('M d, Y', strtotime($appt['preferred_date']));
-            $aTime = date('g:i A', strtotime($appt['preferred_time']));
+            $hasApprovedReschedule = ($appt['reschedule_request_status'] ?? '') === 'approved';
+            $displayAppointmentStatus = $hasApprovedReschedule && in_array($ast, ['approved', 'rescheduled'], true)
+              ? 'scheduled'
+              : $ast;
+            $hasRescheduleActivity = in_array(($appt['reschedule_request_status'] ?? ''), ['pending', 'offered'], true);
+            $displayStatus = $displayAppointmentStatus === 'rescheduled' || $hasRescheduleActivity ? 'rescheduled' : $displayAppointmentStatus;
+            $asc = $apptStatusColors[$displayStatus] ?? ['bg' => '#f1f5f9', 'color' => '#64748b', 'border' => '#e4e4e7'];
+            $astLabel = $displayStatus === 'rescheduled' ? 'Rescheduled' : ucfirst(str_replace('_', ' ', $displayAppointmentStatus));
+            if ($ast === 'action_needed') $astLabel = 'Action needed';
+            elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $astLabel = 'Expired';
+            elseif ($ast === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $astLabel = 'Declined';
+            elseif ($ast === 'cancelled' && $appt['cancelled_by'] === 'resident') $astLabel = 'Cancelled by Resident';
+            $scheduledDate = $appt['scheduled_date'] ?: $appt['preferred_date'];
+            $scheduledTime = $appt['scheduled_time'] ?: $appt['preferred_time'];
+            $aDate = date('F j, Y', strtotime($scheduledDate));
+            $aTime = date('g:i A', strtotime($scheduledTime));
             $aCreatedDate = date('M d, Y', strtotime($appt['created_at']));
             $aCreatedTime = date('g:i A', strtotime($appt['created_at']));
+            $rescheduleTag = '';
+            if (($appt['reschedule_request_status'] ?? '') === 'offered') $rescheduleTag = 'Reply needed';
+            elseif (($appt['reschedule_request_status'] ?? '') === 'declined') $rescheduleTag = 'Reschedule declined';
           ?>
-          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($ast); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($appt['preferred_date']); ?>" data-time="<?php echo (int)strtotime($appt['preferred_time']); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
+          <tr class="sd-tr" data-id="<?php echo (int)$appt['appointment_id']; ?>" data-status="<?php echo htmlspecialchars($displayStatus); ?>" data-service="<?php echo htmlspecialchars(strtolower($appt['appointment_type'])); ?>" data-pet="<?php echo htmlspecialchars(strtolower($appt['pet_name'] ?? '')); ?>" data-date="<?php echo (int)strtotime($scheduledDate); ?>" data-time="<?php echo (int)strtotime($scheduledTime); ?>" data-submitted="<?php echo (int)strtotime($appt['created_at']); ?>" onclick="APPT.view(<?php echo (int)$appt['appointment_id']; ?>)">
             <td class="sd-td"><div class="client-name"><?php echo htmlspecialchars($aptRef); ?></div></td>
             <td class="sd-td">
               <div class="contact-main contact-normal"><?php echo ucfirst($appt['appointment_type']); ?></div>
@@ -3456,7 +4860,7 @@ include __DIR__ . '/../../includes/portal-toast.php';
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aTime; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedDate; ?></div></td>
             <td class="sd-td"><div class="contact-main contact-normal"><?php echo $aCreatedTime; ?></div></td>
-            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span></td>
+            <td class="sd-td"><span class="appt-status-pill" style="background:<?php echo $asc['bg']; ?>;color:<?php echo $asc['color']; ?>;border-color:<?php echo $asc['border']; ?>;"><?php echo $astLabel; ?></span><?php if ($rescheduleTag !== ''): ?><span class="appt-reschedule-table-tag<?php echo $rescheduleTag === 'Reply needed' ? ' reply-needed' : ''; ?>"><?php echo htmlspecialchars($rescheduleTag); ?></span><?php endif; ?></td>
             <td class="sd-td sd-td-action" onclick="event.stopPropagation()">
               <button class="sd-row-actions" title="More options" onclick="event.stopPropagation();apptRowActions(event,<?php echo (int)$appt['appointment_id']; ?>)"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button>
             </td>
@@ -3496,9 +4900,13 @@ include __DIR__ . '/../../includes/portal-toast.php';
                   <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
                 </div>
                 <div class="bk-days" id="bkGridDates"></div>
+                <div class="bk-cal-legend">
+                  <span class="bk-cal-legend-item"><span class="bk-cal-legend-mark"></span> Closed</span>
+                  <span class="bk-cal-legend-item"><span class="bk-cal-legend-mark program"></span> Program or event, limited slots</span>
+                  <span class="bk-cal-legend-full">Full &nbsp; No slots left</span>
+                </div>
               </div>
             </div>
-            <div class="bk-cal-hint" id="bkSlotsHint">Select your preferred appointment date.</div>
           </div>
 
           <!-- RIGHT column: pet, service, available time -->
@@ -3534,10 +4942,10 @@ include __DIR__ . '/../../includes/portal-toast.php';
                   <svg class="bk-select-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
                 </div>
               </div>
-              <div class="bk-field">
+              <div class="bk-field" id="apptPriorityField" hidden>
                 <label class="bk-label" for="apptUrgencySelect">Appointment Priority <span class="req">*</span></label>
                 <div class="bk-select">
-                  <select id="apptUrgencySelect" name="urgency_level" required>
+                  <select id="apptUrgencySelect" name="urgency_level">
                     <option value="routine">Routine</option>
                     <option value="urgent">Urgent</option>
                   </select>
@@ -3546,9 +4954,12 @@ include __DIR__ . '/../../includes/portal-toast.php';
               </div>
             </div>
 
-            <div id="bkUrgentCareNotice" hidden style="margin:12px 0;padding:12px 14px;border:1px solid #fecaca;border-radius:8px;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.5;">
-              <strong>Urgent care:</strong> For an animal bite or possible rabies exposure, go to an animal bite center or hospital immediately. Do not wait for an appointment.
-              For other urgent help, call <a href="tel:+63464321234" style="color:inherit;font-weight:700;">(046) 432-1234</a> or visit the DCVS office.
+            <div id="bkUrgentCareNotice" class="bk-urgent-care-notice" hidden>
+              <div>For pets that are injured or seriously ill.</div>
+              <div class="bk-urgent-care-help">
+                <p><strong>Bitten, or possibly exposed to rabies?</strong> Do not wait for an appointment. Go to an animal bite center or hospital now.</p>
+                <p><strong>Pet needs help right away?</strong> Call DCVS at <a href="tel:+639755583461">0975 558 3461</a> or visit the DCVS office.</p>
+              </div>
             </div>
 
             <!-- Pet info (shown once a pet is selected) -->
@@ -3565,10 +4976,17 @@ include __DIR__ . '/../../includes/portal-toast.php';
 
             <!-- Available Time -->
             <div class="bk-slots-wrap">
-              <div class="bk-slots-title">Available Time</div>
-              <div id="bkProgramNotice" hidden style="margin:0 0 10px;padding:11px 13px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:13px;line-height:1.5;"></div>
+              <div class="bk-slots-heading">
+                <div class="bk-slots-title" id="bkSlotsTitle">Select a date</div>
+                <div class="bk-slots-remaining" id="bkSlotsRemaining"></div>
+              </div>
+              <div class="bk-slots-hint" id="bkSlotsHint" aria-live="polite"></div>
+              <div id="bkProgramNotice" class="bk-program-notice" hidden>
+                <div id="bkProgramNoticeDetails"></div>
+                <p class="bk-program-notice-message" id="bkProgramNoticeMessage"></p>
+              </div>
+              <div id="bkNearestSlotNotice" class="bk-next-availability" hidden role="status" aria-live="polite"></div>
               <div class="bk-slot-grid" id="bkSlots"></div>
-              <div id="bkNearestSlotNotice" hidden role="status" aria-live="polite" style="margin-top:10px;font-size:13px;color:#52525b;"></div>
               <div id="bkWaitlistWrap" hidden style="margin-top:10px;">
                 <button type="button" class="sd-btn sd-btn-outline" id="bkJoinWaitlist">Notify me if a slot opens</button>
                 <div id="bkWaitlistStatus" role="status" aria-live="polite" style="margin-top:6px;font-size:13px;"></div>
@@ -3646,14 +5064,18 @@ include __DIR__ . '/../../includes/portal-toast.php';
   <section id="archive" class="content-section">
 <!-- Archived Pets -->
     <div class="archive-header">
-      <div class="archive-toolbar">
+      <div class="archive-toolbar resident-list-toolbar">
+        <div class="resident-toolbar-search-row">
         <div class="search-grow-wrap">
           <svg class="archive-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
           </svg>
           <input type="text" id="archiveSearch" class="archive-search-input" placeholder="Search archived items..." onkeyup="filterArchive()">
         </div>
-        <select class="archive-filter-select archive-detail-filter" id="archiveDetailFilter" onchange="archiveDetailChanged()" aria-label="Archive type filter"></select>
+        </div>
+        <div class="resident-toolbar-filters">
+        <select class="archive-filter-select archive-detail-filter resident-toolbar-last-filter" id="archiveDetailFilter" onchange="archiveDetailChanged()" aria-label="Archive type filter"></select>
+        </div>
       </div>
     </div>
 
@@ -3918,7 +5340,7 @@ if (!empty($adoptionListings)) {
 
         $ref = isset($l['pet_ref_id']) && $l['pet_ref_id'] !== '' ? $l['pet_ref_id'] : ('#PET-' . str_pad((string)$pid, 4, '0', STR_PAD_LEFT));
         $id = preg_replace('/^#/', '', $ref);
-        $regOn = isset($l['created_at']) && $l['created_at'] !== '' ? date('M j, Y', strtotime($l['created_at'])) : $dash;
+        $regOn = isset($l['created_at']) && $l['created_at'] !== '' ? date('F j, Y', strtotime($l['created_at'])) : $dash;
         $about = trim((string)($l['description'] ?? ''));
         if ($about === '') {
             $sd = trim((string)($l['source_description'] ?? ''));
@@ -3981,7 +5403,7 @@ if (!empty($adoptionListings)) {
         $applicationProgress = $application
             ? ($application['status'] === 'adopted' ? 'Adopted' : 'Approved')
             : '';
-        $applicationDate = $application ? date('M d, Y', strtotime($application['application_date'])) : '';
+        $applicationDate = $application ? date('F j, Y', strtotime($application['application_date'])) : '';
         $vetPets[] = array(
             'id' => $id,
             'resultingPetId' => $pid,
@@ -3996,6 +5418,12 @@ if (!empty($adoptionListings)) {
             'photo' => $photo,
             'status' => $st,
             'applicationProgress' => $applicationProgress,
+            'applicationStatus' => $application ? ((int)($application['resulting_pet_id'] ?? 0) > 0 ? 'adopted' : strtolower((string)$application['status'])) : '',
+            'declineReason' => $application ? (string)($application['decline_reason'] ?? '') : '',
+            'reviewedAt' => $application && !empty($application['reviewed_at']) ? date('F j, Y', strtotime($application['reviewed_at'])) : '',
+            'reservedAt' => $application && !empty($application['reserved_at']) ? date('F j, Y', strtotime($application['reserved_at'])) : '',
+            'confirmedAt' => $application && !empty($application['confirmed_at']) ? date('F j, Y', strtotime($application['confirmed_at'])) : '',
+            'finalizedAt' => $application && !empty($application['finalized_at']) ? date('F j, Y', strtotime($application['finalized_at'])) : '',
             'applicationDate' => $applicationDate,
             'applicationPending' => false,
             'registered' => $regOn,
@@ -4021,7 +5449,7 @@ if (!empty($adoptionListings)) {
             'appointments' => $apptElem,
             'documents' => array(),
             'timeline' => $tl,
-            'adoptedDate' => ($adoptionDate !== '') ? date('M d, Y', strtotime($adoptionDate)) : '',
+            'adoptedDate' => ($adoptionDate !== '') ? date('F j, Y', strtotime($adoptionDate)) : '',
             'readiness' => array(
                 'vaccination' => 'Partially vaccinated',
                 'health' => 'Cleared',
@@ -4047,11 +5475,16 @@ foreach ($residentAdoptionApplications as $application) {
     }
     $applicationStatus = strtolower(trim((string)$application['status']));
     $statusMeta = array(
-        'pending' => array('key' => 'reserved', 'progress' => 'Pending Application'),
-        'under_review' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'needs_info' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'approved' => array('key' => 'reserved', 'progress' => 'In Progress'),
-        'expired' => array('key' => 'available', 'progress' => 'Expired / Unclaimed'),
+        'pending' => array('key' => 'pending', 'progress' => 'DCVS staff are reviewing your application.', 'about' => 'DCVS staff are reviewing your application.'),
+        'under_review' => array('key' => 'pending', 'progress' => 'DCVS staff are reviewing your application.', 'about' => 'DCVS staff are reviewing your application.'),
+        'needs_info' => array('key' => 'review', 'progress' => 'Action needed', 'about' => 'DCVS staff requested more information. Please review the request in your application.'),
+        'reserved' => array('key' => 'reserved', 'progress' => 'Action needed', 'about' => 'Your application was approved. Confirm before the response deadline to begin your pickup period.'),
+        'approved' => array('key' => 'reserved', 'progress' => 'Action needed', 'about' => 'Your application was approved. Confirm your reservation to begin your pickup period.'),
+        'confirmed' => array('key' => 'confirmed', 'progress' => 'Ready for Pickup', 'about' => 'Your reservation is confirmed. Pick up your pet before the deadline.'),
+        'declined' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
+        'expired' => array('key' => 'expired', 'progress' => 'Expired', 'about' => 'You didn’t respond / pick up within the allotted time.'),
+        'rejected' => array('key' => 'declined', 'progress' => 'Declined', 'about' => 'Your application was declined by DCVS staff.'),
+        'withdrawn' => array('key' => 'cancelled', 'progress' => 'Cancelled', 'about' => 'You withdrew this application.'),
     );
     if (!isset($statusMeta[$applicationStatus])) {
         continue;
@@ -4061,11 +5494,32 @@ foreach ($residentAdoptionApplications as $application) {
     $ageNum = isset($ageMatch[0]) ? (int)$ageMatch[0] : 0;
     $species = ucfirst(strtolower(trim((string)($application['species'] ?? ''))));
     $applicationName = trim((string)($application['pet_name'] ?? '')) ?: 'Pet';
-    $applicationDate = date('M d, Y', strtotime($application['application_date']));
+    $applicationDate = date('F j, Y', strtotime($application['application_date']));
+    $responseDeadlineDisplay = !empty($application['response_deadline']) ? date('F j, Y', strtotime($application['response_deadline'])) : '';
+    $pickupDeadlineDisplay = !empty($application['pickup_deadline']) ? date('F j, Y', strtotime($application['pickup_deadline'])) : '';
     $applicationId = (int)$application['application_id'];
     $applicationListingId = (int)$application['pet_listing_id'];
     if ($resultingPetId > 0) {
-        $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted');
+        $statusMeta[$applicationStatus] = array('key' => 'adopted', 'progress' => 'Adopted', 'about' => 'This adoption has been completed.');
+    } elseif ($applicationStatus === 'declined' && strtolower(trim((string)($application['decline_reason'] ?? ''))) !== 'expired') {
+        $statusMeta[$applicationStatus] = array('key' => 'declined', 'progress' => 'Declined', 'about' => 'Your application was declined.');
+    } elseif (in_array($applicationStatus, array('declined', 'expired'), true)) {
+        $statusMeta[$applicationStatus]['progress'] = 'You didn’t respond / pick up within the allotted time.';
+        $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
+    }
+    $declineReason = trim((string)($application['decline_reason'] ?? ''));
+    if ($resultingPetId <= 0 && $applicationStatus === 'rejected') {
+        $declineReason = trim((string)($application['rejection_reason'] ?? ''));
+        if ($declineReason !== '') {
+            $statusMeta[$applicationStatus]['progress'] = 'Declined: ' . $declineReason;
+            $statusMeta[$applicationStatus]['about'] = $statusMeta[$applicationStatus]['progress'];
+        }
+    } elseif ($resultingPetId <= 0 && ($applicationStatus === 'reserved' || $applicationStatus === 'approved')) {
+        if ($responseDeadlineDisplay !== '') {
+            $statusMeta[$applicationStatus]['progress'] = 'Reserved for you. Respond before ' . $responseDeadlineDisplay;
+        }
+    } elseif ($resultingPetId <= 0 && $applicationStatus === 'confirmed' && $pickupDeadlineDisplay !== '') {
+        $statusMeta[$applicationStatus]['progress'] = 'Pick up before ' . $pickupDeadlineDisplay;
     }
     $vetPets[] = array(
         'id' => 'APP-' . str_pad((string)$applicationId, 4, '0', STR_PAD_LEFT),
@@ -4080,7 +5534,23 @@ foreach ($residentAdoptionApplications as $application) {
         'color' => "\u{2014}",
         'photo' => (string)($application['photo_url'] ?? ''),
         'status' => $statusMeta[$applicationStatus]['key'],
+        'statusLabel' => $statusMeta[$applicationStatus]['key'] === 'expired' ? 'Expired' : ($statusMeta[$applicationStatus]['key'] === 'declined' ? 'Declined' : ($statusMeta[$applicationStatus]['key'] === 'cancelled' ? 'Cancelled' : null)),
         'applicationProgress' => $statusMeta[$applicationStatus]['progress'],
+        'declineReason' => $declineReason,
+        'requestedInfo' => (string)($application['requested_info'] ?? ''),
+        'residentResponse' => (string)($application['resident_response'] ?? ''),
+        'residencyProofAvailable' => !empty($application['residency_proof_available']),
+        'applicationStatus' => $resultingPetId > 0 ? 'adopted' : $applicationStatus,
+        'reviewedAt' => !empty($application['reviewed_at']) ? date('F j, Y', strtotime($application['reviewed_at'])) : '',
+        'reservedAt' => !empty($application['reserved_at']) ? date('F j, Y', strtotime($application['reserved_at'])) : '',
+        'confirmedAt' => !empty($application['confirmed_at']) ? date('F j, Y', strtotime($application['confirmed_at'])) : '',
+        'finalizedAt' => !empty($application['finalized_at']) ? date('F j, Y', strtotime($application['finalized_at'])) : '',
+        'responseDeadline' => (string)($application['response_deadline'] ?? ''),
+        'responseDeadlineDisplay' => $responseDeadlineDisplay,
+        'responseDeadlineEpoch' => (int)($application['response_deadline_epoch'] ?? 0),
+        'pickupDeadline' => (string)($application['pickup_deadline'] ?? ''),
+        'pickupDeadlineDisplay' => $pickupDeadlineDisplay,
+        'pickupDeadlineEpoch' => (int)($application['pickup_deadline_epoch'] ?? 0),
         'applicationDate' => $applicationDate,
         'applicationPending' => $resultingPetId <= 0,
         'applicationId' => $applicationId,
@@ -4090,7 +5560,7 @@ foreach ($residentAdoptionApplications as $application) {
         'added' => $applicationDate,
         'fee' => "\u{2014}",
         'location' => 'Dasmariñas City Veterinary Services',
-        'about' => 'Your adoption application is being processed. Track its progress here.',
+        'about' => $statusMeta[$applicationStatus]['about'] ?? 'Track your adoption application here.',
         'tags' => array(),
         'requirements' => array(),
         'temperament' => array(),
@@ -4195,19 +5665,29 @@ foreach ($residentAdoptionApplications as $application) {
 
 <!-- adoption table -->
 <section id="adoption" class="content-section">
+  <header class="resident-section-heading">
+    <h1>Adoption Listings</h1>
+    <p>Browse pets available for adoption and review your applications.</p>
+  </header>
 
-  <div class="appt-card-header">
-    <div class="appt-header-right">
+  <div class="appt-card-header resident-list-toolbar">
+    <div class="appt-header-right resident-toolbar-controls">
+      <div class="resident-toolbar-search-row">
       <div class="appt-search-wrap">
         <svg class="appt-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <input type="text" id="cvSearch" class="appt-search-input" placeholder="Search by name, ID, species...">
       </div>
+      </div>
+      <div class="resident-toolbar-filters">
       <select id="cvStatusFilter" class="appt-status-select">
         <option value="all">All Status</option>
         <option value="available">Available</option>
-        <option value="pending">Pending Application</option>
-        <option value="review">In Progress</option>
-        <option value="approved">Approved</option>
+        <option value="pending">Under Review</option>
+        <option value="review">Action needed</option>
+        <option value="confirmed">Ready for Pickup</option>
+        <option value="expired">Expired</option>
+        <option value="declined">Declined</option>
+        <option value="cancelled">Cancelled</option>
         <option value="adopted">Adopted</option>
         <option value="unavailable">Not Available</option>
       </select>
@@ -4216,18 +5696,19 @@ foreach ($residentAdoptionApplications as $application) {
         <option value="Dog">Dog</option>
         <option value="Cat">Cat</option>
       </select>
-      <select id="cvSort" class="appt-status-select">
+      <select id="cvSort" class="appt-status-select resident-toolbar-last-filter">
         <option value="recent">Recently Added</option>
         <option value="az">Name A&ndash;Z</option>
         <option value="za">Name Z&ndash;A</option>
         <option value="age">Age</option>
         <option value="status">Status</option>
       </select>
+      </div>
     </div>
   </div>
 
-  <div class="appt-db-table-area dt-container">
-    <table class="appt-table" id="cvTable">
+  <div class="appt-db-table-area table-responsive dt-container">
+    <table class="appt-table no-responsive" id="cvTable">
       <thead>
         <tr class="sd-tr">
           <th class="sd-th">Pet</th>
@@ -4269,6 +5750,32 @@ foreach ($residentAdoptionApplications as $application) {
   <div class="cv-drawer-foot" id="cvDrawerFoot"></div>
 </aside>
 
+<div class="modal fade" id="adoptionConfirmModal" tabindex="-1" aria-labelledby="adoptionConfirmTitle" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 class="modal-title" id="adoptionConfirmTitle">Confirm your adoption pickup</h2>
+        <button type="button" class="btn-close" id="adoptionConfirmClose" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="adoption-confirm-pet">
+          <img id="adoptionConfirmPhoto" alt="">
+          <strong id="adoptionConfirmPetName"></strong>
+        </div>
+        <p><strong>Pickup location:</strong> Dasmariñas City Veterinary Services</p>
+        <p><strong>Confirm before:</strong> <span id="adoptionConfirmResponseDeadline"></span></p>
+        <p><strong>Pickup deadline if you confirm now:</strong> <span id="adoptionConfirmDeadline"></span></p>
+        <p class="adoption-confirm-warning">If your pet is not picked up and marked adopted within 3 days, your application will be automatically declined and the animal will be returned to the adoption list.</p>
+        <p class="adoption-confirm-error" id="adoptionConfirmError" role="alert" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="adoptionConfirmCancel">Cancel</button>
+        <button type="button" class="btn btn-primary" id="adoptionConfirmSubmit">Confirm, I'll pick up</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Archive Confirm Dialog -->
 <div class="sd-dialog-overlay" id="cvArchiveModal" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;display:none;align-items:center;justify-content:center;">
   <div style="background:#fff;border-radius:8px;box-shadow:0 16px 48px rgba(0,0,0,0.15);width:100%;max-width:400px;padding:24px;">
@@ -4283,13 +5790,22 @@ foreach ($residentAdoptionApplications as $application) {
 
 <div class="cv-toast" id="cvToast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
 <script>
 (function(){
   function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
   var PETS=<?php echo json_encode($vetPets, JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
+  var ADOPTION_CSRF=<?php echo json_encode(csrfToken(), JSON_HEX_TAG|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_HEX_AMP); ?>;
+  var ADOPTION_SERVER_TIME=<?php echo $adoptionServerNow; ?>;
+  var adoptionClockStarted=performance.now();
+  var adoptionConfirmModalElement=document.getElementById('adoptionConfirmModal');
+  var adoptionConfirmModal=window.bootstrap ? new bootstrap.Modal(adoptionConfirmModalElement) : null;
+  var adoptionConfirmApplicationId=0;
+  var adoptionConfirmButton=document.getElementById('adoptionConfirmSubmit');
+  var adoptionConfirmError=document.getElementById('adoptionConfirmError');
 
-  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Reserved',icon:'hourglass'},pending:{label:'Pending Application',icon:'hourglass'},review:{label:'In Progress',icon:'clipboard'},approved:{label:'Approved',icon:'check'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
+  var STATUS_META={available:{label:'Available',icon:'check'},reserved:{label:'Action needed',icon:'hourglass'},pending:{label:'Under Review',icon:'hourglass'},review:{label:'Action needed',icon:'clipboard'},confirmed:{label:'Ready for Pickup',icon:'check'},expired:{label:'Expired',icon:'minus'},declined:{label:'Declined',icon:'minus'},cancelled:{label:'Cancelled',icon:'minus'},adopted:{label:'Adopted',icon:'heart'},unavailable:{label:'Not Available',icon:'minus'}};
   var ICONS={edit:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',chevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',chevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',dblChevL:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/></svg>',dblChevR:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 17 11 12 6 7"/><polyline points="13 17 18 12 13 7"/></svg>',check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',hourglass:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg>',clipboard:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6"/><path d="M9 16h6"/></svg>',heart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>',minus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>',search:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',cal:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',clock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',weight:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a4 4 0 0 0-4 4c0 1.5.8 2.8 2 3.5L6 21h12l-4-10.5c1.2-.7 2-2 2-3.5a4 4 0 0 0-4-4z"/></svg>',pin:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>',species:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5.172C10 3.782 8.423 2.679 6.5 3c-2.823.47-4.113 6.006-4 7 .08.703 1.725 1.722 3.656 1 1.261-.472 1.96-1.45 2.344-2.5M14 5.172c0-1.39 1.577-2.493 3.5-2.172 2.823.47 4.113 6.006 4 7-.08.703-1.725 1.722-3.656 1-1.261-.472-1.855-1.45-2.344-2.5M8 14v.5M16 14v.5M11.25 16.25h1.5L12 17l-.75-.75z"/><path d="M4.42 11.247A13.152 13.152 0 0 0 4 14.556C4 18.728 7.582 21 12 21s8-2.272 8-6.444c0-1.061-.162-2.2-.493-3.309m-9.243-6.082A8.801 8.801 0 0 1 12 5c.78 0 1.5.108 2.161.306"/></svg>',breed:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',plus:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',chev:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',doc:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>',download:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'};
 
   var state={status:'all',search:'',sort:'recent',species:'',page:1,perPage:10,activeTab:'overview'};
@@ -4316,11 +5832,100 @@ foreach ($residentAdoptionApplications as $application) {
     return a;
   }
 
-  function statusPillHTML(status){
-    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+  function statusPillHTML(status,label){
+    var colors={available:['#dcebe0','#045e1f','#bbf7d0'],reserved:['#fef3c7','#92400e','#fde68a'],pending:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],cancelled:['#f4f4f5','#71717a','#e4e4e7'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var c=colors[status]||['#f4f4f5','#71717a','#e4e4e7'];
     var m=STATUS_META[status]||{label:status||'Unknown'};
+    if(label) m={label:label};
     return '<span class="appt-status-pill" style="background:'+c[0]+';color:'+c[1]+';border-color:'+c[2]+';">'+esc(m.label)+'</span>';
+  }
+
+  function applicationProgress(p){
+    var status=p.applicationStatus||'';
+    if(!status) return null;
+    var declinedExpired=status==='declined'&&String(p.declineReason||'').toLowerCase()==='expired';
+    var terminal=status==='withdrawn'?'cancelled':(status==='rejected'||(status==='declined'&&!declinedExpired)?'declined':((status==='expired'||declinedExpired)?'expired':''));
+    var index=({pending:1,under_review:1,needs_info:1,reserved:2,approved:2,confirmed:3,adopted:4})[status];
+    if(terminal) index=terminal==='cancelled'?0:(terminal==='declined'?1:((p.confirmedAt||p.pickupDeadline)?3:2));
+    if(status==='adopted'||p.resultingPetId) { status='adopted'; terminal=''; index=4; }
+    if(index==null) return null;
+    var title=terminal==='expired'?'Expired':(terminal==='declined'?'Declined':(terminal==='cancelled'?'Cancelled':({
+      pending:'Under Review',under_review:'Under Review',needs_info:'Action needed',reserved:'Action needed',approved:'Action needed',confirmed:'Ready for Pickup',adopted:'Adopted'
+    })[status]||'Application progress'));
+    var note=terminal==='expired'
+      ? 'You didn’t respond / pick up within the allotted time.'
+      : terminal==='declined'
+        ? (p.declineReason||'DCVS staff declined this application.')
+        : terminal==='cancelled'
+          ? 'You withdrew this application.'
+          : status==='pending'||status==='under_review'
+            ? 'DCVS staff are reviewing your application.'
+            : status==='needs_info'
+              ? 'DCVS staff requested more information.'
+              : status==='reserved'||status==='approved'
+                ? (p.responseDeadlineDisplay?'Reserved for you. Respond before '+p.responseDeadlineDisplay:'Reserved for you. Respond before the deadline.')
+                : status==='confirmed'
+                  ? (p.pickupDeadlineDisplay?'Pick up before '+p.pickupDeadlineDisplay:'Pick up before the deadline.')
+                  : status==='adopted'?'The adoption is complete.':'';
+    return {status:status,terminal:terminal,index:index,title:title,note:note};
+  }
+
+  function progressBarsHTML(progress){
+    return '<div class="adoption-progress-bars" aria-hidden="true">'+[0,1,2,3,4].map(function(index){
+      var cls=index<progress.index?'is-done':(index===progress.index?(progress.terminal?'is-terminal':'is-current'):'');
+      return '<span class="adoption-progress-segment '+cls+'"></span>';
+    }).join('')+'</div>';
+  }
+
+  function applicationProgressHTML(p){
+    var progress=applicationProgress(p);
+    if(!progress) return '<div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+'</div>';
+    var step='Step '+(progress.index+1)+' of 5';
+    return '<div class="adoption-progress">'+progressBarsHTML(progress)+
+      '<div class="adoption-progress-heading"><span class="adoption-progress-title">'+esc(progress.title)+'</span><span class="adoption-progress-step">'+step+'</span></div>'+
+      '<div class="adoption-progress-note">'+esc(progress.note)+'</div>'+
+      (p.status==='reserved' ? '<button type="button" class="sd-btn sd-btn-primary adoption-confirm-row" data-application-id="'+esc(p.applicationId)+'">Yes, I\'m In</button>' : '')+
+      (p.status==='confirmed' ? '<div class="adoption-progress-note">Time remaining<span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span></div>' : '')+
+      '</div>';
+  }
+
+  function applicationTimelineHTML(p){
+    var progress=applicationProgress(p);
+    if(!progress) return '';
+    var dates=[p.applicationDate||'',p.reviewedAt||'',p.reservedAt||'',p.confirmedAt||'',p.finalizedAt||''];
+    var labels=['Submitted','Under review','Reserved','Pickup','Adopted'];
+    var notes=[
+      'Your application was submitted.',
+      progress.status==='pending'||progress.status==='under_review'?'DCVS staff are reviewing your application.':'',
+      progress.status==='reserved'||progress.status==='approved'?(p.responseDeadlineDisplay?'Reserved for you. Respond before '+p.responseDeadlineDisplay:'Reserved for you.'): '',
+      progress.status==='confirmed'?(p.pickupDeadlineDisplay?'Pick up before '+p.pickupDeadlineDisplay:'Your reservation is confirmed.'): '',
+      progress.status==='adopted'?'The adoption is complete.':''
+    ];
+    if(progress.status==='needs_info') notes[1]='DCVS staff requested more information.';
+    if(progress.terminal==='expired') {
+      var expiredStep=progress.index;
+      labels[expiredStep]='Expired';
+      notes[expiredStep]=expiredStep===3?'You didn’t pick up within the allotted time.':'You didn’t respond within the allotted time.';
+      dates[expiredStep]=expiredStep===3?(p.pickupDeadlineDisplay||''):(p.responseDeadlineDisplay||'');
+    } else if(progress.terminal==='declined') {
+      labels[1]='Declined';
+      notes[1]=p.declineReason||'DCVS staff declined this application.';
+    } else if(progress.terminal==='cancelled') {
+      labels[0]='Cancelled';
+      notes[0]='You withdrew this application.';
+      dates[0]='';
+    }
+    return '<ol class="adoption-timeline">'+labels.map(function(label,index){
+      var cls=index<progress.index?'is-done':(index===progress.index?(progress.terminal?'is-terminal':'is-current'):'');
+      if(progress.status==='adopted') cls='is-done';
+      return '<li class="adoption-timeline-item '+cls+'"><span class="adoption-timeline-dot"></span><div class="adoption-timeline-copy">'+
+        '<div class="adoption-timeline-title">'+esc(label)+'</div>'+
+        (dates[index]?'<div class="adoption-timeline-date">'+esc(dates[index])+'</div>':'')+
+        (notes[index]?'<div class="adoption-timeline-note">'+esc(notes[index])+'</div>':'')+
+        (index===3&&progress.status==='confirmed'?'<div class="adoption-timeline-note">Time remaining<span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span></div>':'')+
+      '</div></li>';
+    }).join('')+'</ol>'+
+      (progress.terminal?'<a class="adoption-browse-link" href="/dcvs/petlist.php">Browse available pets</a>':'');
   }
 
   function renderList(){
@@ -4331,20 +5936,20 @@ foreach ($residentAdoptionApplications as $application) {
     var pages=Math.max(1,Math.ceil(total/state.perPage));
     if(state.page>pages) state.page=pages;
     var start=(state.page-1)*state.perPage; var rows=sortable.slice(start,start+state.perPage);
-    if(!rows.length){ els.tableBody.innerHTML='<tr><td colspan="10"><div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div></td></tr>'; renderPagination(total,pages); return; }
+    if(!rows.length){ els.tableBody.innerHTML='<tr class="adoption-empty-row"><td colspan="10"><div class="cv-empty">'+ICONS.search+'<div>No pets match your criteria.</div></div></td></tr>'; renderPagination(total,pages); return; }
     els.tableBody.innerHTML=rows.map(function(p){
       var photoHtml=p.photo? '<img src="'+esc(p.photo)+'" alt="">': esc((p.name||'P').charAt(0).toUpperCase());
       return '<tr class="sd-tr" onclick="window.__cvOpenDetail(\''+esc(p.id)+'\')">'+
-        '<td class="sd-td"><div class="client-cell"><div class="pet-avatar-box">'+photoHtml+'</div><div class="pet-cell-main"><div class="client-name">'+esc(p.name)+'</div></div></div></td>'+
-        '<td class="sd-td"><div class="pet-id-label">'+esc(p.id)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.species)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
-        '<td class="sd-td">'+statusPillHTML(p.status)+'</td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationProgress||'\u2014')+'</div></td>'+
-        '<td class="sd-td"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
-        '<td class="sd-td sd-td-action" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
+        '<td class="sd-td" data-label="Pet"><div class="client-cell"><div class="pet-avatar-box">'+photoHtml+'</div><div class="pet-cell-main"><div class="client-name">'+esc(p.name)+'</div></div></div></td>'+
+        '<td class="sd-td" data-label="'+(p.applicationPending?'Application ID':'Pet ID')+'"><div class="pet-id-label">'+esc(p.id)+'</div></td>'+
+        '<td class="sd-td" data-label="Species"><div class="contact-main contact-normal">'+esc(p.species)+'</div></td>'+
+        '<td class="sd-td" data-label="Breed"><div class="contact-main contact-normal">'+esc(p.breed)+'</div></td>'+
+        '<td class="sd-td" data-label="Gender"><div class="contact-main contact-normal">'+esc(p.gender)+'</div></td>'+
+        '<td class="sd-td" data-label="Age"><div class="contact-main contact-normal">'+esc(p.age)+'</div></td>'+
+        '<td class="sd-td" data-label="Adoption Status">'+statusPillHTML(p.status,p.statusLabel)+'</td>'+
+        '<td class="sd-td" data-label="Application Progress">'+applicationProgressHTML(p)+'</td>'+
+        '<td class="sd-td" data-label="Submitted / Added"><div class="contact-main contact-normal">'+esc(p.applicationDate||p.added)+'</div></td>'+
+        '<td class="sd-td sd-td-action" data-label="Actions" onclick="event.stopPropagation()"><button class="sd-row-actions" title="More options" onclick="event.stopPropagation();cvRowActions(event,\''+esc(p.id)+'\')"><span class="sr-only">Open menu</span><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg></button></td>'+
       '</tr>';
     }).join('');
     renderPagination(total,pages);
@@ -4385,7 +5990,24 @@ foreach ($residentAdoptionApplications as $application) {
     function rdOk(v){return !!v && v!=='Not specified' && v!=='Not assessed' && v!=='Not vaccinated';}
     var ready=rdOk(rd.vaccination) && rd.health==='Cleared' && rdOk(rd.spayNeuter) && rdOk(rd.temperament);
     function rdRow(label,val){var v=val||'Not specified';return '<tr><td>'+esc(label)+'</td><td>'+esc(v)+(rdOk(v)?' \u2713':'')+'</td></tr>';}
+    var infoResponseSection='';
+    if(p.applicationStatus==='needs_info'){
+      var missingProof=!p.residencyProofAvailable;
+      infoResponseSection=sec('Respond to Staff')+
+        '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;color:#3f3f46;line-height:1.5;margin:0 0 12px;"><strong>Requested information:</strong> '+esc(p.requestedInfo||'Please provide the information requested by DCVS staff.')+'</p>'+
+        (missingProof?'<p role="alert" style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;color:#991b1b;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:10px 12px;">Your previously submitted proof of residency is unavailable. Upload it again to continue the review.</p>':'')+
+        '<form id="adoption-info-response-form" style="display:grid;gap:10px;margin-bottom:18px;">'+
+          '<input type="hidden" name="action" value="respond"><input type="hidden" name="application_id" value="'+Number(p.applicationId||0)+'">'+
+          '<label style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#3f3f46;">Your response<textarea class="cv-textarea" name="response" maxlength="5000" required style="display:block;width:100%;min-height:84px;margin-top:5px;" placeholder="Reply to the information request"></textarea></label>'+
+          '<label style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;font-weight:600;color:#3f3f46;">'+(missingProof?'Replacement proof of residency':'Replacement proof of residency (optional)')+
+            '<input class="cv-input" name="residency_proof" type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" '+(missingProof?'required':'')+' style="display:block;width:100%;margin-top:5px;">'+
+            '<small style="display:block;margin-top:4px;font-weight:400;color:#71717a;">JPG, PNG, WebP, or PDF; maximum 10 MB.</small></label>'+
+          '<div id="adoption-info-response-notice" role="status" hidden style="font-family:Inter,Segoe UI,sans-serif;font-size:13px;padding:9px 11px;border:1px solid #e4e4e7;border-radius:6px;"></div>'+
+          '<button class="sd-btn sd-btn-primary" type="submit" style="justify-self:start;">Send Response</button>'+
+        '</form>';
+    }
     var body=
+      (p.applicationStatus ? sec('Application Progress')+applicationTimelineHTML(p) : '')+
       sec('Pet Information')+
       '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
         ir('Species',esc(p.species))+
@@ -4398,10 +6020,14 @@ foreach ($residentAdoptionApplications as $application) {
       '</div>'+
       sec('Details')+
       '<div class="rpt-detail-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px;">'+
-        ir(p.applicationPending?'Application Submitted':'Adoption Progress',esc(p.applicationPending?(p.applicationDate||'\u2014'):(p.applicationProgress||p.adoptedDate||'\u2014')))+
+        ir(p.applicationStatus?'Adoption Status':'Application Submitted',esc(p.applicationStatus?(p.applicationProgress||'\u2014'):(p.applicationDate||'\u2014')))+
+        (p.applicationStatus==='reserved' ? ir('Response deadline',esc(p.responseDeadlineDisplay||'\u2014')+' <span class="adoption-countdown" data-countdown="response" data-deadline="'+Number(p.responseDeadlineEpoch||0)+'"></span>') : '')+
+        (p.applicationStatus==='confirmed' ? ir('Pickup deadline',esc(p.pickupDeadlineDisplay||'\u2014')+' <span class="adoption-countdown" data-countdown="pickup" data-deadline="'+Number(p.pickupDeadlineEpoch||0)+'"></span>') : '')+
+        (p.status==='expired' ? ir('Reason',esc(p.applicationProgress)) : '')+
         ir('Location',esc(p.location))+
         ir('Health Status',esc(ready?'Cleared':'For review'))+
       '</div>'+
+      infoResponseSection+
       sec('About')+
       '<p style="font-family:Inter,Segoe UI,sans-serif;font-size:14px;font-weight:400;color:#71717a;line-height:1.6;margin:0 0 20px;">'+esc(p.about||'No description available.')+'</p>'+
       sec('Vaccination Records')+
@@ -4417,9 +6043,9 @@ foreach ($residentAdoptionApplications as $application) {
     els.drawerTitle.textContent='Pet Details';
     els.drawerRef.textContent='View and review this pet\u2019s adoption information, care history, and current records.';
     var petPhoto=p.photo? '<img src="'+esc(p.photo)+'" alt="" style="width:85px;height:85px;border-radius:8px;object-fit:cover;">' : '<div style="width:85px;height:85px;border-radius:8px;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:28px;color:#64748b;">'+esc((p.name||'P').charAt(0).toUpperCase())+'</div>';
-    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],review:['#dbeafe','#1d4ed8','#bfdbfe'],approved:['#dcebe0','#045e1f','#bbf7d0'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
+    var statusColors={available:['#dcebe0','#045e1f','#bbf7d0'],pending:['#fef3c7','#92400e','#fde68a'],reserved:['#fef3c7','#92400e','#fde68a'],review:['#fef3c7','#92400e','#fde68a'],confirmed:['#dbeafe','#1d4ed8','#bfdbfe'],expired:['#f4f4f5','#71717a','#e4e4e7'],declined:['#fef2f2','#b91c1c','#fecaca'],cancelled:['#f4f4f5','#71717a','#e4e4e7'],adopted:['#eff6ff','#1d4ed8','#bfdbfe'],unavailable:['#fef2f2','#b91c1c','#fecaca']};
     var adoptColors=statusColors[p.status]||['#f4f4f5','#71717a','#e4e4e7'];
-    var statusLabel=STATUS_META[p.status]?STATUS_META[p.status].label:p.status;
+    var statusLabel=p.statusLabel || (STATUS_META[p.status]?STATUS_META[p.status].label:p.status);
     var adoptPill='<span style="font-size:13px;font-weight:500;color:'+adoptColors[1]+';background:'+adoptColors[0]+';border:1px solid '+adoptColors[2]+';padding:4px 12px;border-radius:6px;font-family:Inter,sans-serif;white-space:nowrap;">'+esc(statusLabel)+'</span>';
     var header='<div class="cv-pet-summary" style="margin-bottom:14px;display:flex;align-items:center;gap:12px;">'+
       '<div class="cv-pet-summary-photo" style="flex-shrink:0;">'+petPhoto+'</div>'+
@@ -4431,7 +6057,39 @@ foreach ($residentAdoptionApplications as $application) {
       '<span class="cv-pet-summary-status">'+adoptPill+'</span>'+
     '</div>';
     els.drawerBody.innerHTML=header+body;
+    var infoResponseForm=els.drawerBody.querySelector('#adoption-info-response-form');
+    if(infoResponseForm){
+      infoResponseForm.addEventListener('submit',function(event){
+        event.preventDefault();
+        var submitButton=infoResponseForm.querySelector('button[type="submit"]');
+        var responseNotice=infoResponseForm.querySelector('#adoption-info-response-notice');
+        var formData=new FormData(infoResponseForm);
+        formData.append('csrf_token',ADOPTION_CSRF);
+        submitButton.disabled=true;
+        responseNotice.hidden=false;
+        responseNotice.style.color='#3f3f46';
+        responseNotice.textContent='Sending your response...';
+        fetch('../../api/shared/adoption-workflow-handler.php',{method:'POST',body:formData,credentials:'same-origin',headers:{'Accept':'application/json'}})
+          .then(function(response){return response.json().then(function(data){return {ok:response.ok,data:data};});})
+          .then(function(result){
+            responseNotice.textContent=result.data.message||'Your response could not be sent.';
+            if(!result.ok||!result.data.success){
+              responseNotice.style.color='#991b1b';
+              submitButton.disabled=false;
+              return;
+            }
+            responseNotice.style.color='#166534';
+            window.location.reload();
+          })
+          .catch(function(){
+            responseNotice.style.color='#991b1b';
+            responseNotice.textContent='Your response could not be sent. Check your connection and try again.';
+            submitButton.disabled=false;
+          });
+      });
+    }
     els.drawerFoot.innerHTML='<button type="button" class="sd-btn sd-btn-outline" onclick="window.__cvCloseDrawer()">Close</button>'+
+      (p.status==='reserved' ? '<button type="button" class="sd-btn sd-btn-primary" onclick="window.openAdoptionConfirm(\''+esc(p.id)+'\')">Yes, I\'m In</button>' : '')+
       (p.applicationPending?'':'<button type="button" class="sd-btn sd-btn-danger" onclick="window.__cvArchive(\''+esc(p.id)+'\',\''+esc(p.name)+'\')"><i class="fas fa-archive"></i> Archive</button>');
     openDrawer();
   }
@@ -4516,6 +6174,91 @@ foreach ($residentAdoptionApplications as $application) {
 
   window.__cvOpenDetail=function(id){ openDetailModal(id); };
 
+  function serverNowMs(){
+    return ADOPTION_SERVER_TIME*1000+(performance.now()-adoptionClockStarted);
+  }
+  function countdownText(deadline){
+    var remaining=Math.floor(Number(deadline)*1000-serverNowMs());
+    if(remaining<=0) return '';
+    var minutes=Math.floor(remaining/60000);
+    var days=Math.floor(minutes/1440);
+    var hours=Math.floor((minutes%1440)/60);
+    return days+'d '+hours+'h '+(minutes%60)+'m remaining';
+  }
+  function updateAdoptionCountdowns(){
+    var hasExpired=false;
+    document.querySelectorAll('.adoption-countdown[data-deadline]').forEach(function(node){
+      var deadline=Number(node.getAttribute('data-deadline')||0);
+      var text=countdownText(deadline);
+      if(text) node.textContent=' · '+text;
+      else if(deadline>0) hasExpired=true;
+    });
+    if(hasExpired) window.location.reload();
+  }
+  function setConfirmModalVisible(visible){
+    if(adoptionConfirmModal){
+      if(visible) adoptionConfirmModal.show();
+      else adoptionConfirmModal.hide();
+      return;
+    }
+    adoptionConfirmModalElement.style.display=visible?'block':'none';
+    adoptionConfirmModalElement.classList.toggle('show',visible);
+    adoptionConfirmModalElement.setAttribute('aria-hidden',String(!visible));
+  }
+  window.openAdoptionConfirm=function(petId){
+    var pet=PETS.find(function(item){return item.id===petId;});
+    if(!pet||pet.status!=='reserved'||!pet.applicationId) return;
+    adoptionConfirmApplicationId=Number(pet.applicationId);
+    document.getElementById('adoptionConfirmPetName').textContent=pet.name;
+    var photo=document.getElementById('adoptionConfirmPhoto');
+    photo.src=pet.photo||'';
+    photo.alt=pet.name;
+    photo.hidden=!pet.photo;
+    document.getElementById('adoptionConfirmResponseDeadline').textContent=pet.responseDeadlineDisplay||'the response deadline';
+    document.getElementById('adoptionConfirmDeadline').textContent=new Date(serverNowMs()+3*24*60*60*1000).toLocaleString('en-US',{
+      month:'long',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'
+    });
+    adoptionConfirmError.hidden=true;
+    adoptionConfirmError.textContent='';
+    setConfirmModalVisible(true);
+  };
+  document.getElementById('cvTableBody').addEventListener('click',function(event){
+    var button=event.target.closest('.adoption-confirm-row');
+    if(!button) return;
+    event.stopPropagation();
+    var pet=PETS.find(function(item){return Number(item.applicationId)===Number(button.getAttribute('data-application-id'));});
+    if(pet) window.openAdoptionConfirm(pet.id);
+  },true);
+  ['adoptionConfirmClose','adoptionConfirmCancel'].forEach(function(id){
+    document.getElementById(id).addEventListener('click',function(){setConfirmModalVisible(false);});
+  });
+  adoptionConfirmButton.addEventListener('click',function(){
+    if(!adoptionConfirmApplicationId) return;
+    adoptionConfirmButton.disabled=true;
+    adoptionConfirmError.hidden=true;
+    var body=new FormData();
+    body.append('application_id',String(adoptionConfirmApplicationId));
+    body.append('csrf_token',ADOPTION_CSRF);
+    fetch('../../api/resident/confirm_adoption.php',{method:'POST',body:body,credentials:'same-origin'})
+      .then(function(response){return response.json().then(function(data){return {ok:response.ok,data:data};});})
+      .then(function(result){
+        if(!result.ok||!result.data.success){
+          adoptionConfirmError.textContent=result.data.message||'Your confirmation could not be completed.';
+          adoptionConfirmError.hidden=false;
+          adoptionConfirmButton.disabled=false;
+          return;
+        }
+        window.location.reload();
+      })
+      .catch(function(){
+        adoptionConfirmError.textContent='Your confirmation could not be sent. Check your connection and try again.';
+        adoptionConfirmError.hidden=false;
+        adoptionConfirmButton.disabled=false;
+      });
+  });
+  window.setInterval(updateAdoptionCountdowns,1000);
+  updateAdoptionCountdowns();
+
   var _activeCvMenu=null;
   function closeCvMenu(){if(_activeCvMenu){_activeCvMenu.remove();_activeCvMenu=null;}document.removeEventListener('click',closeCvMenu);}
   window.closeCvMenu=closeCvMenu;
@@ -4597,11 +6340,13 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
     var status=tr?tr.getAttribute('data-status'):'';
     var edit='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
     var trash='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
-    var items=[];
+    var eye='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    var items=[_mi(eye,'View Appointment','','APPT.view('+id+');closeCvMenu()')];
     if (status === 'pending') items.push(_mi(edit,'Edit','','APPT.editById('+id+');closeCvMenu()'));
-    items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
-    var archiveLabel = status === 'scheduled' || status === 'completed' ? 'Archive' : 'Cancel';
-    items.push(_mi(trash,archiveLabel,'red','APPT.archive('+id+');closeCvMenu()'));
+    if (['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(status) !== -1) {
+      items.push('<div style="height:1px;background:#e4e4e7;margin:4px 0;"></div>');
+      items.push(_mi(trash,'Cancel Appointment','red','APPT.archive('+id+');closeCvMenu()'));
+    }
     var menu=_buildRowMenu(items);
     _positionMenu(menu,ev.currentTarget);
   };
@@ -4691,7 +6436,8 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
             </div>
             <div class="ps-field">
               <label>Phone Number</label>
-              <input type="tel" name="phone" value="<?php echo htmlspecialchars($userPhoneDb); ?>" disabled data-group="personal">
+              <input type="tel" id="residentPhone" name="phone" value="<?php echo htmlspecialchars($userPhoneDb); ?>" inputmode="numeric" pattern="09[0-9]{9}" required disabled data-group="personal">
+              <small id="residentPhoneError" style="display:block;margin-top:4px;color:#b91c1c;font-size:12px;" role="alert" aria-live="polite"><?php echo htmlspecialchars($_SESSION['profile_phone_error'] ?? ''); unset($_SESSION['profile_phone_error']); ?></small>
             </div>
           </div>
           <div class="ps-form-row">
@@ -4756,6 +6502,7 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
 <div class="modal" id="addPetModal">
   <form class="modal-form sd-dialog" id="addPetForm" action="add-pet.php" method="POST" enctype="multipart/form-data">
     <input type="hidden" name="return_section" value="my-pets">
+    <?php echo csrfField(); ?>
     <div class="sd-dialog-content" role="dialog" aria-modal="true">
       <button type="button" class="sd-dialog-close" onclick="closeModal('addPetModal')" aria-label="Close">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -4849,6 +6596,16 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
           <input type="text" name="color" class="sd-input" placeholder="e.g. brown with white spots" />
         <?php endif; ?>
       </div>
+      <?php if (!$showAdoptModal): ?>
+      <div class="sd-field">
+        <label class="sd-label" for="addPetDateOfBirth">Date of Birth</label>
+        <input type="date" name="date_of_birth" id="addPetDateOfBirth" class="sd-input" max="<?php echo date('Y-m-d'); ?>" />
+      </div>
+      <div class="sd-field">
+        <label class="sd-label" for="addPetMicrochipId">Microchip Number (Optional)</label>
+        <input type="text" name="microchip_id" id="addPetMicrochipId" class="sd-input" maxlength="50" autocomplete="off" />
+      </div>
+      <?php endif; ?>
       <div class="sd-field sd-field-full">
         <label class="sd-label">Vaccination Status</label>
         <select name="vaccinated" class="sd-input">
@@ -4866,14 +6623,14 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
         </div>
       <?php else: ?>
       <div class="sd-field sd-field-full">
-        <label class="sd-label">Pet Photo (optional)</label>
+        <label class="sd-label">Pet Photo <span class="req">*</span></label>
         <div class="sd-photo-upload" id="addPetPhotoBox" onclick="document.getElementById('addPetPhoto').click()">
           <div class="upload-placeholder">
             <i class="fas fa-cloud-upload-alt"></i>
             <span>Upload a photo of your pet</span>
           </div>
           <img id="addPetPhotoImg" src="" alt="Pet Photo Preview" style="display:none;" />
-          <input type="file" name="photo" accept="image/*" id="addPetPhoto" onclick="event.stopPropagation()" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
+          <input type="file" name="photo" accept="image/jpeg,image/png,image/gif" id="addPetPhoto" required onclick="event.stopPropagation()" onchange="previewPetImage(this, 'addPetPhotoBox', 'addPetPhotoImg')" />
         </div>
       </div>
       <?php endif; ?>
@@ -4886,6 +6643,18 @@ items.push(_mi(trash,'Archive','red','RPT.archive('+id+');closeCvMenu()'));
   </form>
 </div>
 
+<dialog id="petDuplicateAlertDialog" role="alertdialog" aria-modal="true" aria-labelledby="petDuplicateAlertTitle" aria-describedby="petDuplicateAlertDescription">
+  <div class="sd-dialog-content">
+    <div class="sd-dialog-header">
+      <h2 class="sd-dialog-title" id="petDuplicateAlertTitle">Possible duplicate pet profile</h2>
+      <p class="sd-dialog-description" id="petDuplicateAlertDescription"></p>
+    </div>
+    <div class="sd-dialog-footer">
+      <button type="button" class="sd-btn sd-btn-outline" id="petDuplicateAlertCancel" autofocus>Cancel</button>
+      <button type="button" class="sd-btn sd-btn-default" id="petDuplicateAlertContinue">Continue registration</button>
+    </div>
+  </div>
+</dialog>
 
 <!-- Edit Pet Modal -->
 <div class="modal" id="editPetModal">
@@ -5346,10 +7115,17 @@ window.__petList = <?php
 
     <div class="rpt-tabs">
       <button type="button" class="rpt-tab active" data-tab="details" onclick="rdDetailGo('details')">Details</button>
-      <button type="button" class="rpt-tab" data-tab="attachments" onclick="rdDetailGo('attachments')">Attachments</button>
+      <button type="button" class="rpt-tab" data-tab="updates" onclick="rdDetailGo('updates')">Updates</button>
     </div>
 
     <div class="rpt-detail-body active" data-tab="details">
+      <div class="rpt-resident-status" role="status">
+        <p class="rpt-resident-status-heading" id="rdStatusHeading">Your report is being reviewed</p>
+        <p class="rpt-resident-status-message" id="rdStatusMessage">Your report is being reviewed.</p>
+        <p class="rpt-resident-status-updated" id="rdLastUpdated"></p>
+      </div>
+      <div id="rdTimeline" style="margin-bottom:1rem;"></div>
+      <p id="rdSupportingNotice" hidden style="margin:-6px 0 16px;padding:10px 12px;border:1px solid #d4d4d8;border-radius:7px;background:#fafafa;color:#52525b;font-size:13px;line-height:1.45;"></p>
       <p class="pet-drawer-section-title">Report Information</p>
       <div class="pet-drawer-info">
         <div class="pet-drawer-info-item"><div class="k">Date Submitted</div><div class="v" id="rdDate"></div></div>
@@ -5371,28 +7147,23 @@ window.__petList = <?php
         <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Description</div><div class="v" id="rdIncident"></div></div>
       </div>
 
-      <p class="pet-drawer-section-title">Status</p>
-      <div id="rdTimeline" style="margin-bottom:1rem;"></div>
       <div class="rpt-detail-block" id="rdResolution" style="display:none;margin-top:0.75rem;">
         <div class="pet-drawer-info-item"><div class="k">Resolution</div><div class="v" id="rdResolutionText"></div></div>
       </div>
 
       <div class="rpt-next">
-        <div class="rpt-next-title" id="rdNextTitle"><i class="fas fa-info-circle"></i> What happens next?</div>
-        <ol id="rdNextList">
-          <li>Your report is submitted to your barangay for review.</li>
-          <li>DCVS reviews the report and validates the case.</li>
-          <li>The case is handled or scheduled for action.</li>
-          <li>You receive an update when the report is resolved.</li>
-        </ol>
+        <div class="rpt-next-title"><i class="fas fa-info-circle"></i> What happens next?</div>
+        <p id="rdNextMessage"></p>
       </div>
     </div>
 
-    <div class="rpt-detail-body" data-tab="attachments">
-      <p class="pet-drawer-section-title">Attached Photos & Videos</p>
-      <div class="pet-drawer-info">
-        <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="v"><div class="rpt-photos" id="rdPhotos"></div></div></div>
-      </div>
+    <div class="rpt-detail-body" data-tab="updates">
+      <p class="pet-drawer-section-title">Case updates</p>
+      <div id="rdUpdates"></div>
+      <p class="pet-drawer-section-title">Report photos</p>
+      <div class="rpt-photos" id="rdYourPhotos"></div>
+      <p class="pet-drawer-section-title" style="margin-top:22px;">Shared case photos</p>
+      <div class="rpt-photos" id="rdStaffPhotos"></div>
     </div>
   </div>
   <div class="rpt-drawer-foot">
@@ -5401,6 +7172,20 @@ window.__petList = <?php
     <button type="button" class="sd-btn sd-btn-outline" onclick="closeReportDrawer()">Close</button>
   </div>
 </aside>
+<div class="rpt-evidence-lightbox" id="rptEvidenceLightbox" role="dialog" aria-modal="true" aria-label="Shared photo evidence" onclick="if(event.target===this)closeEvidenceLightbox()">
+  <div class="rpt-evidence-lightbox-dialog">
+    <div class="rpt-evidence-lightbox-stage"><img id="rdLightboxImage" src="" alt=""></div>
+    <p class="rpt-evidence-lightbox-caption" id="rdLightboxCaption"></p>
+    <p class="rpt-evidence-lightbox-meta" id="rdLightboxMeta"></p>
+    <p class="rpt-evidence-lightbox-meta" id="rdLightboxPrivacy">Shared with you by the barangay</p>
+    <div class="rpt-evidence-lightbox-controls">
+      <button type="button" id="rdLightboxPrev" onclick="stepEvidenceLightbox(-1)">Prev</button>
+      <span id="rdLightboxCount" class="rpt-evidence-lightbox-meta"></span>
+      <button type="button" id="rdLightboxNext" onclick="stepEvidenceLightbox(1)">Next</button>
+    </div>
+    <button type="button" class="sd-btn sd-btn-outline" onclick="closeEvidenceLightbox()">Close</button>
+  </div>
+</div>
 
 <script>
 window.__reportList = <?php
@@ -5437,8 +7222,11 @@ window.__reportList = <?php
           'typeKey' => $rt,
           'urgency' => $report['urgency_level'] ?? 'medium',
           'createdRaw' => date('Y-m-d\TH:i', strtotime($report['created_at'])),
+          'updatedAt' => (string)($report['updated_at'] ?? $report['created_at']),
           'incidentRaw' => !empty($report['incident_at']) ? date('Y-m-d\TH:i', strtotime($report['incident_at'])) : date('Y-m-d\TH:i', strtotime($report['created_at'])),
-          'location' => $report['location_address'] ?? '-',
+          'location' => $report['display_location_address'] ?? $report['location_address'] ?? '-',
+          'supportingReport' => (bool)($report['is_supporting_report'] ?? false),
+          'primaryReference' => (string)($report['primary_reference_id'] ?? ''),
           'date' => date('F d, Y', strtotime($report['created_at'])),
           'incidentDate' => date('F d, Y', strtotime(!empty($report['incident_at']) ? $report['incident_at'] : $report['created_at'])),
           'description' => $rawDescription,
@@ -5450,22 +7238,58 @@ window.__reportList = <?php
           'photo' => $report['photo_url'] ?? '',
           'video' => $report['video_url'] ?? '',
           'status' => $report['status'],
-          'statusLabel' => rptStatusLabel($report['status']),
-          'statusClass' => rptStatusClass($report['status']),
+          'statusHeading' => $report['resident_presentation']['statusHeading'],
+          'statusMessage' => $report['resident_presentation']['statusMessage'],
+          'nextStep' => $report['resident_presentation']['nextStep'],
           'resolution' => (string)($report['resolution_details'] ?? ''),
+          'duplicateStatus' => (string)($report['duplicate_status'] ?? ''),
+          'barangayName' => (string)($report['barangay_name'] ?? ''),
+          'isOverdue' => $report['overdue_info'] !== null,
+          'overdueAction' => (string)($report['overdue_info']['action'] ?? ''),
+          'overdueBadge' => (string)($report['overdue_info']['badge'] ?? ''),
+          'overdueDeadline' => (string)($report['overdue_info']['deadline'] ?? ''),
           'responseState' => (string)($report['response_state'] ?? ''),
           'responseMode' => (string)($report['response_mode'] ?? ''),
+          'caseStatus' => (string)($report['case_status'] ?? ''),
+          'scheduledAt' => (string)($report['scheduled_at'] ?? ''),
           'responseDeadline' => (string)($report['response_deadline'] ?? ''),
           'progressDeadline' => (string)($report['progress_deadline'] ?? ''),
           'turnoverDeadline' => (string)($report['turnover_deadline'] ?? ''),
           'holdingLocation' => (string)($report['holding_location'] ?? ''),
           'animalDisposition' => (string)($report['animal_disposition'] ?? ''),
+          'turnoverRequired' => (bool)($report['turnover_required'] ?? false),
           'turnoverStatus' => (string)($report['turnover_status'] ?? ''),
           'turnoverDueAt' => (string)($report['turnover_due_at'] ?? ''),
           'turnoverReceivedAt' => (string)($report['turnover_received_at'] ?? ''),
+          'media' => (function() use ($report, $reportMediaById) {
+              $media = $reportMediaById[(int)$report['report_id']] ?? [];
+              $hasResidentPhoto = false;
+              $hasResidentVideo = false;
+              foreach ($media as $item) {
+                  if ($item['source'] !== 'resident') continue;
+                  if ($item['type'] === 'photo') $hasResidentPhoto = true;
+                  if ($item['type'] === 'video') $hasResidentVideo = true;
+              }
+              if (!$hasResidentPhoto && !empty($report['photo_url'])) {
+                  $media[] = [
+                      'type' => 'photo', 'source' => 'resident', 'url' => (string)$report['photo_url'],
+                      'mimeType' => 'image/jpeg', 'caption' => 'Your report photo', 'shared' => false,
+                      'historyId' => 0, 'createdAt' => (string)$report['created_at'], 'actor' => 'You', 'role' => 'resident',
+                  ];
+              }
+              if (!$hasResidentVideo && !empty($report['video_url'])) {
+                  $media[] = [
+                      'type' => 'video', 'source' => 'resident', 'url' => (string)$report['video_url'],
+                      'mimeType' => 'video/mp4', 'caption' => '', 'shared' => false,
+                      'historyId' => 0, 'createdAt' => (string)$report['created_at'], 'actor' => 'You', 'role' => 'resident',
+                  ];
+              }
+              return $media;
+          })(),
+          'updates' => $reportUpdatesById[(int)$report['report_id']] ?? [],
       ];
   }
-  echo json_encode($jsonReports);
+  echo json_encode($jsonReports, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
 ?>;
 </script>
 
@@ -5474,63 +7298,203 @@ window.__reportList = <?php
   var reportIndex = {};
   window.__reportList.forEach(function(r) { reportIndex[r.id] = r; });
 
-  function buildTimeline(status) {
-    var reviewed = ['validated','confirmed','scheduled','resolved'].indexOf(status) !== -1;
-    var resolved = status === 'resolved';
-    var step = function(state, icon, label) {
-      var cls = state === 'done' ? 'done' : (state === 'current' ? 'current' : '');
-      var ic = (state === 'done' || state === 'current') ? '<i class="fas fa-' + (state === 'done' ? 'check' : 'circle') + '"></i>' : '';
-      return '<span class="tl-step ' + cls + '">' + ic + ' ' + label + '</span>';
-    };
-    if (status === 'rejected') {
-      return '<div class="rpt-timeline rpt-timeline-rejected">' + step('done','times','Submitted') + '<span class="tl-sep"></span><span class="tl-step current">Rejected</span></div>';
-    }
-    var sub = resolved || reviewed ? 'done' : 'current';
-    return '<div class="rpt-timeline">' + step(sub, 'check', 'Submitted') + '<span class="tl-sep"></span>' +
-      step(reviewed ? 'done' : (status === 'pending' ? 'current' : ''), 'check', 'Reviewed') + '<span class="tl-sep"></span>' +
-      step(resolved ? 'done' : '', 'check', 'Resolved') + '</div>';
+  function buildStatusSteps(report, deadlineOverdue) {
+    var state = String(report.responseState || '');
+    var turnoverComplete = report.status === 'resolved' && report.turnoverStatus === 'receipt_confirmed';
+    var turnoverRequired = !!report.turnoverRequired
+      || report.turnoverStatus === 'pending'
+      || report.turnoverStatus === 'receipt_confirmed';
+    var completedStage = report.status === 'resolved'
+      ? (turnoverRequired ? (turnoverComplete ? 6 : 5) : 4)
+      : (state === 'escalated_to_dcvs' ? 1
+        : (state === 'barangay_responding' || state === 'dcvs_dispatch'
+          || state === 'dcvs_processing' || state === 'turned_over' ? 2
+          : (state === 'animal_secured' || state === 'awaiting_turnover' ? 3
+            : (state === 'barangay_response_approved' || report.status === 'pending'
+              || report.status === 'validated' ? 0
+              : (report.status === 'confirmed' || report.status === 'scheduled' ? 1 : -1)))));
+    var labels = [
+      completedStage > 0 ? 'Accepted'
+        : (report.status === 'pending' ? 'Barangay review' : 'Accepted'),
+      'Arranging',
+      'Responding',
+      'Secured',
+      'Resolved'
+    ];
+    if (turnoverRequired) labels.push(turnoverComplete ? 'Turned over to DCVS' : 'Turned over');
+    return '<div class="response-steps" aria-label="Barangay response progress">' + labels.map(function(label, index) {
+      var stepClass = index < completedStage ? ' is-complete'
+        : (index === completedStage ? (deadlineOverdue ? ' is-current is-overdue' : ' is-current') : '');
+      var checkIcon = index < completedStage
+        ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '';
+      return '<div class="response-step' + stepClass + '"><span class="response-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
+    }).join('') + '</div>';
   }
 
-  function applyNextSteps(status) {
-    var title = document.getElementById('rdNextTitle');
-    var list = document.getElementById('rdNextList');
-    if (!title || !list) return;
-    var items = [];
-    var titleText = 'What happens next?';
-    if (status === 'resolved') {
-      titleText = 'What happened to this case?';
-      items = [
-        'Your report has been reviewed and the necessary action has been completed.',
-        'The reported concern has been addressed by the concerned barangay or DCVS.',
-        'The case has been marked as resolved based on the action taken.',
-        'You can view the case details and resolution information in your report history.'
-      ];
-    } else if (['validated','confirmed','scheduled'].indexOf(status) !== -1) {
-      items = [
-        'Your report has been reviewed and the case is currently being handled.',
-        'DCVS or the concerned barangay is taking the necessary action based on the report.',
-        'The case may be scheduled for field action, monitoring, rescue, treatment, or other appropriate intervention.',
-        'You\u2019ll receive an update once there is significant progress or when the case is resolved.'
-      ];
-    } else if (status === 'rejected') {
-      titleText = 'What happened to this report?';
-      items = [
-        'Your report was reviewed but was not validated for further action.',
-        'The barangay or DCVS assessed the information provided in the report.',
-        'The report has been closed without further action.',
-        'You may submit a new report if the concern still exists.'
-      ];
-    } else {
-      items = [
-        'Your report has been submitted and is awaiting review by your barangay.',
-        'The barangay will verify the report and assess the information provided.',
-        'Once validated, the report will be forwarded to DCVS for further review when necessary.',
-        'You\u2019ll receive an update when the case moves to the next stage.'
-      ];
-    }
-    title.innerHTML = '<i class="fas fa-info-circle"></i> ' + titleText;
-    list.innerHTML = items.map(function(t) { return '<li>' + t + '</li>'; }).join('');
+  var evidenceLightboxItems = [];
+  function escapeReportHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(character) {
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]);
+    });
   }
+  function reportUpdateTitle(update) {
+    var titles = {
+      report_submitted: 'Report submitted',
+      accept_barangay_assignment: 'Review started',
+      forward_to_dcvs_review: 'Review forwarded',
+      start_response: 'Responding',
+      record_site_visit: 'Responding',
+      update_progress: 'Responding',
+      mark_secured: 'Secured',
+      resolve_barangay: 'Resolved',
+      resolve_case: 'Resolved',
+      staff_decide: 'Response plan updated',
+      unable_to_secure: 'Dispatch needed',
+      unable_to_locate: 'Follow-up needed',
+      confirm_turnover: 'Case transferred',
+      turnover_overdue: 'Transfer delayed',
+      dispatch_escalation: 'Team on the way',
+      add_photo_evidence: 'Photo evidence added',
+      auto_escalate_overdue: 'Escalated for follow-up'
+    };
+    return titles[update.action] || update.title || 'Case status updated';
+  }
+  function reportUpdateCopy(update) {
+    var copy = {
+      report_submitted: 'The report was submitted to your barangay.',
+      accept_barangay_assignment: 'The barangay accepted your report and is preparing to respond.',
+      forward_to_dcvs_review: 'DCVS is reviewing your report.',
+      start_response: 'The response team has started working on your report.',
+      record_site_visit: 'The barangay recorded a visit to the incident location.',
+      update_progress: 'The response team shared a progress update.',
+      mark_secured: 'The response team has secured the animal.',
+      resolve_barangay: 'The barangay has resolved your report.',
+      resolve_case: 'DCVS has resolved your report.',
+      staff_decide: 'DCVS updated the response plan for your report.',
+      unable_to_secure: 'DCVS is arranging a response team.',
+      unable_to_locate: 'DCVS is coordinating the next step for your report.',
+      confirm_turnover: 'DCVS has received the animal and is handling the case.',
+      turnover_overdue: 'The handover is taking longer than usual. DCVS is following up.',
+      dispatch_escalation: 'DCVS has dispatched a response team. The team is on the way.',
+      add_photo_evidence: 'Photo evidence was added to this case.',
+      auto_escalate_overdue: 'DCVS is arranging a response team.'
+    };
+    return update.copy || copy[update.action] || 'The case status was updated.';
+  }
+  function evidenceThumb(item, index) {
+    var caption = item.caption || (item.source === 'resident'
+      ? 'Your report photo'
+      : (item.source === 'barangay_secured' ? 'Animal secured' : 'Case photo evidence'));
+    return '<button type="button" class="rpt-evidence-thumb" onclick="openEvidenceLightbox(' + index + ')" aria-label="View photo: ' + escapeReportHtml(caption) + '">' +
+      '<img src="' + escapeReportHtml(item.url) + '" alt="' + escapeReportHtml(caption) + '" loading="lazy"></button>';
+  }
+  function renderEvidenceItems(items, emptyText) {
+    if (!items.length) return '<p class="rpt-photo-none">' + escapeReportHtml(emptyText) + '</p>';
+    return '<div class="rpt-evidence-grid">' + items.map(function(item) {
+      var index = evidenceLightboxItems.indexOf(item);
+      return evidenceThumb(item, index);
+    }).join('') + '</div>' + items.map(function(item) {
+      return '<p class="rpt-evidence-caption">' + escapeReportHtml(item.caption || 'Case photo evidence') + '</p>' +
+        (item.createdAt ? '<p class="rpt-update-meta">Added ' + escapeReportHtml(reportDateTime(item.createdAt)) + '</p>' : '');
+    }).join('');
+  }
+  function reportDateTime(value) {
+    var date = new Date(String(value || '').replace(' ', 'T'));
+    return isNaN(date.getTime()) ? String(value || '') : date.toLocaleString([], {month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+  }
+  function renderReportUpdates(report) {
+    var updates = Array.isArray(report.updates) ? report.updates.slice() : [];
+    updates.unshift({id:0,action:'report_submitted',createdAt:report.createdRaw});
+    if (report.isOverdue && !updates.some(function(update) { return update.action === 'resident_overdue'; })) {
+      updates.push({
+        id: 0,
+        action: 'resident_overdue',
+        title: report.overdueBadge || 'Overdue follow-up',
+        copy: report.statusMessage,
+        createdAt: report.overdueDeadline,
+        createdAtRaw: report.overdueDeadline
+      });
+    }
+    updates.sort(function(a, b) {
+      return new Date(b.createdAtRaw || b.createdAt || 0).getTime()
+        - new Date(a.createdAtRaw || a.createdAt || 0).getTime();
+    });
+    var casePhotos = (Array.isArray(report.media) ? report.media : []).filter(function(item) {
+      return item.type === 'photo' && item.source !== 'resident';
+    });
+    evidenceLightboxItems = casePhotos.slice();
+    function photosForUpdate(update) {
+      var legacyActionsBySource = {
+        barangay_validation: ['accept_barangay_assignment', 'forward_to_dcvs_review'],
+        barangay_secured: ['mark_secured'],
+        barangay_turnover: ['confirm_turnover']
+      };
+      return casePhotos.filter(function(item) {
+        if (item.historyId > 0) return item.historyId === update.id;
+        return update.id > 0 && (legacyActionsBySource[item.source] || []).indexOf(update.action) !== -1;
+      }).slice(0, 3);
+    }
+    var timelineHtml = updates.map(function(update) {
+      var linkedPhotos = photosForUpdate(update);
+      return '<article class="rpt-updates-entry"><div class="rpt-updates-entry-head">' +
+        '<span class="rpt-updates-entry-title">' + escapeReportHtml(reportUpdateTitle(update)) + '</span>' +
+        '<time class="rpt-updates-entry-date">' + escapeReportHtml(reportDateTime(update.createdAt)) + '</time></div>' +
+        '<p class="rpt-updates-entry-copy">' + escapeReportHtml(reportUpdateCopy(update)) + '</p>' +
+        (linkedPhotos.length ? '<div class="rpt-updates-photo-grid">' + linkedPhotos.map(function(item) {
+          var index = evidenceLightboxItems.indexOf(item);
+          var caption = item.caption || 'Case photo evidence';
+          return '<button type="button" class="rpt-updates-photo" onclick="openEvidenceLightbox(' + index + ')" aria-label="View photo: ' + escapeReportHtml(caption) + '">' +
+            '<img src="' + escapeReportHtml(item.url) + '" alt="' + escapeReportHtml(caption) + '" loading="lazy"></button>';
+        }).join('') + '</div>' : '') +
+        '</article>';
+    }).join('');
+    document.getElementById('rdUpdates').innerHTML = timelineHtml
+      ? '<div class="rpt-updates-timeline">' + timelineHtml + '</div>'
+      : '<p class="rpt-photo-none">No case updates have been recorded yet.</p>';
+
+    var residentMedia = (report.media || []).filter(function(item) { return item.source === 'resident'; });
+    var ownPhotoHtml = residentMedia.map(function(item) {
+      if (item.type === 'video') {
+        return '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + escapeReportHtml(item.url) + '" controls playsinline preload="metadata"></video></div>';
+      }
+      var imageIndex = evidenceLightboxItems.push(item) - 1;
+      return evidenceThumb(item, imageIndex);
+    }).join('');
+    var staffPhotos = casePhotos.filter(function(item) { return item.role !== 'barangay'; });
+    document.getElementById('rdYourPhotos').innerHTML = ownPhotoHtml || '<p class="rpt-photo-none">No photos were attached to this report.</p>';
+    document.getElementById('rdStaffPhotos').innerHTML = renderEvidenceItems(staffPhotos, 'No case photos have been shared.');
+  }
+
+  window.openEvidenceLightbox = function(index) {
+    if (!evidenceLightboxItems[index]) return;
+    var item = evidenceLightboxItems[index];
+    document.getElementById('rdLightboxImage').src = item.url;
+    document.getElementById('rdLightboxImage').alt = item.caption || 'Shared case photo';
+    document.getElementById('rdLightboxCaption').textContent = item.caption || 'Case photo evidence';
+    document.getElementById('rdLightboxMeta').textContent = item.createdAt ? 'Added ' + reportDateTime(item.createdAt) : '';
+    document.getElementById('rdLightboxPrivacy').textContent = item.source === 'resident'
+      ? 'Submitted with this report'
+      : 'Shared for this case';
+    document.getElementById('rdLightboxCount').textContent = (index + 1) + ' of ' + evidenceLightboxItems.length;
+    document.getElementById('rdLightboxPrev').disabled = index <= 0;
+    document.getElementById('rdLightboxNext').disabled = index >= evidenceLightboxItems.length - 1;
+    document.getElementById('rptEvidenceLightbox').dataset.index = String(index);
+    document.getElementById('rptEvidenceLightbox').classList.add('open');
+  };
+  window.stepEvidenceLightbox = function(offset) {
+    var current = Number(document.getElementById('rptEvidenceLightbox').dataset.index || 0);
+    window.openEvidenceLightbox(current + offset);
+  };
+  window.closeEvidenceLightbox = function() {
+    document.getElementById('rptEvidenceLightbox').classList.remove('open');
+  };
+  document.addEventListener('keydown', function(event) {
+    if (!document.getElementById('rptEvidenceLightbox').classList.contains('open')) return;
+    if (event.key === 'Escape') window.closeEvidenceLightbox();
+    if (event.key === 'ArrowLeft') window.stepEvidenceLightbox(-1);
+    if (event.key === 'ArrowRight') window.stepEvidenceLightbox(1);
+  });
 
   var rdTab = 'details';
   function rdRefreshTabs() {
@@ -5543,9 +7507,10 @@ window.__reportList = <?php
   }
   window.rdDetailGo = function(t) { rdTab = t; rdRefreshTabs(); };
 
-  window.openReportDetails = function(id) {
+  window.openReportDetails = function(id, preserveView) {
     var r = reportIndex[id];
     if (!r) return;
+    var activeTab = preserveView ? rdTab : 'details';
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
     var orDash = function(val) {
       var s = (val === null || val === undefined) ? '' : String(val).trim();
@@ -5560,35 +7525,23 @@ window.__reportList = <?php
     set('rdAnimalCount', orDash(r.animalCount));
     set('rdAnimalBehavior', orDash(r.animalBehavior));
     set('rdIncident', orDash(r.incidentDescription));
-    var badge = document.getElementById('rdBadge');
-    if (badge) badge.className = 'rpt-status-badge ' + r.statusClass;
-    set('rdBadgeText', r.statusLabel);
+    set('rdStatusHeading', r.statusHeading || r.statusMessage || '');
+    set('rdStatusMessage', r.statusMessage || '');
+    set('rdLastUpdated', 'Last updated ' + reportDateTime(r.updatedAt || r.createdRaw));
+    set('rdNextMessage', r.nextStep || '');
+    set('rdHeadType', r.typeLabel || 'Report');
+    var supportingNotice = document.getElementById('rdSupportingNotice');
+    if (supportingNotice) {
+      supportingNotice.hidden = !r.supportingReport;
+      supportingNotice.textContent = r.supportingReport
+        ? 'This report was merged as supporting information for '
+          + (r.primaryReference ? 'primary report ' + r.primaryReference : 'the primary incident')
+          + '. The status shown here follows that incident.'
+        : '';
+    }
     var tlEl = document.getElementById('rdTimeline');
     if (tlEl) {
-      var responseLabels = {
-        awaiting_dcvs_decision:'Pending DCVS review', dcvs_dispatch:'DCVS team assigned',
-        barangay_response_approved:'Barangay response approved', barangay_responding:'Barangay is responding',
-        animal_secured:'Animal secured by barangay', awaiting_turnover:'Awaiting turnover to DCVS',
-        turned_over:'Turned over to DCVS', dcvs_processing:'DCVS processing',
-        unable_to_locate:'Unable to locate', escalated_to_dcvs:'Escalated to DCVS',
-        returned_to_barangay:'Returned to barangay', closed_not_actionable:'Closed — not actionable',
-        resolved:'Incident resolved'
-      };
-      var responseLabel = responseLabels[r.responseState];
-      var turnoverLabels = { pending:'For Turnover — awaiting DCVS receipt', receipt_confirmed:'Turnover Completed', cancelled:'Turnover Cancelled' };
-      var turnoverLabel = turnoverLabels[r.turnoverStatus] || '';
-      var nextDeadline = r.responseDeadline || r.progressDeadline || '';
-      var deadlineOverdue = nextDeadline && new Date(nextDeadline.replace(' ', 'T')).getTime() < Date.now();
-      tlEl.innerHTML = buildTimeline(r.status) + (responseLabel
-        ? '<div class="rpt-response-tracker" role="status" style="margin-top:12px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;background:#eff6ff;color:#1e3a8a;font-size:14px;font-weight:500;">' +
-          '<strong>Case update:</strong> ' + responseLabel +
-          (r.status === 'resolved' && turnoverLabel ? '<br><span style="font-weight:500;">' + turnoverLabel + '</span>' : '') +
-          (r.status !== 'resolved' && nextDeadline ? '<br><span style="font-weight:400;' + (deadlineOverdue ? 'color:#b91c1c;' : '') + '">' +
-            (deadlineOverdue ? 'Response deadline overdue: ' : 'Response target: ') + nextDeadline + '</span>' : '') +
-          (r.holdingLocation && ['animal_secured','awaiting_turnover','turned_over'].indexOf(r.responseState) !== -1
-            ? '<br><span style="font-weight:400;">Holding location: ' + r.holdingLocation.replace(/[&<>"']/g, function (character) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]); }) + '</span>' : '') +
-          (r.turnoverReceivedAt ? '<br><span style="font-weight:400;">DCVS receipt confirmed: ' + r.turnoverReceivedAt + '</span>' : '') +
-          '</div>' : '');
+      tlEl.innerHTML = buildStatusSteps(r, !!r.isOverdue);
     }
     var resolved = r.status === 'resolved';
     var res = document.getElementById('rdResolution');
@@ -5598,16 +7551,8 @@ window.__reportList = <?php
     } else {
       res.style.display = 'none';
     }
-    applyNextSteps(r.status);
-    var attachmentHtml = '';
-    if (r.photo) {
-      attachmentHtml += '<div class="rpt-photo-thumb"><img src="' + r.photo + '" alt="Report photo" onclick="viewReportImage(\'' + r.photo + '\')"></div>';
-    }
-    if (r.video) {
-      attachmentHtml += '<div class="rpt-photo-thumb rpt-video-thumb"><video src="' + r.video + '" controls playsinline preload="metadata"></video></div>';
-    }
-    document.getElementById('rdPhotos').innerHTML = attachmentHtml || '<p class="rpt-photo-none">No attachments.</p>';
-    rdTab = 'details';
+    renderReportUpdates(r);
+    rdTab = activeTab;
     rdRefreshTabs();
     document.getElementById('rptDrawer').classList.add('open');
     document.getElementById('rptDrawerOverlay').classList.add('open');
@@ -5619,6 +7564,7 @@ window.__reportList = <?php
     document.getElementById('rptDrawer').classList.remove('open');
     document.getElementById('rptDrawerOverlay').classList.remove('open');
     document.body.style.overflow = '';
+    window.__currentReportId = null;
   };
 
   window.RPT = window.RPT || {};
@@ -5911,6 +7857,19 @@ window.APPT = window.APPT || {};
 
   window.APPT.archive = function(id) { archiveAppointment(id); };
   var apptIndex = null;
+  function formatAppointmentDate(value) {
+    var parts = String(value || '').substring(0, 10).split('-');
+    if (parts.length !== 3) return value || '';
+    var date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return isNaN(date.getTime()) ? value : date.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' });
+  }
+  function formatAppointmentTime(value) {
+    var parts = String(value || '').split(':');
+    if (parts.length < 2) return value || '';
+    var date = new Date();
+    date.setHours(Number(parts[0]), Number(parts[1]), 0, 0);
+    return isNaN(date.getTime()) ? value : date.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  }
   function getAppt(id) {
     if (!apptIndex) {
       apptIndex = {};
@@ -5972,16 +7931,44 @@ window.APPT = window.APPT || {};
     'pending': ['#fef3c7', '#92400e'],
     'scheduled': ['#0E8131', '#ffffff', '#0E8131'],
     'rescheduled': ['#ede9fe', '#6d28d9'],
+    'action_needed': ['#ffedd5', '#9a3412', '#fed7aa'],
+    'expired': ['#fee2e2', '#991b1b', '#fecaca'],
     'completed': ['#dbeafe', '#1e40af', '#bfdbfe'],
     'cancelled': ['#fee2e2', '#991b1b'],
-    'no_show': ['#fef3c7', '#92400e']
+    'no_show': ['#fee2e2', '#991b1b', '#fecaca'],
+    'rejected': ['#fee2e2', '#991b1b', '#fecaca'],
+    'waitlisted': ['#fef3c7', '#92400e', '#fde68a']
   };
+
+  function buildAppointmentStatusSteps(status, requestStatus) {
+    var normalizedStatus = String(status || '').toLowerCase();
+    var normalizedRequestStatus = String(requestStatus || '').toLowerCase();
+    var currentStage = normalizedStatus === 'completed' ? 3
+      : (['pending', 'offered'].indexOf(normalizedRequestStatus) !== -1 ? 1
+        : (['scheduled', 'rescheduled', 'approved', 'in_progress'].indexOf(normalizedStatus) !== -1 ? 2 : 1));
+    var labels = ['Requested', 'Under review', 'Scheduled', 'Completed'];
+    return '<div class="appt-status-steps" aria-label="Appointment progress">' + labels.map(function(label, index) {
+      var complete = index < currentStage || normalizedStatus === 'completed';
+      var stepClass = complete ? ' is-complete' : (index === currentStage ? ' is-current' : '');
+      var checkIcon = complete
+        ? '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>'
+        : '';
+      return '<div class="appt-status-step' + stepClass + '"><span class="appt-status-step-dot" aria-hidden="true">' + checkIcon + '</span><span>' + label + '</span></div>';
+    }).join('') + '</div>';
+  }
 
   window.APPT.view = function(id) {
     var a = getAppt(id);
     if (!a) return;
     window.__currentApptId = a.id;
     var set = function(eid, val) { var e = document.getElementById(eid); if (e) e.textContent = val; };
+    var displayStatus = a.status === 'approved' ? 'scheduled' : a.status;
+    var statusTimeline = document.getElementById('apptStatusTimeline');
+    if (statusTimeline) {
+      statusTimeline.innerHTML = buildAppointmentStatusSteps(displayStatus, a.rescheduleRequestStatus);
+      statusTimeline.hidden = false;
+    }
+    var pet = a.pet || 'your pet';
     set('adHeadPet', a.pet);
     var avEl = document.getElementById('adAvatar');
     if (avEl) {
@@ -5996,49 +7983,457 @@ window.APPT = window.APPT || {};
     set('adPet', a.pet);
     set('adDate', a.date);
     set('adTime', a.time);
-    set('adCreated', a.created + ' . ' + a.createdTime);
-    set('adNotes', a.notes === '-' ? '-' : a.notes);
-    var c = apptColors[a.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+    set('adCreated', (a.createdLong || a.created || '—') + (a.createdTime ? ', ' + a.createdTime : ''));
+    set('adNotes', a.notes && a.notes !== 'No notes added' ? a.notes : 'No note added.');
+    var summaryDate = displayStatus === 'pending' ? a.dateRaw : a.scheduledDateRaw;
+    var summaryTime = displayStatus === 'pending' ? a.timeRaw : a.scheduledTimeRaw;
+    set('adDatePrefix', displayStatus === 'pending' ? 'Preferred: ' : '');
+    set('adSummaryDate', formatAppointmentDate(summaryDate) || '—');
+    set('adSummaryTime', formatAppointmentTime(summaryTime) || '');
+    var originalRow = document.getElementById('adOriginalRow');
+    if (originalRow) {
+      originalRow.hidden = displayStatus !== 'rescheduled' && !a.hasApprovedReschedule;
+      set('adOriginalRequested', formatAppointmentDate(a.originalDateRaw) + ', ' + formatAppointmentTime(a.originalTimeRaw));
+    }
+    var requestStatus = a.rescheduleRequestStatus || '';
+    var requestCard = document.getElementById('apptRescheduleRequestCard');
+    var requestTitle = document.getElementById('apptRescheduleRequestTitle');
+    var requestText = document.getElementById('apptRescheduleRequestText');
+    if (requestCard) {
+      requestCard.hidden = requestStatus !== 'pending';
+      if (requestTitle) requestTitle.textContent = 'You requested to reschedule for ' +
+        formatAppointmentDate(a.requestedDate) + ' at ' + formatAppointmentTime(a.requestedTime) + '.';
+      if (requestText) requestText.textContent = 'The clinic is still reviewing your request. Your new time isn’t confirmed yet.';
+    }
+    var decisionCard = document.getElementById('apptRescheduleDecisionCard');
+    if (decisionCard) {
+      decisionCard.hidden = requestStatus !== 'approved' && requestStatus !== 'declined';
+      decisionCard.className = 'appt-reschedule-alert' + (requestStatus === 'approved' ? ' approved' : ' declined');
+      if (requestStatus === 'approved') {
+        decisionCard.textContent = 'Your reschedule request has been approved! Your appointment has been moved from ' +
+          formatAppointmentDate(a.originalDateRaw) + ', at ' + formatAppointmentTime(a.originalTimeRaw) +
+          ' to your requested schedule.';
+      } else if (requestStatus === 'declined') {
+        decisionCard.textContent = a.rescheduleDeclineReason
+          ? 'The clinic couldn’t approve your request: ' + a.rescheduleDeclineReason +
+            ' Your appointment stays on ' + formatAppointmentDate(a.scheduledDateRaw) + '.'
+          : 'You declined the clinic’s alternate time. Your current appointment remains booked for ' +
+            formatAppointmentDate(a.scheduledDateRaw) + ' at ' + formatAppointmentTime(a.scheduledTimeRaw) + '.';
+      }
+    }
+    var replyBanner = document.getElementById('apptRescheduleReplyBanner');
+    if (replyBanner) {
+      replyBanner.hidden = requestStatus !== 'offered';
+      if (requestStatus === 'offered') {
+        set('apptRescheduleReplyTitle', 'The clinic can’t do ' + formatAppointmentDate(a.requestedDate) +
+          '. They suggest ' + formatAppointmentDate(a.offeredDate) + ' at ' + formatAppointmentTime(a.offeredTime) + '.');
+        set('apptRescheduleReplyMessage', 'Your current appointment remains booked unless you accept this new time.');
+        set('apptRescheduleReplyStaffMessage', a.rescheduleStaffMessage || '');
+      }
+    }
+    var displayStatusKey = a.status === 'rescheduled' || ['pending', 'offered'].indexOf(requestStatus) !== -1
+      ? 'rescheduled' : a.status;
+    var c = apptColors[displayStatusKey] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+    var headStatus = document.getElementById('adHeadStatus');
+    if (headStatus) {
+      headStatus.textContent = a.statusLabel;
+      headStatus.style.background = c[0];
+      headStatus.style.color = c[1];
+      headStatus.style.borderColor = c[2] || '#e4e4e7';
+    }
     var pill = '<span class="appt-status-pill" style="background:' + c[0] + ';color:' + c[1] + ';border-color:' + (c[2] || '#e4e4e7') + ';">' + a.statusLabel + '</span>';
     var stEl = document.getElementById('adStatus');
     if (stEl) stEl.innerHTML = pill;
-    var hp = document.getElementById('adHeadStatus');
-    if (hp) {
-      hp.textContent = a.statusLabel;
-      hp.style.background = c[0];
-      hp.style.color = c[1];
-      hp.style.borderColor = c[2] || '#e4e4e7';
+    var actionNeededNotice = document.getElementById('adActionNeeded');
+    if (actionNeededNotice) actionNeededNotice.hidden = a.status !== 'action_needed';
+    if (a.status === 'action_needed') {
+      var originalDate = formatAppointmentDate(a.originalDateRaw);
+      var originalTime = formatAppointmentTime(a.originalTimeRaw);
+      var proposedDate = formatAppointmentDate(a.scheduledDateRaw);
+      var proposedTime = formatAppointmentTime(a.scheduledTimeRaw);
+      set('adOriginalAppointmentTime', originalDate + ', ' + originalTime);
+      set('adProposedAppointmentTime', proposedDate + ', ' + proposedTime);
+      set('adRescheduleDeadline', 'Please respond before ' + (a.rescheduleDeadlineLabel || 'the deadline') + '. Without a response, the request will close.');
+      set('adRescheduleRequestedAt', (a.createdLong || a.created || '') + (a.createdTime ? ', ' + a.createdTime : ''));
     }
     var nextEl = document.getElementById('adNextList');
     if (nextEl) {
-      var steps = apptNextSteps(a.status);
+      var steps = apptNextSteps(displayStatus);
       nextEl.innerHTML = steps.map(function(t) { return '<li>' + t + '</li>'; }).join('');
+      var nextSection = nextEl.closest('.rpt-next');
+      if (nextSection) nextSection.hidden = a.status === 'action_needed';
     }
     var changeButton = document.getElementById('apptChangeBtn');
+    var rescheduleHint = document.getElementById('apptRescheduleSoon');
+    var pendingHint = document.getElementById('apptPendingHint');
+    var rescheduleAction = document.getElementById('apptRescheduleAction');
+    var startRescheduleButton = document.getElementById('apptStartRescheduleBtn');
+    var bookAgainButton = document.getElementById('apptBookAgainBtn');
     if (changeButton) {
       var canEdit = a.status === 'pending';
+      var isFinal = a.status === 'completed' || a.status === 'rejected' || a.status === 'cancelled' || a.status === 'no_show';
       changeButton.style.display = canEdit ? '' : 'none';
-      changeButton.textContent = 'Edit Appointment';
+      changeButton.textContent = 'Edit request';
+      changeButton.disabled = false;
       changeButton.setAttribute('data-action', 'edit');
+      changeButton.classList.toggle('sd-btn-primary', canEdit);
+      changeButton.classList.toggle('sd-btn-outline', !canEdit);
+      if (pendingHint) pendingHint.hidden = !canEdit;
+      if (rescheduleAction) rescheduleAction.style.display = canEdit ? '' : 'none';
+      if (bookAgainButton) {
+        bookAgainButton.style.display = isFinal ? '' : 'none';
+        bookAgainButton.textContent = 'Book again for ' + pet;
+      }
     }
+    var isScheduled = ['approved', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
+    var cooldownActive = !!a.rescheduleCooldownActive;
+    var requestWaiting = requestStatus === 'pending' || requestStatus === 'offered';
+    if (startRescheduleButton) {
+      startRescheduleButton.style.display = isScheduled ? '' : 'none';
+      startRescheduleButton.disabled = requestWaiting || !a.canCancel || cooldownActive;
+      startRescheduleButton.textContent = requestWaiting ? 'Reschedule requested' : 'Reschedule';
+    }
+    if (rescheduleHint) {
+      rescheduleHint.hidden = !isScheduled || requestWaiting || (!cooldownActive && !!a.canCancel);
+      if (cooldownActive && a.rescheduleCooldownUntil) {
+        var cooldownDate = a.rescheduleCooldownUntil.substring(0, 10);
+        var cooldownTime = a.rescheduleCooldownUntil.substring(11, 16);
+        rescheduleHint.textContent = 'You can request another reschedule after ' +
+          formatAppointmentDate(cooldownDate) + ' at ' + formatAppointmentTime(cooldownTime) + '.';
+      } else {
+        rescheduleHint.innerHTML = 'Less than 24 hours away. Please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>.';
+      }
+    }
+    if (requestStatus === 'declined' && startRescheduleButton && isScheduled && a.canCancel && !cooldownActive) {
+      startRescheduleButton.disabled = false;
+      startRescheduleButton.textContent = 'Request another time';
+    }
+    var viewCalendarButton = document.getElementById('apptViewCalendarBtn');
+    if (viewCalendarButton) viewCalendarButton.style.display = ['completed', 'cancelled', 'rejected', 'no_show'].indexOf(a.status) !== -1 ? '' : 'none';
+    var drawerCloseButton = document.getElementById('apptDrawerCloseBtn');
+    if (drawerCloseButton) drawerCloseButton.style.display = a.status === 'action_needed' ? '' : 'none';
     var archiveButton = document.getElementById('apptArchiveBtn');
+    var cancelCutoff = document.getElementById('apptCancelCutoff');
+    var canCancelStatus = ['pending', 'approved', 'scheduled', 'rescheduled'].indexOf(a.status) !== -1;
+    var hasCancellationWindow = a.status === 'pending' || a.canCancel || requestWaiting;
     if (archiveButton) {
-      var canArchiveOrCancel = ['pending', 'scheduled', 'rescheduled', 'completed'].indexOf(a.status) !== -1;
-      archiveButton.style.display = canArchiveOrCancel ? '' : 'none';
-      archiveButton.textContent = a.status === 'scheduled' || a.status === 'completed' ? 'Archive Appointment' : 'Cancel Appointment';
+      archiveButton.style.display = canCancelStatus && hasCancellationWindow ? '' : 'none';
+      archiveButton.textContent = a.status === 'pending' ? 'Cancel request' : 'Cancel appointment';
+    }
+    if (cancelCutoff) {
+      cancelCutoff.hidden = !canCancelStatus || hasCancellationWindow || a.status === 'pending';
+      if (!cancelCutoff.hidden && requestWaiting) cancelCutoff.innerHTML = 'Less than 24 hours away. Please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>. Your pending reschedule request will also close if the appointment is cancelled.';
     }
     document.getElementById('apptDrawer').classList.add('open');
     document.getElementById('apptDrawerOverlay').classList.add('open');
     document.body.style.overflow = 'hidden';
   };
 
+  var reschedulePicker = { slots: [], selectedDate: '', selectedTime: '', urgency: 'routine', programDay: false, month: '', serverToday: '', calendarDays: [] };
+  function renderRescheduleCalendar() {
+    var grid = document.getElementById('apptRescheduleCalendarGrid');
+    var parts = reschedulePicker.month.split('-');
+    var year = Number(parts[0]);
+    var monthNumber = Number(parts[1]);
+    var firstDay = new Date(year, monthNumber - 1, 1);
+    var daysInMonth = new Date(year, monthNumber, 0).getDate();
+    var todayParts = reschedulePicker.serverToday.split('-');
+    var currentMonth = todayParts.length === 3 ? todayParts[0] + '-' + todayParts[1] : reschedulePicker.month;
+    document.getElementById('apptRescheduleMonthLabel').textContent =
+      firstDay.toLocaleDateString('en-US', { month:'long', year:'numeric' });
+    document.getElementById('apptReschedulePrevMonth').disabled = reschedulePicker.month <= currentMonth;
+    grid.textContent = '';
+    ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach(function(label) {
+      var weekday = document.createElement('span');
+      weekday.className = 'appt-reschedule-calendar-weekday';
+      weekday.textContent = label;
+      weekday.setAttribute('aria-hidden', 'true');
+      grid.appendChild(weekday);
+    });
+    var offset = (firstDay.getDay() + 6) % 7;
+    for (var blank = 0; blank < offset; blank++) {
+      var spacer = document.createElement('span');
+      spacer.setAttribute('aria-hidden', 'true');
+      grid.appendChild(spacer);
+    }
+    var availabilityByDate = {};
+    reschedulePicker.calendarDays.forEach(function(day) { availabilityByDate[day.date] = day; });
+    for (var dayNumber = 1; dayNumber <= daysInMonth; dayNumber++) {
+      var date = reschedulePicker.month + '-' + String(dayNumber).padStart(2, '0');
+      var isPastDate = reschedulePicker.serverToday !== '' && date < reschedulePicker.serverToday;
+      var dayInfo = availabilityByDate[date] || { closed:true, full:false, program_day:false };
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'appt-reschedule-calendar-day';
+      button.disabled = isPastDate || !!dayInfo.past || !!dayInfo.closed || !!dayInfo.full;
+      button.dataset.past = isPastDate || dayInfo.past ? 'true' : 'false';
+      button.dataset.program = dayInfo.program_day ? 'true' : 'false';
+      button.dataset.full = dayInfo.full ? 'true' : 'false';
+      button.dataset.closed = dayInfo.closed ? 'true' : 'false';
+      button.setAttribute('aria-pressed', reschedulePicker.selectedDate === date ? 'true' : 'false');
+      var dayStatus = isPastDate || dayInfo.past ? 'Past date' : (dayInfo.closed ? 'Closed' : (dayInfo.full ? 'Full' : (dayInfo.program_day ? 'Program day, available' : 'Available')));
+      button.setAttribute('aria-label', firstDay.toLocaleDateString('en-US', { month:'long' }) + ' ' + dayNumber + ', ' + year + ': ' + dayStatus);
+      var marker = document.createElement('span');
+      marker.className = 'day-marker';
+      marker.setAttribute('aria-hidden', 'true');
+      var dayDate = new Date(year, monthNumber - 1, dayNumber);
+      var weekdayLabel = document.createElement('span');
+      weekdayLabel.className = 'day-weekday';
+      weekdayLabel.textContent = dayDate.toLocaleDateString('en-US', { weekday:'short' });
+      weekdayLabel.setAttribute('aria-hidden', 'true');
+      var dayLabel = document.createElement('span');
+      dayLabel.className = 'day-number';
+      dayLabel.textContent = String(dayNumber);
+      dayLabel.setAttribute('aria-hidden', 'true');
+      button.appendChild(weekdayLabel);
+      button.appendChild(dayLabel);
+      button.appendChild(marker);
+      button.onclick = function(selectedDate) {
+        return function() {
+          document.getElementById('apptRescheduleDate').value = selectedDate;
+          reschedulePicker.selectedDate = selectedDate;
+          reschedulePicker.selectedTime = '';
+          renderRescheduleCalendar();
+          loadRescheduleSlots();
+        };
+      }(date);
+      grid.appendChild(button);
+    }
+  }
+  function loadRescheduleCalendar() {
+    var appointment = getAppt(window.__currentApptId);
+    var note = document.getElementById('apptRescheduleDayNote');
+    note.textContent = 'Loading calendar availability…';
+    fetch('api/resident/reschedule-availability.php?appointment_id=' + encodeURIComponent(appointment.id) + '&month=' + encodeURIComponent(reschedulePicker.month))
+      .then(function(response) { return response.json().then(function(body) { if (!response.ok || !body.success) throw new Error(body.message || 'Could not load calendar availability.'); return body; }); })
+      .then(function(result) {
+        reschedulePicker.calendarDays = result.days || [];
+        reschedulePicker.serverToday = result.server_today || '';
+        renderRescheduleCalendar();
+        note.textContent = '';
+      })
+      .catch(function(error) {
+        reschedulePicker.calendarDays = [];
+        renderRescheduleCalendar();
+        note.textContent = error.message || 'Could not load calendar availability.';
+      });
+  }
+  window.APPT.startReschedule = function() {
+    var appointment = getAppt(window.__currentApptId);
+    if (!appointment || !['approved', 'scheduled', 'rescheduled'].includes(appointment.status)) return;
+    if (!appointment.canCancel || appointment.rescheduleCooldownActive
+      || ['pending', 'offered'].includes(appointment.rescheduleRequestStatus || '')) return;
+    var today = new Date();
+    var initialMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+    document.getElementById('apptRescheduleReason').value = '';
+    document.getElementById('apptRescheduleError').hidden = true;
+    document.getElementById('apptRescheduleSubmitError').hidden = true;
+    document.getElementById('apptRescheduleCurrent').textContent =
+      formatAppointmentDate(appointment.scheduledDateRaw) + ' at ' + formatAppointmentTime(appointment.scheduledTimeRaw);
+    document.getElementById('apptDrawerNormalContent').hidden = true;
+    document.getElementById('apptStatusTimeline').hidden = true;
+    document.getElementById('apptRescheduleFlow').hidden = false;
+    document.getElementById('apptRescheduleFlowHeader').hidden = false;
+    document.getElementById('apptDrawerDefaultHeader').hidden = true;
+    document.querySelector('#apptDrawer .rpt-drawer-foot').hidden = true;
+    document.getElementById('apptRescheduleStepChoose').hidden = false;
+    document.getElementById('apptRescheduleStepReview').hidden = true;
+    document.getElementById('apptRescheduleFlowTitle').focus();
+    reschedulePicker = { slots: [], selectedDate: '', selectedTime: '', urgency: 'routine', programDay: false, month: initialMonth, serverToday: '', calendarDays: [] };
+    document.getElementById('apptRescheduleDate').value = '';
+    document.getElementById('apptReschedulePrevMonth').onclick = function() {
+      var parts = reschedulePicker.month.split('-');
+      var previous = new Date(Number(parts[0]), Number(parts[1]) - 2, 1);
+      reschedulePicker.month = previous.getFullYear() + '-' + String(previous.getMonth() + 1).padStart(2, '0');
+      reschedulePicker.selectedDate = '';
+      reschedulePicker.selectedTime = '';
+      document.getElementById('apptRescheduleDate').value = '';
+      document.getElementById('apptRescheduleSlots').textContent = '';
+      document.getElementById('apptRescheduleReviewButton').disabled = true;
+      loadRescheduleCalendar();
+    };
+    document.getElementById('apptRescheduleNextMonth').onclick = function() {
+      var parts = reschedulePicker.month.split('-');
+      var next = new Date(Number(parts[0]), Number(parts[1]), 1);
+      reschedulePicker.month = next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0');
+      reschedulePicker.selectedDate = '';
+      reschedulePicker.selectedTime = '';
+      document.getElementById('apptRescheduleDate').value = '';
+      document.getElementById('apptRescheduleSlots').textContent = '';
+      document.getElementById('apptRescheduleReviewButton').disabled = true;
+      loadRescheduleCalendar();
+    };
+    loadRescheduleCalendar();
+    document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(button) {
+      button.onclick = function() {
+        reschedulePicker.urgency = button.getAttribute('data-priority');
+        document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(item) {
+          item.setAttribute('aria-pressed', item === button ? 'true' : 'false');
+        });
+        renderRescheduleSlots();
+      };
+    });
+  };
+  function loadRescheduleSlots() {
+    var appointment = getAppt(window.__currentApptId);
+    var date = document.getElementById('apptRescheduleDate').value;
+    var area = document.getElementById('apptRescheduleSlots');
+    var note = document.getElementById('apptRescheduleDayNote');
+    var review = document.getElementById('apptRescheduleReviewButton');
+    area.textContent = 'Checking availability…';
+    review.disabled = true;
+    reschedulePicker.selectedDate = date;
+    reschedulePicker.selectedTime = '';
+    if (!date) { area.textContent = ''; return; }
+    fetch('api/resident/reschedule-availability.php?appointment_id=' + encodeURIComponent(appointment.id) + '&date=' + encodeURIComponent(date))
+      .then(function(response) { return response.json().then(function(body) { if (!response.ok || !body.success) throw new Error(body.message || 'Could not check availability.'); return body; }); })
+      .then(function(result) {
+        reschedulePicker.slots = result.slots || [];
+        reschedulePicker.programDay = !!result.program_day;
+        reschedulePicker.urgency = result.program_day ? 'routine' : 'routine';
+        var priorityWrap = document.getElementById('apptReschedulePriorityWrap');
+        priorityWrap.hidden = !result.program_day;
+        note.textContent = result.past ? 'Past dates are unavailable.' :
+          (result.closed ? 'Closed on this date.' :
+            (result.program_day ? 'Program day — choose Urgent or Routine. Daily capacity: up to 3 urgent and 2 routine appointments.' :
+              'Priority doesn’t apply on regular days. Daily limit: 5 routine appointments.'));
+        document.querySelectorAll('#apptReschedulePriorityWrap button').forEach(function(button) {
+          button.setAttribute('aria-pressed', button.getAttribute('data-priority') === reschedulePicker.urgency ? 'true' : 'false');
+        });
+        renderRescheduleSlots();
+      })
+      .catch(function(error) {
+        area.textContent = '';
+        note.textContent = error.message || 'Could not check available times.';
+        document.getElementById('apptRescheduleError').textContent = error.message || 'Could not check available times.';
+        document.getElementById('apptRescheduleError').hidden = false;
+      });
+  }
+  function renderRescheduleSlots() {
+    var area = document.getElementById('apptRescheduleSlots');
+    var review = document.getElementById('apptRescheduleReviewButton');
+    area.textContent = '';
+    reschedulePicker.slots.forEach(function(slot) {
+      var availability = slot[reschedulePicker.urgency] || { available: false };
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = formatAppointmentTime(slot.time) + (availability.available ? '' : ' · ' + (slot.open ? 'Full' : 'Closed'));
+      var sameSlot = reschedulePicker.selectedDate === (getAppt(window.__currentApptId).scheduledDateRaw || '') &&
+        slot.time === (getAppt(window.__currentApptId).scheduledTimeRaw || '').substring(0, 5);
+      button.disabled = !availability.available || sameSlot;
+      if (sameSlot) button.textContent += ' · Current';
+      button.setAttribute('aria-pressed', slot.time === reschedulePicker.selectedTime ? 'true' : 'false');
+      button.onclick = function() {
+        reschedulePicker.selectedTime = slot.time;
+        area.querySelectorAll('button').forEach(function(item) { item.setAttribute('aria-pressed', item === button ? 'true' : 'false'); });
+        review.disabled = false;
+      };
+      area.appendChild(button);
+    });
+    if (!reschedulePicker.slots.length) area.textContent = 'No appointment times are configured.';
+  }
+  window.APPT.reviewReschedule = function() {
+    if (!reschedulePicker.selectedDate || !reschedulePicker.selectedTime) return;
+    var appointment = getAppt(window.__currentApptId);
+    document.getElementById('apptRescheduleReviewCurrent').textContent =
+      formatAppointmentDate(appointment.scheduledDateRaw) + ' at ' + formatAppointmentTime(appointment.scheduledTimeRaw);
+    document.getElementById('apptRescheduleReviewNew').textContent =
+      formatAppointmentDate(reschedulePicker.selectedDate) + ' at ' + formatAppointmentTime(reschedulePicker.selectedTime) +
+      (reschedulePicker.programDay ? ' · ' + (reschedulePicker.urgency === 'urgent' ? 'Urgent' : 'Routine') : '');
+    var reason = document.getElementById('apptRescheduleReason').value.trim();
+    document.getElementById('apptRescheduleReviewReason').textContent = reason ? 'Your reason: “' + reason + '”' : 'No reason provided.';
+    document.getElementById('apptRescheduleStepChoose').hidden = true;
+    document.getElementById('apptRescheduleStepReview').hidden = false;
+    document.querySelector('#apptRescheduleStepReview .appt-reschedule-step-title').focus();
+  };
+  window.APPT.backRescheduleToChoose = function() {
+    document.getElementById('apptRescheduleStepChoose').hidden = false;
+    document.getElementById('apptRescheduleStepReview').hidden = true;
+    document.querySelector('#apptRescheduleStepChoose .appt-reschedule-step-title').focus();
+  };
+  window.APPT.backReschedule = function() {
+    if (!document.getElementById('apptRescheduleStepReview').hidden) {
+      window.APPT.backRescheduleToChoose();
+      return;
+    }
+    document.getElementById('apptRescheduleFlow').hidden = true;
+    document.getElementById('apptRescheduleFlowHeader').hidden = true;
+    document.getElementById('apptDrawerDefaultHeader').hidden = false;
+    document.getElementById('apptDrawerNormalContent').hidden = false;
+    document.getElementById('apptStatusTimeline').hidden = false;
+    document.querySelector('#apptDrawer .rpt-drawer-foot').hidden = false;
+    document.getElementById('apptStartRescheduleBtn').focus();
+  };
+  window.APPT.submitReschedule = function() {
+    var button = document.getElementById('apptRescheduleSubmitButton');
+    button.disabled = true;
+    var body = new URLSearchParams();
+    body.set('appointment_id', String(window.__currentApptId));
+    body.set('date', reschedulePicker.selectedDate);
+    body.set('time', reschedulePicker.selectedTime);
+    body.set('urgency', reschedulePicker.urgency);
+    body.set('reason', document.getElementById('apptRescheduleReason').value.trim());
+    body.set('csrf_token', window.__APPT_CSRF || '');
+    fetch('api/resident/request-reschedule.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+      .then(function(response) { return response.json().then(function(result) { if (!response.ok || !result.success) { if (result.slot_available === false) { window.APPT.backRescheduleToChoose(); loadRescheduleSlots(); } throw new Error(result.message || 'Could not send your request.'); } return result; }); })
+      .then(function() { location.reload(); })
+      .catch(function(error) {
+        var errorEl = document.getElementById('apptRescheduleSubmitError');
+        errorEl.textContent = error.message || 'Could not send your request.';
+        errorEl.hidden = false;
+        button.disabled = false;
+      });
+  };
+  window.APPT.respondRescheduleRequest = function(response) {
+    var appointment = getAppt(window.__currentApptId);
+    if (!appointment || !appointment.rescheduleRequestId) return;
+    if (response === 'decline' && !window.confirm('Keep your current appointment? Declining the suggested time will leave the current booking unchanged.')) return;
+    var body = new URLSearchParams();
+    body.set('request_id', String(appointment.rescheduleRequestId));
+    body.set('response', response);
+    body.set('csrf_token', window.__APPT_CSRF || '');
+    fetch('api/resident/respond-reschedule-request.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body.toString() })
+      .then(function(res) { return res.json().then(function(result) { if (!res.ok || !result.success) throw new Error(result.message || 'Could not save your response.'); }); })
+      .then(function() { location.reload(); })
+      .catch(function(error) { alert(error.message || 'Could not save your response.'); });
+  };
+
   function apptNextSteps(status) {
-    if (status === 'completed') {
+    if (status === 'action_needed') {
+      return ['Review the proposed appointment time above and respond before the deadline.'];
+    }
+    if (status === 'pending') {
       return [
-        'Your appointment has been completed.',
-        'You may view the details in your report or service history.',
-        'Thank you for using DCVS services.'
+        'DCVS staff are reviewing your appointment request.',
+        'We’ll notify you when your request is confirmed or if another time is suggested.'
       ];
+    }
+    if (status === 'scheduled') {
+      return [
+        'Arrive at the DCVS office on your scheduled date and time.',
+        'Bring your pet and any relevant service or vaccination records.'
+      ];
+    }
+    if (status === 'rescheduled') {
+      return [
+        'Your updated appointment date and time are shown above.',
+        'Arrive at the DCVS office and bring your pet and any relevant service records.'
+      ];
+    }
+    if (status === 'waitlisted') {
+      return [
+        'Your appointment request has been added to the waitlist because the selected date or time was full.',
+        'DCVS staff will contact you if a slot becomes available.'
+      ];
+    }
+    if (status === 'rejected') {
+      return [
+        'Your appointment request was rejected by DCVS staff.',
+        'Review the staff note for the reason, or submit a new request if needed.'
+      ];
+    }
+    if (status === 'completed') {
+      return ['Your appointment has been completed. Thank you for using DCVS services.'];
     }
     if (status === 'cancelled' || status === 'no_show') {
       return [
@@ -6061,6 +8456,88 @@ window.APPT = window.APPT || {};
     closeApptDrawer();
     window.openAppointmentForm(a, 'edit');
   };
+  window.APPT.requestReschedule = function() {
+    alert('Resident reschedule requests are not available yet. Please contact DCVS staff for assistance.');
+  };
+  var pendingRescheduleResponse = '';
+  window.APPT.confirmReschedule = function(response) {
+    var id = Number(window.__currentApptId || 0);
+    if (!id || (response !== 'accept' && response !== 'decline')) return;
+    var appointment = getAppt(id);
+    if (!appointment || appointment.status !== 'action_needed') return;
+    pendingRescheduleResponse = response;
+    var title = document.getElementById('appointmentRescheduleConfirmTitle');
+    var message = document.getElementById('appointmentRescheduleConfirmMessage');
+    var confirmButton = document.getElementById('appointmentRescheduleConfirmButton');
+    var proposedDate = formatAppointmentDate(appointment.scheduledDateRaw);
+    var proposedTime = formatAppointmentTime(appointment.scheduledTimeRaw);
+    if (response === 'accept') {
+      title.textContent = 'Accept the new appointment time?';
+      message.textContent = 'Confirm the proposed time for ' + appointment.pet + ': ' + proposedDate + ' at ' + proposedTime + '.';
+      confirmButton.textContent = 'Confirm new time';
+      confirmButton.classList.remove('sd-btn-danger');
+      confirmButton.classList.add('sd-btn-primary');
+    } else {
+      title.textContent = 'Decline the proposed time?';
+      message.textContent = 'Declining will close this appointment request. You will need to book again if you still need this service.';
+      confirmButton.textContent = 'Decline appointment';
+      confirmButton.classList.remove('sd-btn-primary');
+      confirmButton.classList.add('sd-btn-danger');
+    }
+    openModal('appointmentRescheduleConfirm');
+  };
+  window.APPT.cancelRescheduleConfirmation = function() {
+    pendingRescheduleResponse = '';
+    closeModal('appointmentRescheduleConfirm');
+  };
+  window.APPT.submitRescheduleResponse = function() {
+    var response = pendingRescheduleResponse;
+    var id = Number(window.__currentApptId || 0);
+    if (!id || (response !== 'accept' && response !== 'decline')) return;
+    var acceptButton = document.getElementById('adAcceptReschedule');
+    var declineButton = document.getElementById('adDeclineReschedule');
+    var confirmButton = document.getElementById('appointmentRescheduleConfirmButton');
+    if (acceptButton) acceptButton.disabled = true;
+    if (declineButton) declineButton.disabled = true;
+    if (confirmButton) confirmButton.disabled = true;
+    var body = new URLSearchParams();
+    body.append('appointment_id', String(id));
+    body.append('response', response);
+    body.append('csrf_token', window.__APPT_CSRF || '');
+    fetch('../../api/resident/respond-reschedule.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      credentials: 'same-origin',
+      body: body.toString()
+    }).then(function(result) {
+      return result.json().then(function(data) {
+        if (!result.ok || !data.success) throw new Error(data.message || 'Could not save your response.');
+        closeModal('appointmentRescheduleConfirm');
+        window.location.reload();
+      });
+    }).catch(function(error) {
+      alert(error.message || 'Could not save your response.');
+      if (acceptButton) acceptButton.disabled = false;
+      if (declineButton) declineButton.disabled = false;
+      if (confirmButton) confirmButton.disabled = false;
+    });
+  };
+  window.APPT.bookAgain = function() {
+    var a = getAppt(window.__currentApptId);
+    if (!a) return;
+    closeApptDrawer();
+    openBookApptModal();
+    var type = document.getElementById('apptTypeSelect');
+    var pet = document.getElementById('petSelect');
+    if (type) {
+      type.value = String(a.service || '').toLowerCase();
+      type.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    if (pet) {
+      pet.value = a.petId || '';
+      pet.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  };
 
   window.closeApptDrawer = function() {
     document.getElementById('apptDrawer').classList.remove('open');
@@ -6071,7 +8548,10 @@ window.APPT = window.APPT || {};
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
       var d = document.getElementById('apptDrawer');
-      if (d && d.classList.contains('open')) closeApptDrawer();
+      if (d && d.classList.contains('open')) {
+        if (!document.getElementById('apptRescheduleFlow').hidden) window.APPT.backReschedule();
+        else closeApptDrawer();
+      }
     }
   });
   window.APPT.refresh = function() {
@@ -6204,6 +8684,7 @@ window.APPT = window.APPT || {};
       dateRaw: appt.preferred_date,
       timeRaw: appt.preferred_time,
       created: submittedDate,
+      createdLong: submitted.toLocaleDateString('en-US', { month:'long', day:'numeric', year:'numeric' }),
       createdTime: submittedTime,
       status: 'pending',
       statusLabel: 'Pending',
@@ -6236,10 +8717,10 @@ window.APPT = window.APPT || {};
     if (cells[3]) cells[3].textContent = dateText;
     if (cells[4]) cells[4].textContent = timeText;
     var badge = row.querySelector('.appt-status-pill');
-    var colors = { pending:['#fef3c7','#92400e','#fde68a'], scheduled:['#0E8131','#ffffff','#0E8131'], rescheduled:['#ede9fe','#6d28d9','#ddd6fe'], completed:['#dbeafe','#1e40af','#bfdbfe'], cancelled:['#fee2e2','#991b1b','#fecaca'], no_show:['#fef3c7','#92400e','#fde68a'] };
+    var colors = { pending:['#fef3c7','#92400e','#fde68a'], scheduled:['#0E8131','#ffffff','#0E8131'], rescheduled:['#ede9fe','#6d28d9','#ddd6fe'], completed:['#dbeafe','#1e40af','#bfdbfe'], cancelled:['#fee2e2','#991b1b','#fecaca'], no_show:['#fee2e2','#991b1b','#fecaca'] };
     var style = colors[status] || ['#f1f5f9','#64748b','#e4e4e7'];
     if (badge) {
-      badge.textContent = status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
+      badge.textContent = status === 'no_show' ? 'No Show' : status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
       badge.style.background = style[0];
       badge.style.color = style[1];
       badge.style.borderColor = style[2];
@@ -6255,7 +8736,7 @@ window.APPT = window.APPT || {};
     var total = rows.length, pending = 0, scheduled = 0, completed = 0;
     rows.forEach(function(r) {
       var st = r.getAttribute('data-status');
-      if (st === 'pending') pending++;
+      if (st === 'pending' || st === 'action_needed') pending++;
       else if (st === 'scheduled' || st === 'rescheduled') scheduled++;
       else if (st === 'completed') completed++;
     });
@@ -6387,52 +8868,209 @@ window.APPT = window.APPT || {};
 <!-- Appointment Details Drawer -->
 <div class="rpt-drawer-overlay" id="apptDrawerOverlay" onclick="closeApptDrawer()"></div>
 <aside class="rpt-drawer" id="apptDrawer" aria-label="Appointment details">
+  <section class="appt-reschedule-reply" id="apptRescheduleReplyBanner" hidden aria-live="assertive">
+    <strong id="apptRescheduleReplyTitle">The clinic suggests another time</strong>
+    <p id="apptRescheduleReplyMessage"></p>
+    <p id="apptRescheduleReplyStaffMessage"></p>
+    <div>
+      <button type="button" class="sd-btn sd-btn-primary" onclick="APPT.respondRescheduleRequest('accept')">Accept new time</button>
+      <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.respondRescheduleRequest('decline')">Decline</button>
+    </div>
+  </section>
   <div class="rpt-drawer-head">
     <div style="min-width:0;">
-      <h2 class="rpt-drawer-title">Appointment Details</h2>
-      <p class="rpt-drawer-ref">Review details of this appointment request.</p>
+      <div id="apptDrawerDefaultHeader">
+        <h2 class="rpt-drawer-title">Appointment Details</h2>
+        <p class="rpt-drawer-ref">Review details of this appointment request.</p>
+      </div>
+      <div id="apptRescheduleFlowHeader" hidden>
+        <button type="button" class="appt-reschedule-back" onclick="APPT.backReschedule()">‹ Back</button>
+        <h2 class="rpt-drawer-title" id="apptRescheduleFlowTitle" tabindex="-1">Reschedule appointment</h2>
+      </div>
     </div>
     <button type="button" class="rpt-drawer-close" onclick="closeApptDrawer()" aria-label="Close"><i class="fas fa-times"></i></button>
   </div>
   <div class="rpt-drawer-body">
-    <div style="margin-bottom:24px;display:flex;align-items:center;gap:12px;">
-      <div id="adAvatar" style="width:85px;height:85px;border-radius:8px;flex-shrink:0;overflow:hidden;background:#e4e4e7;display:flex;align-items:center;justify-content:center;font-family:Inter,Segoe UI,sans-serif;font-weight:600;font-size:28px;color:#64748b;">
-        <i class="fas fa-paw"></i>
+    <div id="apptDrawerNormalContent">
+    <div class="appt-reschedule-alert" id="apptRescheduleDecisionCard" hidden></div>
+    <section class="appt-summary">
+      <div class="appt-summary-head">
+        <div class="appt-summary-avatar" id="adAvatar" aria-hidden="true"><i class="fas fa-paw"></i></div>
+        <div class="appt-summary-pet">
+          <span class="appt-summary-label">Appointed for</span>
+          <span class="appt-summary-pet-name" id="adHeadPet">-</span>
+        </div>
+        <span class="appt-summary-status" id="adHeadStatus">-</span>
       </div>
-      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
-        <span style="font-family:Inter,Segoe UI,sans-serif;font-size:12px;font-weight:400;color:#71717a;">Appointed for</span>
-        <span id="adHeadPet" style="font-family:Inter,Segoe UI,sans-serif;font-size:18px;font-weight:600;color:#18181b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</span>
+    </section>
+    <div id="apptStatusTimeline" hidden></div>
+    <section class="appt-reschedule-request-card" id="apptRescheduleRequestCard" hidden aria-live="polite">
+      <strong id="apptRescheduleRequestTitle"></strong>
+      <p id="apptRescheduleRequestText"></p>
+    </section>
+    <section id="adActionNeeded" class="appt-action-needed" hidden>
+      <h3>Staff suggested another time</h3>
+      <p>Your requested time has changed. Please review the proposed schedule and respond before the deadline.</p>
+      <div class="appt-reschedule-times">
+        <div class="requested"><span>You requested</span><strong id="adOriginalAppointmentTime"></strong></div>
+        <div><span>Staff suggests</span><strong id="adProposedAppointmentTime"></strong></div>
       </div>
-      <span id="adHeadStatus" style="margin-left:auto;font-size:13px;font-weight:500;padding:4px 12px;border-radius:6px;border:1px solid #e4e4e7;font-family:Inter,sans-serif;white-space:nowrap;">-</span>
-    </div>
-    <p class="pet-drawer-section-title">Appointment Information</p>
-    <div class="pet-drawer-info">
-      <div class="pet-drawer-info-item"><div class="k">Request ID</div><div class="v" id="adRef"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Service</div><div class="v" id="adService"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Pet</div><div class="v" id="adPet"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Status</div><div class="v" id="adStatus"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Appointment Date</div><div class="v" id="adDate"></div></div>
-      <div class="pet-drawer-info-item"><div class="k">Appointment Time</div><div class="v" id="adTime"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Submitted</div><div class="v" id="adCreated"></div></div>
-      <div class="pet-drawer-info-item pet-drawer-info-item-full"><div class="k">Notes</div><div class="v appt-notes" id="adNotes"></div></div>
-    </div>
-
-    <div class="rpt-next">
-      <div class="rpt-next-title"><i class="fas fa-info-circle"></i> What Happens Next?</div>
+      <div class="appt-reschedule-actions">
+        <button type="button" id="adAcceptReschedule" class="sd-btn sd-btn-primary" onclick="APPT.confirmReschedule('accept')">Accept new time</button>
+        <button type="button" id="adDeclineReschedule" class="sd-btn sd-btn-outline" onclick="APPT.confirmReschedule('decline')">Decline</button>
+      </div>
+      <p class="appt-response-deadline" id="adRescheduleDeadline"></p>
+      <div class="appt-progress">
+        <div class="appt-progress-title">Progress</div>
+        <ol class="appt-progress-list">
+          <li class="appt-progress-step done">
+            <span class="appt-progress-step-title">Requested</span>
+            <span class="appt-progress-step-detail" id="adRescheduleRequestedAt"></span>
+          </li>
+          <li class="appt-progress-step current">
+            <span class="appt-progress-step-title">Under review</span>
+            <span class="appt-progress-step-detail">Staff suggested a new time. Your answer is needed.</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Scheduled</span>
+          </li>
+          <li class="appt-progress-step">
+            <span class="appt-progress-step-title">Completed</span>
+          </li>
+        </ol>
+      </div>
+    </section>
+    <section class="appt-detail-section">
+      <h3 class="appt-detail-title">Details</h3>
+      <div class="appt-detail-row"><span class="appt-detail-label">Pet</span><span class="appt-detail-value" id="adPet"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Service</span><span class="appt-detail-value" id="adService"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Appointment</span><span class="appt-detail-value"><span id="adDatePrefix"></span><span id="adSummaryDate"></span><span>, </span><span id="adSummaryTime"></span></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Location</span><span class="appt-detail-value">Dasmariñas City Veterinary Services</span></div>
+      <div class="appt-detail-row appt-original-request" id="adOriginalRow" hidden><span class="appt-detail-label">Originally requested</span><span class="appt-detail-value" id="adOriginalRequested"></span></div>
+      <div class="appt-detail-row"><span class="appt-detail-label">Submitted</span><span class="appt-detail-value" id="adCreated"></span></div>
+    </section>
+    <section class="appt-note-section">
+      <h3 class="appt-note-title">Your note</h3>
+      <p class="appt-note-content" id="adNotes"></p>
+    </section>
+    <section class="rpt-next appt-next-section">
+      <div class="rpt-next-title">What happens next</div>
       <ol id="adNextList"></ol>
+    </section>
+    </div>
+    <section class="appt-reschedule-flow" id="apptRescheduleFlow" hidden>
+      <div id="apptRescheduleStepChoose">
+        <p class="appt-current-schedule"><strong>Current</strong><span id="apptRescheduleCurrent"></span></p>
+        <h3 class="appt-reschedule-step-title" tabindex="-1">Choose a date and time</h3>
+        <span class="appt-reschedule-label">New date</span>
+        <input type="hidden" id="apptRescheduleDate">
+        <div class="appt-reschedule-calendar" aria-label="Choose a reschedule date">
+          <div class="appt-reschedule-calendar-head">
+            <button type="button" id="apptReschedulePrevMonth" aria-label="Previous month">‹</button>
+            <strong id="apptRescheduleMonthLabel" aria-live="polite"></strong>
+            <button type="button" id="apptRescheduleNextMonth" aria-label="Next month">›</button>
+          </div>
+          <div class="appt-reschedule-calendar-grid" id="apptRescheduleCalendarGrid"></div>
+          <div class="appt-reschedule-calendar-legend" aria-label="Calendar legend">
+            <span><i></i>Available</span><span><i class="program"></i>Program</span>
+            <span><i class="full"></i>Full</span><span><i class="closed"></i>Closed</span>
+          </div>
+        </div>
+        <p class="appt-reschedule-day-note" id="apptRescheduleDayNote" aria-live="polite"></p>
+        <div id="apptReschedulePriorityWrap" hidden>
+          <span class="appt-reschedule-label">Priority</span>
+          <div class="appt-reschedule-priorities">
+            <button type="button" data-priority="routine" aria-pressed="true">Routine</button>
+            <button type="button" data-priority="urgent" aria-pressed="false">Urgent</button>
+          </div>
+        </div>
+        <div class="appt-reschedule-slots" id="apptRescheduleSlots" aria-live="polite"></div>
+        <label class="appt-reschedule-label" for="apptRescheduleReason">Reason (optional)</label>
+        <textarea id="apptRescheduleReason" maxlength="2000" rows="3" placeholder="Tell the clinic why you need to reschedule."></textarea>
+        <p class="appt-reschedule-not-reserved">Sending a request doesn't reserve the new time.</p>
+        <p class="appt-reschedule-error" id="apptRescheduleError" role="alert" hidden></p>
+        <button type="button" id="apptRescheduleReviewButton" class="sd-btn sd-btn-primary" disabled onclick="APPT.reviewReschedule()">Review request</button>
+      </div>
+      <div id="apptRescheduleStepReview" hidden>
+        <h3 class="appt-reschedule-step-title" tabindex="-1">Review and confirm</h3>
+        <div class="appt-reschedule-comparison">
+          <div><span>Current</span><strong id="apptRescheduleReviewCurrent"></strong></div>
+          <span aria-hidden="true">→</span>
+          <div><span>New</span><strong id="apptRescheduleReviewNew"></strong></div>
+        </div>
+        <p id="apptRescheduleReviewReason" class="appt-reschedule-review-reason"></p>
+        <p class="appt-reschedule-not-reserved">Your current appointment stays booked until the clinic approves the change. The requested time is not reserved.</p>
+        <p class="appt-reschedule-error" id="apptRescheduleSubmitError" role="alert" hidden></p>
+        <div class="appt-reschedule-review-actions">
+          <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.backRescheduleToChoose()">Back</button>
+          <button type="button" id="apptRescheduleSubmitButton" class="sd-btn sd-btn-primary" onclick="APPT.submitReschedule()">Send request</button>
+        </div>
+      </div>
+    </section>
+    <div class="appt-drawer-legacy" aria-hidden="true">
+      <span id="adRef"></span><span id="adStatus"></span>
+      <span id="adDate"></span><span id="adTime"></span><span id="adNotesItem"></span>
     </div>
   </div>
   <div class="rpt-drawer-foot">
-    <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit Appointment</button>
-    <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel Appointment</button>
-    <button type="button" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
+    <p id="apptPendingHint" class="appt-footer-hint" hidden>You can change the date and time while it’s pending, as long as the slot is still available.</p>
+    <p id="apptRescheduleSoon" class="appt-footer-hint" hidden>Rescheduling online isn’t available yet. To change the time, please contact DCVS at <a href="tel:+63464321234">(046) 432-1234</a>.</p>
+    <p id="apptCancelCutoff" class="appt-footer-hint" hidden>This appointment is within the 24-hour cancellation cutoff, so it can no longer be cancelled here. Please contact DCVS staff for assistance.</p>
+    <div class="appt-footer-actions">
+      <button type="button" id="apptStartRescheduleBtn" class="sd-btn sd-btn-outline" style="display:none;" onclick="APPT.startReschedule()">Reschedule</button>
+      <div id="apptRescheduleAction" class="appt-footer-reschedule">
+        <button type="button" id="apptChangeBtn" class="sd-btn sd-btn-outline" onclick="APPT.editFromDrawer()">Edit request</button>
+      </div>
+      <button type="button" id="apptBookAgainBtn" class="sd-btn sd-btn-primary" style="display:none;" onclick="APPT.bookAgain()">Book again</button>
+      <button type="button" id="apptViewCalendarBtn" class="sd-btn sd-btn-outline" style="display:none;" onclick="APPT.viewCalendar()">View on calendar</button>
+      <button type="button" id="apptArchiveBtn" class="sd-btn sd-btn-outline" style="border-color:#fecaca;color:#b91c1c;" onclick="APPT.archive(window.__currentApptId)">Cancel request</button>
+      <button type="button" id="apptDrawerCloseBtn" class="sd-btn sd-btn-outline" onclick="closeApptDrawer()">Close</button>
+    </div>
   </div>
 </aside>
+
+<style>
+  #appointmentRescheduleConfirm.modal { background:rgba(0,0,0,.55); padding:1rem; z-index:1100; }
+  #appointmentRescheduleConfirm .sd-dialog { width:100%; display:flex; justify-content:center; }
+  #appointmentRescheduleConfirm .sd-dialog-content { position:relative; width:100%; max-width:420px; box-sizing:border-box; padding:24px; display:flex; flex-direction:column; gap:16px; border:1px solid #e4e4e7; border-radius:8px; background:#fff; box-shadow:0 10px 30px rgba(0,0,0,.18); }
+  #appointmentRescheduleConfirm .sd-dialog-header { display:flex; flex-direction:column; gap:8px; text-align:left; }
+  #appointmentRescheduleConfirm .sd-dialog-title { margin:0; color:#18181b; font:600 18px/1.3 Inter,'Segoe UI',sans-serif; }
+  #appointmentRescheduleConfirm .sd-dialog-description { margin:0; color:#475569; font:14px/1.5 Inter,'Segoe UI',sans-serif; }
+  #appointmentRescheduleConfirm .sd-dialog-footer { display:flex; justify-content:flex-end; gap:8px; }
+  @media(max-width:480px) { #appointmentRescheduleConfirm .sd-dialog-footer { flex-direction:column-reverse; } #appointmentRescheduleConfirm .sd-dialog-footer .sd-btn { width:100%; justify-content:center; } }
+</style>
+<div class="modal" id="appointmentRescheduleConfirm">
+  <div class="sd-dialog">
+    <div class="sd-dialog-content" role="alertdialog" aria-modal="true" aria-labelledby="appointmentRescheduleConfirmTitle" aria-describedby="appointmentRescheduleConfirmMessage">
+      <div class="sd-dialog-header">
+        <h2 class="sd-dialog-title" id="appointmentRescheduleConfirmTitle">Confirm appointment response</h2>
+        <p class="sd-dialog-description" id="appointmentRescheduleConfirmMessage"></p>
+      </div>
+      <div class="sd-dialog-footer">
+        <button type="button" class="sd-btn sd-btn-outline" onclick="APPT.cancelRescheduleConfirmation()">Cancel</button>
+        <button type="button" id="appointmentRescheduleConfirmButton" class="sd-btn sd-btn-primary" onclick="APPT.submitRescheduleResponse()">Confirm</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 window.__apptList = <?php
   $jsonAppts = [];
   foreach ($appointments as $appt) {
+      $hasApprovedReschedule = ($appt['reschedule_request_status'] ?? '') === 'approved';
+      $displayAppointmentStatus = $hasApprovedReschedule
+        && in_array($appt['status'], ['approved', 'rescheduled'], true)
+        ? 'scheduled'
+        : $appt['status'];
+      $hasRescheduleActivity = in_array(($appt['reschedule_request_status'] ?? ''), ['pending', 'offered'], true);
+      $appointmentStatusLabel = $displayAppointmentStatus === 'rescheduled' || $hasRescheduleActivity
+        ? 'Rescheduled'
+        : ($displayAppointmentStatus === 'no_show' ? 'No Show' : ucfirst(str_replace('_', ' ', $displayAppointmentStatus)));
+      if ($displayAppointmentStatus === 'action_needed') $appointmentStatusLabel = 'Action needed';
+      elseif ($displayAppointmentStatus === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Reschedule offer expired') === 0) $appointmentStatusLabel = 'Expired';
+      elseif ($displayAppointmentStatus === 'cancelled' && strpos((string)($appt['cancellation_reason'] ?? ''), 'Resident declined the proposed') === 0) $appointmentStatusLabel = 'Declined';
+      elseif ($displayAppointmentStatus === 'cancelled' && $appt['cancelled_by'] === 'resident') $appointmentStatusLabel = 'Cancelled by Resident';
       $jsonAppts[] = [
           'id' => (int)$appt['appointment_id'],
           'ref' => $appt['reference_id'] ?? '#APT-' . str_pad($appt['appointment_id'], 4, '0', STR_PAD_LEFT),
@@ -6441,19 +9079,57 @@ window.__apptList = <?php
           'pet' => $appt['pet_name'] ?? '-',
           'petId' => $appt['pet_id'] ?? '',
           'petPhoto' => $appt['pet_photo'] ?? '',
-          'date' => date('M d, Y', strtotime($appt['preferred_date'])),
-          'time' => date('g:i A', strtotime($appt['preferred_time'])),
+          'date' => date('F j, Y', strtotime($appt['scheduled_date'] ?: $appt['preferred_date'])),
+          'time' => date('g:i A', strtotime($appt['scheduled_time'] ?: $appt['preferred_time'])),
           'dateRaw' => $appt['preferred_date'],
           'timeRaw' => $appt['preferred_time'],
+          'scheduledDateRaw' => $appt['scheduled_date'] ?: $appt['preferred_date'],
+          'scheduledTimeRaw' => $appt['scheduled_time'] ?: $appt['preferred_time'],
+          'originalDateRaw' => $appt['original_schedule_date'] ?: $appt['preferred_date'],
+          'originalTimeRaw' => $appt['original_schedule_time'] ?: $appt['preferred_time'],
+          'rescheduleDeadlineRaw' => $appt['reschedule_response_deadline'] ?? '',
+          'rescheduleDeadlineLabel' => !empty($appt['reschedule_response_deadline'])
+            ? date('F j, Y', strtotime($appt['reschedule_response_deadline'])) : '',
           'created' => date('M d, Y', strtotime($appt['created_at'])),
+          'createdLong' => date('F j, Y', strtotime($appt['created_at'])),
           'createdTime' => date('g:i A', strtotime($appt['created_at'])),
-          'status' => $appt['status'],
-          'statusLabel' => ucfirst(str_replace('_', ' ', $appt['status'])),
-          'notes' => $appt['notes'] ?? '-',
+          'status' => $displayAppointmentStatus,
+          'hasApprovedReschedule' => $hasApprovedReschedule,
+          'canCancel' => (bool)$appt['can_cancel'],
+          'rescheduleCooldownUntil' => $appt['reschedule_cooldown_until'] ?? '',
+          'rescheduleCooldownActive' => (bool)$appt['reschedule_cooldown_active'],
+          'statusLabel' => $appointmentStatusLabel,
+          'notes' => trim((string)($appt['notes'] ?? '')) !== '' ? $appt['notes'] : 'No notes added',
+          'rescheduleRequestId' => !empty($appt['reschedule_request_id']) ? (int)$appt['reschedule_request_id'] : null,
+          'rescheduleRequestStatus' => $appt['reschedule_request_status'] ?? '',
+          'requestedDate' => $appt['requested_date'] ?? '',
+          'requestedTime' => $appt['requested_time'] ?? '',
+          'requestedUrgency' => $appt['requested_urgency'] ?? 'routine',
+          'rescheduleReason' => $appt['resident_reason'] ?? '',
+          'rescheduleStaffMessage' => $appt['reschedule_staff_message'] ?? '',
+          'rescheduleDeclineReason' => $appt['reschedule_decline_reason'] ?? '',
+          'offeredDate' => $appt['offered_date'] ?? '',
+          'offeredTime' => $appt['offered_time'] ?? '',
+          'offeredUrgency' => $appt['offered_urgency'] ?? '',
+          'rescheduleRequestedAt' => $appt['reschedule_requested_at'] ?? '',
       ];
   }
   echo json_encode($jsonAppts);
 ?>;
+window.__APPT_CSRF = <?php echo json_encode(csrfToken(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+var appointmentsNeedingReply = (window.__apptList || []).filter(function(appointment) {
+  return appointment.rescheduleRequestStatus === 'offered';
+});
+var replySummary = document.getElementById('apptReplySummary');
+if (replySummary && appointmentsNeedingReply.length) {
+  replySummary.hidden = false;
+  document.getElementById('apptReplySummaryText').textContent =
+    appointmentsNeedingReply.length + ' appointment' + (appointmentsNeedingReply.length === 1 ? '' : 's') + ' need' +
+    (appointmentsNeedingReply.length === 1 ? 's' : '') + ' your reply.';
+  document.getElementById('apptReplySummaryButton').onclick = function() {
+    window.APPT.view(appointmentsNeedingReply[0].id);
+  };
+}
 </script>
 
 <!-- Edit Appointment Modal -->
@@ -6623,6 +9299,9 @@ window.__apptList = <?php
   #confirmModal .sd-dialog-title { margin:0; font-family:'Inter',sans-serif; font-size:18px; font-weight:600; line-height:1; letter-spacing:-0.025em; color:#18181b; }
   #confirmModal .sd-dialog-description { margin:0; font-family:'Inter',sans-serif; font-size:14px; color:#71717a; line-height:1.5; }
   #confirmModal .sd-dialog-footer { display:flex; justify-content:center; gap:8px; }
+  #cancelAppointmentReasonWrap { width:100%; margin:14px 0; text-align:left; }
+  #cancelAppointmentReasonWrap[hidden] { display:none; }
+  #cancelAppointmentReason { box-sizing:border-box; width:100%; min-height:82px; margin-top:6px; padding:9px 10px; border:1px solid #d4d4d8; border-radius:6px; font:14px 'Inter','Segoe UI',sans-serif; resize:vertical; }
   #confirmModal .sd-btn-danger { background:#dc2626; border-color:#dc2626; color:#fff; }
   #confirmModal .sd-btn-danger:hover { background:#b91c1c; border-color:#b91c1c; }
 </style>
@@ -6632,6 +9311,10 @@ window.__apptList = <?php
       <div class="sd-dialog-header">
         <h2 class="sd-dialog-title" id="confirmTitle">Confirm</h2>
         <p class="sd-dialog-description" id="confirmMessage">Are you sure?</p>
+      </div>
+      <div id="cancelAppointmentReasonWrap" hidden>
+        <label for="cancelAppointmentReason" class="sd-label">Reason for cancelling <span style="font-weight:400;color:#71717a;">(optional)</span></label>
+        <textarea id="cancelAppointmentReason" maxlength="1000" placeholder="Share a reason, if you’d like."></textarea>
       </div>
       <div class="sd-dialog-footer">
         <a id="confirmYesBtn" href="#" class="sd-btn sd-btn-danger">Yes</a>
@@ -6698,6 +9381,8 @@ function editPet(btn) {
 }
 
 function archivePet(id) {
+    document.getElementById('cancelAppointmentReasonWrap').hidden = true;
+    document.getElementById('confirmYesBtn').onclick = null;
     document.getElementById('confirmTitle').textContent = 'Archive Pet';
     document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this pet?';
     document.getElementById('confirmYesBtn').href = 'archive-pet.php?id=' + id;
@@ -6729,6 +9414,8 @@ function editReport(btn) {
 }
 
 function archiveReport(id) {
+    document.getElementById('cancelAppointmentReasonWrap').hidden = true;
+    document.getElementById('confirmYesBtn').onclick = null;
     document.getElementById('confirmTitle').textContent = 'Archive Report';
     document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this report?';
     document.getElementById('confirmYesBtn').href = 'archive-report.php?id=' + id;
@@ -6747,9 +9434,39 @@ function editAppointment(btn) {
 }
 
 function archiveAppointment(id) {
-    document.getElementById('confirmTitle').textContent = 'Archive Appointment';
-    document.getElementById('confirmMessage').textContent = 'Are you sure you want to archive this appointment?';
-    document.getElementById('confirmYesBtn').href = 'archive-appointment.php?id=' + id;
+    var appointment = getAppt(id);
+    var hasPendingReschedule = appointment && ['pending','offered'].includes(appointment.rescheduleRequestStatus || '');
+    document.getElementById('confirmTitle').textContent = 'Cancel Appointment';
+    document.getElementById('confirmMessage').textContent = hasPendingReschedule
+      ? 'Are you sure you want to cancel this appointment? Its pending reschedule request will also be closed.'
+      : 'Are you sure you want to cancel this appointment? Cancelling may release the slot for another resident.';
+    document.getElementById('cancelAppointmentReasonWrap').hidden = false;
+    document.getElementById('cancelAppointmentReason').value = '';
+    var confirmButton = document.getElementById('confirmYesBtn');
+    confirmButton.href = '#';
+    confirmButton.onclick = function (event) {
+      event.preventDefault();
+      confirmButton.disabled = true;
+      var body = new URLSearchParams();
+      body.append('appointment_id', id);
+      body.append('csrf_token', ADOPTION_CSRF);
+      body.append('cancellation_reason', document.getElementById('cancelAppointmentReason').value.trim());
+      fetch('api/resident/cancel-appointment.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString()
+      }).then(function (response) { return response.json(); })
+        .then(function (result) {
+          if (!result || !result.success) throw new Error((result && result.message) || 'Could not cancel this appointment.');
+          closeModal('confirmModal');
+          closeApptDrawer();
+          location.reload();
+        }).catch(function (error) {
+          alert(error.message || 'Could not cancel this appointment.');
+        }).then(function () {
+          confirmButton.disabled = false;
+        });
+    };
     openModal('confirmModal');
 }
 
@@ -6764,6 +9481,20 @@ function openAdoptionAppt(petId, petName) {
 function openBookApptModal() {
     if (typeof window.resetBookingForm === 'function') window.resetBookingForm();
     if (typeof switchSection === 'function') switchSection('book-appt');
+}
+
+function reworkBookVaccination(petId) {
+    openBookApptModal();
+    var petSelect = document.getElementById('petSelect');
+    var serviceSelect = document.getElementById('apptTypeSelect');
+    if (!petSelect || !serviceSelect) {
+        console.error('The vaccination booking form is unavailable.');
+        return;
+    }
+    petSelect.value = String(petId);
+    serviceSelect.value = 'vaccination';
+    petSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    serviceSelect.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 function toggleCustomSpecies(selectId, inputId) {
@@ -7014,9 +9745,16 @@ function checkSlot() {
     status.style.color = '#92400e';
     status.textContent = 'Checking availability...';
     var exclude = prefix ? (document.getElementById('editAppointmentId')?.value || 0) : 0;
+    var requestId = Number(status.dataset.checkRequestId || 0) + 1;
+    status.dataset.checkRequestId = String(requestId);
     fetch('includes/check_slot.php?date=' + encodeURIComponent(date) + '&time=' + encodeURIComponent(time) + '&exclude=' + exclude + '&urgency=' + encodeURIComponent(urgency))
         .then(function(r) { return r.json(); })
         .then(function(d) {
+            if (status.dataset.checkRequestId !== String(requestId)
+                || dateEl.value !== date
+                || timeEl.value !== time
+                || (prefix && (document.getElementById('editAppointmentId')?.value || 0) != exclude)
+                || (urgencyEl && urgencyEl.value !== urgency)) return;
             var submitBtn = form ? form.querySelector('button[type="submit"]') : null;
             if (d.error) {
                 status.style.background = '#fef2f2';
@@ -7033,10 +9771,9 @@ function checkSlot() {
             } else {
                 status.style.background = '#fef2f2';
                 status.style.color = '#991b1b';
-                var msg = d.program_blocked ? 'All clinic staff are assigned to a program during this time.'
-                                    : (d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
-                                    : (d.held ? 'This time slot is already reserved by another resident.'
-                                              : 'This slot is no longer available.'));
+                var msg = d.clinic_blocked ? 'This time slot is closed by the clinic schedule.'
+                                    : (d.held ? 'This time slot is already in use.'
+                                              : 'This slot is no longer available.');
                 if (d.nearest_slot) {
                     var nearest = d.nearest_slot.split(' ');
                     var nearDate = new Date(nearest[0] + 'T00:00:00');
@@ -7047,6 +9784,11 @@ function checkSlot() {
             }
         })
         .catch(function(error) {
+            if (status.dataset.checkRequestId !== String(requestId)
+                || dateEl.value !== date
+                || timeEl.value !== time
+                || (prefix && (document.getElementById('editAppointmentId')?.value || 0) != exclude)
+                || (urgencyEl && urgencyEl.value !== urgency)) return;
             console.error('Appointment slot availability check failed:', error);
             status.style.display = 'block';
             status.style.background = '#fef2f2';
@@ -7098,9 +9840,11 @@ document.addEventListener('DOMContentLoaded', function() {
     var blockedSlots = {};
     var urgentBlockedSlots = {};
     var programEvents = {};
+    var programDays = {};
     var dateOverrides = {};
-    var maxAppointmentsPerDay = 3;
-    var maxUrgentPerDay = 2;
+    var maxAppointmentsPerDay = 5;
+    var maxRoutinePerProgramDay = 2;
+    var maxUrgentPerDay = 3;
     var availabilityError = '';
     var waitlistWrap = document.getElementById('bkWaitlistWrap');
     var waitlistButton = document.getElementById('bkJoinWaitlist');
@@ -7125,16 +9869,40 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function selectedUrgency() {
-        return urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+        return selStart && programDays[selStart] && urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+    }
+    function isProgramDay(dateKey) {
+        return !!programDays[dateKey];
+    }
+    function urgencyForDate(dateKey) {
+        return dateKey === selStart && isProgramDay(dateKey) && urgencySelect && urgencySelect.value === 'urgent' ? 'urgent' : 'routine';
+    }
+    function updatePriorityForDate() {
+        var field = document.getElementById('apptPriorityField');
+        var hasPriority = !!(selStart && isProgramDay(selStart));
+        if (field) field.hidden = !hasPriority;
+        if (field) field.style.display = hasPriority ? '' : 'none';
+        if (urgencySelect) {
+            urgencySelect.required = hasPriority;
+            if (!hasPriority) urgencySelect.value = 'routine';
+        }
     }
     function getSlotCounts(dateKey) {
-        return selectedUrgency() === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        var urgency = urgencyForDate(dateKey);
+        if (urgency === 'urgent') return urgentSlots[dateKey] || {};
+        if (isProgramDay(dateKey)) return routineSlots[dateKey] || {};
+        var combined = {};
+        BK_SLOTS.forEach(function(time) {
+            combined[time] = (routineSlots[dateKey] || {})[time] || 0;
+            combined[time] += (urgentSlots[dateKey] || {})[time] || 0;
+        });
+        return combined;
     }
     function getSlotCapacities(dateKey) {
-        return selectedUrgency() === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
+        return urgencyForDate(dateKey) === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
     }
     function isBlocked(dateKey, time) {
-        var map = selectedUrgency() === 'urgent' ? urgentBlockedSlots : blockedSlots;
+        var map = urgencyForDate(dateKey) === 'urgent' ? urgentBlockedSlots : blockedSlots;
         return !!(map[dateKey] && map[dateKey][time]);
     }
     function matchingWaitlistEntry(dateKey) {
@@ -7163,16 +9931,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 blockedSlots = d.blocked || {};
                 urgentBlockedSlots = d.urgentBlocked || {};
                 programEvents = d.programs || {};
+                programDays = d.programDays || {};
                 dateOverrides = d.overrides || {};
-                maxAppointmentsPerDay = parseInt(d.maxPerDay, 10) || 3;
-                maxUrgentPerDay = parseInt(d.maxUrgentPerDay, 10) || 2;
+                maxAppointmentsPerDay = parseInt(d.maxPerDay, 10) || 5;
+                maxRoutinePerProgramDay = parseInt(d.maxRoutinePerProgramDay, 10) || 2;
+                maxUrgentPerDay = parseInt(d.maxUrgentPerDay, 10) || 3;
                 availabilityError = '';
             })
             .catch(function(error) {
                 availabilityError = error.message || 'Could not load appointment availability.';
                 console.error('Appointment availability request failed:', error);
                 routineSlots = {}; urgentSlots = {}; routineCapacity = {}; urgentCapacity = {};
-                blockedSlots = {}; urgentBlockedSlots = {}; programEvents = {}; dateOverrides = {};
+                blockedSlots = {}; urgentBlockedSlots = {}; programEvents = {}; programDays = {}; dateOverrides = {};
             });
     }
 
@@ -7180,9 +9950,19 @@ document.addEventListener('DOMContentLoaded', function() {
         var counts = getSlotCounts(dateKey);
         return Object.keys(counts).reduce(function(total, time) { return total + (parseInt(counts[time], 10) || 0); }, 0);
     }
+    function dayAppointmentCountForUrgency(dateKey, urgency) {
+        var counts = urgency === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        return Object.keys(counts).reduce(function(total, time) { return total + (parseInt(counts[time], 10) || 0); }, 0);
+    }
+    function programDayAppointmentCount(dateKey) {
+        return dayAppointmentCountForUrgency(dateKey, 'routine') + dayAppointmentCountForUrgency(dateKey, 'urgent');
+    }
 
     function dayOpenCount(dateKey) {
-        var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
+        var dateUrgency = urgencyForDate(dateKey);
+        var dayLimit = isProgramDay(dateKey)
+            ? (dateUrgency === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay)
+            : maxAppointmentsPerDay;
         if (dayAppointmentCount(dateKey) >= dayLimit) return 0;
         var counts = getSlotCounts(dateKey);
         var capacities = getSlotCapacities(dateKey);
@@ -7191,6 +9971,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isBlocked(dateKey, s)) return;
             var booked = counts[s] || 0;
             if (booked < (capacities[s] || 0)) open++;
+        });
+        return open;
+    }
+    function dayOpenCountForUrgency(dateKey, urgency) {
+        var dayLimit = urgency === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay;
+        if (dayAppointmentCountForUrgency(dateKey, urgency) >= dayLimit
+            || programDayAppointmentCount(dateKey) >= maxAppointmentsPerDay) return 0;
+        var counts = urgency === 'urgent' ? (urgentSlots[dateKey] || {}) : (routineSlots[dateKey] || {});
+        var capacities = urgency === 'urgent' ? (urgentCapacity[dateKey] || {}) : (routineCapacity[dateKey] || {});
+        var blocked = urgency === 'urgent' ? urgentBlockedSlots : blockedSlots;
+        var open = 0;
+        BK_SLOTS.forEach(function(time) {
+            if (!(blocked[dateKey] && blocked[dateKey][time]) && (counts[time] || 0) < (capacities[time] || 0)) open++;
         });
         return open;
     }
@@ -7256,6 +10049,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderCalendar() {
+        updatePriorityForDate();
         var year = viewDate.getFullYear();
         var month = viewDate.getMonth();
         var monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -7284,23 +10078,34 @@ document.addEventListener('DOMContentLoaded', function() {
             div.setAttribute('data-date', key);
 
             var isPast = cellDate < new Date(today.getFullYear(), today.getMonth(), today.getDate());
-            var openCount = dayOpenCount(key);
-            var bookedCount = dayAppointmentCount(key);
+            var openCount = isProgramDay(key)
+                ? dayOpenCountForUrgency(key, 'routine') + dayOpenCountForUrgency(key, 'urgent')
+                : dayOpenCount(key);
+            var dailyCapacityReached = isProgramDay(key)
+                ? programDayAppointmentCount(key) >= maxAppointmentsPerDay
+                    || (dayAppointmentCountForUrgency(key, 'routine') >= maxRoutinePerProgramDay
+                        && dayAppointmentCountForUrgency(key, 'urgent') >= maxUrgentPerDay)
+                : dayAppointmentCount(key) >= maxAppointmentsPerDay;
             if (isPast) {
                 div.classList.add('bk-day-disabled');
                 div.disabled = true;
             }
-            var dayLimit = selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxAppointmentsPerDay;
-            if (!isPast && openCount === 0) {
+            if (!isPast && openCount === 0 && !isClinicClosed(key)) {
               div.classList.add('bk-day-full');
-              div.title = bookedCount >= dayLimit
-                ? 'No ' + selectedUrgency() + ' slots available (' + bookedCount + '/' + dayLimit + ' daily limit)'
-                : 'No appointment times available';
+              div.title = dailyCapacityReached ? 'Daily appointment capacity is full.' : 'No appointment times are available.';
+              var fullLabel = document.createElement('span');
+              fullLabel.className = 'bk-day-full-label';
+              fullLabel.textContent = 'Full';
+              div.appendChild(fullLabel);
             }
             if (!isPast && isClinicClosed(key)) {
               div.classList.add('bk-day-disabled');
               div.disabled = true;
               div.title = 'The clinic is closed on this date';
+            }
+            if (isProgramDay(key)) {
+              div.classList.add('bk-day-program');
+              div.title = (div.title ? div.title + '. ' : '') + 'Program or event scheduled; appointment capacity is limited.';
             }
             if (key === todayIso) div.classList.add('bk-day-today');
             if (selStart !== null && key === selStart) div.classList.add('bk-day-selected');
@@ -7335,31 +10140,90 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             selStart = key;
         }
+        updatePriorityForDate();
         clearBooking();
         renderCalendar();
     }
 
     function renderSlots() {
+        var requestId = ++nearestRequestId;
         bkSlots.innerHTML = '';
         waitlistWrap.hidden = true;
         nearestSlotNotice.hidden = true;
-        nearestSlotNotice.textContent = '';
-        document.getElementById('bkProgramNotice').hidden = true;
+        nearestSlotNotice.replaceChildren();
+        nearestSlotNotice.classList.remove('program-full');
+        var slotsTitle = document.getElementById('bkSlotsTitle');
+        var slotsRemaining = document.getElementById('bkSlotsRemaining');
+        var programNotice = document.getElementById('bkProgramNotice');
+        var programDetails = document.getElementById('bkProgramNoticeDetails');
+        var programMessage = document.getElementById('bkProgramNoticeMessage');
+        bkSlots.hidden = false;
+        slotsRemaining.classList.remove('full');
+        programNotice.hidden = true;
+        programDetails.innerHTML = '';
+        programMessage.textContent = '';
         document.getElementById('bkUrgentCareNotice').hidden = selectedUrgency() !== 'urgent';
         if (selStart === null) {
-            bkSlotsHint.textContent = 'Select your preferred appointment date.';
+            slotsTitle.textContent = 'Select a date';
+            slotsRemaining.textContent = '';
+            bkSlotsHint.textContent = '';
             return;
         }
         if (availabilityError) {
+            slotsTitle.textContent = 'Availability unavailable';
+            slotsRemaining.textContent = '';
             bkSlotsHint.textContent = availabilityError + ' Please refresh the page and try again.';
             return;
         }
         var dd = new Date(selStart + 'T00:00:00');
-        bkSlotsHint.textContent = 'Available times on ' + dd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) + '.';
+        slotsTitle.textContent = dd.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+        bkSlotsHint.textContent = '';
 
         var counts = getSlotCounts(selStart);
         var capacities = getSlotCapacities(selStart);
+        var dayLimit = isProgramDay(selStart)
+            ? (selectedUrgency() === 'urgent' ? maxUrgentPerDay : maxRoutinePerProgramDay)
+            : maxAppointmentsPerDay;
+        var capacityRemaining = 0;
+        BK_SLOTS.forEach(function(time) {
+            if (!isBlocked(selStart, time)) {
+                capacityRemaining += Math.max(0, (capacities[time] || 0) - (counts[time] || 0));
+            }
+        });
+        var remainingAppointments = Math.min(
+            Math.max(0, dayLimit - dayAppointmentCount(selStart)),
+            capacityRemaining,
+            isProgramDay(selStart)
+                ? Math.max(0, maxAppointmentsPerDay - programDayAppointmentCount(selStart))
+                : Math.max(0, maxAppointmentsPerDay - dayAppointmentCount(selStart))
+        );
+        var dailyLimitReached = isProgramDay(selStart)
+            ? programDayAppointmentCount(selStart) >= maxAppointmentsPerDay
+            : dayAppointmentCount(selStart) >= maxAppointmentsPerDay;
         var anyOpen = false;
+        BK_SLOTS.forEach(function(time) {
+            if (!dailyLimitReached && !isBlocked(selStart, time) && (counts[time] || 0) < (capacities[time] || 0)) anyOpen = true;
+        });
+        var bothProgramPrioritiesFull = isProgramDay(selStart)
+            && dayAppointmentCountForUrgency(selStart, 'routine') >= maxRoutinePerProgramDay
+            && dayAppointmentCountForUrgency(selStart, 'urgent') >= maxUrgentPerDay;
+        var programDailyCapacityReached = isProgramDay(selStart)
+            && programDayAppointmentCount(selStart) >= maxAppointmentsPerDay;
+        var dateIsFull = !anyOpen && (
+            isProgramDay(selStart)
+                ? bothProgramPrioritiesFull || programDailyCapacityReached
+                : dayAppointmentCount(selStart) >= maxAppointmentsPerDay
+        );
+        slotsRemaining.textContent = isProgramDay(selStart)
+            ? remainingAppointments + ' ' + selectedUrgency() + ' slot' + (remainingAppointments === 1 ? '' : 's') + ' left'
+            : remainingAppointments + ' appointment' + (remainingAppointments === 1 ? '' : 's') + ' left';
+        if (!anyOpen) {
+            slotsRemaining.textContent = dateIsFull
+                ? 'Fully booked'
+                : isProgramDay(selStart) ? 'No ' + selectedUrgency() + ' slots left' : 'No slots left';
+            slotsRemaining.classList.add('full');
+            bkSlots.hidden = true;
+        }
         BK_SLOTS.forEach(function(s) {
             var blocked = isBlocked(selStart, s);
             var booked = counts[s] || 0;
@@ -7369,14 +10233,14 @@ document.addEventListener('DOMContentLoaded', function() {
             btn.className = 'bk-slot-btn';
             btn.setAttribute('data-date', selStart);
             btn.setAttribute('data-time', s);
-            if (blocked || booked >= capacity) {
+            if (blocked || dailyLimitReached || booked >= capacity) {
                 btn.classList.add('bk-slot-unavailable');
                 btn.textContent = fmtTime(s);
                 btn.disabled = true;
                 btn.title = blocked ? 'Clinic closed' : 'No remaining capacity';
             } else {
                 anyOpen = true;
-                btn.textContent = fmtTime(s) + (capacity > 1 ? ' · ' + (capacity - booked) + ' left' : '');
+                btn.textContent = fmtTime(s);
                 btn.addEventListener('click', function() {
                     selectTime(this.getAttribute('data-date'), this.getAttribute('data-time'));
                 });
@@ -7386,24 +10250,49 @@ document.addEventListener('DOMContentLoaded', function() {
         });
 
         if (!anyOpen) {
-            var none = document.createElement('div');
-            none.className = 'bk-slot-none';
-            none.textContent = 'No ' + selectedUrgency() + ' slots are available on this day.';
-            bkSlots.appendChild(none);
-            var requestId = ++nearestRequestId;
-            fetch('includes/check_slot.php?date=' + encodeURIComponent(selStart) + '&time=15%3A00&urgency=' + encodeURIComponent(selectedUrgency()))
+            var preferredUrgency = bothProgramPrioritiesFull || programDailyCapacityReached ? 'routine' : selectedUrgency();
+            var requestedDate = selStart;
+            nearestSlotNotice.classList.toggle('program-full', isProgramDay(selStart) && dateIsFull);
+            fetch('includes/check_slot.php?date=' + encodeURIComponent(requestedDate) + '&time=09%3A00&urgency=' + encodeURIComponent(preferredUrgency))
                 .then(function(response) {
                     if (!response.ok) throw new Error('Could not find the nearest available appointment.');
                     return response.json();
                 })
                 .then(function(data) {
-                    if (requestId !== nearestRequestId || selStart === null) return;
+                    if (requestId !== nearestRequestId || selStart !== requestedDate) return;
                     if (data.nearest_slot) {
                         var nearest = data.nearest_slot.split(' ');
                         var nearestDate = new Date(nearest[0] + 'T00:00:00');
-                        nearestSlotNotice.textContent = 'Nearest available ' + selectedUrgency() + ' appointment: ' + nearestDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + fmtTime(nearest[1]) + '.';
+                        var dateLink = document.createElement('button');
+                        dateLink.type = 'button';
+                        dateLink.className = 'bk-next-date-link';
+                        dateLink.textContent = nearestDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+                        dateLink.addEventListener('click', function() {
+                            viewDate = new Date(nearestDate.getFullYear(), nearestDate.getMonth(), 1);
+                            selStart = nearest[0];
+                            if (urgencySelect) urgencySelect.value = preferredUrgency;
+                            clearBooking();
+                            fetchAvailability().then(function() {
+                                updatePriorityForDate();
+                                if (urgencySelect && preferredUrgency === 'urgent' && isProgramDay(selStart)) {
+                                    urgencySelect.value = 'urgent';
+                                }
+                                renderCalendar();
+                            });
+                        });
+                        if (bothProgramPrioritiesFull) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All ' + maxUrgentPerDay + ' urgent and ' + maxRoutinePerProgramDay + ' routine slots are taken for this day. Next day with routine slots: '));
+                        } else if (programDailyCapacityReached) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All appointments are taken for this day. Next day with routine slots: '));
+                        } else if (dateIsFull && !isProgramDay(requestedDate)) {
+                            nearestSlotNotice.appendChild(document.createTextNode('All times are taken for this day. Next day with open times: '));
+                        } else {
+                            nearestSlotNotice.appendChild(document.createTextNode('No ' + preferredUrgency + ' slots are left for this day. Next day with ' + preferredUrgency + ' slots: '));
+                        }
+                        nearestSlotNotice.appendChild(dateLink);
+                        nearestSlotNotice.appendChild(document.createTextNode('.'));
                     } else {
-                        nearestSlotNotice.textContent = 'No available appointment found in the next 90 days. ' + (selectedUrgency() === 'urgent' ? 'Call (046) 432-1234 or visit the DCVS office for urgent assistance.' : 'Please join the waitlist or contact the DCVS office.');
+                        nearestSlotNotice.textContent = 'No available appointment found in the next 90 days. ' + (preferredUrgency === 'urgent' ? 'Call 0975 558 3461 or visit the DCVS office for urgent assistance.' : 'Please join the waitlist or contact the DCVS office.');
                     }
                     nearestSlotNotice.hidden = false;
                 })
@@ -7415,13 +10304,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
         }
         var events = programEvents[selStart] || [];
-        if (events.length && typeSelect && typeSelect.value === 'vaccination') {
-            var notice = document.getElementById('bkProgramNotice');
-            notice.textContent = events.map(function(event) {
-                var location = event.venue || event.barangay_names || 'Location to be announced';
-                return 'Free Vaccination Drive: ' + event.program_name + ' at ' + location + ', ' + fmtTime(event.start_time) + '–' + fmtTime(event.end_time) + '. Walk-in; no appointment is needed for the drive.';
-            }).join(' ');
-            notice.hidden = false;
+        if (events.length) {
+            events.forEach(function(event) {
+                var programName = String(event.program_name || 'Program')
+                    .toLowerCase()
+                    .replace(/\b[a-z]/g, function(letter) { return letter.toUpperCase(); });
+                var location = event.barangay_names || event.venue || 'Location to be announced';
+                var time = event.start_time && event.end_time
+                    ? fmtTime(event.start_time) + ' to ' + fmtTime(event.end_time)
+                    : '';
+                var entry = document.createElement('div');
+                entry.className = 'bk-program-entry';
+                if (time) {
+                    var timeElement = document.createElement('div');
+                    timeElement.className = 'bk-program-entry-time';
+                    timeElement.textContent = time;
+                    entry.appendChild(timeElement);
+                }
+                var nameElement = document.createElement('div');
+                nameElement.className = 'bk-program-entry-name';
+                nameElement.textContent = programName;
+                entry.appendChild(nameElement);
+                var locationElement = document.createElement('div');
+                locationElement.className = 'bk-program-entry-location';
+                locationElement.textContent = location;
+                entry.appendChild(locationElement);
+                programDetails.appendChild(entry);
+            });
+            programMessage.textContent = 'You can still book. Appointments are limited to up to ' + maxUrgentPerDay + ' urgent and '
+                + maxRoutinePerProgramDay + ' routine slots on this day. If the program is held at the clinic, check in with staff when you arrive.';
+            programNotice.hidden = false;
         }
         if (!anyOpen && typeSelect && typeSelect.value && document.getElementById('petSelect').value
             && (selectedUrgency() === 'routine' || ['vaccination', 'checkup', 'deworming'].indexOf(typeSelect.value) !== -1)) {
@@ -7478,7 +10390,9 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('cfPet').value = petSel ? petSel.value : '';
         document.getElementById('cfType').value = typeVal;
         document.getElementById('cfUrgency').value = selectedUrgency();
-        document.getElementById('bkDetailUrgency').textContent = selectedUrgency() === 'urgent' ? 'Urgent' : 'Routine';
+        document.getElementById('bkDetailUrgency').textContent = !isProgramDay(chosenDate)
+            ? 'Standard appointment'
+            : (selectedUrgency() === 'urgent' ? 'Urgent' : 'Routine');
         document.getElementById('apptDate').value = chosenDate;
         document.getElementById('apptTime').value = selectedTime;
         // Open the Confirm Booking dialog
@@ -7571,6 +10485,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function resetSelection() {
         selStart = null;
+        updatePriorityForDate();
         clearBooking();
     }
 
@@ -7587,6 +10502,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (urgencySelect) urgencySelect.value = bookingPrefill.urgency_level;
                 updatePetProfile();
                 fetchAvailability().then(function() {
+                    updatePriorityForDate();
                     renderCalendar();
                     if (bookingPrefill.preferred_time) {
                         var counts = getSlotCounts(bookingPrefill.preferred_date);
@@ -7697,25 +10613,52 @@ document.addEventListener('DOMContentLoaded', function() {
                     var dateTime = new Date(d + 'T' + t);
                     var timeColumn = document.createElement('div');
                     timeColumn.className = 'appointment-time-col';
+                    var dateLabel = document.createElement('span');
+                    dateLabel.className = 'appointment-schedule-date';
+                    dateLabel.textContent = dateTime.toLocaleDateString('en-US', { weekday:'short', month:'short', day:'2-digit' });
                     var timeLabel = document.createElement('span');
+                    timeLabel.className = 'appointment-schedule-time';
                     timeLabel.textContent = dateTime.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
-                    var dot = document.createElement('span');
-                    dot.className = 'status-dot-indicator dot-amber';
-                    timeColumn.append(timeLabel, dot);
+                    timeColumn.append(dateLabel, timeLabel);
                     var detailColumn = document.createElement('div');
                     detailColumn.className = 'appointment-details-col';
                     var petLabel = document.createElement('span');
                     petLabel.className = 'appointment-pet-name';
                     petLabel.textContent = petName;
-                    var serviceLabel = document.createElement('span');
-                    serviceLabel.className = 'appointment-reason-meta';
+                    detailColumn.append(petLabel);
+                    var serviceColumn = document.createElement('span');
+                    serviceColumn.className = 'appointment-service-col';
                     var serviceNames = { adoption:'Adoption', kapon:'Kapon', vaccination:'Vaccination', checkup:'Check-up' };
-                    serviceLabel.textContent = (serviceNames[ty] || ty) + ' · Awaiting confirmation';
-                    detailColumn.append(petLabel, serviceLabel);
+                    var serviceName = serviceNames[ty] || ty;
+                    serviceColumn.textContent = serviceName;
                     var badge = document.createElement('span');
                     badge.className = 'status-pill-badge badge-pending';
                     badge.textContent = 'Pending';
-                    item.append(timeColumn, detailColumn, badge);
+                    var statusColumn = document.createElement('span');
+                    statusColumn.className = 'appointment-status-col';
+                    var viewLabel = document.createElement('span');
+                    viewLabel.className = 'appointment-row-view';
+                    viewLabel.textContent = 'View';
+                    statusColumn.append(badge, viewLabel);
+                    item.append(timeColumn, detailColumn, serviceColumn, statusColumn);
+                    item.addEventListener('click', function() {
+                      reworkSelectVisit(item, {
+                        apptId: parseInt(data.appointment_id, 10),
+                        type: ty,
+                        petId: data.pet_id || 0,
+                        date: d,
+                        timeRaw: t,
+                        notes: (form.querySelector('[name="notes"]') || {}).value || '',
+                        pet: petName,
+                        service: serviceName,
+                        time: dateTime.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }),
+                        status: 'Pending',
+                        day: dateTime.toLocaleDateString('en-US', { day:'2-digit' }),
+                        weekday: dateTime.toLocaleDateString('en-US', { weekday:'short' }).toUpperCase(),
+                        month: dateTime.toLocaleDateString('en-US', { month:'short', year:'numeric' }).toUpperCase(),
+                        nextStep: 'bring your pet records.'
+                      });
+                    });
                     overviewList.prepend(item);
                   }
                   if (typeof window.resetBookingForm === 'function') window.resetBookingForm();
@@ -7750,8 +10693,36 @@ function toggleEdit(group) {
 // Enable all disabled inputs before form submission
 document.addEventListener('DOMContentLoaded', function() {
     var sf = document.getElementById('settingsForm');
+    var phoneInput = document.getElementById('residentPhone');
+    var phoneError = document.getElementById('residentPhoneError');
+    window.DCVSPhilippinePhone?.attach(phoneInput);
+    if (phoneInput && phoneError) {
+        phoneInput.addEventListener('input', function() {
+            if (phoneInput.dataset.phoneTouched !== 'true' && phoneInput.dataset.phoneOverflow !== 'true') {
+                phoneError.textContent = '';
+                return;
+            }
+            phoneError.textContent = window.DCVSPhilippinePhone.error(phoneInput);
+        });
+        phoneInput.addEventListener('blur', function() {
+            phoneInput.dataset.phoneTouched = 'true';
+            phoneError.textContent = window.DCVSPhilippinePhone.error(phoneInput);
+        });
+    }
     if (sf) {
-        sf.addEventListener('submit', function() {
+        sf.addEventListener('submit', function(event) {
+            if (phoneInput) phoneInput.dataset.phoneTouched = 'true';
+            var phoneValidationMessage = window.DCVSPhilippinePhone.error(phoneInput);
+            if (phoneValidationMessage) {
+                event.preventDefault();
+                if (phoneError) phoneError.textContent = phoneValidationMessage;
+                var personalEditButton = document.querySelector('#personal-card .ps-edit-btn');
+                if (phoneInput.disabled && personalEditButton) {
+                    personalEditButton.click();
+                }
+                phoneInput.focus();
+                return;
+            }
             this.querySelectorAll('[disabled]').forEach(function(el) { el.disabled = false; });
         });
     }
@@ -8022,7 +10993,12 @@ function switchSection(sectionId) {
   document.body.classList.toggle('page-white', sectionId === 'my-pets' || sectionId === 'my-reports' || sectionId === 'appointments' || sectionId === 'book-appt' || sectionId === 'archive' || sectionId === 'account-settings');
   localStorage.setItem('activeSection', sectionId);
   window.location.hash = sectionId;
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  window.scrollTo(0, 0);
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  requestAnimationFrame(function() {
+    window.dispatchEvent(new Event('resize'));
+  });
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -8044,6 +11020,14 @@ window.addEventListener('hashchange', function() {
     switchSection(hash);
   }
 });
+
+window.addEventListener('pageshow', function() {
+  document.documentElement.scrollLeft = 0;
+  document.body.scrollLeft = 0;
+  requestAnimationFrame(function() {
+    window.dispatchEvent(new Event('resize'));
+  });
+});
 </script>
 <?php if ($showAdoptModal): ?>
 <script>
@@ -8053,6 +11037,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <?php endif; ?>
+<script src="assets/js/philippine-phone-validation.js"></script>
 <script src="includes/realtime.js"></script>
 <script>
 document.addEventListener('dcvs:realtime', function(e) {
@@ -8078,14 +11063,29 @@ document.addEventListener('dcvs:realtime', function(e) {
               'pending': 'Pending Barangay Review', 'validated': 'Pending DCVS Review', 'confirmed': 'In Progress',
               'scheduled': 'In Progress', 'resolved': 'Resolved', 'rejected': 'Closed'
             };
+            var realtimeStatusClasses = {
+              pending:'st-pending', validated:'st-awaiting', confirmed:'st-review',
+              scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected'
+            };
+            function realtimeReportStatusLabel(report) {
+              return rLabels[report.status]
+                || (report.status ? report.status.charAt(0).toUpperCase() + report.status.slice(1) : '');
+            }
+            function realtimeReportTableStatusClass(report) {
+              return realtimeStatusClasses[report.status] || 'st-pending';
+            }
+            function realtimeReportStatusStyle(report) {
+              return rColors[report.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
+            }
             var rKnownTypes = {'stray':'Stray Animal','rabies':'Rabies Case','injured':'Injured Animal','dead':'Dead Animal','other':'Other'};
             data.reports.forEach(function(rpt) {
               var existing = rtable.querySelector('tr[data-id="' + rpt.report_id + '"]');
               if (existing) {
                 var existingStatus = existing.querySelector('.appt-status-pill');
-                var existingColor = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var existingLabel = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
+                var existingColor = realtimeReportStatusStyle(rpt);
+                var existingLabel = realtimeReportStatusLabel(rpt);
                 existing.setAttribute('data-status', rpt.status);
+                existing.setAttribute('data-statuscls', realtimeReportTableStatusClass(rpt));
                 if (existingStatus) {
                   existingStatus.classList.toggle('report-status-resolved', rpt.status === 'resolved');
                   existingStatus.textContent = existingLabel;
@@ -8100,19 +11100,43 @@ document.addEventListener('dcvs:realtime', function(e) {
                 var reportItem = (window.__reportList || []).find(function(item) { return Number(item.id) === Number(rpt.report_id); });
                 if (reportItem) {
                   reportItem.status = rpt.status;
-                  reportItem.statusLabel = existingLabel;
-                  var reportStatusClasses = { pending:'st-pending', validated:'st-awaiting', confirmed:'st-review', scheduled:'st-review', resolved:'st-resolved', rejected:'st-rejected' };
-                  reportItem.statusClass = reportStatusClasses[rpt.status] || 'st-pending';
-                  if (rpt.status === 'resolved') reportItem.resolution = 'This report has been resolved by DCVS.';
+                  reportItem.statusHeading = rpt.resident_status_heading || reportItem.statusHeading;
+                  reportItem.responseState = rpt.response_state || '';
+                  reportItem.statusMessage = rpt.resident_status_message || '';
+                  reportItem.nextStep = rpt.resident_next_step || '';
+                  reportItem.updatedAt = rpt.updated_at || reportItem.updatedAt;
+                  reportItem.isOverdue = !!rpt.is_overdue;
+                  reportItem.overdueAction = rpt.overdue_action || '';
+                  reportItem.overdueDeadline = rpt.overdue_deadline || '';
+                  reportItem.duplicateStatus = rpt.duplicate_status || '';
+                  reportItem.barangayName = rpt.barangay_name || '';
+                  reportItem.supportingReport = !!rpt.is_supporting_report;
+                  reportItem.primaryReference = rpt.primary_reference_id || '';
+                  reportItem.responseMode = rpt.response_mode || '';
+                  reportItem.responseDeadline = rpt.response_deadline || '';
+                  reportItem.progressDeadline = rpt.progress_deadline || '';
+                  reportItem.turnoverDeadline = rpt.turnover_deadline || '';
+                  reportItem.holdingLocation = rpt.holding_location || '';
+                  reportItem.resolution = rpt.resolution_details || (rpt.status === 'resolved' ? 'This report has been resolved by DCVS.' : '');
+                  reportItem.animalDisposition = rpt.animal_disposition || '';
+                  reportItem.turnoverRequired = !!rpt.turnover_required;
+                  reportItem.responseResolvedAt = rpt.response_resolved_at || '';
+                  reportItem.turnoverStatus = rpt.turnover_status || '';
+                  reportItem.turnoverDueAt = rpt.turnover_due_at || '';
+                  reportItem.turnoverReceivedAt = rpt.turnover_received_at || '';
                 }
                 if (window.RPT && typeof window.RPT.refresh === 'function') window.RPT.refresh();
                 if (window.RPT && typeof window.RPT.refreshSummary === 'function') window.RPT.refreshSummary();
-                if (Number(window.__currentReportId) === Number(rpt.report_id) && window.RPT && typeof window.RPT.view === 'function') window.RPT.view(rpt.report_id);
+                var reportDrawer = document.getElementById('rptDrawer');
+                if (reportDrawer && reportDrawer.classList.contains('open')
+                    && Number(window.__currentReportId) === Number(rpt.report_id)) {
+                  openReportDetails(rpt.report_id, true);
+                }
                 return;
               }
                 var ref = rpt.reference_id || '#RPT-' + String(rpt.report_id).padStart(4, '0');
-                var rc = rColors[rpt.status] || ['#f1f5f9', '#64748b', '#e4e4e7'];
-                var rlab = rLabels[rpt.status] || (rpt.status ? rpt.status.charAt(0).toUpperCase() + rpt.status.slice(1) : '');
+                var rc = realtimeReportStatusStyle(rpt);
+                var rlab = realtimeReportStatusLabel(rpt);
                 var typeLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report') + ' Report';
                 var catLabel = (rKnownTypes[(rpt.report_type || '').toLowerCase()] || rpt.report_type || 'Report');
                 var incidentAt = rpt.incident_at || rpt.created_at || '';
@@ -8128,6 +11152,7 @@ document.addEventListener('dcvs:realtime', function(e) {
                 rtr.className = 'sd-tr';
                 rtr.setAttribute('data-id', rpt.report_id);
                 rtr.setAttribute('data-status', rpt.status);
+                rtr.setAttribute('data-statuscls', realtimeReportTableStatusClass(rpt));
                 rtr.setAttribute('data-type', typeLabel.toLowerCase());
                 rtr.setAttribute('data-location', (rpt.location_address || '').toLowerCase());
                 rtr.setAttribute('data-date', String(incidentAt ? Math.floor(new Date(incidentAt.replace(' ', 'T')).getTime() / 1000) : '0'));
@@ -8231,6 +11256,7 @@ function reworkSelectVisit(el, data) {
   document.querySelectorAll('.appointment-item-row').forEach(function(row) { row.classList.remove('active-visit'); });
   if (el) el.classList.add('active-visit');
   var dayEl = document.getElementById('rework-visit-day');
+  var weekdayEl = document.getElementById('rework-visit-weekday');
   var monthEl = document.getElementById('rework-visit-month');
   var statusEl = document.getElementById('rework-visit-status');
   var titleEl = document.getElementById('rework-visit-title');
@@ -8238,9 +11264,10 @@ function reworkSelectVisit(el, data) {
   var timeEl = document.getElementById('rework-visit-time');
   var instrEl = document.getElementById('rework-visit-instruction');
   if (dayEl && data.day) dayEl.textContent = data.day;
+  if (weekdayEl && data.weekday) weekdayEl.textContent = data.weekday;
   if (monthEl && data.month) monthEl.textContent = data.month;
   if (titleEl) titleEl.textContent = data.service;
-  if (petEl) petEl.textContent = 'For ' + data.pet;
+  if (petEl) petEl.textContent = data.pet;
   if (timeEl) timeEl.textContent = data.time;
   if (instrEl) instrEl.textContent = data.nextStep || 'Bring your pet records';
   if (statusEl) {
@@ -8299,6 +11326,130 @@ function reworkUpdateGreetingDate() {
 }
 reworkUpdateGreetingDate();
 setInterval(reworkUpdateGreetingDate, 60000);
+
+var addPetForm = document.getElementById('addPetForm');
+if (addPetForm) {
+  var petDuplicateAlertDialog = document.getElementById('petDuplicateAlertDialog');
+  var petDuplicateAlertDescription = document.getElementById('petDuplicateAlertDescription');
+  var petDuplicateAlertCancel = document.getElementById('petDuplicateAlertCancel');
+  var petDuplicateAlertContinue = document.getElementById('petDuplicateAlertContinue');
+  var resolvePetDuplicateAlert = null;
+
+  if (petDuplicateAlertDialog) {
+    petDuplicateAlertDialog.addEventListener('close', function () {
+      var resolve = resolvePetDuplicateAlert;
+      resolvePetDuplicateAlert = null;
+      if (resolve) resolve(petDuplicateAlertDialog.returnValue === 'continue');
+    });
+    petDuplicateAlertDialog.addEventListener('click', function (event) {
+      if (event.target === petDuplicateAlertDialog) petDuplicateAlertDialog.close('cancel');
+    });
+    if (petDuplicateAlertCancel) {
+      petDuplicateAlertCancel.addEventListener('click', function () {
+        petDuplicateAlertDialog.close('cancel');
+      });
+    }
+    if (petDuplicateAlertContinue) {
+      petDuplicateAlertContinue.addEventListener('click', function () {
+        petDuplicateAlertDialog.close('continue');
+      });
+    }
+  }
+
+  function confirmPetDuplicateRegistration(messages) {
+    if (!petDuplicateAlertDialog || !petDuplicateAlertDescription
+        || !petDuplicateAlertCancel || !petDuplicateAlertContinue
+        || typeof petDuplicateAlertDialog.showModal !== 'function') {
+      return Promise.reject(new Error('The pet confirmation dialog is unavailable. Refresh and try again.'));
+    }
+    petDuplicateAlertDescription.textContent = messages.join('\n\n')
+      + '\n\nA matching name alone does not trigger this warning. If this is a different pet, you can still register it. Would you like to continue?';
+    petDuplicateAlertDialog.returnValue = '';
+    return new Promise(function (resolve) {
+      resolvePetDuplicateAlert = resolve;
+      petDuplicateAlertDialog.showModal();
+    });
+  }
+
+  addPetForm.addEventListener('submit', function (event) {
+    if (addPetForm.dataset.petDuplicateChecked === '1' || addPetForm.querySelector('[name="from_adoption"]')) return;
+    event.preventDefault();
+
+    var submitButton = addPetForm.querySelector('button[type="submit"]');
+    var previousButtonText = submitButton ? submitButton.textContent : '';
+    if (submitButton) {
+      submitButton.disabled = true;
+      submitButton.textContent = 'Checking profiles...';
+    }
+
+    var fields = ['pet_name', 'species', 'species_custom', 'breed', 'gender', 'age', 'color', 'date_of_birth', 'microchip_id', 'csrf_token'];
+    var payload = new URLSearchParams();
+    fields.forEach(function (name) {
+      var field = addPetForm.elements.namedItem(name);
+      if (field) payload.append(name, field.value);
+    });
+
+    fetch(<?php echo json_encode(rtrim($appBaseUrl, '/') . '/api/resident/check-pet-duplicates.php', JSON_UNESCAPED_SLASHES); ?>, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {'Accept': 'application/json'},
+      body: payload
+    }).then(function (response) {
+      return response.json().then(function (data) {
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || 'Similar pet profiles could not be checked. Please try again.');
+        }
+        return data;
+      });
+    }).then(function (data) {
+      var messages = [];
+      if (data.resident_matches && data.resident_matches.length) {
+        var matchedFieldLabels = {
+          breed: 'breed',
+          gender: 'gender',
+          color: 'color / markings',
+          date_of_birth: 'date of birth',
+          age: 'age'
+        };
+        var ownMatches = data.resident_matches.map(function (pet) {
+          var petLabel = pet.pet_name + ' (' + pet.pet_type + ')';
+          var matchedFields = Array.isArray(pet.matched_fields) ? pet.matched_fields : [];
+          if (matchedFields.indexOf('microchip_id') !== -1) {
+            return 'I found a pet in your profile named ' + petLabel + ' with the same microchip number.';
+          }
+          var matchedDetails = matchedFields.map(function (field) {
+            return matchedFieldLabels[field] || '';
+          }).filter(Boolean);
+          var detailSummary = '';
+          if (matchedDetails.length === 1) {
+            detailSummary = ' Its ' + matchedDetails[0] + ' also matches.';
+          } else if (matchedDetails.length > 1) {
+            detailSummary = ' Its ' + matchedDetails.slice(0, -1).join(', ')
+              + ' and ' + matchedDetails[matchedDetails.length - 1] + ' also match.';
+          }
+          return 'I found a pet in your profile with the same name and species: '
+            + petLabel + '.' + detailSummary;
+        });
+        messages.push(ownMatches.join('\n'));
+      }
+      if (data.staff_review_possible) {
+        messages.push('A similar pet profile may belong to another account. For privacy, its details are not shown; DCVS staff may review this registration.');
+      }
+      return messages.length ? confirmPetDuplicateRegistration(messages) : Promise.resolve(true);
+    }).then(function (confirmed) {
+      if (!confirmed) return;
+      addPetForm.dataset.petDuplicateChecked = '1';
+      addPetForm.submit();
+    }).catch(function (error) {
+      window.alert(error.message || 'Similar pet profiles could not be checked. Please try again.');
+    }).finally(function () {
+      if (submitButton && addPetForm.dataset.petDuplicateChecked !== '1') {
+        submitButton.disabled = false;
+        submitButton.textContent = previousButtonText;
+      }
+    });
+  });
+}
 </script>
 </body>
 </html>

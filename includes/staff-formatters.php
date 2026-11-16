@@ -28,6 +28,12 @@ function cpdAgeLabel($age) {
     return $a === 1 ? '1 year' : $a . ' years';
 }
 
+function staffPetPhotoUrl($photoUrl, $baseUrl): string {
+    $photoUrl = trim((string)$photoUrl);
+    if ($photoUrl === '' || preg_match('#^(?:[a-z][a-z0-9+.-]*:|//|/)#i', $photoUrl)) return $photoUrl;
+    return rtrim((string)$baseUrl, '/') . '/' . ltrim($photoUrl, '/');
+}
+
 function cpdVaxOk($vax) {
     $v = strtolower((string)$vax);
     return $v !== '' && strpos($v, 'vaccinated') !== false && strpos($v, 'not') === false;

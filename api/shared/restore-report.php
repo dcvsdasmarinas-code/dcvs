@@ -51,9 +51,16 @@ if (!$report) {
 }
 
 // Restore: set archived_at to NULL
-$stmt = $conn->prepare("UPDATE reports SET archived_at = NULL WHERE report_id = ?");
-$stmt->bind_param('i', $reportId);
+$stmt = $conn->prepare("UPDATE reports SET archived_at = NULL WHERE report_id = ? AND barangay_id = ? AND archived_at IS NOT NULL");
+$stmt->bind_param('ii', $reportId, $barangayId);
 $stmt->execute();
+$restored = $stmt->affected_rows === 1;
 $stmt->close();
+
+if (!$restored) {
+    http_response_code(404);
+    echo json_encode(['success' => false, 'message' => 'Archived report not found']);
+    exit;
+}
 
 echo json_encode(['success' => true, 'message' => 'Report restored successfully']);

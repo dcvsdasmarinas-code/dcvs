@@ -11,6 +11,7 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
+require_once __DIR__ . '/../../includes/pet-duplicates.php';
 
 header('Content-Type: application/json');
 
@@ -20,21 +21,44 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'message' => 'Your session could not be verified. Refresh the page and try again.']);
+        exit;
+    }
     if (($_POST['from_adoption'] ?? '') === '1') {
         echo json_encode(['success' => false, 'message' => 'Adopted pets can only be registered through an approved adoption application.']);
         exit;
     }
     $owner_id = $_SESSION['user_id'];
-    $pet_name = $_POST['pet_name'] ?? '';
-    $pet_type = $_POST['species'] ?? 'dog';
-    $breed = $_POST['breed'] ?? '';
-    $age = $_POST['age'] ?? 0;
-    $gender = $_POST['gender'] ?? 'male';
-    $color = $_POST['color'] ?? '';
+    $identityInput = $_POST;
+    $speciesInput = $identityInput['species'] ?? '';
+    $genderInput = $identityInput['gender'] ?? '';
+    if (!is_scalar($speciesInput) || trim((string)$speciesInput) === '') {
+        $identityInput['species'] = 'dog';
+    }
+    if (!is_scalar($genderInput) || trim((string)$genderInput) === '') {
+        $identityInput['gender'] = 'male';
+    }
+    $identity = petDuplicateIdentityFromInput($identityInput);
+    $pet_name = $identity['pet_name'];
+    $pet_type = $identity['pet_type'] !== '' ? $identity['pet_type'] : 'dog';
+    $breed = $identity['breed'];
+    $age = $identity['age'] ?? 0;
+    $gender = $identity['gender'] !== '' ? $identity['gender'] : 'male';
+    $color = $identity['color'];
+    $date_of_birth = $identity['date_of_birth'] !== '' ? $identity['date_of_birth'] : null;
+    $microchip_id = $identity['microchip_id'] !== '' ? $identity['microchip_id'] : null;
     $vaccinated = $_POST['vaccinated'] ?? 'no';
 
     if (empty($pet_name)) {
         echo json_encode(['success' => false, 'message' => 'Pet name is required.']);
+        exit;
+    }
+    $identityErrors = petDuplicateIdentityErrors($identity, $identityInput);
+    if ($identityErrors) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => implode(' ', $identityErrors)]);
         exit;
     }
 
@@ -43,6 +67,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (AdoptionWorkflowException $exception) {
         http_response_code(422);
         echo json_encode(['success' => false, 'message' => $exception->getMessage()]);
+        exit;
+    }
+
+    try {
+        $duplicateMatches = petDuplicateFindCandidates($conn, (int)$owner_id, $identity);
+    } catch (RuntimeException $exception) {
+        $conn->rollback();
+        error_log('Legacy resident pet duplicate lookup failed: ' . $exception->getMessage());
+        http_response_code(503);
+        echo json_encode(['success' => false, 'message' => 'Similar pet profiles could not be checked. Please try again.']);
         exit;
     }
 
@@ -91,12 +125,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $refId = generateReferenceId($conn, '#PET-', 'pets');
-    $stmt = $conn->prepare("INSERT INTO pets (owner_id, pet_name, pet_type, breed, age, weight, gender, color, vaccination_status, photo_url, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->bind_param("isssidsssss", $owner_id, $pet_name, $pet_type, $breed, $age, $weight, $gender, $color, $vaccinationStatus, $photoUrl, $refId);
+    $stmt = $conn->prepare("INSERT INTO pets (owner_id, pet_name, pet_type, breed, age, weight, gender, color, date_of_birth, microchip_id, vaccination_status, photo_url, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if (!$stmt) {
+        $conn->rollback();
+        http_response_code(500);
+        error_log('Could not prepare legacy pet registration insert: ' . $conn->error);
+        echo json_encode(['success' => false, 'message' => 'Failed to add pet. Please try again.']);
+        exit;
+    }
+    $stmt->bind_param("isssidsssssss", $owner_id, $pet_name, $pet_type, $breed, $age, $weight, $gender, $color, $date_of_birth, $microchip_id, $vaccinationStatus, $photoUrl, $refId);
     
     if ($stmt->execute()) {
         $pet_id = $conn->insert_id;
-        adoptionCommit($conn);
+        $stmt->close();
+        try {
+            petDuplicateCreateReviewRows($conn, $pet_id, $duplicateMatches);
+            adoptionCommit($conn);
+        } catch (RuntimeException $exception) {
+            $conn->rollback();
+            error_log('Legacy pet duplicate review save failed: ' . $exception->getMessage());
+            http_response_code(500);
+            echo json_encode(['success' => false, 'message' => 'Failed to add pet. Please try again.']);
+            exit;
+        }
 
         // Log activity
         $action = "Pet Registered";
@@ -105,9 +156,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $logStmt->bind_param("iss", $owner_id, $action, $details);
         $logStmt->execute();
 
-        echo json_encode(['success' => true, 'message' => 'Pet added successfully!', 'pet_id' => $pet_id]);
+        echo json_encode([
+            'success' => true,
+            'message' => $duplicateMatches
+                ? 'Pet added successfully. A possible duplicate profile was sent to DCVS staff for review.'
+                : 'Pet added successfully!',
+            'pet_id' => $pet_id,
+            'duplicate_review' => !empty($duplicateMatches),
+        ]);
     } else {
+        $insertError = $stmt->error;
+        $stmt->close();
         $conn->rollback();
+        error_log('Legacy pet insert failed: ' . $insertError);
         echo json_encode(['success' => false, 'message' => 'Failed to add pet. Please try again.']);
     }
 } else {

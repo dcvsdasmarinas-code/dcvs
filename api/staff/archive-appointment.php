@@ -13,55 +13,58 @@ session_set_cookie_params([
     'httponly' => true,
     'samesite' => 'Lax',
 ]);
+session_name('DCVS_STAFF_SESSION');
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/availability.php';
 require_once __DIR__ . '/../../includes/waitlist.php';
 
 // Check if user is logged in
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
-    header('Location: login.php');
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'staff') {
+    header('Location: login-staff.php');
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $appointmentId = intval($_POST['appointment_id'] ?? $_GET['id'] ?? 0);
 
     if ($appointmentId === 0) {
         $_SESSION['appointment_error'] = "Invalid appointment ID.";
-        header('Location: dashboard-resident.php');
+        header('Location: dashboard-staff.php#appointments');
         exit;
     }
 
-    // Check if appointment belongs to user
-    $checkAppt = $conn->prepare("SELECT appointment_id, appointment_type, urgency_level, preferred_date, preferred_time, status FROM appointments WHERE appointment_id = ? AND user_id = ?");
-    $checkAppt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
+    $checkAppt = $conn->prepare("SELECT appointment_id, status FROM appointments WHERE appointment_id = ? AND archived_at IS NULL");
+    $checkAppt->bind_param("i", $appointmentId);
     $checkAppt->execute();
     $checkAppt->store_result();
 
     if ($checkAppt->num_rows === 0) {
-        $_SESSION['appointment_error'] = "Invalid appointment selected.";
-        header('Location: dashboard-resident.php');
+        $_SESSION['appointment_error'] = "Appointment not found.";
+        header('Location: dashboard-staff.php#appointments');
         exit;
     }
-    $checkAppt->bind_result($existingAppointmentId, $oldService, $oldUrgency, $oldDate, $oldTime, $oldStatus);
+    $checkAppt->bind_result($existingAppointmentId, $oldStatus);
     $checkAppt->fetch();
     $checkAppt->close();
 
-    // Archive appointment (soft delete - add archived_at timestamp)
-    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id = ? AND user_id = ?");
-    $stmt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
+    if (!in_array($oldStatus, ['completed', 'no_show', 'cancelled', 'rejected'], true)) {
+        $_SESSION['appointment_error'] = 'Only final appointment outcomes can be archived.';
+        header('Location: dashboard-staff.php#appointments');
+        exit;
+    }
 
-    if ($stmt->execute()) {
-        if (in_array($oldStatus, dcvsHeldStatuses(), true)) {
-            dcvsNotifyWaitlistForSlot($conn, $oldDate, $oldTime, $oldService, $oldUrgency ?? 'routine');
-        }
+    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW()
+        WHERE appointment_id = ? AND status IN ('completed','no_show','cancelled','rejected')");
+    $stmt->bind_param("i", $appointmentId);
+
+    if ($stmt->execute() && $stmt->affected_rows === 1) {
         $_SESSION['appointment_success'] = "Appointment archived successfully!";
-        header('Location: dashboard-resident.php#archive');
+        header('Location: dashboard-staff.php#appointments');
         exit;
     } else {
         $_SESSION['appointment_error'] = "Failed to archive appointment. Please try again.";
-        header('Location: dashboard-resident.php');
+        header('Location: dashboard-staff.php#appointments');
         exit;
     }
 

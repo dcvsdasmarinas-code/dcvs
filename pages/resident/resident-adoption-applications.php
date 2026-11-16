@@ -9,15 +9,17 @@ session_set_cookie_params([
     'samesite' => 'Lax',
 ]);
 session_start();
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/adoption-workflow.php';
 
 if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'resident') {
-    header('Location: login.php');
+    header('Location: ' . $appBaseUrl . '/login.php');
     exit;
 }
 
-adoptionReleaseExpiredReservations($conn);
+expireAdoptionReservations($conn);
 
 $residentId = (int)$_SESSION['user_id'];
 $applyListingId = (int)($_GET['apply'] ?? 0);
@@ -61,15 +63,15 @@ $pageTitle = 'Adoption Application';
   <title>Adoption Application - DCVS Resident Portal</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-  <link rel="stylesheet" href="assets/css/dashboard.css">
-  <link rel="stylesheet" href="assets/css/responsive.css">
+  <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>">
+  <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>">
   <style>
     #adoptionApplicationDialog.modal{z-index:2000;background:rgba(0,0,0,.8);padding:1rem}
     #adoptionApplicationDialog .sd-dialog{width:100%;display:flex;justify-content:center}
     #adoptionApplicationDialog .sd-dialog-content{position:relative;box-sizing:border-box;width:100%;max-width:680px;max-height:90vh;padding:24px;display:flex;flex-direction:column;gap:16px;overflow:hidden;border:1px solid #e4e4e7;border-radius:8px;background:#fff;box-shadow:0 10px 15px -3px rgba(0,0,0,.1),0 4px 6px -4px rgba(0,0,0,.1);animation:modalIn .2s ease;font-family:'Inter','Segoe UI',sans-serif;color:#18181b}
-    #adoptionApplicationDialog .sd-dialog-header{display:flex;flex-direction:column;gap:6px;padding-right:28px;text-align:left}
-    #adoptionApplicationDialog .sd-dialog-title{margin:0;font-family:'Inter',sans-serif;font-size:18px;font-weight:600;line-height:1;letter-spacing:-.025em;color:#18181b}
-    #adoptionApplicationDialog .sd-dialog-description{margin:0;font-size:14px;line-height:1.5;color:#71717a}
+    #adoptionApplicationDialog .sd-dialog-header{display:flex;flex-direction:column;gap:4px;padding-right:28px;text-align:left}
+    #adoptionApplicationDialog .sd-dialog-title{margin:0;font-family:'Inter',sans-serif;font-size:20px;font-weight:600;line-height:1.3;letter-spacing:-.025em;color:#14201A}
+    #adoptionApplicationDialog .sd-dialog-description{margin:0;font-size:14px;line-height:1.45;color:#5B675F}
     #adoptionApplicationDialog .sd-dialog-close{position:absolute;top:16px;right:16px;width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:4px;background:transparent;color:#71717a;cursor:pointer;transition:all .15s ease}
     #adoptionApplicationDialog .sd-dialog-close:hover{background:#f4f4f5;color:#18181b}
     #adoptionApplicationDialog .application-body{min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:20px}
@@ -112,8 +114,9 @@ $pageTitle = 'Adoption Application';
     #adoptionApplicationDialog .application-notice.error{border-color:#fecaca;background:#fef2f2;color:#991b1b}
     @media(max-width:640px){#adoptionApplicationDialog.modal{padding:0}#adoptionApplicationDialog .sd-dialog-content{max-height:100dvh;border-radius:0;padding:16px}#adoptionApplicationDialog .pet-summary img{width:64px;height:64px;flex-basis:64px}#adoptionApplicationDialog .application-grid,#adoptionApplicationDialog .check-grid{grid-template-columns:1fr}#adoptionApplicationDialog .application-field.full{grid-column:auto}#adoptionApplicationDialog .sd-dialog-footer{flex-wrap:wrap}#adoptionApplicationDialog .application-footer-note{flex-basis:100%}#adoptionApplicationDialog .sd-dialog-footer .sd-btn{flex:1}}
   </style>
+  <link rel="stylesheet" href="assets/css/sb2.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>">
 </head>
-<body class="resident-portal">
+<body class="resident-portal sb2-active">
 <?php include __DIR__ . '/../../includes/resident-sidebar.php'; ?>
 <div class="modal active" id="adoptionApplicationDialog">
   <div class="sd-dialog">

@@ -1,6 +1,14 @@
 (function() {
   'use strict';
 
+  var appBaseUrl = typeof window.DCVS_APP_BASE_URL === 'string' ? window.DCVS_APP_BASE_URL : '';
+  if (typeof window.DCVS_APP_BASE_URL !== 'string' && document.currentScript && document.currentScript.src) {
+    appBaseUrl = new URL('../../', document.currentScript.src).pathname.replace(/\/$/, '');
+  }
+  function appUrl(path) {
+    return appBaseUrl + '/' + path.replace(/^\/+/, '');
+  }
+
   var STREET_STYLE = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json';
   var SATELLITE_STYLE = 'https://api.maptiler.com/maps/hybrid/style.json?key=';
   var CUSTOM_SOURCE_IDS = [
@@ -8,6 +16,7 @@
     'brgy-labels',
     'report-pins',
     'report-pin-accuracy',
+    'public-report-pins',
     'dcvs-landmarks',
     'dcvs-city-perimeter',
     'dcvs-city-mask',
@@ -19,7 +28,6 @@
     'barangay-fill',
     'barangay-outline',
     'barangay-label',
-    'geo-brgy-label',
     'report-pin-accuracy-fill',
     'report-pin-accuracy-outline',
     'dcvs-city-perimeter-casing',
@@ -31,16 +39,14 @@
     'report-pins-clusters',
     'report-pins-cluster-count',
     'report-pins-points',
-    'dcvs-landmark-points',
-    'dcvs-landmark-codes',
+    'public-report-pins-clusters',
+    'public-report-pins-cluster-count',
+    'public-report-pins-points',
+    'dcvs-landmark-clusters',
+    'dcvs-landmark-cluster-count',
+    'dcvs-landmark-prominent-labels',
     'dcvs-landmark-labels',
-    'dcvs-office-halo',
-    'dcvs-office-marker',
-    'dcvs-office-code',
     'dcvs-office-label',
-    'dcvs-home-hall-halo',
-    'dcvs-home-hall-marker',
-    'dcvs-home-hall-code',
     'dcvs-home-hall-label'
   ];
   var SATELLITE_ONLY_SOURCE_IDS = [
@@ -63,10 +69,23 @@
 
   function initialize(mapElement) {
     var key = mapElement.getAttribute('data-maptiler-key');
+    var satelliteStyleAttribute = mapElement.getAttribute('data-satellite-style');
+    var usesConfiguredSatelliteStyle = mapElement.hasAttribute('data-use-mapcn-satellite-style')
+      || !!satelliteStyleAttribute;
+    var configuredSatelliteStyle = satelliteStyleAttribute
+      ? JSON.parse(satelliteStyleAttribute)
+      : (usesConfiguredSatelliteStyle
+        ? JSON.parse(mapElement.getAttribute('data-mapcn') || '{}').style
+        : null);
+    var canUseSatellite = !!key || !!configuredSatelliteStyle;
+    var configuredMaxZoom = Number(mapElement.getAttribute('data-max-map-zoom'));
+    var maxMapZoom = isFinite(configuredMaxZoom) && configuredMaxZoom >= MIN_MAP_ZOOM
+      ? Math.min(MAX_MAP_ZOOM, configuredMaxZoom)
+      : MAX_MAP_ZOOM;
 
     var map = null;
     var status = mapElement.querySelector('[data-basemap-status]');
-    var selectedStyle = 'street';
+    var selectedStyle = mapElement.getAttribute('data-initial-basemap') === 'satellite' ? 'satellite' : 'street';
     var isChangingStyle = false;
     var reportPinsReady = !mapElement.hasAttribute('data-report-pins-session');
     var landmarksReady = !mapElement.hasAttribute('data-map-landmarks-session');
@@ -76,7 +95,10 @@
     var hasRiskOverlay = mapElement.getAttribute('data-map-risk-overlay') === 'true';
     var hasCityBoundary = mapElement.getAttribute('data-city-boundary') === 'true';
     var scopedBarangayFeature = null;
+    var searchedBarangayId = null;
     var initialMaxBounds = null;
+    var satelliteContextReady = !usesConfiguredSatelliteStyle || selectedStyle !== 'satellite';
+    var satelliteContextLoading = false;
     var streetButton = null;
     var satelliteButton = null;
     var attribution = null;
@@ -89,18 +111,23 @@
       if (streetButton) streetButton.setAttribute('aria-pressed', selectedStyle === 'street' ? 'true' : 'false');
       if (satelliteButton) {
         satelliteButton.setAttribute('aria-pressed', selectedStyle === 'satellite' ? 'true' : 'false');
-        satelliteButton.disabled = !key || !overlaysReady || isChangingStyle;
+        satelliteButton.disabled = !canUseSatellite || !overlaysReady || isChangingStyle;
       }
       if (streetButton) streetButton.disabled = isChangingStyle || selectedStyle === 'street';
       if (attribution) {
         attribution.textContent = '';
         var links = selectedStyle === 'satellite'
-          ? [
-              { label: '© MapTiler', href: 'https://www.maptiler.com/copyright/' },
-              { label: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright' }
-            ]
+          ? (usesConfiguredSatelliteStyle
+            ? [
+              { label: '© Esri, Maxar, Earthstar Geographics, and the GIS User Community', href: 'https://www.esri.com/en-us/legal/terms/full-master-agreement' },
+              { label: '© OpenStreetMap contributors (ODbL)', href: 'https://www.openstreetmap.org/copyright' }
+              ]
+            : [
+                { label: '© MapTiler', href: 'https://www.maptiler.com/copyright/' },
+              { label: '© OpenStreetMap contributors (ODbL)', href: 'https://www.openstreetmap.org/copyright' }
+              ])
           : [
-              { label: '© OpenStreetMap contributors', href: 'https://www.openstreetmap.org/copyright' },
+            { label: '© OpenStreetMap contributors (ODbL)', href: 'https://www.openstreetmap.org/copyright' },
               { label: '© CARTO', href: 'https://carto.com/attributions' }
             ];
         links.forEach(function(item, index) {
@@ -112,6 +139,13 @@
           link.textContent = item.label;
           attribution.appendChild(link);
         });
+        if (links.length) attribution.appendChild(document.createTextNode(' · '));
+        var searchCredit = document.createElement('a');
+        searchCredit.href = 'https://www.maptiler.com/';
+        searchCredit.target = '_blank';
+        searchCredit.rel = 'noopener noreferrer';
+        searchCredit.textContent = 'Search by MapTiler';
+        attribution.appendChild(searchCredit);
       }
     }
 
@@ -128,7 +162,7 @@
       satelliteButton = document.createElement('button');
       satelliteButton.type = 'button';
       satelliteButton.textContent = 'Satellite';
-      satelliteButton.title = key ? 'Show satellite imagery' : 'Satellite imagery requires a MapTiler key';
+      satelliteButton.title = canUseSatellite ? 'Show satellite imagery' : 'Satellite imagery requires a MapTiler key';
       satelliteButton.addEventListener('click', loadSatelliteStyle);
       controls.appendChild(satelliteButton);
       attribution = document.createElement('div');
@@ -174,22 +208,40 @@
 
     function applyRiskMapStyle() {
       if (!map) return;
+      var riskFillColor = [
+        'match', ['get', 'risk'],
+        'Green', '#22c55e',
+        'Yellow', '#eab308',
+        'Orange', '#f97316',
+        'Red', '#ef4444',
+        '#22c55e'
+      ];
       if (hasRiskOverlay && map.getLayer('barangay-fill')) {
-        setPaintPropertyIfChanged('barangay-fill', 'fill-color', [
-          'match', ['get', 'risk'],
-          'Green', '#22c55e',
-          'Yellow', '#eab308',
-          'Orange', '#f97316',
-          'Red', '#ef4444',
-          '#22c55e'
-        ]);
-        setPaintPropertyIfChanged('barangay-fill', 'fill-opacity', selectedStyle === 'satellite' ? 0.3 : 0.4);
+        var fillColor = riskFillColor;
+        var fillOpacity = searchedBarangayId === null
+          ? (selectedStyle === 'satellite' ? 0.16 : 0.4)
+          : [
+              'case',
+              ['==', ['to-number', ['get', 'id']], searchedBarangayId],
+              selectedStyle === 'satellite' ? 0.24 : 0.72,
+              selectedStyle === 'satellite' ? 0.12 : 0.42
+            ];
+        setPaintPropertyIfChanged('barangay-fill', 'fill-color', fillColor);
+        setPaintPropertyIfChanged('barangay-fill', 'fill-opacity', fillOpacity);
       }
       if (map.getLayer('barangay-outline')) {
-        setPaintPropertyIfChanged('barangay-outline', 'line-color',
-          selectedStyle === 'satellite' ? '#ffffff' : PRIMARY_GREEN);
-        setPaintPropertyIfChanged('barangay-outline', 'line-width', 1.5);
-        setPaintPropertyIfChanged('barangay-outline', 'line-opacity', 0.95);
+        var lineColor = selectedStyle === 'satellite' ? '#ffffff' : PRIMARY_GREEN;
+        var lineWidth = 1.5;
+        var lineOpacity = 0.95;
+        if (searchedBarangayId !== null) {
+          var isSearchedFeature = ['==', ['to-number', ['get', 'id']], searchedBarangayId];
+          lineColor = ['case', isSearchedFeature, PRIMARY_GREEN, '#ffffff'];
+          lineWidth = ['case', isSearchedFeature, 4, 1];
+          lineOpacity = ['case', isSearchedFeature, 1, 0.55];
+        }
+        setPaintPropertyIfChanged('barangay-outline', 'line-color', lineColor);
+        setPaintPropertyIfChanged('barangay-outline', 'line-width', lineWidth);
+        setPaintPropertyIfChanged('barangay-outline', 'line-opacity', lineOpacity);
       }
     }
 
@@ -242,7 +294,7 @@
 
     function loadCityBoundaryOutline() {
       if (!hasCityBoundary) return Promise.resolve();
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();
@@ -439,7 +491,7 @@
         id: 'dcvs-city-context-mask',
         type: 'fill',
         source: 'dcvs-city-mask',
-        paint: { 'fill-color': '#334155', 'fill-opacity': 0.32 }
+        paint: { 'fill-color': '#334155', 'fill-opacity': 0 }
       }, 'barangay-fill');
       addLayerIfMissing({
         id: 'dcvs-barangay-boundary-casing',
@@ -462,18 +514,12 @@
         map.setPaintProperty('barangay-outline', 'line-width', 1.5);
         map.setPaintProperty('barangay-outline', 'line-opacity', 1);
       }
-      if (map.getLayer('geo-brgy-label')) {
-        map.setPaintProperty('geo-brgy-label', 'text-color', '#1e293b');
-        map.setPaintProperty('geo-brgy-label', 'text-halo-color', '#ffffff');
-        map.setPaintProperty('geo-brgy-label', 'text-halo-width', 2);
-      }
-
       map.setMaxBounds([
         [bounds[0][0] - widthPadding, bounds[0][1] - heightPadding],
         [bounds[1][0] + widthPadding, bounds[1][1] + heightPadding]
       ]);
       map.setMinZoom(MIN_MAP_ZOOM);
-      map.setMaxZoom(MAX_MAP_ZOOM);
+      map.setMaxZoom(maxMapZoom);
       map.fitBounds(bounds, { padding: 64, maxZoom: 17, duration: 650 });
       mapElement.classList.add('geo-map-satellite-focused');
       return Promise.resolve();
@@ -482,7 +528,7 @@
     function addSatelliteContext() {
       if (isBarangayMap) return addBarangaySatelliteContext(scopedBarangayFeature);
 
-      return fetch('geo-map/barangays-boundary.json', { credentials: 'same-origin' })
+      return fetch(appUrl('geo-map/barangays-boundary.json'), { credentials: 'same-origin' })
         .then(function(response) {
           if (!response.ok) throw new Error('Barangay boundary request failed with HTTP ' + response.status + '.');
           return response.json();
@@ -544,13 +590,13 @@
             id: 'dcvs-city-context-mask',
             type: 'fill',
             source: 'dcvs-city-mask',
-            paint: { 'fill-color': '#334155', 'fill-opacity': 0.32 }
+            paint: { 'fill-color': '#334155', 'fill-opacity': 0 }
           }, 'barangay-fill');
           addLayerIfMissing({
             id: 'dcvs-city-interior-mask',
             type: 'fill',
             source: 'dcvs-city-interior-masks',
-            paint: { 'fill-color': '#334155', 'fill-opacity': 0.32 }
+            paint: { 'fill-color': '#334155', 'fill-opacity': 0 }
           }, 'barangay-fill');
           addLayerIfMissing({
             id: 'dcvs-barangay-boundary-casing',
@@ -582,14 +628,9 @@
             map.setPaintProperty('barangay-outline', 'line-width', 1.5);
             map.setPaintProperty('barangay-outline', 'line-opacity', 1);
           }
-          if (map.getLayer('geo-brgy-label')) {
-            map.setPaintProperty('geo-brgy-label', 'text-color', '#1e293b');
-            map.setPaintProperty('geo-brgy-label', 'text-halo-color', '#ffffff');
-            map.setPaintProperty('geo-brgy-label', 'text-halo-width', 2);
-          }
           map.setMaxBounds(DEFAULT_MAP_BOUNDS);
           map.setMinZoom(MIN_MAP_ZOOM);
-          map.setMaxZoom(MAX_MAP_ZOOM);
+          map.setMaxZoom(maxMapZoom);
           if (!mapElement.hasAttribute('data-preserve-map-view')) {
             map.fitBounds(cityBounds, { padding: 84, maxZoom: 10.5, duration: 650 });
           }
@@ -598,7 +639,7 @@
     }
 
     function loadSatelliteStyle() {
-      if (!map || !key || !overlaysReady || isChangingStyle || selectedStyle === 'satellite') return;
+      if (!map || !canUseSatellite || !overlaysReady || isChangingStyle || selectedStyle === 'satellite') return;
       var previousStyle = selectedStyle;
       isChangingStyle = true;
       selectedStyle = 'satellite';
@@ -619,6 +660,7 @@
           restoreOverlays(overlays);
           return addSatelliteContext();
         }).then(function() {
+          satelliteContextReady = true;
           applyScopedBarangay();
           applyRiskMapStyle();
           map.jumpTo(view);
@@ -638,7 +680,7 @@
       });
 
       try {
-        map.setStyle(SATELLITE_STYLE + encodeURIComponent(key), { diff: false });
+        map.setStyle(configuredSatelliteStyle || SATELLITE_STYLE + encodeURIComponent(key), { diff: false });
       } catch (error) {
         console.error('Could not load satellite map style:', error);
         isChangingStyle = false;
@@ -719,11 +761,24 @@
           window.clearInterval(waitForLayers);
           overlaysReady = true;
           updateControls();
+          if (selectedStyle === 'satellite' && !satelliteContextReady && !satelliteContextLoading) {
+            satelliteContextLoading = true;
+            addSatelliteContext().then(function() {
+              applyScopedBarangay();
+              applyRiskMapStyle();
+              satelliteContextReady = true;
+              satelliteContextLoading = false;
+            }).catch(function(error) {
+              satelliteContextLoading = false;
+              console.error('Could not restore satellite map context:', error);
+              setStatus('Satellite map context could not load: ' + error.message);
+            });
+          }
           return;
         }
         if (++attempts >= 100) {
           window.clearInterval(waitForLayers);
-          if (key) setStatus('Satellite imagery is unavailable until required map overlays load.');
+          if (canUseSatellite) setStatus('Satellite imagery is unavailable until required map overlays load.');
         }
       }, 100);
     }
@@ -733,7 +788,7 @@
       if (!map) return;
       initialMaxBounds = map.getMaxBounds();
       map.setMinZoom(MIN_MAP_ZOOM);
-      map.setMaxZoom(MAX_MAP_ZOOM);
+      map.setMaxZoom(maxMapZoom);
       createControls();
       mapElement.addEventListener('dcvs:reportpinsready', function() {
         reportPinsReady = true;
@@ -758,6 +813,11 @@
         }
         updateSatelliteAvailability();
       });
+      mapElement.addEventListener('dcvs:barangaysearch', function(event) {
+        var detail = event.detail || {};
+        searchedBarangayId = detail.active ? Number(detail.id) : null;
+        applyRiskMapStyle();
+      });
 
       var initialStyle = map.getStyle();
       (initialStyle.layers || []).forEach(function(layer) {
@@ -778,7 +838,9 @@
         console.error('Map basemap request failed:', event.error || event);
         if (selectedStyle === 'satellite' || isChangingStyle) {
           setStatus(selectedStyle === 'satellite'
-            ? 'Satellite imagery could not load. Check the MapTiler key and try again.'
+            ? (usesConfiguredSatelliteStyle
+              ? 'Satellite imagery could not load. Check the network connection and try again.'
+              : 'Satellite imagery could not load. Check the MapTiler key and try again.')
             : 'The selected map style could not load. Check the network connection.');
         } else {
           setStatus('Street map tiles could not load. Check the network connection.');

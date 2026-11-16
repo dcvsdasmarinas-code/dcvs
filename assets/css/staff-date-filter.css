@@ -1,0 +1,178 @@
+.staff-date-filter {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.staff-date-filter-button {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  background: #fff;
+  color: #71717a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+  cursor: pointer;
+}
+
+.staff-date-filter-button:hover,
+.staff-date-filter-button[aria-expanded="true"] {
+  background: #f4f4f5;
+  color: #18181b;
+  border-color: #d4d4d8;
+}
+
+.staff-date-filter-button.has-date {
+  background: #f4f4f5;
+  color: #18181b;
+  border-color: #d4d4d8;
+}
+
+.staff-date-calendar {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 9999;
+  display: none;
+  width: 280px;
+  padding: 12px;
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, .12);
+  color: #18181b;
+  font-family: Inter, 'Segoe UI', sans-serif;
+}
+
+.staff-date-calendar.open {
+  display: block;
+}
+
+.staff-date-calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.staff-date-calendar-nav {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+}
+
+.staff-date-calendar-nav:hover {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.staff-date-calendar-month-year {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.staff-date-calendar-month-year select {
+  height: 28px;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+  color: #18181b;
+  font: 600 14px Inter, 'Segoe UI', sans-serif;
+  cursor: pointer;
+}
+
+.staff-date-calendar-weekdays,
+.staff-date-calendar-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  justify-items: center;
+}
+
+.staff-date-calendar-weekdays {
+  margin-bottom: 2px;
+  color: #71717a;
+  font-size: 12px;
+}
+
+.staff-date-calendar-weekdays span {
+  display: grid;
+  width: 32px;
+  height: 28px;
+  place-items: center;
+}
+
+.staff-date-calendar-day {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #18181b;
+  font: 400 13px Inter, 'Segoe UI', sans-serif;
+  cursor: pointer;
+}
+
+.staff-date-calendar-day:hover {
+  background: #f4f4f5;
+}
+
+.staff-date-calendar-day.is-today:not(.is-selected) {
+  background: #f4f4f5;
+  font-weight: 600;
+}
+
+.staff-date-calendar-day.is-selected {
+  background: #18181b;
+  color: #fff;
+}
+
+.staff-date-calendar-day.is-outside {
+  color: #a1a1aa;
+}
+
+.staff-date-calendar-clear {
+  display: block;
+  margin: 8px 0 0 auto;
+  padding: 4px 6px;
+  border: 0;
+  background: transparent;
+  color: #52525b;
+  font: 500 12px Inter, 'Segoe UI', sans-serif;
+  cursor: pointer;
+}
+
+.staff-date-calendar-clear:hover {
+  color: #18181b;
+  text-decoration: underline;
+}
+
+.staff-date-calendar-clear[hidden] {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .staff-date-calendar {
+    position: fixed;
+    top: calc(var(--topbar-h, 64px) + 8px);
+    right: 12px;
+    left: auto;
+    width: min(280px, calc(100vw - 24px));
+  }
+}

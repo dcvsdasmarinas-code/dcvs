@@ -16,9 +16,10 @@ session_set_cookie_params([
 session_start();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/reports/duplicates.php';
 
 // Check if user is logged in
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true) {
+if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || ($_SESSION['role'] ?? '') !== 'resident') {
     header('Location: login.php');
     exit;
 }
@@ -43,6 +44,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         );
         $reportPinEnabled = dcvsReportPinFeatureEnabled($conn, $reportPinFeatures);
     }
+    if (!validateCsrf($_POST['csrf_token'] ?? null)) {
+        $_SESSION['report_error'] = 'Your session could not be verified. Refresh the form and try again.';
+        header('Location: dashboard-resident.php#my-reports');
+        exit;
+    }
 
     $sec = isset($_POST['return_section']) && preg_match('/^[a-z0-9_-]+$/', $_POST['return_section']) ? '#' . $_POST['return_section'] : '';
     $reportTypeLabel = trim($_POST['report_type'] ?? '');
@@ -63,6 +69,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $locationStatus = 'legacy_none';
     $unpinnedReason = null;
     $pinSource = null;
+    $duplicateParentInput = $readPostString('duplicate_parent_id');
+    $duplicateParentId = $duplicateParentInput === ''
+        ? null
+        : filter_var($duplicateParentInput, FILTER_VALIDATE_INT);
+    $duplicateChoice = $readPostString('duplicate_choice');
+    if ($duplicateChoice !== '' && !in_array($duplicateChoice, ['same', 'different'], true)) {
+        $_SESSION['report_error'] = 'Invalid similar-report selection. Please retry.';
+        header('Location: dashboard-resident.php#my-reports');
+        exit;
+    }
+
+    $duplicateSession = $_SESSION['report_duplicate_candidates'] ?? [];
+    $candidateIds = is_array($duplicateSession)
+        && (int)($duplicateSession['created_at'] ?? 0) >= time() - 300
+        && is_array($duplicateSession['ids'] ?? null)
+            ? array_map('intval', $duplicateSession['ids'])
+            : [];
+    if ($duplicateParentInput !== '' && ($duplicateParentId === false || $duplicateParentId <= 0)) {
+        $_SESSION['report_error'] = 'The similar report selection is invalid. Please retry.';
+        header('Location: dashboard-resident.php#my-reports');
+        exit;
+    }
+    if ($candidateIds !== []) {
+        if ($duplicateParentId === null) {
+            $duplicateParentId = $candidateIds[0];
+        }
+        if (!in_array((int)$duplicateParentId, $candidateIds, true)) {
+            $_SESSION['report_error'] = 'The similar report selection is invalid. Please retry.';
+            header('Location: dashboard-resident.php#my-reports');
+            exit;
+        }
+        $duplicateChoice = 'same';
+    } elseif ($duplicateParentId !== null || $duplicateChoice === 'same') {
+        $_SESSION['report_error'] = 'The similar report could not be verified. Please retry the duplicate check.';
+        header('Location: dashboard-resident.php#my-reports');
+        exit;
+    }
 
     // Server-side validation
     $errors = [];
@@ -272,8 +315,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($fileInfo !== false) {
         finfo_close($fileInfo);
     }
-    if ($locationStatus === 'unpinned_fallback' && !$validatedAttachments) {
-        $attachmentErrors[] = 'Attach at least one photo or video when submitting without an incident pin.';
+    if (!$validatedAttachments) {
+        $attachmentErrors[] = 'Attach at least one photo or video to submit your report.';
     }
     if ($attachmentErrors) {
         $_SESSION['report_error'] = implode('<br>', array_unique($attachmentErrors));
@@ -332,6 +375,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $isStructuredReport = $animalType !== '' && $animalBreed !== '' && $animalCount !== '' && $animalBehavior !== '';
     $storedDescription = $isStructuredReport ? $description : ($legacyAnimalDesc !== '' ? $legacyAnimalDesc . ' - ' . $description : $description);
     $refId = 'RPT-' . time() . '-' . $_SESSION['user_id'];
+    $submissionFingerprint = dcvsReportSubmissionFingerprint([
+        'reporter_id' => (int)$_SESSION['user_id'],
+        'report_type' => $reportType,
+        'report_datetime' => $reportDatetime,
+        'animal_type' => $animalType,
+        'animal_breed' => $animalBreed,
+        'animal_count' => $animalCount,
+        'animal_behavior' => $animalBehavior,
+        'barangay_id' => $barangayId,
+        'location_detail' => $locationDetail,
+        'description' => $description,
+        'latitude' => $latitude === null ? '' : number_format($latitude, 8, '.', ''),
+        'longitude' => $longitude === null ? '' : number_format($longitude, 8, '.', ''),
+    ]);
     $removeStoredAttachments = static function () use (&$storedAttachments) {
         foreach ($storedAttachments as $attachment) {
             $storedFile = __DIR__ . '/../../' . $attachment['file_url'];
@@ -347,7 +404,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-resident.php' . $sec);
         exit;
     }
-    $stmt = $conn->prepare("INSERT INTO reports (reporter_id, report_type, animal_type, animal_breed, animal_count, animal_behavior, description, location_address, barangay_id, urgency_level, photo_url, video_url, status, reference_id, incident_at, coordinates_lat, coordinates_long, location_status, unpinned_reason, pin_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)");
+    $expiredGuardCleanup = $conn->query("DELETE FROM report_submission_guards WHERE reporter_id = " . (int)$_SESSION['user_id'] . " AND created_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)");
+    if (!$expiredGuardCleanup) {
+        error_log('Could not clean expired report submission guards: ' . $conn->error);
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'The report could not be checked for accidental duplicate submission. Please try again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $guardCheck = $conn->prepare("SELECT report_id FROM report_submission_guards WHERE reporter_id = ? AND fingerprint = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 5 MINUTE) LIMIT 1 FOR UPDATE");
+    if (!$guardCheck) {
+        error_log('Could not prepare report double-submit check: ' . $conn->error);
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'The report could not be checked for accidental duplicate submission. Please try again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $reporterIdForGuard = (int)$_SESSION['user_id'];
+    $guardCheck->bind_param('is', $reporterIdForGuard, $submissionFingerprint);
+    if (!$guardCheck->execute()) {
+        error_log('Could not execute report double-submit check: ' . $guardCheck->error);
+        $guardCheck->close();
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'The report could not be checked for accidental duplicate submission. Please try again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $recentSubmission = $guardCheck->get_result()->fetch_assoc();
+    $guardCheck->close();
+    if ($recentSubmission) {
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'This report was just submitted. Please check My Reports before submitting it again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+
+    $duplicateStatus = 'none';
+    if ($duplicateChoice === 'same') {
+        if ($latitude === null || $longitude === null
+            || !dcvsReportDuplicateLockCandidate($conn, (int)$duplicateParentId, $barangayId, $reportType, $latitude, $longitude)) {
+            $conn->rollback();
+            $removeStoredAttachments();
+            $_SESSION['report_error'] = 'The similar report is no longer eligible. Please retry the duplicate check before submitting.';
+            header('Location: dashboard-resident.php' . $sec);
+            exit;
+        }
+        $duplicateStatus = 'suspected';
+    }
+
+    $stmt = $conn->prepare("INSERT INTO reports (reporter_id, report_type, animal_type, animal_breed, animal_count, animal_behavior, description, location_address, barangay_id, urgency_level, photo_url, video_url, status, duplicate_status, parent_report_id, reference_id, incident_at, coordinates_lat, coordinates_long, location_status, unpinned_reason, pin_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)");
     if (!$stmt) {
         error_log("Prepare failed: " . $conn->error);
         $conn->rollback();
@@ -356,7 +465,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: dashboard-resident.php' . $sec);
         exit;
     }
-    $stmt->bind_param("isssssssisssssddsss", $_SESSION['user_id'], $reportType, $animalType, $animalBreed, $animalCount, $animalBehavior, $storedDescription, $location, $barangayId, $urgency, $photoUrl, $videoUrl, $refId, $reportDatetime, $latitude, $longitude, $locationStatus, $unpinnedReason, $pinSource);
+    $stmt->bind_param("isssssssissssissddsss", $_SESSION['user_id'], $reportType, $animalType, $animalBreed, $animalCount, $animalBehavior, $storedDescription, $location, $barangayId, $urgency, $photoUrl, $videoUrl, $duplicateStatus, $duplicateParentId, $refId, $reportDatetime, $latitude, $longitude, $locationStatus, $unpinnedReason, $pinSource);
 
     if (!$stmt->execute()) {
         error_log('Report insert failed: ' . $stmt->error);
@@ -370,6 +479,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $reportId = $stmt->insert_id;
     $stmt->close();
 
+    $guardInsert = $conn->prepare("INSERT INTO report_submission_guards (reporter_id, fingerprint, report_id) VALUES (?, ?, ?)");
+    if (!$guardInsert) {
+        error_log('Could not prepare report double-submit guard: ' . $conn->error);
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'The report could not be saved. Please try again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $guardInsert->bind_param('isi', $reporterIdForGuard, $submissionFingerprint, $reportId);
+    if (!$guardInsert->execute()) {
+        error_log('Could not save report double-submit guard: ' . $guardInsert->error);
+        $guardInsert->close();
+        $conn->rollback();
+        $removeStoredAttachments();
+        $_SESSION['report_error'] = 'The report could not be saved. Please try again.';
+        header('Location: dashboard-resident.php' . $sec);
+        exit;
+    }
+    $guardInsert->close();
+
+    if ($duplicateStatus === 'suspected') {
+        $duplicateLog = $conn->prepare("INSERT INTO report_duplicate_log (report_id, parent_report_id, action, performed_by, performed_role, notes) VALUES (?, ?, 'suspect', ?, 'resident', NULL)");
+        if (!$duplicateLog) {
+            error_log('Could not prepare resident duplicate suggestion audit record: ' . $conn->error);
+            $conn->rollback();
+            $removeStoredAttachments();
+            $_SESSION['report_error'] = 'The report could not be saved. Please try again.';
+            header('Location: dashboard-resident.php' . $sec);
+            exit;
+        }
+        $residentActorId = (int)$_SESSION['user_id'];
+        $duplicateLog->bind_param('iii', $reportId, $duplicateParentId, $residentActorId);
+        if (!$duplicateLog->execute()) {
+            error_log('Could not save resident duplicate suggestion audit record: ' . $duplicateLog->error);
+            $duplicateLog->close();
+            $conn->rollback();
+            $removeStoredAttachments();
+            $_SESSION['report_error'] = 'The report could not be saved. Please try again.';
+            header('Location: dashboard-resident.php' . $sec);
+            exit;
+        }
+        $duplicateLog->close();
+    }
     if ($storedAttachments) {
         $attachmentStatement = $conn->prepare(
             'INSERT INTO report_attachments (report_id, attachment_type, file_url, mime_type, display_order) VALUES (?, ?, ?, ?, ?)'

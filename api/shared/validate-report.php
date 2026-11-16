@@ -101,17 +101,21 @@ if ($action === 'validate') {
         exit;
     }
 
-    $fieldStatusValue = $input['field_status'] ?? '';
-    $fieldStatus = is_string($fieldStatusValue) ? trim($fieldStatusValue) : '';
     $barangayWillRespond = $barangayResponseEnabled
         && ($input['barangay_will_respond'] ?? ($input['barangay_response_proposed'] ?? '')) === '1';
+    $fieldStatusValue = $input['field_status'] ?? '';
+    $fieldStatus = is_string($fieldStatusValue) ? trim($fieldStatusValue) : '';
+    if ($barangayWillRespond) {
+        $fieldStatus = 'site_visit_pending';
+    }
     $urgentBarangayResponse = $barangayWillRespond
         && (in_array(strtolower((string)$report['urgency_level']), ['high', 'critical'], true)
             || $fieldStatus === 'urgent_response');
     $validationNotesValue = $input['validation_notes'] ?? '';
     $validationNotes = is_string($validationNotesValue) ? trim($validationNotesValue) : '';
     $validFieldStatuses = dcvsValidationFieldStatuses();
-    if (!in_array($fieldStatus, $validFieldStatuses, true)) {
+    if (!in_array($fieldStatus, $validFieldStatuses, true)
+        || ($barangayWillRespond && $fieldStatus !== 'site_visit_pending')) {
         http_response_code(400);
         echo json_encode(['success' => false, 'message' => 'Select the field status before forwarding this report.']);
         exit;
@@ -228,9 +232,9 @@ if ($action === 'validate') {
         echo json_encode(['success' => false, 'message' => 'The report could not be validated. Please try again.']);
         exit;
     }
-    $reportStatus = $barangayWillRespond ? 'confirmed' : 'validated';
-    $confirmedBy = $barangayWillRespond ? $userId : null;
-    $confirmedFlag = $barangayWillRespond ? 1 : 0;
+    $reportStatus = 'validated';
+    $confirmedBy = null;
+    $confirmedFlag = 0;
     $updateStmt = $conn->prepare("UPDATE reports
         SET status = ?, validated_by = ?, validated_at = NOW(),
             confirmed_by = ?, confirmed_at = IF(? = 1, NOW(), NULL),
@@ -354,33 +358,6 @@ if ($action === 'validate') {
                 exit;
             }
             $urgentFlag->close();
-        }
-        if ($barangayWillRespond) {
-            $activeCase = $conn->prepare("INSERT INTO confirmed_cases
-                    (report_id, case_type, location_address, coordinates_lat, coordinates_long, barangay_id, urgency_level, status, confirmed_at)
-                SELECT r.report_id, r.report_type, r.location_address, r.coordinates_lat, r.coordinates_long,
-                       r.barangay_id, r.urgency_level, 'active', NOW()
-                FROM reports r
-                WHERE r.report_id = ? AND NOT EXISTS (
-                    SELECT 1 FROM confirmed_cases existing WHERE existing.report_id = r.report_id
-                )");
-            if (!$activeCase) {
-                $conn->rollback();
-                error_log('Could not prepare barangay response assignment: ' . $conn->error);
-                http_response_code(500);
-                echo json_encode(['success' => false, 'message' => 'Barangay assignment could not be saved. Please try again.']);
-                exit;
-            }
-            $activeCase->bind_param('i', $reportId);
-            if (!$activeCase->execute()) {
-                $activeCase->close();
-                $conn->rollback();
-                error_log('Could not create active barangay response case: ' . $conn->error);
-                http_response_code(500);
-                echo json_encode(['success' => false, 'message' => 'Barangay assignment could not be saved. Please try again.']);
-                exit;
-            }
-            $activeCase->close();
         }
         $history = $conn->prepare("INSERT INTO report_response_history (report_id, actor_id, actor_role, action, from_state, to_state, reason)
             VALUES (?, ?, 'barangay', ?, 'pending_validation', ?, ?)");

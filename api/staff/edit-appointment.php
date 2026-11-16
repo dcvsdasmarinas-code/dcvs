@@ -49,8 +49,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($petId === 0) {
         $errors[] = "Please select a pet.";
     }
-    if (empty($preferredDate)) {
+    if (empty($preferredDate)
+        || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferredDate)
+        || !checkdate((int)substr($preferredDate, 5, 2), (int)substr($preferredDate, 8, 2), (int)substr($preferredDate, 0, 4))) {
         $errors[] = "Preferred date is required.";
+    } elseif (strtotime($preferredDate . ' ' . substr($preferredTime, 0, 5)) <= time()) {
+        $errors[] = "Choose a future appointment date and time.";
     }
     if (empty($preferredTime)) {
         $errors[] = "Preferred time is required.";
@@ -61,24 +65,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Slot capacity check (only if date/time changed)
     if (empty($errors)) {
         $preferredTime = dcvsTimeKey($preferredTime) . ':00';
-        $origStmt = $conn->prepare("SELECT preferred_date, preferred_time, urgency_level FROM appointments WHERE appointment_id = ?");
-        $origStmt->bind_param("i", $appointmentId);
+        $origStmt = $conn->prepare("SELECT preferred_date, preferred_time, scheduled_date, scheduled_time, urgency_level, status
+            FROM appointments WHERE appointment_id = ? AND user_id = ?");
+        $origStmt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
         $origStmt->execute();
         $orig = $origStmt->get_result()->fetch_assoc();
         $origStmt->close();
-        if ($orig && ($orig['preferred_date'] !== $preferredDate || dcvsTimeKey($orig['preferred_time']) !== dcvsTimeKey($preferredTime) || $orig['urgency_level'] !== $urgencyLevel)) {
+        if (!$orig || $orig['status'] !== 'pending') {
+            $errors[] = "Only your pending appointment requests can be edited.";
+        } else {
+            $originalDate = $orig['scheduled_date'] ?: $orig['preferred_date'];
+            $originalTime = $orig['scheduled_time'] ?: $orig['preferred_time'];
+        }
+        if (empty($errors) && ($originalDate !== $preferredDate || dcvsTimeKey($originalTime) !== dcvsTimeKey($preferredTime) || $orig['urgency_level'] !== $urgencyLevel)) {
+            dcvsLockAppointmentCapacityDates($conn, [$originalDate, $preferredDate]);
+            $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $preferredDate, $urgencyLevel, $appointmentId);
             $slotAvailable = $urgencyLevel === 'urgent'
                 ? dcvsUrgentSlotAvailable($conn, $preferredDate, $preferredTime)
                 : dcvsSlotAvailable($conn, $preferredDate, $preferredTime);
             if (!$slotAvailable) {
                 $errors[] = "This time is not available under the clinic schedule and program staffing.";
             }
-            $dailyLimit = $urgencyLevel === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-            if (dcvsAppointmentDayCount($conn, $preferredDate, $appointmentId, $urgencyLevel) >= $dailyLimit) {
-                $errors[] = $urgencyLevel === 'urgent' ? "This date has no remaining urgent appointments." : "This date has reached its routine appointment limit.";
+            if ((!$dailyCapacity['has_program'] && $urgencyLevel === 'urgent') || !$dailyCapacity['available']) {
+                $errors[] = $urgencyLevel === 'urgent' ? "This date has no remaining urgent appointments." : "This date has reached its applicable daily appointment limit.";
             }
             $slotLimit = $urgencyLevel === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $preferredDate, $preferredTime);
-            if (dcvsAppointmentSlotCount($conn, $preferredDate, $preferredTime, $appointmentId, $urgencyLevel) >= $slotLimit) {
+            if (dcvsAppointmentSlotCount($conn, $preferredDate, $preferredTime, $appointmentId, $dailyCapacity['has_program'] ? $urgencyLevel : 'all') >= $slotLimit) {
                 $errors[] = "This time slot has no remaining appointment capacity.";
             }
         }
@@ -90,18 +102,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // Check if appointment belongs to user
-    $checkAppt = $conn->prepare("SELECT appointment_id FROM appointments WHERE appointment_id = ? AND user_id = ?");
-    $checkAppt->bind_param("ii", $appointmentId, $_SESSION['user_id']);
-    $checkAppt->execute();
-    $checkAppt->store_result();
-
-    if ($checkAppt->num_rows === 0) {
-        $_SESSION['appointment_error'] = "Invalid appointment selected.";
+    $duplicateStmt = $conn->prepare("SELECT COUNT(*) FROM appointments
+        WHERE user_id = ? AND COALESCE(scheduled_date, preferred_date) = ?
+          AND COALESCE(scheduled_time, preferred_time) = ?
+          AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+          AND archived_at IS NULL AND appointment_id <> ?");
+    $duplicateStmt->bind_param('issi', $_SESSION['user_id'], $preferredDate, $preferredTime, $appointmentId);
+    $duplicateStmt->execute();
+    $hasDuplicate = (int)$duplicateStmt->get_result()->fetch_row()[0] > 0;
+    $duplicateStmt->close();
+    if ($hasDuplicate) {
+        $_SESSION['appointment_error'] = "You already have another appointment at this date and time.";
         header('Location: dashboard-resident.php');
         exit;
     }
-    $checkAppt->close();
 
     // Check if pet belongs to user
     $checkPet = $conn->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND owner_id = ?");
@@ -117,18 +131,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $checkPet->close();
 
     // Update appointment in database
-    $oldSlotStmt = $conn->prepare("SELECT appointment_type, preferred_date, preferred_time, urgency_level FROM appointments WHERE appointment_id = ? AND user_id = ?");
+    $oldSlotStmt = $conn->prepare("SELECT appointment_type,
+        COALESCE(scheduled_date, preferred_date) AS effective_date,
+        COALESCE(scheduled_time, preferred_time) AS effective_time,
+        urgency_level FROM appointments WHERE appointment_id = ? AND user_id = ? AND status = 'pending'");
     $oldSlotStmt->bind_param('ii', $appointmentId, $_SESSION['user_id']);
     $oldSlotStmt->execute();
     $oldSlot = $oldSlotStmt->get_result()->fetch_assoc();
     $oldSlotStmt->close();
-    $stmt = $conn->prepare("UPDATE appointments SET appointment_type = ?, urgency_level = ?, pet_id = ?, preferred_date = ?, preferred_time = ?, notes = ? WHERE appointment_id = ? AND user_id = ?");
+    $stmt = $conn->prepare("UPDATE appointments SET appointment_type = ?, urgency_level = ?, pet_id = ?, preferred_date = ?, preferred_time = ?, notes = ? WHERE appointment_id = ? AND user_id = ? AND status = 'pending'");
     $stmt->bind_param("ssisssii", $appointmentType, $urgencyLevel, $petId, $preferredDate, $preferredTime, $notes, $appointmentId, $_SESSION['user_id']);
 
     if ($stmt->execute()) {
         dcvsMarkWaitlistBooked($conn, (int)$_SESSION['user_id'], $appointmentId, $appointmentType, $urgencyLevel, $preferredDate, $preferredTime, $petId);
-        if ($oldSlot && ($oldSlot['appointment_type'] !== $appointmentType || $oldSlot['preferred_date'] !== $preferredDate || dcvsTimeKey($oldSlot['preferred_time']) !== dcvsTimeKey($preferredTime) || ($oldSlot['urgency_level'] ?? 'routine') !== $urgencyLevel)) {
-            dcvsNotifyWaitlistForSlot($conn, $oldSlot['preferred_date'], $oldSlot['preferred_time'], $oldSlot['appointment_type'], $oldSlot['urgency_level'] ?? 'routine');
+        if ($oldSlot && ($oldSlot['appointment_type'] !== $appointmentType || $oldSlot['effective_date'] !== $preferredDate || dcvsTimeKey($oldSlot['effective_time']) !== dcvsTimeKey($preferredTime) || ($oldSlot['urgency_level'] ?? 'routine') !== $urgencyLevel)) {
+            dcvsNotifyWaitlistForSlot($conn, $oldSlot['effective_date'], $oldSlot['effective_time'], $oldSlot['appointment_type'], $oldSlot['urgency_level'] ?? 'routine');
         }
         $_SESSION['appointment_success'] = "Appointment updated successfully!";
         header('Location: dashboard-resident.php');

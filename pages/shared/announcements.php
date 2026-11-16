@@ -1,10 +1,21 @@
 ﻿<!DOCTYPE html>
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 $currentPage = 'updates'; $homePage = 'landing-page.php';
 $announcements = [];
-$conn->query("UPDATE announcements SET status='published', updated_at=NOW() WHERE status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW() AND is_active=1");
-$aq = $conn->query("SELECT * FROM announcements WHERE is_active=1 AND (status='published' OR (status='scheduled' AND publish_at IS NOT NULL AND publish_at <= NOW())) ORDER BY created_at DESC");
+$aq = $conn->query(
+    "SELECT announcement_id, title, location, content, category, subject, link_url, photo_url,
+            status, created_at, publish_at, expiry_date, is_event, event_date, event_end_date
+     FROM announcements
+     WHERE is_active=1
+       AND status='published'
+       AND archived_at IS NULL
+       AND (publish_at IS NULL OR publish_at <= NOW())
+       AND (expiry_date IS NULL OR expiry_date >= CURDATE())
+     ORDER BY COALESCE(publish_at, created_at) DESC"
+);
 if ($aq) { while ($rr = $aq->fetch_assoc()) $announcements[] = $rr; }
 $publicBarangayNames = [];
 $publicBarangaysQuery = $conn->query("SELECT barangay_id, barangay_name FROM barangays");
@@ -13,22 +24,41 @@ if ($publicBarangaysQuery) {
         $publicBarangayNames[(int)$barangay['barangay_id']] = $barangay['barangay_name'];
     }
 }
+$publicSubjectLabels = [
+    'animal_health' => 'Animal Health',
+    'services_programs' => 'Services and Programs',
+    'events' => 'Events',
+    'general_notices' => 'General Notices'
+];
+$normalizePublicBarangayText = static function (string $value): string {
+    $value = strtolower($value);
+    $value = preg_replace('/\biv\b/', '4', $value);
+    $value = preg_replace('/\biii\b/', '3', $value);
+    $value = preg_replace('/\bii\b/', '2', $value);
+    $value = preg_replace('/\bi\b/', '1', $value);
+    return preg_replace('/\s+/', ' ', trim($value));
+};
+foreach ($announcements as &$announcement) {
+    $targets = [];
+    $location = trim((string)($announcement['location'] ?? ''));
+    if ($location !== '') {
+        $normalizedLocation = $normalizePublicBarangayText($location);
+        foreach ($publicBarangayNames as $barangayId => $barangayName) {
+            $normalizedName = $normalizePublicBarangayText((string)$barangayName);
+            if (preg_match('/(?<![\p{L}\p{N}])' . preg_quote($normalizedName, '/') . '(?![\p{L}\p{N}])/u', $normalizedLocation)) {
+                $targets[] = ['id' => (int)$barangayId, 'name' => (string)$barangayName];
+            }
+        }
+    }
+    $announcement['_public_targets'] = $targets;
+    $announcement['_public_all_barangays'] = strcasecmp($location, 'all barangays') === 0;
+    $announcement['_public_category_label'] = $publicSubjectLabels[(string)($announcement['subject'] ?? '')]
+        ?? 'General Notices';
+}
+unset($announcement);
 function annf($c){ return $c === 'advisory' ? 'advisories' : 'announcements'; }
 function annlabel($c){ return $c === 'advisory' ? 'Advisory' : 'Announcement'; }
 function annAudience($announcement, $barangayNames) {
-    $type = $announcement['audience_type'] ?? 'all';
-    if ($type === 'barangay') {
-        $name = $barangayNames[(int)($announcement['barangay_id'] ?? 0)] ?? '';
-        return $name !== '' ? 'Visible to ' . $name : 'Visible to selected residents';
-    }
-    if ($type === 'selected') {
-        $ids = array_filter(array_map('intval', explode(',', (string)($announcement['audience_barangays'] ?? ''))));
-        $names = [];
-        foreach ($ids as $id) {
-            if (isset($barangayNames[$id])) $names[] = $barangayNames[$id];
-        }
-        return $names ? 'Visible to ' . implode(', ', $names) : 'Visible to selected residents';
-    }
     return '';
 }
 $ann_ct = count($announcements);
@@ -164,6 +194,7 @@ $ann_ct = count($announcements);
   .dropdown-toggle { padding:5px 10px !important; font-size:0.8rem !important; }
 }
 </style>
+<link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/site-navbar.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/site-navbar.css'), ENT_QUOTES, 'UTF-8'); ?>" />
 </head><!--/$--><body data-barba="wrapper" data-navigation-status="is-closed" data-about-status="is-closed" data-theme-nav="light" data-scroll-time="0"><?php include __DIR__ . '/../../includes/landing-navbar.php'; ?><div class="transition_screen"></div><div data-cursor="" class="cursor_wrap"><div class="cursor-bubble"><!--$--><span data-cursor-text-target="" class="cursor-bubble__text u-text-style-main">Hello world</span><!--/$--></div><div class="cursor_css w-embed"><style>
   @media (hover: hover) and (pointer: fine) {
 

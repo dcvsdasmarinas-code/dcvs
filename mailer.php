@@ -4,7 +4,7 @@
  * Sends professional HTML emails to residents when staff updates appointments or reports.
  */
 
-require_once 'email_config.php';
+require_once __DIR__ . '/email_config.php';
 
 /**
  * Enqueue a DCVS email to the email_queue table for background delivery.
@@ -262,8 +262,10 @@ function sendAppointmentEmail($conn, $appointmentId, $newStatus, $staffMessage =
     $typeLabels = ['vaccination'=>'Vaccination','checkup'=>'Checkup','kapon'=>'Kapon (Spay/Neuter)','adoption'=>'Adoption'];
     $apptType = $typeLabels[$data['appointment_type']] ?? ucfirst($data['appointment_type']);
     $titleType = $data['appointment_type'] === 'kapon' ? 'Kapon' : $apptType;
-    $dateFormatted = date('F j, Y', strtotime($data['preferred_date']));
-    $timeFormatted = date('g:i A', strtotime($data['preferred_time']));
+    $appointmentDate = $data['scheduled_date'] ?: $data['preferred_date'];
+    $appointmentTime = $data['scheduled_time'] ?: $data['preferred_time'];
+    $dateFormatted = date('F j, Y', strtotime($appointmentDate));
+    $timeFormatted = date('g:i A', strtotime($appointmentTime));
 
     $statusLabels = [
         'scheduled' => 'Scheduled',

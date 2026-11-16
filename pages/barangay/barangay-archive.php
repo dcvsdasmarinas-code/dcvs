@@ -8,6 +8,8 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['barangay_id']) || ($_SESSI
 }
 
 require_once __DIR__ . '/../../db.php';
+require_once __DIR__ . '/../../includes/barangay-app-base.php';
+$appBaseUrl = dcvsBarangayAppBaseUrl();
 
 $userId     = (int)$_SESSION['user_id'];
 $barangayId = (int)$_SESSION['barangay_id'];
@@ -15,13 +17,13 @@ $fullName   = $conn->real_escape_string($_SESSION['full_name'] ?? 'Barangay Offi
 $barangayName = 'Barangay';
 $barangayDistrict = '';
 
-$bq = $conn->prepare("SELECT name, district FROM barangays WHERE barangay_id = ?");
+$bq = $conn->prepare("SELECT barangay_name, district FROM barangays WHERE barangay_id = ?");
 if ($bq) {
     $bq->bind_param('i', $barangayId);
     $bq->execute();
     $bRow = $bq->get_result()->fetch_assoc();
     if ($bRow) {
-        $barangayName     = str_replace('±', 'ñ', (string)$bRow['name']);
+        $barangayName     = str_replace('±', 'ñ', (string)$bRow['barangay_name']);
         $barangayDistrict = str_replace('±', 'ñ', (string)$bRow['district']);
     }
     $bq->close();
@@ -101,12 +103,14 @@ $activePage = 'archive';
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/sb2.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/sb2.css'); ?>">
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/notification.css', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html { height: 100%; -webkit-font-smoothing: antialiased; }
     body { background: #fff; font-family: 'Inter', 'Segoe UI', sans-serif; }
 
-    .app-wrapper{min-height:100vh;display:flex;flex-direction:column;background:#fff;}
+    .app-wrapper{min-width:0;min-height:100vh;display:flex;flex-direction:column;background:#fff;}
     body.sb2-active .app-wrapper{padding-left:var(--sidebar-w);transition:padding-left .2s ease;}
     body.sb2-active .app-wrapper .topbar{left:auto!important;}
     body.sb2-active .app-wrapper .main-content{margin-left:0!important;}
@@ -142,14 +146,13 @@ $activePage = 'archive';
     .notif-time{font-size:.65rem;color:#94a3b8;margin-top:3px;}
     .notif-empty{text-align:center;padding:2rem;color:#94a3b8;font-size:.82rem;}
     @media(max-width:640px){.notif-panel{width:calc(100vw - 2rem)!important;right:.5rem!important;}}
-    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;cursor:pointer;transition:all .2s cubic-bezier(.4,0,.2,1);border:1px solid transparent;}
-    .user-profile:hover{background:#F3F4F6;border-color:#F0F2F5;}
+    .user-profile{display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:6px;border:1px solid transparent;}
     .user-avatar{width:34px;height:34px;border-radius:50%;background:#D5ECE0;border:1px solid #B8DEC9;display:flex;align-items:center;justify-content:center;color:#0B4D26;font-weight:700;font-size:12px;overflow:hidden;}
     .user-meta{display:flex;flex-direction:column;line-height:1.25;}
     .user-name{font-size:14px;font-weight:600;color:#18181B;}
     .user-role{font-size:12px;color:#71717A;}
 
-    .main-content { padding: 1.25rem 2rem 1.75rem; margin-top: 0 !important; }
+    .main-content { min-width:0; padding: 1.25rem 2rem 1.75rem; margin-top: 0 !important; }
 
     .appt-card-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:1rem;}
     .appt-header-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -163,8 +166,8 @@ $activePage = 'archive';
     .pet-action-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:6px;border:1px solid #e4e4e7;background:#fff;color:#71717a;font-size:13px;font-weight:500;font-family:'Inter','Segoe UI',sans-serif;cursor:pointer;transition:all .15s;text-decoration:none;}
     .pet-action-btn:hover{background:#f4f4f5;color:#18181b;border-color:#d4d4d8;}
 
-    .appt-db-table-area{background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow-x:auto;}
-    .appt-table{width:100%;border-collapse:collapse;font-family:'Inter','Segoe UI',sans-serif;}
+    .appt-db-table-area{width:100%;min-width:0;max-width:100%;contain:paint;background:#fff;border:1px solid #e4e4e7;border-radius:8px;overflow-x:auto;}
+    .appt-table{width:100%;min-width:980px;border-collapse:collapse;font-family:'Inter','Segoe UI',sans-serif;}
     .appt-table thead th{padding:10px 12px;font-size:14px;font-weight:500;color:#71717a;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;white-space:nowrap;}
     .sd-th{position:relative;}
     .th-sort{display:inline-flex;align-items:center;gap:6px;height:28px;margin-left:-12px;padding:0 12px;border-radius:6px;background:transparent;border:none;font-size:14px;font-weight:500;color:#71717a;cursor:pointer;white-space:nowrap;font-family:inherit;transition:background .1s,color .1s;}
@@ -226,12 +229,14 @@ $activePage = 'archive';
     .toast-notification{position:fixed;bottom:24px;right:24px;background:#111827;color:#fff;padding:12px 18px;border-radius:8px;font-size:14px;font-weight:500;box-shadow:0 10px 15px -3px rgba(0,0,0,.2);display:flex;align-items:center;gap:10px;z-index:200;transform:translateY(100px);opacity:0;transition:all .3s cubic-bezier(.4,0,.2,1);}
     .toast-notification.show{transform:translateY(0);opacity:1;}
 
-    @media(max-width:768px){.topbar{padding:0 16px;}.main-content{padding:1rem;}.appt-card-header{flex-direction:column;align-items:stretch;}.appt-header-right{flex-wrap:wrap;}}
+    @media(max-width:768px){.topbar{gap:12px;padding:0 16px;}.topbar-left{min-width:0;}.topbar-breadcrumb{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}.breadcrumb-root,.breadcrumb-current{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.topbar-right{flex:0 0 auto;gap:8px;}.user-meta{display:none;}.main-content{min-width:0;padding:1rem;}.appt-card-header{flex-direction:column;align-items:stretch;}.appt-header-right{width:100%;flex-wrap:wrap;}.appt-search-wrap{min-width:0;flex:1;}.appt-search-input{width:100%;min-width:0;}.appt-status-select{min-width:0;max-width:100%;}}
+    @media(max-width:480px){.topbar{padding:0 10px;}.main-content{padding:12px;}.appt-header-right>*{max-width:100%;}}
   </style>
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>">
 </head>
 <body>
 
-<?php include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
+<?php $barangaySidebarStylesheetInHead = true; include __DIR__ . '/../../includes/barangay-sidebar.php'; ?>
 
 <div class="app-wrapper">
   <header class="topbar">
@@ -254,8 +259,8 @@ $activePage = 'archive';
         </button>
         <div class="notif-panel" id="notifPanel" data-notification-panel data-portal="barangay"
           data-csrf="<?php echo htmlspecialchars(csrfToken(), ENT_QUOTES, 'UTF-8'); ?>"
-          data-action-url="includes/staff-notification-action.php?portal=barangay"
-          data-load-url="get-notifications.php?limit=30" data-app-base-url="">
+          data-action-url="<?php echo htmlspecialchars($appBaseUrl . '/includes/staff-notification-action.php?portal=barangay', ENT_QUOTES, 'UTF-8'); ?>"
+          data-load-url="<?php echo htmlspecialchars($appBaseUrl . '/get-notifications.php?limit=30', ENT_QUOTES, 'UTF-8'); ?>" data-app-base-url="<?php echo htmlspecialchars($appBaseUrl, ENT_QUOTES, 'UTF-8'); ?>">
           <div class="notif-panel-header">
             <h4>Notifications</h4>
             <button class="notif-mark-all" type="button" <?php echo $unreadNotifs === 0 ? 'disabled' : ''; ?>><i class="fas fa-check-double" aria-hidden="true"></i> Mark all as read</button>
@@ -271,7 +276,7 @@ $activePage = 'archive';
           </div>
         </div>
       </div>
-      <div class="user-profile" id="user-profile-btn" title="View Profile">
+      <div class="user-profile">
         <div class="user-avatar">
           <?php if ($avatarUrl): ?>
             <img src="<?php echo htmlspecialchars($avatarUrl); ?>" alt="avatar" style="width:100%;height:100%;object-fit:cover;">
@@ -292,15 +297,17 @@ $activePage = 'archive';
 
   <main class="main-content">
 
-    <div class="appt-card-header">
-      <div class="appt-header-right">
-        <select class="appt-status-select" id="categoryFilter">
+    <div class="appt-card-header portal-mobile-toolbar">
+      <div class="appt-header-right portal-toolbar-controls">
+        <div class="portal-toolbar-filter-grid">
+        <select class="appt-status-select portal-toolbar-last-filter" id="categoryFilter">
           <option value="">All Categories</option>
           <option value="stray">Stray</option>
           <option value="rabies">Rabies</option>
           <option value="injured">Injured</option>
           <option value="dead">Dead</option>
         </select>
+        </div>
       </div>
     </div>
 
@@ -483,8 +490,7 @@ document.getElementById('categoryFilter').addEventListener('change', getFiltered
 render();
 
 </script>
-<script src="assets/js/notification-panel.js?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
-<link rel="stylesheet" href="assets/css/notification.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/notification.css'); ?>">
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/notification-panel.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/notification-panel.js'); ?>" defer></script>
 
 </body>
 </html>

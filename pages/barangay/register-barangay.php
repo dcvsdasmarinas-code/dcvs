@@ -10,8 +10,11 @@ session_set_cookie_params([
 ]);
 session_start();
 
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/registration-validation.php';
 
 // Fetch barangay list for the dropdown
 $barangays = dcvsLoadApprovedBarangays($conn);
@@ -38,19 +41,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $errors = [];
 
     if (empty($fullName)) $errors[] = "Full name is required.";
-    if (empty($phone)) $errors[] = "Phone number is required.";
-    elseif (!preg_match('/^(\+63|0)[0-9]{10}$/', preg_replace('/\s/', '', $phone)))
-        $errors[] = "Enter a valid PH number (e.g. 09XX XXX XXXX).";
+    $phoneError = dcvsRegistrationPhoneError($phone);
+    if ($phoneError !== '') $errors[] = $phoneError;
     if (empty($email)) $errors[] = "Email address is required.";
     elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors[] = "Please enter a valid email address.";
     if (empty($username)) $errors[] = "Username is required.";
     elseif (strlen($username) < 3) $errors[] = "Username must be at least 3 characters.";
-    if (empty($password)) $errors[] = "Password is required.";
-    elseif (strlen($password) < 8) $errors[] = "Password must be at least 8 characters.";
-    elseif (!preg_match('/[A-Z]/', $password)) $errors[] = "Password must contain at least one uppercase letter.";
-    elseif (!preg_match('/[a-z]/', $password)) $errors[] = "Password must contain at least one lowercase letter.";
-    elseif (!preg_match('/[0-9]/', $password)) $errors[] = "Password must contain at least one number.";
-    elseif (!preg_match('/[^A-Za-z0-9]/', $password)) $errors[] = "Password must contain at least one special character.";
+    $passwordError = dcvsRegistrationPasswordError($password);
+    if ($passwordError !== '') $errors[] = $passwordError;
     if ($password !== $confirmPassword) $errors[] = "Passwords do not match.";
     if (!isset($officialBarangayIds[$barangayId])) $errors[] = "Please select a valid official barangay.";
     if (!$agreeTerms) $errors[] = "You must agree to the Terms and Conditions.";
@@ -102,8 +100,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $logStmt->execute();
         $logStmt->close();
 
-        $_SESSION['register_success'] = "Barangay account created successfully! You can now log in.";
-        header('Location: login-barangay.php');
+        $_SESSION['login_notice'] = "Barangay account created successfully. You can now sign in.";
+        header('Location: ' . $appBaseUrl . '/login.php');
         exit;
     } else {
         $_SESSION['register_error'] = "Registration failed. Please try again.";
@@ -126,9 +124,6 @@ $conn->close();
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/auth.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
-
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -143,7 +138,7 @@ $conn->close();
       --error: #ef4444;
       --error-bg: #fef2f2;
       --surface: #ffffff;
-      --bg: #f8fafc;
+      --bg: #ffffff;
     }
 
     body {
@@ -158,6 +153,7 @@ $conn->close();
     .auth-wrapper {
       display: grid;
       grid-template-columns: 1fr 1fr;
+      align-items: start;
       min-height: 100vh;
       width: 100%;
     }
@@ -168,9 +164,11 @@ $conn->close();
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      position: sticky;
+      top: 0;
+      height: 100vh;
       padding: 4rem 4rem 2.5rem;
       background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%);
-      position: relative;
       overflow: hidden;
     }
 
@@ -273,22 +271,16 @@ $conn->close();
     /* Right Form Panel */
     .auth-form-panel {
       display: flex;
-      align-items: safe center;
+      align-items: center;
       justify-content: center;
-      padding: 1.5rem 3rem;
-      overflow-y: auto;
-      max-height: 100vh;
+      min-height: 100vh;
+      padding: 2rem clamp(1.5rem, 4vw, 3rem);
       background: var(--bg);
     }
 
     .auth-form-card {
       width: 100%;
       max-width: 520px;
-      background: var(--surface);
-      border: 1px solid var(--border-color);
-      border-radius: 3px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04);
-      padding: 1.25rem 2.5rem;
     }
 
     @keyframes fadeIn {
@@ -296,22 +288,9 @@ $conn->close();
       to { opacity: 1; transform: translateY(0); }
     }
 
-    .register-logo {
-      display: flex;
-      justify-content: center;
-      padding-top: 0;
-      margin-bottom: 0.75rem;
-    }
-
-    .register-logo img {
-      width: 64px;
-      height: 64px;
-      object-fit: contain;
-    }
-
     .register-header {
       text-align: center;
-      margin-bottom: 0.75rem;
+      margin-bottom: 1.5rem;
     }
 
     .register-header h2 {
@@ -355,23 +334,23 @@ $conn->close();
     .register-form {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 1rem;
     }
 
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
+      gap: 1rem;
     }
 
     .form-group {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.4rem;
     }
 
     .form-group label {
-      font-size: 0.8rem;
+      font-size: 0.875rem;
       font-weight: 600;
       color: var(--text-main);
     }
@@ -407,6 +386,10 @@ $conn->close();
       transition: border-color 0.25s, box-shadow 0.25s;
       outline: none;
       appearance: none;
+    }
+
+    .input-wrapper input.password-input {
+      padding-right: 2.75rem;
     }
 
     .input-wrapper select {
@@ -459,14 +442,17 @@ $conn->close();
     .strength-fill {
       height: 100%; border-radius: 2px; transition: width 0.4s ease, background 0.4s ease; width: 0%;
     }
-    .strength-fill.weak { width: 25%; background: var(--error); }
-    .strength-fill.fair { width: 50%; background: #f59e0b; }
-    .strength-fill.good { width: 75%; background: #eab308; }
+    .strength-fill.weak { width: 33%; background: var(--error); }
+    .strength-fill.medium { width: 66%; background: #f59e0b; }
     .strength-fill.strong { width: 100%; background: #10b981; }
     .strength-label {
       font-size: 0.75rem; font-weight: 600; color: var(--text-muted);
       min-width: 40px; text-align: right;
     }
+    .password-requirements { display:grid;gap:0.25rem;margin:0.15rem 0 0;padding:0;list-style:none;color:var(--text-muted);font-size:0.75rem;line-height:1.4; }
+    .password-requirements li::before { content:'○';display:inline-block;width:1.15rem;color:var(--text-muted); }
+    .password-requirements li.is-met { color:var(--green-primary); }
+    .password-requirements li.is-met::before { content:'✓';color:var(--green-primary); }
 
     /* Terms */
     .terms-label {
@@ -556,65 +542,117 @@ $conn->close();
     /* Terms Modal */
     .modal {
       display: none; position: fixed; inset: 0; z-index: 999;
-      background: rgba(0,0,0,0.5); align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.8); align-items: center; justify-content: center;
       padding: 1rem;
+      font-family: 'Inter', sans-serif;
     }
     .modal.active { display: flex; }
     .modal-content {
-      background: #fff; border-radius: 12px; overflow: hidden;
-      max-width: 560px; width: 100%;
-      box-shadow: 0 25px 80px rgba(0,0,0,0.15);
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid #e4e4e7;
+      border-radius: 8px;
+      max-width: 512px;
+      width: 100%;
+      max-height: min(85vh, 720px);
+      box-shadow: 0 20px 25px rgba(0,0,0,0.18);
       animation: modalIn 0.2s ease;
     }
     @keyframes modalIn {
-      from { opacity: 0; transform: translateY(20px) scale(0.97); }
+      from { opacity: 0; transform: translateY(8px) scale(0.98); }
       to { opacity: 1; transform: translateY(0) scale(1); }
     }
     .modal-header {
-      background: #fff; padding: 20px 24px;
-      display: flex; align-items: center; justify-content: space-between;
-      border-bottom: 1px solid var(--border-color);
+      position: relative;
+      display: flex;
+      align-items: center;
+      min-height: 60px;
+      padding: 20px 24px 12px;
     }
     .modal-header h3 {
-      margin: 0; font-size: 1.1rem; font-weight: 700;
-      color: var(--text-main); display: flex; align-items: center; gap: 8px;
+      margin: 0;
+      color: #09090b;
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1;
+      letter-spacing: -0.025em;
     }
     .modal-close {
-      width: 32px; height: 32px; border-radius: 50%;
-      background: #f1f5f9; border: none; color: var(--text-muted);
-      font-size: 1.1rem; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      transition: all 0.2s;
+      position: absolute;
+      top: 16px;
+      right: 16px;
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: #71717a;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
     }
-    .modal-close:hover { background: #e2e8f0; color: var(--text-main); }
-    .modal-body { padding: 24px; background: #fff; max-height: 60vh; overflow-y: auto; }
+    .modal-close:hover { background: #f4f4f5; color: #18181b; }
+    .modal-close:focus-visible { outline: 2px solid #18181b; outline-offset: 2px; }
+    .modal-body {
+      padding: 8px 24px 20px;
+      overflow-y: auto;
+      color: #71717a;
+      font-size: 14px;
+      line-height: 1.5;
+    }
     .modal-actions {
-      display: flex; justify-content: flex-end; gap: 0.75rem;
-      padding: 16px 24px; border-top: 1px solid var(--border-color); background: #fff;
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 16px 24px;
+      border-top: 1px solid #e4e4e7;
     }
     .terms-content h4 {
-      font-size: 0.9rem; font-weight: 700; color: var(--text-main);
+      color: #18181b;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.4;
       margin: 1.25rem 0 0.4rem;
     }
     .terms-content h4:first-child { margin-top: 0; }
     .terms-content p {
-      font-size: 0.82rem; line-height: 1.6; color: var(--text-muted); margin: 0 0 0.4rem;
+      color: #71717a;
+      font-size: 14px;
+      line-height: 1.5;
+      margin: 0 0 0.4rem;
+    }
+    @media (max-width: 520px) {
+      .modal { padding: 16px; }
+      .modal-content { max-height: calc(100dvh - 32px); }
+      .modal-header { padding: 20px 20px 12px; }
+      .modal-body { padding: 8px 20px 20px; }
+      .modal-actions { padding: 12px 20px 20px; }
+      .modal-actions .btn-register { flex: 1; }
     }
 
     /* Responsive */
     @media (max-width: 900px) {
-      .auth-wrapper { grid-template-columns: 1fr; }
-      .auth-brand-panel { min-height: auto; padding: 3rem 2rem 1.5rem; }
-      .brand-trust { position: static; margin: 3rem calc(-1 * (4rem + 60px)) 0; }
-      .auth-form-panel { padding: 2rem 1rem; height: auto; max-height: none; }
+      body { display: block; min-height: 100vh; overflow-x: hidden; background: #ffffff; }
+      .auth-wrapper { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; min-height: 100vh; overflow: hidden; background: inherit; }
+      .auth-brand-panel, .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .brand-title,
+      .brand-trust { display: none; }
+      .auth-logo { order: 2; width: clamp(88px, 24vw, 112px); margin: 0.6rem auto 0.75rem; }
+      .brand-tagline { display: none; }
+      .auth-form-panel { order: 3; min-width: 0; width: 100%; min-height: 0; padding: 1rem 16px; background: #ffffff; }
+      .auth-form-card { width: 100%; max-width: 560px; margin: 0 auto; padding: 0; }
+      .register-header { text-align: center; }
+      .form-row { grid-template-columns: 1fr; gap: 1rem; }
     }
 
     @media (max-width: 480px) {
-      .auth-brand-panel { padding: 2rem 1.5rem 1rem; }
-      .brand-trust { margin: 2rem calc(-1 * (1.5rem + 60px)) 0; }
-      .auth-form-panel { padding: 1.5rem 1rem; }
       .register-header h2 { font-size: 1.25rem; }
-      .form-row { grid-template-columns: 1fr; gap: 1rem; }
     }
   </style>
 </head>
@@ -626,7 +664,7 @@ $conn->close();
     <div class="auth-brand-panel">
       <div class="brand-content">
         <h1 class="brand-title">Dasmariñas City<br />Veterinary Services</h1>
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <p class="brand-tagline">Serving the community through better animal welfare and veterinary services.</p>
       </div>
 
@@ -637,7 +675,7 @@ $conn->close();
             $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
             for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
               <div class="brand-logo-item">
-                <img src="assets/images/<?php echo rawurlencode($logo); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
               </div>
             <?php endforeach; endfor; ?>
           </div>
@@ -648,10 +686,6 @@ $conn->close();
     <!-- Right Panel: Register Form -->
     <div class="auth-form-panel">
       <div class="auth-form-card">
-
-        <div class="register-logo">
-          <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" />
-        </div>
 
         <div class="register-header">
           <h2>Create Barangay Account</h2>
@@ -666,7 +700,7 @@ $conn->close();
         <?php else: ?>
           <div class="auth-alert auth-alert-error" id="registerAlert" style="display:none;">
             <i class="fas fa-exclamation-circle"></i>
-            <span id="registerAlertMsg">Please fix the errors below.</span>
+            <span id="registerAlertMsg">Review the highlighted fields and try again.</span>
           </div>
         <?php endif; ?>
 
@@ -694,7 +728,7 @@ $conn->close();
               <label for="phone">Phone Number <span class="required">*</span></label>
               <div class="input-wrapper">
                 <i class="fas fa-phone input-icon"></i>
-                <input type="tel" id="phone" name="phone" placeholder="+63 9XX XXX XXXX" required />
+                <input type="tel" id="phone" name="phone" inputmode="numeric" pattern="09[0-9]{9}" placeholder="09XXXXXXXXX" required />
               </div>
               <span class="field-error" id="phoneError"></span>
             </div>
@@ -737,7 +771,7 @@ $conn->close();
               <label for="regPassword">Password <span class="required">*</span></label>
               <div class="input-wrapper">
                 <i class="fas fa-lock input-icon"></i>
-                <input type="password" id="regPassword" name="password" placeholder="8+ chars, upper+lower+number+symbol" required />
+                <input type="password" id="regPassword" class="password-input" name="password" placeholder="8+ characters" required />
                 <button type="button" class="toggle-password" id="toggleRegPassword" aria-label="Toggle password visibility">
                   <i class="fas fa-eye"></i>
                 </button>
@@ -747,12 +781,19 @@ $conn->close();
                 <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
                 <span class="strength-label" id="strengthLabel">Weak</span>
               </div>
+              <ul class="password-requirements" id="passwordRequirements" aria-label="Password requirements">
+                <li data-password-rule="length">At least 8 characters</li>
+                <li data-password-rule="uppercase">At least one uppercase letter (A-Z)</li>
+                <li data-password-rule="lowercase">At least one lowercase letter (a-z)</li>
+                <li data-password-rule="number">At least one number (0-9)</li>
+                <li data-password-rule="special">At least one special character (such as !, @, #, or $)</li>
+              </ul>
             </div>
             <div class="form-group" id="confirmPasswordGroup">
               <label for="confirmPassword">Confirm Password <span class="required">*</span></label>
               <div class="input-wrapper">
                 <i class="fas fa-lock input-icon"></i>
-                <input type="password" id="confirmPassword" name="confirm_password" placeholder="Re-enter your password" required />
+                <input type="password" id="confirmPassword" class="password-input" name="confirm_password" placeholder="Re-enter your password" required />
                 <button type="button" class="toggle-password" id="toggleConfirmPassword" aria-label="Toggle confirm password visibility">
                   <i class="fas fa-eye"></i>
                 </button>
@@ -781,7 +822,7 @@ $conn->close();
 
         <p class="register-switch">
           Already have a barangay account?
-          <a href="login-barangay.php">Sign in here <i class="fas fa-arrow-right"></i></a>
+          <a href="<?php echo htmlspecialchars($appBaseUrl . '/login.php', ENT_QUOTES, 'UTF-8'); ?>">Sign in here <i class="fas fa-arrow-right"></i></a>
         </p>
 
         <div class="back-home">
@@ -794,11 +835,11 @@ $conn->close();
   </div>
 
   <!-- Terms & Conditions Modal -->
-  <div class="modal" id="termsModal">
-    <div class="modal-content">
+  <div class="modal" id="termsModal" aria-hidden="true">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="termsDialogTitle">
       <div class="modal-header">
-        <h3><i class="fas fa-file-contract"></i> Terms and Conditions</h3>
-        <button class="modal-close" onclick="closeTermsModal()">&times;</button>
+        <h3 id="termsDialogTitle">Terms and Conditions</h3>
+        <button type="button" class="modal-close" onclick="closeTermsModal()" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
         <div class="terms-content">
@@ -840,6 +881,7 @@ $conn->close();
     </div>
   </div>
 
-  <script src="assets/js/auth.js"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/philippine-phone-validation.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+  <script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 </body>
 </html>

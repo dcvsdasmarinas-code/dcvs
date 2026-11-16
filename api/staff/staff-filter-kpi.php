@@ -44,24 +44,24 @@ function kpiQuery($conn, $sql, $clause) {
 // Total all-time counts (display value)
 $totalResidents = kpiQuery($conn, "SELECT COUNT(*) FROM users WHERE role = 'resident'", "");
 $totalPets      = kpiQuery($conn, "SELECT COUNT(*) FROM pets WHERE archived_at IS NULL", "");
-$totalReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL", "");
+$totalReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", "");
 
 // For rabies: total currently active
-$totalRabies    = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL", "");
+$totalRabies    = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", "");
 
 // Period counts (new in current period) — for flow metrics
 $curResidents = kpiQuery($conn, "SELECT COUNT(*) FROM users WHERE role = 'resident'", $curClause);
 $curPets      = kpiQuery($conn, "SELECT COUNT(*) FROM pets WHERE archived_at IS NULL", $curClause);
-$curReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL", $curClause);
+$curReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", $curClause);
 
 // Previous period counts
 $prevResidents = kpiQuery($conn, "SELECT COUNT(*) FROM users WHERE role = 'resident'", $prevClause);
 $prevPets      = kpiQuery($conn, "SELECT COUNT(*) FROM pets WHERE archived_at IS NULL", $prevClause);
-$prevReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL", $prevClause);
+$prevReports   = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", $prevClause);
 
 // Rabies is a STOCK metric (total active count), so compare total now
 // vs total at the start of the current period
-$newRabiesInPeriod = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL", $curClause);
+$newRabiesInPeriod = kpiQuery($conn, "SELECT COUNT(*) FROM reports WHERE report_type = 'rabies' AND status IN ('pending', 'validated') AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", $curClause);
 $curRabies  = $totalRabies;
 $prevRabies = max(0, $totalRabies - $newRabiesInPeriod);
 
@@ -87,7 +87,7 @@ $brgyQ = $conn->query("
     SUM(CASE WHEN r.status = 'rejected' THEN 1 ELSE 0 END) as rejected
   FROM reports r
   JOIN barangays b ON r.barangay_id = b.barangay_id
-  WHERE r.archived_at IS NULL
+  WHERE r.archived_at IS NULL AND r.duplicate_status NOT IN ('merged', 'suspected')
   GROUP BY b.barangay_id, b.barangay_name
   ORDER BY total DESC
   LIMIT 5
@@ -125,8 +125,8 @@ function dailyTrend($conn, $sql, $startDate, $sparkDays) {
 }
 $sparkResidents = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM users t WHERE role='resident'", $startDate, $sparkDays);
 $sparkPets      = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM pets t WHERE archived_at IS NULL", $startDate, $sparkDays);
-$sparkReports   = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM reports t WHERE archived_at IS NULL", $startDate, $sparkDays);
-$sparkRabies    = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM reports t WHERE report_type='rabies' AND archived_at IS NULL", $startDate, $sparkDays);
+$sparkReports   = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM reports t WHERE archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", $startDate, $sparkDays);
+$sparkRabies    = dailyTrend($conn, "SELECT DATE(created_at) as d, COUNT(*) as c FROM reports t WHERE report_type='rabies' AND archived_at IS NULL AND duplicate_status NOT IN ('merged', 'suspected')", $startDate, $sparkDays);
 
 echo json_encode([
     'period'          => $period,

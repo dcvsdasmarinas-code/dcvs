@@ -6,12 +6,14 @@ function dcvsResponseTransition(string $action): ?array {
         'return_for_validation' => ['role' => 'staff', 'from' => ['awaiting_dcvs_decision'], 'to' => 'awaiting_dcvs_decision', 'reason' => true],
         'reject_report' => ['role' => 'staff', 'from' => ['awaiting_dcvs_decision'], 'to' => 'closed_not_actionable', 'reason' => true],
         'start_response' => ['role' => 'barangay', 'from' => ['barangay_response_approved'], 'to' => 'barangay_responding'],
+        'record_site_visit' => ['role' => 'barangay', 'from' => ['barangay_responding'], 'to' => 'barangay_responding'],
         'update_progress' => ['role' => 'barangay', 'from' => ['barangay_responding', 'animal_secured'], 'to' => 'barangay_responding', 'reason' => true],
         'resolve_barangay' => ['role' => 'barangay', 'from' => ['animal_secured'], 'to' => 'resolved'],
         'unable_to_secure' => ['role' => 'barangay', 'from' => ['barangay_response_approved', 'barangay_responding'], 'to' => 'escalated_to_dcvs', 'reason' => true],
         'unable_to_locate' => ['role' => 'barangay', 'from' => ['barangay_responding'], 'to' => 'unable_to_locate', 'reason' => true],
         'mark_secured' => ['role' => 'barangay', 'from' => ['barangay_responding'], 'to' => 'animal_secured'],
         'request_pickup' => ['role' => 'barangay', 'from' => ['animal_secured'], 'to' => 'awaiting_turnover'],
+        'set_handover_plan' => ['role' => 'barangay', 'from' => ['resolved'], 'to' => 'resolved'],
         'revoke_approval' => ['role' => 'staff', 'from' => ['barangay_response_approved', 'barangay_responding'], 'to' => 'dcvs_dispatch', 'reason' => true],
         'confirm_turnover' => ['role' => 'staff', 'from' => ['awaiting_turnover', 'resolved'], 'to' => 'resolved'],
         'begin_processing' => ['role' => 'staff', 'from' => ['turned_over'], 'to' => 'dcvs_processing'],
@@ -20,7 +22,7 @@ function dcvsResponseTransition(string $action): ?array {
         'resume_barangay_response' => ['role' => 'barangay', 'from' => ['returned_to_barangay'], 'to' => 'barangay_responding'],
         'close_not_actionable' => ['role' => 'staff', 'from' => ['unable_to_locate', 'escalated_to_dcvs'], 'to' => 'closed_not_actionable', 'reason' => true],
         'reopen_unable_to_locate' => ['role' => 'staff', 'from' => ['unable_to_locate'], 'to' => 'dcvs_dispatch', 'reason' => true],
-        'dispatch_escalation' => ['role' => 'staff', 'from' => ['escalated_to_dcvs'], 'to' => 'dcvs_dispatch', 'reason' => true],
+        'dispatch_escalation' => ['role' => 'staff', 'from' => ['escalated_to_dcvs'], 'to' => 'dcvs_dispatch'],
     ];
     return $transitions[$action] ?? null;
 }
@@ -34,6 +36,17 @@ function dcvsResponseCanTransition(string $action, string $role, string $state):
 
 function dcvsResponseCanResolveCase(string $role, string $state): bool {
     return $role === 'staff' && in_array($state, ['dcvs_dispatch', 'dcvs_processing'], true);
+}
+
+function dcvsResponseRequiresTurnover(string $reportType, string $animalDisposition): bool {
+    if (stripos($reportType, 'dead') !== false) {
+        return false;
+    }
+    return !in_array($animalDisposition, [
+        'reunited_with_owner',
+        'transferred_to_shelter',
+        'disposed_per_local_protocol',
+    ], true);
 }
 
 function dcvsResponseHasBarangayProposal(array $report): bool {

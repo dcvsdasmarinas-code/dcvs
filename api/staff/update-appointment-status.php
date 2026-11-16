@@ -39,7 +39,7 @@ if (empty($ids)) {
     exit;
 }
 
-$allowed = ['complete', 'cancel', 'reschedule', 'approve', 'reject', 'archive'];
+$allowed = ['complete', 'no_show', 'cancel', 'reschedule', 'approve', 'reject', 'archive'];
 if (!in_array($action, $allowed, true)) {
     echo json_encode(['success' => false, 'message' => 'Invalid action.']);
     exit;
@@ -61,7 +61,9 @@ $types = str_repeat('i', count($ids));
 
 if ($action === 'approve') {
     $staffMessage = trim($_POST['staff_message'] ?? '');
-    $selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, appointment_type, urgency_level, preferred_date, preferred_time, status FROM appointments WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
+    $selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, pet_id, appointment_type, urgency_level,
+        preferred_date, preferred_time, status FROM appointments
+        WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
     $selStmt->bind_param($types, ...$ids);
     $selStmt->execute();
     $res = $selStmt->get_result();
@@ -77,50 +79,111 @@ if ($action === 'approve') {
         echo json_encode(['success' => false, 'message' => 'Selected appointment(s) are not in pending status.']);
         exit;
     }
-
-    foreach ($pending as $appointment) {
-        $urgency = $appointment['urgency_level'] ?? 'routine';
-        $time = substr($appointment['preferred_time'], 0, 5);
-        $isAvailable = $urgency === 'urgent'
-            ? dcvsUrgentSlotAvailable($conn, $appointment['preferred_date'], $time)
-            : dcvsSlotAvailable($conn, $appointment['preferred_date'], $time);
-        $capacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $appointment['preferred_date'], $time);
-        $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-        if (!$isAvailable
-            || dcvsAppointmentSlotCount($conn, $appointment['preferred_date'], $time, 0, $urgency) > $capacity
-            || dcvsAppointmentDayCount($conn, $appointment['preferred_date'], 0, $urgency) > $dailyLimit) {
-            echo json_encode(['success' => false, 'message' => 'Cannot approve: ' . date('M d, Y', strtotime($appointment['preferred_date'])) . ' exceeds the available ' . $urgency . ' appointment capacity.']);
+    if (count($pending) !== 1) {
+        echo json_encode(['success' => false, 'message' => 'Approve appointments individually so capacity can be checked for each final schedule.']);
+        exit;
+    }
+    $appointment = $pending[0];
+    $urgency = $appointment['urgency_level'] ?: 'routine';
+    $date = $appointment['preferred_date'];
+    $time = substr($appointment['preferred_time'], 0, 5);
+    try {
+        dcvsLockAppointmentCapacityDates($conn, [$date]);
+    } catch (RuntimeException $error) {
+        echo json_encode(['success' => false, 'message' => $error->getMessage()]);
+        exit;
+    }
+    $dailyCapacity = dcvsAppointmentDailyCapacity($conn, $date, $urgency, (int)$appointment['appointment_id']);
+    if (!$dailyCapacity['has_program'] && $urgency === 'urgent') {
+        echo json_encode(['success' => false, 'message' => 'Urgent priority is only available on dates with a scheduled program.']);
+        exit;
+    }
+    if (!dcvsIsStandardTime($time) || strtotime($date . ' ' . $time) <= time()) {
+        echo json_encode(['success' => false, 'message' => 'The requested appointment time has passed or is invalid.']);
+        exit;
+    }
+    $open = $urgency === 'urgent'
+        ? dcvsUrgentSlotAvailable($conn, $date, $time)
+        : dcvsSlotAvailable($conn, $date, $time);
+    if (!$open) {
+        echo json_encode(['success' => false, 'message' => dcvsSlotUnavailableReason($conn, $date, $time)]);
+        exit;
+    }
+    $duplicate = $conn->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = ?
+        AND COALESCE(scheduled_date, preferred_date) = ?
+        AND COALESCE(scheduled_time, preferred_time) = ?
+        AND status IN ('pending','approved','scheduled','rescheduled','in_progress','action_needed')
+        AND archived_at IS NULL AND appointment_id <> ?");
+    $duplicate->bind_param('issi', $appointment['user_id'], $date, $time, $appointment['appointment_id']);
+    $duplicate->execute();
+    $hasConflict = (int)$duplicate->get_result()->fetch_row()[0] > 0;
+    $duplicate->close();
+    if ($hasConflict) {
+        echo json_encode(['success' => false, 'message' => 'This resident already has another appointment at the requested date and time.']);
+        exit;
+    }
+    $dailyFull = !$dailyCapacity['available'];
+    $slotCapacity = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $time);
+    $slotCountUrgency = $dailyCapacity['has_program'] ? $urgency : 'all';
+    $slotFull = dcvsAppointmentSlotCount($conn, $date, $time, $appointment['appointment_id'], $slotCountUrgency) >= $slotCapacity;
+    $nextStatus = 'scheduled';
+    if ($dailyFull || $slotFull) {
+        if (empty($appointment['pet_id'])) {
+            echo json_encode(['success' => false, 'message' => 'Capacity is full, but this request has no linked pet and cannot be added to the pet-required waitlist. It remains pending.']);
             exit;
         }
-    }
-
-    $targetIds = array_column($pending, 'appointment_id');
-    $tPlaceholders = implode(',', array_fill(0, count($targetIds), '?'));
-    $tTypes = str_repeat('i', count($targetIds));
-
-    $updStmt = $conn->prepare("UPDATE appointments SET status = 'scheduled' WHERE appointment_id IN ($tPlaceholders) AND status = 'pending'");
-    $updStmt->bind_param($tTypes, ...$targetIds);
-    $ok = $updStmt->execute() && $updStmt->affected_rows > 0;
-    $updStmt->close();
-
-    if (!$ok) {
-        echo json_encode(['success' => false, 'message' => 'Failed to approve appointment(s).']);
+        $conn->begin_transaction();
+        $waitlist = $conn->prepare("INSERT INTO appointment_waitlist
+            (user_id, pet_id, appointment_type, urgency_level, preferred_date, preferred_time, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'waiting')");
+        $waitTime = $time . ':00';
+        $waitlist->bind_param('iissss', $appointment['user_id'], $appointment['pet_id'], $appointment['appointment_type'], $urgency, $date, $waitTime);
+        $inserted = $waitlist->execute();
+        $waitlist->close();
+        if (!$inserted) {
+            $conn->rollback();
+            echo json_encode(['success' => false, 'message' => 'Could not add this request to the waitlist.']);
+            exit;
+        }
+        $update = $conn->prepare("UPDATE appointments SET status = 'waitlisted', scheduled_date = NULL, scheduled_time = NULL
+            WHERE appointment_id = ? AND status = 'pending'");
+        $update->bind_param('i', $appointment['appointment_id']);
+        $updated = $update->execute() && $update->affected_rows === 1;
+        $update->close();
+        if (!$updated) {
+            $conn->rollback();
+            echo json_encode(['success' => false, 'message' => 'The request changed before it could be moved to the waitlist.']);
+            exit;
+        }
+        $conn->commit();
+        $nextStatus = 'waitlisted';
+        createNotification($conn, $appointment['user_id'], 'appointment_update', 'Appointment Added to Waitlist',
+            'Your requested appointment time is full. Your appointment request has been added to the waitlist.',
+            'appointments', $appointment['appointment_id']);
+        logActivity($conn, $staffId, 'Appointment Waitlisted', 'Moved appointment #' . $appointment['appointment_id'] . ' to the waitlist.', $_SERVER['REMOTE_ADDR']);
+        echo json_encode(['success' => true, 'status' => $nextStatus, 'message' => 'The requested date or time is full. The appointment was moved to the waitlist.']);
         exit;
     }
 
-    foreach ($pending as $r) {
-        $refId = $r['reference_id'] ?? fallbackRefId('#APT-', $r['appointment_id']);
-        $notifTitle = $r['appointment_type'] === 'adoption' ? 'Adoption Appointment Approved' : 'Appointment Approved';
-        $notifMsg = "Your " . $r['appointment_type'] . " appointment has been approved and scheduled on "
-            . date('F j, Y', strtotime($r['preferred_date'])) . " at " . date('g:i A', strtotime($r['preferred_time'])) . ".";
-        if (!empty($staffMessage)) $notifMsg .= "\n\nStaff Message: $staffMessage";
-        createNotification($conn, $r['user_id'], 'appointment_update', $notifTitle, $notifMsg, 'appointments', $r['appointment_id']);
-        sendAppointmentEmail($conn, $r['appointment_id'], 'scheduled', $staffMessage, $staffName);
-        sendAppointmentSms($conn, $r['appointment_id'], 'scheduled', $staffName, $staffMessage);
+    $scheduledTime = $time . ':00';
+    $updStmt = $conn->prepare("UPDATE appointments SET status = 'scheduled', scheduled_date = ?, scheduled_time = ?, cancelled_by = NULL
+        WHERE appointment_id = ? AND status = 'pending'");
+    $updStmt->bind_param('ssi', $date, $scheduledTime, $appointment['appointment_id']);
+    $ok = $updStmt->execute() && $updStmt->affected_rows === 1;
+    $updStmt->close();
+    if (!$ok) {
+        echo json_encode(['success' => false, 'message' => 'Failed to schedule the appointment.']);
+        exit;
     }
-
-    logActivity($conn, $staffId, 'Appointment Approved', 'Approved ' . count($pending) . ' appointment(s).', $_SERVER['REMOTE_ADDR']);
-    echo json_encode(['success' => true, 'message' => count($pending) . ' appointment(s) approved.']);
+    $notifTitle = $appointment['appointment_type'] === 'adoption' ? 'Adoption Appointment Approved' : 'Appointment Approved';
+    $notifMsg = 'Your ' . $appointment['appointment_type'] . ' appointment has been scheduled for '
+        . date('F j, Y', strtotime($date)) . ' at ' . date('g:i A', strtotime($scheduledTime)) . '.';
+    if ($staffMessage !== '') $notifMsg .= "\n\nStaff Message: " . $staffMessage;
+    createNotification($conn, $appointment['user_id'], 'appointment_update', $notifTitle, $notifMsg, 'appointments', $appointment['appointment_id']);
+    sendAppointmentEmail($conn, $appointment['appointment_id'], 'scheduled', $staffMessage, $staffName);
+    sendAppointmentSms($conn, $appointment['appointment_id'], 'scheduled', $staffName, $staffMessage);
+    logActivity($conn, $staffId, 'Appointment Approved', 'Scheduled appointment #' . $appointment['appointment_id'] . ' for ' . $date . ' ' . $scheduledTime . '.', $_SERVER['REMOTE_ADDR']);
+    echo json_encode(['success' => true, 'status' => 'scheduled', 'message' => 'Appointment scheduled.']);
     exit;
 }
 
@@ -134,9 +197,7 @@ if ($action === 'reject') {
     $selStmt->close();
 
     $active = [];
-    foreach ($rows as $r) {
-        if (in_array($r['status'], ['pending', 'approved', 'scheduled', 'rescheduled'], true)) $active[] = $r;
-    }
+    foreach ($rows as $r) if ($r['status'] === 'pending') $active[] = $r;
     if (empty($active)) {
         echo json_encode(['success' => false, 'message' => 'Selected appointment(s) cannot be rejected from their current status.']);
         exit;
@@ -146,7 +207,7 @@ if ($action === 'reject') {
     $tPlaceholders = implode(',', array_fill(0, count($targetIds), '?'));
     $tTypes = str_repeat('i', count($targetIds));
 
-    $updStmt = $conn->prepare("UPDATE appointments SET status = 'cancelled' WHERE appointment_id IN ($tPlaceholders) AND status IN ('pending','approved','scheduled','rescheduled')");
+    $updStmt = $conn->prepare("UPDATE appointments SET status = 'rejected' WHERE appointment_id IN ($tPlaceholders) AND status = 'pending'");
     $updStmt->bind_param($tTypes, ...$targetIds);
     $ok = $updStmt->execute() && $updStmt->affected_rows > 0;
     $updStmt->close();
@@ -161,9 +222,8 @@ if ($action === 'reject') {
         $notifTitle = 'Appointment Rejected';
         $notifMsg = "Your " . $r['appointment_type'] . " appointment on " . date('F j, Y', strtotime($r['preferred_date'])) . " at " . date('g:i A', strtotime($r['preferred_time'])) . " was not approved.";
         createNotification($conn, $r['user_id'], 'appointment_update', $notifTitle, $notifMsg, 'appointments', $r['appointment_id']);
-        sendAppointmentEmail($conn, $r['appointment_id'], 'cancelled', '', $staffName);
-        sendAppointmentSms($conn, $r['appointment_id'], 'cancelled', $staffName);
-        dcvsNotifyWaitlistForSlot($conn, $r['preferred_date'], $r['preferred_time'], $r['appointment_type'], $r['urgency_level'] ?? 'routine');
+        sendAppointmentEmail($conn, $r['appointment_id'], 'rejected', '', $staffName);
+        sendAppointmentSms($conn, $r['appointment_id'], 'rejected', $staffName);
     }
 
     logActivity($conn, $staffId, 'Appointment Rejected', 'Rejected ' . count($active) . ' appointment(s).', $_SERVER['REMOTE_ADDR']);
@@ -172,8 +232,8 @@ if ($action === 'reject') {
 }
 
 if ($action === 'reschedule') {
-    $date = trim($_POST['preferred_date'] ?? '');
-    $time = trim($_POST['preferred_time'] ?? '');
+    $date = trim($_POST['scheduled_date'] ?? $_POST['preferred_date'] ?? '');
+    $time = trim($_POST['scheduled_time'] ?? $_POST['preferred_time'] ?? '');
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !checkdate((int)substr($date, 5, 2), (int)substr($date, 8, 2), (int)substr($date, 0, 4))) {
         echo json_encode(['success' => false, 'message' => 'Invalid date.']);
         exit;
@@ -182,9 +242,15 @@ if ($action === 'reschedule') {
         echo json_encode(['success' => false, 'message' => 'Invalid time.']);
         exit;
     }
+    if (strtotime($date . ' ' . $time) <= time()) {
+        echo json_encode(['success' => false, 'message' => 'Choose a future appointment date and time.']);
+        exit;
+    }
     $time = substr($time, 0, 5) . ':00';
 
-    $selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, appointment_type, urgency_level, preferred_date, preferred_time, status FROM appointments WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
+    $selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, appointment_type, urgency_level,
+        preferred_date, preferred_time, scheduled_date, scheduled_time, status FROM appointments
+        WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
     $selStmt->bind_param($types, ...$ids);
     $selStmt->execute();
     $res = $selStmt->get_result();
@@ -196,12 +262,30 @@ if ($action === 'reschedule') {
         echo json_encode(['success' => false, 'message' => 'Appointment(s) not found.']);
         exit;
     }
+    $lockDates = [$date];
+    foreach ($rows as $row) {
+        $lockDates[] = $row['scheduled_date'] ?: $row['preferred_date'];
+    }
+    try {
+        dcvsLockAppointmentCapacityDates($conn, $lockDates);
+    } catch (RuntimeException $error) {
+        echo json_encode(['success' => false, 'message' => $error->getMessage()]);
+        exit;
+    }
+
+    $reschedulableStatuses = ['pending', 'approved', 'scheduled', 'rescheduled'];
+    if (count($rows) !== count($ids) || count(array_filter($rows, function ($row) use ($reschedulableStatuses) {
+        return in_array($row['status'], $reschedulableStatuses, true);
+    })) !== count($rows)) {
+        echo json_encode(['success' => false, 'message' => 'Only pending, approved, scheduled, or rescheduled appointments can be rescheduled.']);
+        exit;
+    }
 
     $capacityStatuses = "'" . implode("','", dcvsCapacityStatuses()) . "'";
     $targetsByUrgency = ['routine' => 0, 'urgent' => 0];
     foreach ($rows as $row) $targetsByUrgency[$row['urgency_level'] ?? 'routine']++;
     $dailyStmt = $conn->prepare("SELECT urgency_level, COUNT(*) AS c FROM appointments
-        WHERE preferred_date = ? AND status IN ($capacityStatuses) AND archived_at IS NULL
+        WHERE COALESCE(scheduled_date, preferred_date) = ? AND status IN ($capacityStatuses) AND archived_at IS NULL
           AND appointment_id NOT IN ($placeholders) GROUP BY urgency_level");
     $dailyStmt->bind_param('s' . $types, $date, ...$ids);
     $dailyStmt->execute();
@@ -211,7 +295,7 @@ if ($action === 'reschedule') {
     $dailyStmt->close();
 
     $slotStmt = $conn->prepare("SELECT urgency_level, COUNT(*) AS c FROM appointments
-        WHERE preferred_date = ? AND preferred_time = ? AND status IN ($capacityStatuses) AND archived_at IS NULL
+        WHERE COALESCE(scheduled_date, preferred_date) = ? AND COALESCE(scheduled_time, preferred_time) = ? AND status IN ($capacityStatuses) AND archived_at IS NULL
           AND appointment_id NOT IN ($placeholders) GROUP BY urgency_level");
     $slotStmt->bind_param('ss' . $types, $date, $time, ...$ids);
     $slotStmt->execute();
@@ -227,23 +311,35 @@ if ($action === 'reschedule') {
             ? dcvsUrgentSlotAvailable($conn, $date, $timeKey)
             : dcvsSlotAvailable($conn, $date, $timeKey);
         $slotLimit = $urgency === 'urgent' ? 1 : dcvsRoutineSlotCapacity($conn, $date, $timeKey);
-        $dailyLimit = $urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_APPOINTMENTS_PER_DAY;
-        if (!$open || $slotCounts[$urgency] + $targetCount > $slotLimit
-            || $dailyCounts[$urgency] + $targetCount > $dailyLimit) {
+        $hasProgram = dcvsDateHasActiveProgram($conn, $date);
+        $dailyLimit = $hasProgram
+            ? ($urgency === 'urgent' ? DCVS_MAX_URGENT_APPOINTMENTS_PER_DAY : DCVS_MAX_ROUTINE_APPOINTMENTS_ON_PROGRAM_DAY)
+            : DCVS_MAX_APPOINTMENTS_PER_DAY;
+        $dayCount = $hasProgram
+            ? $dailyCounts[$urgency]
+            : $dailyCounts['routine'] + $dailyCounts['urgent'];
+        $isInvalidUrgentDay = !$hasProgram && $urgency === 'urgent';
+        $slotCount = $hasProgram ? $slotCounts[$urgency] : $slotCounts['routine'] + $slotCounts['urgent'];
+        if (!$open || $slotCount + $targetCount > $slotLimit
+            || $dayCount + $targetCount > $dailyLimit || $isInvalidUrgentDay) {
             echo json_encode(['success' => false, 'message' => 'That date and time does not have enough ' . $urgency . ' appointment capacity for the selected residents.']);
             exit;
         }
     }
 
-    $updStmt = $conn->prepare("UPDATE appointments SET preferred_date = ?, preferred_time = ?, status = 'rescheduled' WHERE appointment_id IN ($placeholders)");
+    $conn->begin_transaction();
+    $updStmt = $conn->prepare("UPDATE appointments SET scheduled_date = ?, scheduled_time = ?, status = 'rescheduled'
+        WHERE appointment_id IN ($placeholders) AND status IN ('pending','approved','scheduled','rescheduled') AND archived_at IS NULL");
     $updStmt->bind_param('ss' . $types, $date, $time, ...$ids);
-    $ok = $updStmt->execute() && $updStmt->affected_rows > 0;
+    $ok = $updStmt->execute() && $updStmt->affected_rows === count($rows);
     $updStmt->close();
 
     if (!$ok) {
+        $conn->rollback();
         echo json_encode(['success' => false, 'message' => 'Failed to reschedule. The appointment may have been updated already.']);
         exit;
     }
+    $conn->commit();
 
     $newDate = date('F j, Y', strtotime($date));
     $newTime = date('g:i A', strtotime($time));
@@ -254,7 +350,7 @@ if ($action === 'reschedule') {
         createNotification($conn, $r['user_id'], 'appointment_update', $title, $msg, 'appointments', $r['appointment_id']);
         sendAppointmentEmail($conn, $r['appointment_id'], 'rescheduled', '', $staffName);
         sendAppointmentSms($conn, $r['appointment_id'], 'rescheduled', $staffName);
-        dcvsNotifyWaitlistForSlot($conn, $r['preferred_date'], $r['preferred_time'], $r['appointment_type'], $r['urgency_level'] ?? 'routine');
+        dcvsNotifyWaitlistForSlot($conn, $r['scheduled_date'] ?: $r['preferred_date'], $r['scheduled_time'] ?: $r['preferred_time'], $r['appointment_type'], $r['urgency_level'] ?? 'routine');
     }
 
     logActivity($conn, $staffId, 'Appointment Rescheduled', 'Rescheduled ' . count($rows) . ' appointment(s) to ' . $date . ' ' . $time . '.', $_SERVER['REMOTE_ADDR']);
@@ -263,32 +359,35 @@ if ($action === 'reschedule') {
 }
 
 if ($action === 'archive') {
-    $slotStmt = $conn->prepare("SELECT appointment_type, urgency_level, preferred_date, preferred_time FROM appointments
+    $slotStmt = $conn->prepare("SELECT appointment_type, urgency_level, COALESCE(scheduled_date, preferred_date) AS slot_date,
+        COALESCE(scheduled_time, preferred_time) AS slot_time FROM appointments
         WHERE appointment_id IN ($placeholders) AND archived_at IS NULL
-          AND status IN ('scheduled','rescheduled')");
+          AND status IN ('completed','no_show','cancelled','rejected')");
     $slotStmt->bind_param($types, ...$ids);
     $slotStmt->execute();
     $slotsToRelease = $slotStmt->get_result()->fetch_all(MYSQLI_ASSOC);
     $slotStmt->close();
-    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id IN ($placeholders) AND archived_at IS NULL AND status IN ('scheduled','rescheduled')");
+    $stmt = $conn->prepare("UPDATE appointments SET archived_at = NOW() WHERE appointment_id IN ($placeholders) AND archived_at IS NULL AND status IN ('completed','no_show','cancelled','rejected')");
     $stmt->bind_param($types, ...$ids);
     $ok = $stmt->execute() && $stmt->affected_rows > 0;
     $stmt->close();
     if (!$ok) {
-        echo json_encode(['success' => false, 'message' => 'Only scheduled appointments can be archived.']);
+        echo json_encode(['success' => false, 'message' => 'Only completed, no-show, cancelled, or rejected appointments can be archived.']);
         exit;
     }
     foreach ($slotsToRelease as $releasedSlot) {
-        dcvsNotifyWaitlistForSlot($conn, $releasedSlot['preferred_date'], $releasedSlot['preferred_time'], $releasedSlot['appointment_type'], $releasedSlot['urgency_level'] ?? 'routine');
+        dcvsNotifyWaitlistForSlot($conn, $releasedSlot['slot_date'], $releasedSlot['slot_time'], $releasedSlot['appointment_type'], $releasedSlot['urgency_level'] ?? 'routine');
     }
     logActivity($conn, $staffId, 'Appointment Archived', 'Archived ' . count($ids) . ' appointment(s).', $_SERVER['REMOTE_ADDR']);
     echo json_encode(['success' => true, 'message' => count($ids) . ' appointment(s) archived.']);
     exit;
 }
 
-$newStatus = $action === 'complete' ? 'completed' : 'cancelled';
+$newStatus = $action === 'complete' ? 'completed' : ($action === 'no_show' ? 'no_show' : 'cancelled');
 
-$selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, appointment_type, preferred_date, preferred_time, status FROM appointments WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
+$selStmt = $conn->prepare("SELECT appointment_id, reference_id, user_id, appointment_type, urgency_level,
+    preferred_date, preferred_time, scheduled_date, scheduled_time, status FROM appointments
+    WHERE appointment_id IN ($placeholders) AND archived_at IS NULL");
 $selStmt->bind_param($types, ...$ids);
 $selStmt->execute();
 $res = $selStmt->get_result();
@@ -302,8 +401,11 @@ if (empty($rows)) {
 }
 
 $validFrom = $newStatus === 'cancelled'
-    ? ['pending', 'approved', 'scheduled', 'rescheduled']
-    : ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress'];
+    ? ['pending', 'approved', 'scheduled', 'rescheduled', 'in_progress', 'action_needed']
+    : ['scheduled', 'rescheduled', 'in_progress'];
+if ($newStatus === 'completed') {
+    $validFrom[] = 'no_show';
+}
 
 $targets = [];
 foreach ($rows as $r) {
@@ -311,37 +413,93 @@ foreach ($rows as $r) {
 }
 
 if (empty($targets)) {
-    echo json_encode(['success' => false, 'message' => 'Selected appointment(s) cannot be updated from their current status.']);
+    $allNoShow = count($rows) > 0 && count(array_filter($rows, function ($row) {
+        return $row['status'] === 'no_show';
+    })) === count($rows);
+    if ($allNoShow && $newStatus === 'no_show') {
+        echo json_encode(['success' => true, 'status' => 'no_show', 'message' => 'This appointment is already marked No Show.']);
+        exit;
+    }
+    echo json_encode([
+        'success' => false,
+        'status' => $allNoShow ? 'no_show' : null,
+        'message' => $allNoShow && in_array($newStatus, ['completed', 'no_show'], true)
+            ? 'The scheduled time has passed, so this appointment is now marked No Show.'
+            : 'Selected appointment(s) cannot be updated from their current status.',
+    ]);
     exit;
+}
+
+if ($newStatus === 'completed' || $newStatus === 'no_show') {
+    foreach ($targets as $r) {
+        $date = $r['scheduled_date'] ?: $r['preferred_date'];
+        $time = $r['scheduled_time'] ?: $r['preferred_time'];
+        if (strtotime($date . ' ' . $time) > time()) {
+            echo json_encode(['success' => false, 'message' => 'Only staff can mark an appointment completed or no-show after its scheduled date and time.']);
+            exit;
+        }
+    }
 }
 
 $targetIds = array_column($targets, 'appointment_id');
 $tPlaceholders = implode(',', array_fill(0, count($targetIds), '?'));
 $tTypes = str_repeat('i', count($targetIds));
 
-$updStmt = $conn->prepare("UPDATE appointments SET status = '$newStatus' WHERE appointment_id IN ($tPlaceholders) AND status IN ('pending','approved','scheduled','rescheduled','in_progress')");
+$updateSql = $newStatus === 'cancelled'
+    ? "UPDATE appointments SET status = 'cancelled', cancelled_by = 'staff' WHERE appointment_id IN ($tPlaceholders)"
+    : "UPDATE appointments SET status = '$newStatus' WHERE appointment_id IN ($tPlaceholders)";
+if ($newStatus === 'cancelled') $conn->begin_transaction();
+$updStmt = $conn->prepare($updateSql);
 $updStmt->bind_param($tTypes, ...$targetIds);
 $ok = $updStmt->execute() && $updStmt->affected_rows > 0;
 $updStmt->close();
 
 if (!$ok) {
+    if ($newStatus === 'cancelled') $conn->rollback();
     echo json_encode(['success' => false, 'message' => 'Failed to update appointment status.']);
     exit;
 }
+if ($newStatus === 'cancelled') {
+    $closeRequests = $conn->prepare("UPDATE appointment_reschedule_requests
+        SET status = 'cancelled', responded_at = NOW()
+        WHERE appointment_id IN ($tPlaceholders) AND status IN ('pending','offered')");
+    if (!$closeRequests) {
+        $conn->rollback();
+        error_log('Could not prepare reschedule request closure after staff cancellation: ' . $conn->error);
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+        exit;
+    }
+    $closeRequests->bind_param($tTypes, ...$targetIds);
+    if (!$closeRequests->execute()) {
+        error_log('Could not close reschedule requests after staff cancellation: ' . $closeRequests->error);
+        $closeRequests->close();
+        $conn->rollback();
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => 'The appointment could not be cancelled. Please try again.']);
+        exit;
+    }
+    $closeRequests->close();
+    $conn->commit();
+}
 
-$actionLabel = $newStatus === 'completed' ? 'Completed' : 'Cancelled';
+$actionLabel = $newStatus === 'completed' ? 'Completed' : ($newStatus === 'no_show' ? 'No-show' : 'Cancelled');
 foreach ($targets as $r) {
     $refId = $r['reference_id'] ?? fallbackRefId('#APT-', $r['appointment_id']);
-    $title = $newStatus === 'completed' ? 'Appointment Completed' : 'Appointment Cancelled';
+    $title = $newStatus === 'completed' ? 'Appointment Completed' : ($newStatus === 'no_show' ? 'Appointment Marked No-show' : 'Appointment Cancelled');
+    $appointmentDate = $r['scheduled_date'] ?: $r['preferred_date'];
+    $appointmentTime = $r['scheduled_time'] ?: $r['preferred_time'];
     $msg = $newStatus === 'completed'
-        ? "Your " . $r['appointment_type'] . " appointment (" . $refId . ") has been marked as completed."
-        : "Your " . $r['appointment_type'] . " appointment on " . date('F j, Y', strtotime($r['preferred_date'])) . " at " . date('g:i A', strtotime($r['preferred_time'])) . " has been cancelled.";
+        ? "Your " . $r['appointment_type'] . " appointment (" . $refId . ") has been marked as completed by DCVS staff."
+        : ($newStatus === 'no_show'
+            ? "Your " . $r['appointment_type'] . " appointment (" . $refId . ") was marked as no-show by DCVS staff."
+            : "Your " . $r['appointment_type'] . " appointment on " . date('F j, Y', strtotime($appointmentDate)) . " at " . date('g:i A', strtotime($appointmentTime)) . " has been cancelled by DCVS staff.");
     createNotification($conn, $r['user_id'], 'appointment_update', $title, $msg, 'appointments', $r['appointment_id']);
     sendAppointmentEmail($conn, $r['appointment_id'], $newStatus, '', $staffName);
     sendAppointmentSms($conn, $r['appointment_id'], $newStatus, $staffName);
 }
 if ($newStatus === 'cancelled') {
-    foreach ($targets as $r) dcvsNotifyWaitlistForSlot($conn, $r['preferred_date'], $r['preferred_time'], $r['appointment_type'], $r['urgency_level'] ?? 'routine');
+    foreach ($targets as $r) dcvsNotifyWaitlistForSlot($conn, $r['scheduled_date'] ?: $r['preferred_date'], $r['scheduled_time'] ?: $r['preferred_time'], $r['appointment_type'], $r['urgency_level'] ?? 'routine');
 }
 
 logActivity($conn, $staffId, 'Appointment ' . $actionLabel, $actionLabel . ' ' . count($targets) . ' appointment(s).', $_SERVER['REMOTE_ADDR']);

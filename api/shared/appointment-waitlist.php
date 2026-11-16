@@ -55,6 +55,11 @@ if (!$ownsPet) {
     echo json_encode(['success' => false, 'message' => 'The selected pet is not registered to your account.']);
     exit;
 }
+if ($urgency === 'urgent' && !dcvsDateHasActiveProgram($conn, $date)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Urgent priority is only available on dates with a scheduled program.']);
+    exit;
+}
 
 $fullTime = $time === '' ? null : (dcvsTimeKey($time) . ':00');
 $duplicateStmt = $conn->prepare("SELECT waitlist_id, status FROM appointment_waitlist

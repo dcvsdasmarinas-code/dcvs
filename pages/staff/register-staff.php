@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../includes/app-base.php';
+$appBaseUrl = dcvsAppBaseUrl();
 session_name('DCVS_ADMIN_SESSION');
 ini_set('session.gc_maxlifetime', 30 * 24 * 60 * 60);
 session_set_cookie_params([
@@ -16,6 +18,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../includes/reports/location.php';
+require_once __DIR__ . '/../../includes/registration-validation.php';
 
 $officialBarangays = dcvsLoadApprovedBarangays($conn);
 $officialBarangaysByCode = [];
@@ -58,11 +61,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (empty($lastName)) {
         $errors[] = "Last name is required.";
     }
-    if (empty($phone)) {
-        $errors[] = "Phone number is required.";
-    } elseif (!preg_match('/^(\+63|0)[0-9]{10}$/', preg_replace('/\s/', '', $phone))) {
-        $errors[] = "Enter a valid PH number (e.g. 09XX XXX XXXX).";
-    }
+    $phoneError = dcvsRegistrationPhoneError($phone);
+    if ($phoneError !== '') $errors[] = $phoneError;
     if (empty($birthdate)) {
         $errors[] = "Date of birth is required.";
     } else {
@@ -87,19 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
         $errors[] = "Please enter a valid email address.";
     }
-    if (empty($password)) {
-        $errors[] = "Password is required.";
-    } elseif (strlen($password) < 8) {
-        $errors[] = "Password must be at least 8 characters.";
-    } elseif (!preg_match('/[A-Z]/', $password)) {
-        $errors[] = "Password must contain at least one uppercase letter.";
-    } elseif (!preg_match('/[a-z]/', $password)) {
-        $errors[] = "Password must contain at least one lowercase letter.";
-    } elseif (!preg_match('/[0-9]/', $password)) {
-        $errors[] = "Password must contain at least one number.";
-    } elseif (!preg_match('/[^A-Za-z0-9]/', $password)) {
-        $errors[] = "Password must contain at least one special character.";
-    }
+    $passwordError = dcvsRegistrationPasswordError($password);
+    if ($passwordError !== '') $errors[] = $passwordError;
     if ($password !== $confirmPassword) {
         $errors[] = "Passwords do not match.";
     }
@@ -183,8 +172,80 @@ $conn->close();
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
-  <link rel="stylesheet" href="assets/css/auth.css" />
-  <link rel="stylesheet" href="assets/css/responsive.css" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/auth.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css', ENT_QUOTES, 'UTF-8'); ?>" />
+  <style>
+    .mobile-brand-title,
+    .mobile-brand-trust { display: none; }
+
+    @media (max-width: 900px) {
+      body.auth-body {
+        display: block;
+        min-height: 100vh;
+        overflow-x: hidden;
+        background: linear-gradient(135deg, var(--green-primary) 0%, var(--green-dark) 100%);
+      }
+      .auth-wrapper.auth-wrapper-register {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        align-content: start;
+        min-height: 100vh;
+        overflow: hidden;
+        background: inherit;
+      }
+      .auth-brand-panel,
+      .brand-content { display: contents; }
+      .auth-brand-panel::before { display: none; }
+      .mobile-brand-title {
+        display: block;
+        order: 1;
+        width: 100%;
+        max-width: 360px;
+        padding: 1.25rem 1rem 0;
+        color: #fff;
+        font-size: clamp(1.45rem, 6vw, 1.9rem);
+        font-weight: 700;
+        line-height: 1.15;
+        text-align: center;
+      }
+      .brand-title:not(.mobile-brand-title) { display: none; }
+      .auth-logo {
+        order: 2;
+        width: clamp(88px, 24vw, 112px);
+        margin: 0.6rem auto 0.75rem;
+      }
+      .brand-subtitle,
+      .register-highlights { display: none; }
+      .auth-form-panel-register {
+        order: 3;
+        min-width: 0;
+        width: 100%;
+        max-height: none;
+        padding: 0.5rem 16px 0;
+        background: transparent;
+      }
+      .auth-form-card-register {
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+        padding: 1.5rem clamp(1rem, 5vw, 2rem);
+      }
+      .form-header { text-align: center; }
+      .mobile-brand-trust {
+        display: block;
+        order: 4;
+        position: relative;
+        width: 100%;
+        max-width: 100%;
+        margin: 0;
+        padding: 1rem 0 1.25rem;
+      }
+      .mobile-brand-trust .brand-logos { width: 100%; overflow: hidden; }
+      .mobile-brand-trust .brand-logo-item { padding: 0 0.75rem; }
+      .mobile-brand-trust .brand-logo-item img { height: 48px; max-width: 140px; }
+      .form-row { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body class="auth-body">
 
@@ -197,8 +258,9 @@ $conn->close();
     <!-- Left Panel: Branding -->
     <div class="auth-brand-panel">
       <div class="brand-content">
-        <img src="uploads/site/DCVS LOGO.png" alt="DCVS Logo" class="auth-logo" />
+        <img src="<?php echo htmlspecialchars($appBaseUrl . '/uploads/site/DCVS%20LOGO.png', ENT_QUOTES, 'UTF-8'); ?>" alt="DCVS Logo" class="auth-logo" />
         <h1 class="brand-title">Join DCVS<br />Staff Management</h1>
+        <h1 class="mobile-brand-title">Dasmariñas City Veterinary Services</h1>
         <p class="brand-subtitle">Create your staff account and help manage the city's animal welfare programs.</p>
 
         <div class="register-highlights">
@@ -221,6 +283,19 @@ $conn->close();
           <div class="highlight-item">
             <i class="fas fa-check-circle"></i>
             <span>Access system analytics</span>
+          </div>
+        </div>
+        <div class="brand-trust mobile-brand-trust" aria-label="Partner and organization logos">
+          <div class="brand-logos">
+            <div class="brand-logos-track">
+              <?php
+              $trustLogos = ['SPCA.png', 'PAWS.png', 'CARA.png', 'AKF.png', 'WORLD ANIMAL PROTECTION.png', 'ANIMAL INDUSTRY.png', 'PAWSTURE.png', 'PARTNER.png', 'ANIMAL WELFARE AWARDS.png', 'PUBLIC SERVICE AWARDS.png', 'DCVS AWARDS.png'];
+              for ($i = 0; $i < 2; $i++): foreach ($trustLogos as $logo): ?>
+                <div class="brand-logo-item">
+                  <img src="<?php echo htmlspecialchars($appBaseUrl . '/assets/images/' . rawurlencode($logo), ENT_QUOTES, 'UTF-8'); ?>" alt="<?php echo htmlspecialchars(pathinfo($logo, PATHINFO_FILENAME)); ?>" />
+                </div>
+              <?php endforeach; endfor; ?>
+            </div>
           </div>
         </div>
       </div>
@@ -261,7 +336,7 @@ $conn->close();
         <?php else: ?>
           <div class="auth-alert auth-alert-error" id="registerAlert" style="display:none;">
             <i class="fas fa-exclamation-circle"></i>
-            <span id="registerAlertMsg">Please fix the errors below.</span>
+            <span id="registerAlertMsg">Review the highlighted fields and try again.</span>
           </div>
         <?php endif; ?>
 
@@ -304,7 +379,7 @@ $conn->close();
                 <label for="phone">Phone Number <span class="required">*</span></label>
                 <div class="input-wrapper">
                   <i class="fas fa-phone input-icon"></i>
-                  <input type="tel" id="phone" name="phone" placeholder="+63 9XX XXX XXXX" required />
+                  <input type="tel" id="phone" name="phone" inputmode="numeric" pattern="09[0-9]{9}" placeholder="09XXXXXXXXX" required />
                 </div>
                 <span class="field-error" id="phoneError"></span>
               </div>
@@ -412,6 +487,13 @@ $conn->close();
                 </div>
                 <span class="strength-label" id="strengthLabel">Weak</span>
               </div>
+              <ul class="password-requirements" id="passwordRequirements" aria-label="Password requirements">
+                <li data-password-rule="length">At least 8 characters</li>
+                <li data-password-rule="uppercase">At least one uppercase letter (A-Z)</li>
+                <li data-password-rule="lowercase">At least one lowercase letter (a-z)</li>
+                <li data-password-rule="number">At least one number (0-9)</li>
+                <li data-password-rule="special">At least one special character (such as !, @, #, or $)</li>
+              </ul>
             </div>
             <div class="form-group" id="confirmPasswordGroup">
               <label for="confirmPassword">Confirm Password <span class="required">*</span></label>
@@ -501,7 +583,8 @@ $conn->close();
     </div>
   </div>
 
-<script src="assets/js/auth.js"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/philippine-phone-validation.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/auth.js', ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script>
   function openTermsModal() { var m = document.getElementById('termsModal'); if (m) m.style.display = 'flex'; }
   function closeTermsModal() { var m = document.getElementById('termsModal'); if (m) m.style.display = 'none'; }
@@ -534,10 +617,13 @@ $conn->close();
         if (grp) grp.classList.add('has-error');
         valid = false;
       }
-      if (f === 'phone' && inp && inp.value.trim() && !/^(\+63|0)[0-9]{10}$/.test(inp.value.replace(/\s/g,''))) {
-        if (err) err.textContent = 'Enter a valid PH number.';
+      if (f === 'phone' && inp && window.DCVSPhilippinePhone.error(inp)) {
+        inp.dataset.phoneTouched = 'true';
+        if (err) err.textContent = window.DCVSPhilippinePhone.error(inp);
         if (grp) grp.classList.add('has-error');
         valid = false;
+      } else if (f === 'phone' && inp) {
+        inp.dataset.phoneTouched = 'true';
       }
     });
     return valid;
@@ -588,16 +674,25 @@ $conn->close();
       if (!val) { if (pwStrength) pwStrength.style.display = 'none'; return; }
       if (pwStrength) pwStrength.style.display = 'flex';
       var score = 0;
-      if (val.length >= 8) score++;
+      if (Array.from(val).length >= 8) score++;
       if (/[A-Z]/.test(val)) score++;
       if (/[a-z]/.test(val)) score++;
       if (/[0-9]/.test(val)) score++;
       if (/[^A-Za-z0-9]/.test(val)) score++;
-      var levels = ['', 'weak', 'weak', 'fair', 'good', 'strong'];
-      var labels = ['', 'Weak', 'Weak', 'Fair', 'Good', 'Strong'];
-      var colors = ['', '#ef4444', '#ef4444', '#f97316', '#eab308', '#16a34a'];
-      if (strengthFill) { strengthFill.className = 'strength-fill ' + levels[score]; strengthFill.style.background = colors[score]; }
-      if (strengthLabel) { strengthLabel.textContent = labels[score]; strengthLabel.style.color = colors[score]; }
+      var strength = score === 5 ? 'strong' : (score >= 3 ? 'medium' : 'weak');
+      var label = strength === 'strong' ? 'Strong' : (strength === 'medium' ? 'Medium' : 'Weak');
+      var color = strength === 'strong' ? '#16a34a' : (strength === 'medium' ? '#f59e0b' : '#ef4444');
+      document.querySelectorAll('#passwordRequirements [data-password-rule]').forEach(function(item) {
+        var met = false;
+        if (item.dataset.passwordRule === 'length') met = Array.from(val).length >= 8;
+        if (item.dataset.passwordRule === 'uppercase') met = /[A-Z]/.test(val);
+        if (item.dataset.passwordRule === 'lowercase') met = /[a-z]/.test(val);
+        if (item.dataset.passwordRule === 'number') met = /[0-9]/.test(val);
+        if (item.dataset.passwordRule === 'special') met = /[^A-Za-z0-9]/.test(val);
+        item.classList.toggle('is-met', met);
+      });
+      if (strengthFill) { strengthFill.className = 'strength-fill ' + strength; strengthFill.style.background = color; }
+      if (strengthLabel) { strengthLabel.textContent = label; strengthLabel.style.color = color; }
     });
   }
 
@@ -629,7 +724,7 @@ $conn->close();
         valid = false;
       }
       var pw = document.getElementById('regPassword')?.value;
-      if (pw && pw.length < 8) {
+      if (pw && Array.from(pw).length < 8) {
         var pwErr = document.getElementById('regPasswordError');
         if (pwErr) pwErr.textContent = 'Password must be at least 8 characters.';
         document.getElementById('regPasswordGroup')?.classList.add('has-error');
