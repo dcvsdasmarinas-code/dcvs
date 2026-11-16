@@ -78,6 +78,7 @@ function registeredPetVaccination($status) {
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/dashboard.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/responsive.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'), ENT_QUOTES, 'UTF-8'); ?>" />
+  <link rel="stylesheet" href="<?php echo htmlspecialchars($appBaseUrl . '/assets/css/staff-date-filter.css?v=' . (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'), ENT_QUOTES, 'UTF-8'); ?>" />
   <style>
     .registered-pets-page{min-height:calc(100vh - var(--topbar-h,64px));margin:-1.75rem -2rem;padding:24px;background:#fff;color:#18181b;font-family:Inter,'Segoe UI',sans-serif}
     .rp-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:20px}
@@ -86,18 +87,20 @@ function registeredPetVaccination($status) {
     .rp-kpi-label{margin:0 0 6px;font-family:Inter,'Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#18181b;text-transform:uppercase}
     .rp-kpi-value{margin:0 0 6px;font-family:Inter,'Segoe UI',sans-serif;font-size:26px;font-weight:600;line-height:1;color:#18181b;letter-spacing:-.02em}
     .rp-kpi-sub{margin:0;font-family:Inter,'Segoe UI',sans-serif;font-size:14px;color:#71717a}
-    .rp-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
-    .rp-search{position:relative;flex:0 1 auto;width:380px;min-width:180px}
-    .rp-search i{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#71717a;font-size:13px}
-    .rp-search input,.rp-toolbar select,.rp-rows select{box-sizing:border-box;height:36px;padding:0 10px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:500 14px Inter,'Segoe UI',sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.05)}
-    .rp-search input{width:100%;padding-left:36px;font-weight:400;outline:none}
-    .rp-search input:focus,.rp-toolbar select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
+    .rp-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+    .rp-controls{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+    .rp-search{position:relative;flex:1 1 260px;max-width:380px;min-width:180px}
+    .rp-search i{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#71717a;font-size:14px;pointer-events:none}
+    .rp-search input,.rp-filter-select,.rp-rows select{box-sizing:border-box;height:36px;padding:0 12px;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;font:400 14px Inter,'Segoe UI',sans-serif;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+    .rp-search input{width:100%;padding-left:36px;outline:none}
+    .rp-search input:focus,.rp-filter-select:focus{border-color:#18181b;box-shadow:0 0 0 1px #18181b}
     .rp-search input::placeholder{color:#a1a1aa}
-    .rp-filters{display:flex;align-items:center;gap:8px}
-    .rp-filters select{min-width:120px;max-width:150px;padding-right:26px;cursor:pointer}
+    .rp-filters{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+    .rp-filter-select{min-width:120px;max-width:170px;padding-right:28px;cursor:pointer}
+    .rp-date-filter{position:relative;flex:0 0 auto}
     .rp-table-wrap{overflow:auto;border:1px solid #e4e4e7;border-radius:8px;background:#fff}
     .rp-table{width:100%;min-width:980px;border-collapse:collapse;font-size:14px}
-    .rp-table th{height:42px;padding:0 12px;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;color:#71717a;font-size:13px;font-weight:500;white-space:nowrap}
+    .rp-table th{height:42px;padding:0 12px;background:#fafafa;border-bottom:1px solid #e4e4e7;text-align:left;color:#71717a;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;white-space:nowrap}
     .rp-table td{height:58px;padding:8px 12px;border-bottom:1px solid #f1f1f2;color:#3f3f46;white-space:nowrap}
     .rp-table tbody tr:last-child td{border-bottom:0}
     .rp-table tbody tr:hover{background:#fafafa}
@@ -117,8 +120,8 @@ function registeredPetVaccination($status) {
     .rp-page-controls button{width:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;border:1px solid #e4e4e7;border-radius:6px;background:#fff;color:#18181b;cursor:pointer}
     .rp-page-controls button:disabled{opacity:.45;cursor:not-allowed}
     .rp-empty{padding:42px 16px!important;text-align:center;color:#71717a!important}
-    @media(max-width:900px){.rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rp-toolbar{align-items:stretch}.rp-search,.rp-filters{width:100%;max-width:100%;min-width:0}.rp-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.rp-filters select{width:100%;min-width:0;max-width:none}}
-    @media(max-width:768px){.registered-pets-page{width:100%;margin:-1.75rem 0;padding:18px 14px}.rp-toolbar{flex-direction:column}.rp-search{max-width:none}.rp-pagination{justify-content:space-between;gap:10px}.rp-rows{display:flex;align-items:center;gap:7px}}
+    @media(max-width:900px){.rp-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.rp-controls{width:100%;flex-wrap:wrap}.rp-search{flex:1 1 100%;max-width:none}.rp-filters{flex:1 1 auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.rp-filter-select{width:100%;min-width:0;max-width:none}}
+    @media(max-width:768px){.registered-pets-page{width:100%;margin:-1.75rem 0;padding:18px 14px}.rp-toolbar{align-items:stretch}.rp-controls{flex-direction:column;align-items:stretch}.rp-filters{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.rp-date-filter{display:flex;justify-content:flex-end}.rp-pagination{justify-content:space-between;gap:10px}.rp-rows{display:flex;align-items:center;gap:7px}}
     @media(max-width:480px){.rp-kpis{gap:10px}.rp-kpi{padding:13px}.rp-kpi-value{font-size:23px}}
   </style>
 </head>
@@ -132,31 +135,38 @@ function registeredPetVaccination($status) {
       <div class="rp-kpi"><p class="rp-kpi-label">Cats</p><div class="rp-kpi-value"><?php echo number_format($counts['cat']); ?></div><p class="rp-kpi-sub">Registered cats</p></div>
       <div class="rp-kpi"><p class="rp-kpi-label">Other Pets</p><div class="rp-kpi-value"><?php echo number_format($counts['other']); ?></div><p class="rp-kpi-sub">Other registered species</p></div>
     </div>
-    <div class="rp-toolbar staff-mobile-toolbar staff-toolbar-search-only">
-      <div class="staff-toolbar-search-row staff-toolbar-no-filter">
-      <label class="rp-search staff-toolbar-search">
+    <div class="rp-toolbar">
+      <div class="rp-controls">
+      <label class="rp-search">
         <i class="fas fa-search" aria-hidden="true"></i>
         <input type="search" id="registeredPetsSearch" placeholder="Search pets..." aria-label="Search registered pets" />
       </label>
-      </div>
-      <div class="rp-filters staff-toolbar-filters">
-      <select class="staff-toolbar-select" id="registeredPetsType" aria-label="Filter by type">
+      <div class="rp-filters">
+      <select class="rp-filter-select" id="registeredPetsType" aria-label="Filter by type">
         <option value="">All Types</option>
         <option value="dog">Dog</option>
         <option value="cat">Cat</option>
         <option value="other">Other</option>
       </select>
-      <select class="staff-toolbar-select" id="registeredPetsQuickFilter" aria-label="Additional filters">
+      <select class="rp-filter-select" id="registeredPetsQuickFilter" aria-label="Additional filters">
         <option value="">All</option>
         <option value="recent">Recently Added</option>
         <option value="vaccinated">Vaccinated Pets</option>
       </select>
-      <select class="staff-toolbar-select staff-toolbar-last-filter" id="registeredPetsBarangay" aria-label="Filter by barangay">
+      <select class="rp-filter-select" id="registeredPetsBarangay" aria-label="Filter by barangay">
         <option value="">All Barangays</option>
         <?php foreach ($barangays as $barangay): ?>
           <option value="<?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($barangay, ENT_QUOTES, 'UTF-8'); ?></option>
         <?php endforeach; ?>
       </select>
+      </div>
+      <div class="rp-date-filter" data-date-filter="registeredPets">
+        <button class="staff-date-filter-button" type="button" aria-label="Filter registered pets by registration date" title="Filter by registration date" aria-expanded="false">
+          <i class="fas fa-filter" aria-hidden="true"></i>
+        </button>
+        <input type="hidden" id="registeredPetsDateFrom" value="">
+        <input type="hidden" id="registeredPetsDateTo" value="">
+      </div>
       </div>
     </div>
     <div class="rp-table-wrap">
@@ -183,7 +193,7 @@ function registeredPetVaccination($status) {
           $photoUrl = staffPetPhotoUrl($pet['photo_url'], $appBaseUrl);
           $searchText = implode(' ', [$pet['pet_name'], $ref, $pet['owner_name'], $pet['owner_ref'], $pet['owner_email'], cpdTypeLabel($type), $pet['breed'], $pet['barangay_name']]);
         ?>
-          <tr data-species="<?php echo htmlspecialchars($filterType, ENT_QUOTES, 'UTF-8'); ?>" data-barangay="<?php echo htmlspecialchars($barangayName, ENT_QUOTES, 'UTF-8'); ?>" data-recent="<?php echo !empty($pet['created_at']) && strtotime((string)$pet['created_at']) >= strtotime('-30 days') ? '1' : '0'; ?>" data-vaccinated="<?php echo $vaccinationClass === 'vacc-ok' ? '1' : '0'; ?>" data-search="<?php echo htmlspecialchars(strtolower($searchText), ENT_QUOTES, 'UTF-8'); ?>">
+          <tr data-species="<?php echo htmlspecialchars($filterType, ENT_QUOTES, 'UTF-8'); ?>" data-barangay="<?php echo htmlspecialchars($barangayName, ENT_QUOTES, 'UTF-8'); ?>" data-registration-date="<?php echo !empty($pet['created_at']) ? htmlspecialchars(date('Y-m-d', strtotime((string)$pet['created_at'])), ENT_QUOTES, 'UTF-8') : ''; ?>" data-recent="<?php echo !empty($pet['created_at']) && strtotime((string)$pet['created_at']) >= strtotime('-30 days') ? '1' : '0'; ?>" data-vaccinated="<?php echo $vaccinationClass === 'vacc-ok' ? '1' : '0'; ?>" data-search="<?php echo htmlspecialchars(strtolower($searchText), ENT_QUOTES, 'UTF-8'); ?>">
             <td><div class="rp-pet"><span class="rp-avatar"><?php if ($photoUrl !== ''): ?><img src="<?php echo htmlspecialchars($photoUrl, ENT_QUOTES, 'UTF-8'); ?>" alt=""><?php else: echo htmlspecialchars(cpdInitials($pet['pet_name']), ENT_QUOTES, 'UTF-8'); endif; ?></span><span class="rp-name"><?php echo htmlspecialchars($pet['pet_name'], ENT_QUOTES, 'UTF-8'); ?></span></div></td>
             <td class="rp-id" data-sort-value="<?php echo htmlspecialchars($ref, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($ref, ENT_QUOTES, 'UTF-8'); ?></td>
             <td><?php echo htmlspecialchars($pet['owner_name'], ENT_QUOTES, 'UTF-8'); ?></td>
@@ -216,6 +226,7 @@ function registeredPetVaccination($status) {
     <?php endif; ?>
   </section>
 </main>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/js/staff-date-filter.js'); ?>"></script>
 <script>
 (function(){
   var body = document.getElementById('registeredPetsRows');
@@ -224,6 +235,8 @@ function registeredPetVaccination($status) {
   var type = document.getElementById('registeredPetsType');
   var quickFilter = document.getElementById('registeredPetsQuickFilter');
   var barangay = document.getElementById('registeredPetsBarangay');
+  var dateFrom = document.getElementById('registeredPetsDateFrom');
+  var dateTo = document.getElementById('registeredPetsDateTo');
   var perPage = document.getElementById('registeredPetsPerPage');
   var pageLabel = document.getElementById('registeredPetsPageLabel');
   var page = 1;
@@ -233,11 +246,14 @@ function registeredPetVaccination($status) {
   function visibleRows(){
     var query = search.value.trim().toLowerCase();
     return originalRows.filter(function(row){
+      var registrationDate = row.dataset.registrationDate || '';
       return (!query || row.dataset.search.indexOf(query) !== -1) &&
         (!type.value || row.dataset.species === type.value) &&
         (!quickFilter.value || (quickFilter.value === 'recent' && row.dataset.recent === '1') ||
           (quickFilter.value === 'vaccinated' && row.dataset.vaccinated === '1')) &&
-        (!barangay.value || row.dataset.barangay === barangay.value);
+        (!barangay.value || row.dataset.barangay === barangay.value) &&
+        (!dateFrom.value || registrationDate >= dateFrom.value) &&
+        (!dateTo.value || registrationDate <= dateTo.value);
     });
   }
   function render(){
@@ -258,6 +274,7 @@ function registeredPetVaccination($status) {
     document.getElementById('registeredPetsPrev').disabled = page <= 1;
     document.getElementById('registeredPetsNext').disabled = page >= count;
   }
+  window.registeredPetsSetDate = function(){ page = 1; render(); };
   search.addEventListener('input', function(){ page = 1; render(); });
   type.addEventListener('change', function(){ page = 1; render(); });
   quickFilter.addEventListener('change', function(){ page = 1; render(); });

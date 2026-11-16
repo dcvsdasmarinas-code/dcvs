@@ -46,8 +46,8 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
 ?>
 <style>
   .cb-app{
-    --cb-primary:#5B4FE9; --cb-primary-soft:#EFEDFD; --cb-ink:#1B1B25; --cb-muted:#8A8A9E;
-    --cb-line:#ECECF2; --cb-bg:#F5F5F8; --cb-card:#FFFFFF; --cb-radius:14px;
+    --cb-primary:#18181b; --cb-primary-soft:#f4f4f5; --cb-ink:#18181b; --cb-muted:#71717a;
+    --cb-line:#e4e4e7; --cb-bg:#fff; --cb-card:#fff; --cb-radius:10px;
   }
   .cb-app *{margin:0;padding:0;box-sizing:border-box}
   .cb-app{
@@ -71,7 +71,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-avatar{width:34px;height:34px;border-radius:50%;object-fit:cover;background:#D8D8E4}
   .cb-app .cb-name{font-size:13px;font-weight:600}
   .cb-app .cb-mail{font-size:12px;font-weight:400;color:#71717a}
-  .cb-app .cb-cal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;flex-wrap:wrap;gap:12px;}
+  .cb-app .cb-cal-header{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;flex-wrap:wrap;gap:12px;color:#18181b}
   .cb-app .cb-month-nav{display:flex;align-items:center;gap:12px}
   .cb-app .cb-month-nav h1{font-family:'Inter','Segoe UI',sans-serif;font-size:18px;font-weight:600;letter-spacing:-.025em;line-height:1;width:180px;}
   .cb-app .cb-nav-arrow{width:36px;height:36px;border-radius:6px;border:1px solid #e4e4e7;background:#fff;cursor:pointer;color:#18181b;font-size:14px;display:grid;place-items:center;box-shadow:0 1px 2px rgba(0,0,0,.05);}
@@ -80,14 +80,16 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-btn-primary{background:#18181b;color:#fafafa;border:none;border-radius:6px;height:36px;padding:0 16px;font-size:14px;font-weight:500;line-height:1;cursor:pointer;display:inline-flex;align-items:center;gap:8px;box-shadow:0 1px 2px 0 rgba(0,0,0,.05);transition:background .15s;font-family:'Inter','Segoe UI',sans-serif;}
   .cb-app .cb-btn-primary:hover{background:#27272a}
   .cb-app .cb-filter-wrap{position:relative;}
-  .cb-app .cb-filter-dropdown{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #e4e4e7;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);z-index:50;width:360px;padding:16px;}
+  .cb-app .cb-filter-dropdown{display:none;position:absolute;top:calc(100% + 6px);right:0;background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.12);z-index:50;width:360px;padding:16px;}
   .cb-app .cb-filter-dropdown.show{display:block;}
   .cb-app .cb-filter-cols{display:flex;gap:20px;margin-bottom:14px;}
   .cb-app .cb-filter-cols .cb-filter-section{flex:1;margin-bottom:0;}
   .cb-app .cb-filter-section{margin-bottom:14px;}
   .cb-app .cb-filter-label{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:600;color:#18181b;margin:0 0 6px;}
   .cb-app .cb-filter-opt{display:flex;align-items:center;gap:8px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b;padding:3px 0;cursor:pointer;}
-  .cb-app .cb-filter-opt input[type="radio"]{margin:0;accent-color:#5B4FE9;}
+  .cb-app .cb-filter-opt input[type="checkbox"]{width:14px;height:14px;margin:0;accent-color:#18181b;}
+  .cb-app .cb-date-picker-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:8px;padding-top:10px;border-top:1px solid #e4e4e7;}
+  .cb-app .cb-date-picker-label{font-family:'Inter','Segoe UI',sans-serif;font-size:13px;font-weight:500;color:#52525b;}
   .cb-app .cb-filter-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e4e4e7;padding-top:12px;}
   .cb-app .cb-filter-reset{font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:500;color:#71717a;background:transparent;border:1px solid #e4e4e7;border-radius:6px;padding:6px 14px;cursor:pointer;}
   .cb-app .cb-filter-reset:hover{background:#F4F4F8;}
@@ -95,14 +97,15 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   .cb-app .cb-filter-apply:hover{background:#27272a;}
   .cb-app .cb-grid-wrap{padding:0 28px;overflow-x:auto}
   .cb-app .cb-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));border-left:1px solid var(--cb-line);border-top:1px solid var(--cb-line);min-width:880px;}
-  .cb-app .cb-dow{padding:10px 12px;font-size:13px;font-weight:600;color:#18181b;border-right:1px solid var(--cb-line);border-bottom:1px solid var(--cb-line);background:#FBFBFD;}
+  .cb-app .cb-dow{padding:10px 12px;font-family:'Inter','Segoe UI',sans-serif;font-size:12px;font-weight:500;color:#71717a;border-right:1px solid var(--cb-line);border-bottom:1px solid var(--cb-line);background:#fff;}
   .cb-app .cb-day{min-height:110px;padding:8px;border-right:1px solid var(--cb-line);border-bottom:1px solid var(--cb-line);position:relative;cursor:pointer;transition:background .12s;}
-  .cb-app .cb-day:hover{background:#FAFAFE}
-  .cb-app .cb-day.cb-dim{color:#C3C3D2;background:#FCFCFE}
-  .cb-app .cb-day.cb-selected{outline:2px solid #18181b;outline-offset:-2px;}
-  .cb-app .cb-day.cb-today{background:#fefce8;}
-  .cb-app .cb-day-num{font-size:14px;font-weight:500;margin-bottom:6px}
-  .cb-app .cb-day.cb-dim .cb-day-num{font-weight:400}
+  .cb-app .cb-day:hover{background:#fafafa}
+  .cb-app .cb-day.cb-dim{color:#a1a1aa;background:#fff}
+  .cb-app .cb-day.cb-selected{box-shadow:inset 0 0 0 1px #a1a1aa;}
+  .cb-app .cb-day-num{display:grid;width:28px;height:28px;place-items:center;margin-bottom:6px;border-radius:8px;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;font-weight:400;color:#18181b}
+  .cb-app .cb-day.cb-dim .cb-day-num{color:#a1a1aa}
+  .cb-app .cb-day.cb-today:not(.cb-selected) .cb-day-num{background:#f4f4f5;font-weight:600}
+  .cb-app .cb-day.cb-selected .cb-day-num{background:#18181b;color:#fff;font-weight:500}
   .cb-app .cb-chip{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:400;line-height:1.25;border-radius:0;padding:3px 2px;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:transparent;color:#18181b;border-bottom:1px solid #e4e4e7;}
   .cb-app .cb-chip .cb-dot{width:10px;min-width:10px;align-self:auto;border-radius:0;flex:none;color:#15803d;font-size:12px;line-height:1;text-align:center}
   .cb-app .cb-chip.cb-blue .cb-dot,.cb-app .cb-chip.cb-green .cb-dot{color:#15803d}
@@ -285,6 +288,16 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
               <label class="cb-filter-opt"><input type="checkbox" name="cbFDate" value="today" /> Today</label>
               <label class="cb-filter-opt"><input type="checkbox" name="cbFDate" value="week" /> This Week</label>
               <label class="cb-filter-opt"><input type="checkbox" name="cbFDate" value="month" /> This Month</label>
+              <div class="cb-date-picker-row">
+                <span class="cb-date-picker-label">Specific date</span>
+                <div class="staff-date-filter" data-date-filter="cbBooking">
+                  <button class="staff-date-filter-button" type="button" aria-label="Filter appointments by a specific date" title="Choose a specific date" aria-expanded="false">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
+                  </button>
+                  <input type="hidden" id="cbBookingDateFrom" value="">
+                  <input type="hidden" id="cbBookingDateTo" value="">
+                </div>
+              </div>
             </div>
             <div class="cb-filter-actions">
               <button class="cb-filter-reset" id="cbFilterReset" type="button">Reset</button>
@@ -548,7 +561,9 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
         chip.appendChild(label);
         cell.appendChild(chip);
       });
-      (requestedEvents[key] || []).forEach(function(request) {
+      (requestedEvents[key] || []).filter(function(request) {
+        return matchDate(request.date);
+      }).forEach(function(request) {
         var chip = document.createElement('div');
         chip.className = 'cb-chip cb-reschedule-requested';
         chip.title = 'Not reserved yet' + (request.time ? ' · ' + request.time : '');
@@ -608,6 +623,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   var filterStatuses = ['all'];
   var filterServices = ['all'];
   var filterDates = ['all'];
+  var specificDate = '';
 
   filterBtn.addEventListener('click', function(e){
     e.stopPropagation();
@@ -644,6 +660,34 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   setupCheckAll('cbFStatus');
   setupCheckAll('cbFService');
   setupCheckAll('cbFDate');
+  document.querySelectorAll('input[name="cbFDate"]').forEach(function(checkbox){
+    checkbox.addEventListener('change', function(){
+      specificDate = '';
+      document.getElementById('cbBookingDateFrom').value = '';
+      document.getElementById('cbBookingDateTo').value = '';
+      var dateButton = document.querySelector('[data-date-filter="cbBooking"] .staff-date-filter-button');
+      if (dateButton) dateButton.classList.remove('has-date');
+    });
+  });
+
+  window.cbBookingSetDate = function(){
+    specificDate = document.getElementById('cbBookingDateFrom').value;
+    if (specificDate) {
+      var selectedDate = new Date(specificDate.replace(/-/g, '/'));
+      current = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+      document.querySelectorAll('input[name="cbFDate"]').forEach(function(checkbox){
+        checkbox.checked = checkbox.value === 'all';
+      });
+      filterDates = ['all'];
+    }
+    selectedKey = '';
+    selectedApptIndex = 0;
+    emptyState.style.display = '';
+    apptDetails.style.display = 'none';
+    dayApptPicker.style.display = 'none';
+    closeApptDialog();
+    render();
+  };
 
   function getCheckedVals(name){
     var arr = [];
@@ -662,6 +706,7 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   }
 
   function matchDate(dateStr){
+    if (specificDate) return dateStr === specificDate;
     if (filterDates.indexOf('all') !== -1) return true;
     var d = new Date(dateStr.replace(/-/g,'/'));
     var today = new Date(); today.setHours(0,0,0,0);
@@ -691,6 +736,11 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
       cb.checked = cb.value === 'all';
     });
     filterStatuses = ['all']; filterServices = ['all']; filterDates = ['all'];
+    specificDate = '';
+    document.getElementById('cbBookingDateFrom').value = '';
+    document.getElementById('cbBookingDateTo').value = '';
+    var dateButton = document.querySelector('[data-date-filter="cbBooking"] .staff-date-filter-button');
+    if (dateButton) dateButton.classList.remove('has-date');
     filterDropdown.classList.remove('show');
     render();
   });
@@ -842,3 +892,4 @@ if (isset($conn) && !$conn->connect_error && isset($_SESSION['user_id'])) {
   render();
 })();
 </script>
+<script src="<?php echo htmlspecialchars($appBaseUrl . '/assets/js/staff-date-filter.js', ENT_QUOTES, 'UTF-8'); ?>?v=<?php echo (int)filemtime(__DIR__ . '/assets/js/staff-date-filter.js'); ?>"></script>

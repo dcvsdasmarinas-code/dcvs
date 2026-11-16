@@ -627,6 +627,7 @@ $annResult = $annStmt->get_result();
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" />
   <link rel="stylesheet" href="assets/css/dashboard.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/dashboard.css'); ?>" />
   <link rel="stylesheet" href="assets/css/responsive.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/responsive.css'); ?>&resident-dialog=9" />
+  <link rel="stylesheet" href="assets/css/staff-date-filter.css?v=<?php echo (int)filemtime(__DIR__ . '/../../assets/css/staff-date-filter.css'); ?>" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
