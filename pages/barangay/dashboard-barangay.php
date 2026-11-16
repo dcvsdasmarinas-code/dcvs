@@ -245,6 +245,19 @@ $cmpDaily = ['labels' => $cmpLabels, 'reports' => array_values($cmpDailyReportMa
 
 $cmpYearly = [];
 $firstTrendYear = 2021;
+$firstYearStmt = $conn->prepare("SELECT MIN(YEAR(COALESCE(incident_at, created_at))) AS first_year FROM reports WHERE barangay_id = ? AND duplicate_status NOT IN ('merged', 'suspected')");
+if ($firstYearStmt) {
+  $firstYearStmt->bind_param('i', $barangayId);
+  if ($firstYearStmt->execute()) {
+    $firstYearRow = $firstYearStmt->get_result()->fetch_assoc();
+    if (!empty($firstYearRow['first_year'])) $firstTrendYear = (int)$firstYearRow['first_year'];
+  } else {
+    error_log('Failed to find first barangay report year: ' . $firstYearStmt->error);
+  }
+  $firstYearStmt->close();
+} else {
+  error_log('Failed to prepare first barangay report year: ' . $conn->error);
+}
 $lastTrendYear = (int)date('Y');
 for ($year = $firstTrendYear; $year <= $lastTrendYear; $year++) {
   $cmpYearly[(string)$year] = ['reports' => array_fill(0, 12, 0), 'resolved' => array_fill(0, 12, 0)];
@@ -268,6 +281,16 @@ if ($cmpStmt) {
   $cmpResult = $cmpStmt->get_result();
   while ($cmpRow = $cmpResult->fetch_assoc()) $cmpYearly[(string)$cmpRow['resolved_year']]['resolved'][(int)$cmpRow['resolved_month'] - 1] = (int)$cmpRow['total'];
   $cmpStmt->close();
+}
+$cmpAllTime = ['labels' => [], 'reports' => [], 'resolved' => []];
+for ($year = $firstTrendYear; $year <= $lastTrendYear; $year++) {
+  $yearData = $cmpYearly[(string)$year] ?? ['reports' => array_fill(0, 12, 0), 'resolved' => array_fill(0, 12, 0)];
+  for ($month = 0; $month < 12; $month++) {
+    if ($year === $lastTrendYear && $month > (int)date('n') - 1) break;
+    $cmpAllTime['labels'][] = date('M', mktime(0, 0, 0, $month + 1, 1)) . ' ' . substr((string)$year, -2);
+    $cmpAllTime['reports'][] = $yearData['reports'][$month];
+    $cmpAllTime['resolved'][] = $yearData['resolved'][$month];
+  }
 }
 
 // ── Categories: actual report counts by time period ──
@@ -404,6 +427,7 @@ $dashboardConfig = [
     'comparisonChart' => [
       'daily'     => $cmpDaily,
       'yearly'    => $cmpYearly,
+      'allTime'   => $cmpAllTime,
     ],
     'metrics'       => $kpi,
     'reports'       => $reports,
@@ -2894,27 +2918,16 @@ $dashboardConfig = [
     <!-- Main dashboard charts and report status overview -->
     <div class="dashboard-grid">
 
-        <!-- Card: Monthly Reports vs. Resolved Cases -->
+        <!-- Card: Reports vs. Resolved Cases -->
         <div class="dashboard-card comparison-chart-card">
           <div class="card-header comparison-chart-head">
             <div>
-              <h2 class="card-title">Monthly Reports vs. Resolved Cases</h2>
-              <p class="comparison-chart-sub" id="cmpChartSub">Last 30 days</p>
+              <h2 class="card-title">Reports vs. Resolved Cases</h2>
+              <p class="comparison-chart-sub" id="cmpChartSub">All time</p>
             </div>
             <div class="comparison-chart-controls">
-              <div class="chart-range" id="cmpRange">
-                <button class="chart-range-btn active" data-range="30d" onclick="cmpSetRange('30d', this)">Last 30 Days</button>
-                <button class="chart-range-btn" data-range="year" onclick="cmpSetRange('year', this)">Per Year</button>
-              </div>
-              <div class="chart-range-extra" id="cmpYearWrap" style="display:none;">
-                <select id="cmpYearSelect" class="chart-range-select" onchange="cmpSetRange('year', null)">
-                  <?php for ($y = date('Y'); $y >= 2021; $y--): ?>
-                    <option value="<?php echo $y; ?>"><?php echo $y; ?></option>
-                  <?php endfor; ?>
-                </select>
-              </div>
               <div class="chart-legend">
-                <span class="chart-legend-item"><span class="chart-legend-swatch" style="background:#18181b;"></span> Monthly Reports</span>
+                <span class="chart-legend-item"><span class="chart-legend-swatch" style="background:#18181b;"></span> Reports</span>
                 <span class="chart-legend-item"><span class="chart-legend-swatch" style="background:#a1a1aa;"></span> Resolved Cases</span>
               </div>
             </div>
@@ -3854,7 +3867,6 @@ var brgyCrosshairPlugin = {
   }
 };
 
-var cmpCurrentRange = '30d';
 var brgyChartResizeFrame = 0;
 
 function scheduleBarangayChartResize() {
@@ -3873,17 +3885,6 @@ window.addEventListener('orientationchange', function() {
   window.setTimeout(scheduleBarangayChartResize, 100);
 });
 
-function cmpSetRange(range, btn) {
-  cmpCurrentRange = range;
-  var wrap = document.getElementById('cmpRange');
-  if (wrap) wrap.querySelectorAll('.chart-range-btn').forEach(function(b) { b.classList.remove('active'); });
-  if (btn) { btn.classList.add('active'); }
-  else if (wrap) { wrap.querySelector('[data-range="' + range + '"]').classList.add('active'); }
-  var yearWrap = document.getElementById('cmpYearWrap');
-  if (yearWrap) yearWrap.style.display = range === 'year' ? 'flex' : 'none';
-  renderCmpChart();
-}
-
 function renderCmpChart() {
   var el = document.getElementById('brgyComparisonChart');
   if (!el || typeof Chart === 'undefined') return;
@@ -3897,20 +3898,20 @@ function renderCmpChart() {
   var labels, reports, resolved;
   var subtitle = document.getElementById('cmpChartSub');
 
-  if (cmpCurrentRange === 'year') {
-    labels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    var yearSelect = document.getElementById('cmpYearSelect');
-    var yearKey = yearSelect ? yearSelect.value : String(new Date().getFullYear());
-    var yearData = (cmp.yearly || {})[yearKey] || { reports: Array(12).fill(0), resolved: Array(12).fill(0) };
-    reports = yearData.reports;
-    resolved = yearData.resolved;
-    if (subtitle) subtitle.textContent = yearKey;
+  var dailyData = cmp.daily || { labels: [], reports: [], resolved: [] };
+  if (catCurrentPeriod === 'all') {
+    var allTimeData = cmp.allTime || { labels: [], reports: [], resolved: [] };
+    labels = allTimeData.labels;
+    reports = allTimeData.reports;
+    resolved = allTimeData.resolved;
+    if (subtitle) subtitle.textContent = 'All time';
   } else {
-    var dailyData = cmp.daily || {};
-    labels = dailyData.labels || [];
-    reports = dailyData.reports || [];
-    resolved = dailyData.resolved || [];
-    if (subtitle) subtitle.textContent = 'Last 30 days';
+    var dayCount = catCurrentPeriod === 'today' ? 1 : (catCurrentPeriod === '7' ? 7 : 30);
+    labels = (dailyData.labels || []).slice(-dayCount);
+    reports = (dailyData.reports || []).slice(-dayCount);
+    resolved = (dailyData.resolved || []).slice(-dayCount);
+    var periodLabels = { '30': 'Last 30 Days', '7': 'Last 7 Days', today: 'Today' };
+    if (subtitle) subtitle.textContent = periodLabels[catCurrentPeriod] || 'All time';
   }
 
   var rgb = brgyHexToRgb('#18181b');
@@ -3935,7 +3936,7 @@ function renderCmpChart() {
           fill: false
         },
         {
-          label: 'Monthly Reports',
+          label: 'Reports',
           data: reports,
           borderColor: '#18181b',
           borderWidth: 2,
@@ -4003,6 +4004,7 @@ function setCategoryPeriod(label, btn) {
   document.getElementById('categoryPeriodMenu').classList.remove('show');
   catCurrentPeriod = btn.getAttribute('data-period');
   renderCategoryChart();
+  renderCmpChart();
 }
 
 document.addEventListener('click', function(e) {
